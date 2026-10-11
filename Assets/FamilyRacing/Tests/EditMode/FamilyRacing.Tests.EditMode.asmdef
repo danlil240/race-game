@@ -1,0 +1,9 @@
+{
+  "name": "FamilyRacing.Tests.EditMode",
+  "rootNamespace": "FamilyRacing.Tests",
+  "references": ["FamilyRacing.Core"],
+  "includePlatforms": ["Editor"],
+  "overrideReferences": true,
+  "precompiledReferences": ["Newtonsoft.Json.dll"],
+  "optionalUnityReferences": ["TestAssemblies"]
+}

@@ -1,0 +1,7 @@
+{
+  "name": "FamilyRacing.Core",
+  "rootNamespace": "FamilyRacing.Core",
+  "references": [],
+  "autoReferenced": true,
+  "noEngineReferences": true
+}

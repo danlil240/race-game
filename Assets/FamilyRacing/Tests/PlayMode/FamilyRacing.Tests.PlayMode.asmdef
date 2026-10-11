@@ -1,0 +1,11 @@
+{
+  "name": "FamilyRacing.Tests.PlayMode",
+  "rootNamespace": "FamilyRacing.Tests",
+  "references": [
+    "FamilyRacing.Core",
+    "FamilyRacing.Runtime"
+  ],
+  "overrideReferences": true,
+  "precompiledReferences": ["Newtonsoft.Json.dll"],
+  "optionalUnityReferences": ["TestAssemblies"]
+}

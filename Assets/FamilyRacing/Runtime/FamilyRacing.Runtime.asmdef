@@ -1,0 +1,11 @@
+{
+  "name": "FamilyRacing.Runtime",
+  "rootNamespace": "FamilyRacing",
+  "references": [
+    "FamilyRacing.Core",
+    "Unity.InputSystem",
+    "Unity.RenderPipelines.Universal.Runtime",
+    "Unity.RenderPipelines.Core.Runtime"
+  ],
+  "autoReferenced": true
+}
