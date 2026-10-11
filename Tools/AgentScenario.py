@@ -15,7 +15,28 @@ from collections import deque
 from pathlib import Path
 
 
-SEQUENCED_TYPES = {"snapshot", "state", "result", "discovery", "lookup", "health", "finished"}
+SEQUENCED_TYPES = {"snapshot", "state", "result", "discovery", "lookup",
+                   "health", "screenshot", "finished"}
+
+# Schemas this consumer can interpret. Records without the field are
+# treated as schema 1 (pre-driving baseline); anything outside the
+# supported set must be rejected before driving evidence is trusted.
+SUPPORTED_STATE_SCHEMAS = {1, 2}
+
+
+def validate_state_schema(event):
+    """Reject state records carrying a schema this consumer cannot read."""
+    if event.get("type") not in ("snapshot", "state"):
+        return
+    schema = event.get("stateSchemaVersion", 1)
+    assert type(schema) is int and schema in SUPPORTED_STATE_SCHEMAS, \
+        "Unsupported state schema: " + repr(schema)
+    state = event["state"]
+    if schema >= 2:
+        assert "driving" in state and "drivingEvents" in state, \
+            "Schema-2 state is missing the driving slice"
+        assert state.get("stateSchemaVersion") == 2, \
+            "Nested state schema marker disagrees with the record"
 
 
 def validate_presentation(state, language):
@@ -74,6 +95,7 @@ def verify_trace(directory, info):
                 assert event.get("type") == "snapshot" and event.get("sequence") == 1
                 first = False
             sequence, timestamp = validate_record(event, info, sequence, timestamp)
+            validate_state_schema(event)
             state_tick = validate_state_tick(event, state_tick)
             if event.get("type") in ("state", "snapshot"):
                 assert event["state"]["captureValid"], event["state"].get("captureError")
@@ -100,7 +122,9 @@ class Client:
             "type": "hello", "protocolVersion": 1,
             "runId": connection["runId"], "token": connection["token"],
         })
-        self.wait(lambda event: event.get("type") == "hello")
+        hello = self.wait(lambda event: event.get("type") == "hello")
+        assert hello.get("stateSchemaVersion", 1) in SUPPORTED_STATE_SCHEMAS, \
+            "Server advertises an unsupported state schema"
         self.wait(lambda event: event.get("type") == "snapshot")
 
     def send(self, frame):
@@ -121,6 +145,7 @@ class Client:
         event = json.loads(line)
         self.last_sequence, self.last_time = validate_record(
             event, self.info, self.last_sequence, self.last_time)
+        validate_state_schema(event)
         self.last_state_tick = validate_state_tick(event, self.last_state_tick)
         assert self.info["token"] not in line.decode("utf-8"), "Credential leaked"
         if event.get("type") in ("snapshot", "state"):
@@ -202,7 +227,10 @@ def run(connection, evidence):
             "profile.create", "profile.select", "ui.navigate", "ui.language",
             "settings.update", "settings.save", "input.set", "input.clear",
             "camera.toggle", "pause.toggle",
+            "race.start", "race.restart", "race.exit",
         }, actions
+        assert not any(action.startswith("tutorial.") for action in actions), \
+            "Tutorial commands are out of scope for this slice"
         assert discovery["featureCoverage"], "Missing future-feature coverage gaps"
         checks.append("command discovery")
 
@@ -286,7 +314,66 @@ def run(connection, evidence):
         client.applied("input.clear")
         checks.append("paused observation and input cleanup")
 
-        unsupported, _ = client.command("race.start")
+        # --- driving slice -------------------------------------------------
+        client.applied("ui.navigate", {"screen": "practice"})
+        started, _ = client.applied(
+            "race.start", {"vehicleId": "car-01", "eventId": "intro-01"})
+        state = client.action_state(started["commandId"])
+        assert state["screen"] == "driving" and state["driving"]
+        driving = state["driving"]
+        assert driving["vehicleId"] == "car-01" and driving["eventId"] == "intro-01"
+        assert driving["phase"] == "countdown" and driving["raceId"]
+        checks.append("race.start enters driving through the shared command path")
+
+        client.wait(lambda event: event.get("type") == "state"
+                    and event["state"].get("driving")
+                    and event["state"]["driving"]["phase"] == "running",
+                    timeout=30)
+        # Auto-acceleration: the car moves without any held input.
+        spawn_z = driving["motor"]["z"]
+        client.wait(lambda event: event.get("type") == "state"
+                    and event["state"].get("driving")
+                    and event["state"]["driving"]["motor"]["z"] > spawn_z + 5.0,
+                    timeout=60)
+        motor = client.state["driving"]["motor"]
+        heading0 = motor["heading"]
+        client.applied("input.set", inputs(steering=1, duration=90))
+        client.wait(lambda event: event.get("type") == "state"
+                    and event["state"].get("driving")
+                    and abs(event["state"]["driving"]["motor"]["heading"] - heading0)
+                    > 0.3, timeout=30)
+        client.applied("input.clear")
+        checks.append("command input moves and steers the physical car")
+
+        paused, _ = client.applied("pause.toggle")
+        paused_state = client.action_state(paused["commandId"])
+        assert paused_state["paused"]
+        sim_tick = paused_state["driving"]["simulationTick"]
+        client.wait(lambda event: event.get("type") == "state"
+                    and event["state"]["tick"] >= paused_state["tick"] + 30)
+        assert client.state["driving"]["simulationTick"] == sim_tick, \
+            "Simulation kept running while paused"
+        client.applied("pause.toggle")
+        checks.append("paused driving freezes simulation, observation advances")
+
+        client.send({"type": "screenshot", "captureId": "drive-1"})
+        shot = client.wait(lambda event: event.get("type") == "screenshot"
+                           and event.get("captureId") == "drive-1")
+        assert shot["status"] == "captured", shot
+        shot_path = Path(connection["_directory"]) / "screenshots" / shot["file"]
+        assert shot_path.stat().st_size > 0, "Screenshot artifact missing"
+        checks.append("bridge screenshot capture is correlated and durable")
+
+        restarted, _ = client.applied("race.restart")
+        state = client.action_state(restarted["commandId"])
+        assert state["driving"]["raceId"] != driving["raceId"], \
+            "Restart must create a new race identity"
+        exited, _ = client.applied("race.exit")
+        state = client.action_state(exited["commandId"])
+        assert state["screen"] == "practice" and state["driving"] is None
+        checks.append("race.restart identity and race.exit return")
+
+        unsupported, _ = client.command("warp.drive")
         assert unsupported["status"] == "rejected"
         client.send({"type": "health"})
         health = client.wait(lambda event: event.get("type") == "health")
@@ -311,6 +398,8 @@ def main():
     try:
         connection = json.loads(args.connection_file.read_text(encoding="utf-8-sig"))
         assert connection["protocolVersion"] == 1
+        assert connection.get("stateSchemaVersion", 1) in SUPPORTED_STATE_SCHEMAS, \
+            "Unsupported advertised state schema"
         connection["_directory"] = str(args.connection_file.resolve().parent)
         result["checks"] = run(connection, args.evidence)
         result["status"] = "passed"

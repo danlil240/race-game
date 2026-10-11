@@ -463,7 +463,7 @@ namespace FamilyRacing.Tests
                 "fr-stream-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(dir);
             var stream = new StateStream(dir, "run-bounded", "dev-b", "local", "test",
-                maxTraceBytes: 1200, maxOutgoing: 128);
+                maxTraceBytes: 2400, maxOutgoing: 128);
             try
             {
                 stream.Start();
@@ -478,7 +478,7 @@ namespace FamilyRacing.Tests
 
                 var info = new FileInfo(Path.Combine(dir, "state.ndjson"));
                 Assert.That(info.Exists, Is.True, "Prefix trace must exist.");
-                Assert.That(info.Length, Is.LessThanOrEqualTo(1200),
+                Assert.That(info.Length, Is.LessThanOrEqualTo(2400),
                     "Trace must stop at the byte bound, never truncate.");
                 var lines = File.ReadAllLines(info.FullName);
                 Assert.That(lines.Length, Is.GreaterThanOrEqualTo(1));

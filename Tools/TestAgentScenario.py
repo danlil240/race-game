@@ -5,7 +5,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from AgentScenario import validate_record, validate_state_tick, verify_trace, validate_presentation
+from AgentScenario import (validate_record, validate_state_schema,
+                           validate_state_tick, verify_trace,
+                           validate_presentation)
 
 
 class IntegrityTests(unittest.TestCase):
@@ -52,6 +54,55 @@ class IntegrityTests(unittest.TestCase):
     def test_unknown_records_cannot_hide_in_a_trace(self):
         with self.assertRaises(AssertionError):
             self.check(self.record(kind="unknown"))
+
+    def test_schema_2_states_need_the_driving_slice(self):
+        record = self.record()
+        record["stateSchemaVersion"] = 2
+        record["state"]["driving"] = None
+        record["state"]["drivingEvents"] = []
+        record["state"]["stateSchemaVersion"] = 2
+        validate_state_schema(record)
+        live = self.record()
+        live["stateSchemaVersion"] = 2
+        live["state"]["driving"] = {
+            "raceId": "r1", "vehicleId": "car-01", "eventId": "intro-01",
+            "courseId": "graybox-01", "phase": "running", "simulationTick": 5,
+            "motor": {"x": 0.0, "y": 0.0, "z": 3.0, "heading": 0.5,
+                      "speed": 6.0, "grounded": True},
+        }
+        live["state"]["drivingEvents"] = []
+        live["state"]["stateSchemaVersion"] = 2
+        validate_state_schema(live)
+
+    def test_schema_2_states_without_driving_are_rejected(self):
+        record = self.record()
+        record["stateSchemaVersion"] = 2
+        record["state"]["stateSchemaVersion"] = 2
+        with self.assertRaises(AssertionError):
+            validate_state_schema(record)
+
+    def test_unsupported_schemas_are_rejected_before_driving_evidence(self):
+        for schema in (0, 3, "2", True):
+            record = self.record()
+            record["stateSchemaVersion"] = schema
+            with self.subTest(schema=schema), self.assertRaises(AssertionError):
+                validate_state_schema(record)
+
+    def test_schema_1_records_stay_compatible(self):
+        record = self.record()
+        validate_state_schema(record)  # no field: baseline schema
+        record["stateSchemaVersion"] = 1
+        validate_state_schema(record)
+
+    def test_screenshot_is_a_sequenced_record_type(self):
+        record = self.record(kind="screenshot")
+        record["captureId"] = "drive-1"
+        record["file"] = "screenshot-drive-1.png"
+        record["status"] = "captured"
+        self.assertEqual(self.check(record), (1, 10))
+        record = self.record(kind="notAScreenshot")
+        with self.assertRaises(AssertionError):
+            self.check(record)
 
     def test_missing_tick_states_cannot_hide_behind_contiguous_sequences(self):
         state = self.record(sequence=2)

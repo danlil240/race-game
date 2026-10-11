@@ -39,6 +39,7 @@ namespace FamilyRacing.Automation
         private readonly string deviceId;
         private readonly string participantId;
         private readonly string buildVersion;
+        private readonly Func<string> contentVersion;
         private readonly long maxTraceBytes;
         private readonly BlockingCollection<WorkItem> queue;
         private readonly Stopwatch clock = Stopwatch.StartNew();
@@ -61,6 +62,7 @@ namespace FamilyRacing.Automation
 
         internal StateStream(string directory, string runId, string deviceId,
             string participantId, string buildVersion,
+            Func<string> contentVersion = null,
             long maxTraceBytes = DefaultMaxTraceBytes,
             int maxOutgoing = DefaultMaxOutgoing)
         {
@@ -69,6 +71,7 @@ namespace FamilyRacing.Automation
             this.deviceId = deviceId;
             this.participantId = participantId;
             this.buildVersion = buildVersion;
+            this.contentVersion = contentVersion;
             this.maxTraceBytes = maxTraceBytes;
             queue = new BlockingCollection<WorkItem>(maxOutgoing);
         }
@@ -109,7 +112,9 @@ namespace FamilyRacing.Automation
             record["deviceId"] = deviceId;
             record["participantId"] = participantId;
             record["buildVersion"] = buildVersion;
-            record["contentVersion"] = buildVersion;
+            // Content is versioned separately from the build: the catalog
+            // that produced driving definitions travels with every record.
+            record["contentVersion"] = contentVersion != null ? contentVersion() : buildVersion;
             record["sequence"] = ++sequence;
             record["monotonicMs"] = clock.ElapsedMilliseconds;
             record["tick"] = tick;
@@ -120,6 +125,7 @@ namespace FamilyRacing.Automation
         internal void EmitSnapshot(FoundationState state)
         {
             var record = Record("snapshot", state.tick, null);
+            record["stateSchemaVersion"] = state.stateSchemaVersion;
             record["state"] = JObject.FromObject(state);
             Emit(record);
         }
@@ -127,6 +133,7 @@ namespace FamilyRacing.Automation
         internal void EmitState(FoundationState state, string commandId)
         {
             var record = Record("state", state.tick, commandId);
+            record["stateSchemaVersion"] = state.stateSchemaVersion;
             record["state"] = JObject.FromObject(state);
             Emit(record);
         }
@@ -167,6 +174,18 @@ namespace FamilyRacing.Automation
             record["pendingCommands"] = pendingCommands;
             record["outgoingRecords"] = outgoingRecords;
             record["controllerConnected"] = controllerConnected;
+            Emit(record);
+        }
+
+        // Screenshot completion is a sequenced capture record correlated by
+        // captureId: "captured" carries the run-relative file, "failed" is
+        // an honest outcome (e.g. headless capture), never silent.
+        internal void EmitScreenshot(string captureId, string file, string status, long tick)
+        {
+            var record = Record("screenshot", tick, null);
+            record["captureId"] = captureId;
+            record["file"] = file ?? "";
+            record["status"] = status;
             Emit(record);
         }
 

@@ -103,16 +103,32 @@ no duplicate keys, no trailing content, strict UTF-8:
 - `{"type":"hello","protocolVersion":1,"runId":...,"token":...}` — first
   frame within a 5-second total deadline; bad/missing auth is rejected.
 - `{"type":"command","protocolVersion":1,"runId":...,"commandId":...,"participantId":"local","action":...,"parameters":{...}}`
-- `{"type":"discover"|"snapshot"|"health"|"finish"}`, `{"type":"lookup","commandId":...}`
+- `{"type":"discover"|"snapshot"|"health"|"finish"}`, `{"type":"lookup","commandId":...}`,
+  `{"type":"screenshot","captureId":...}` — `captureId` is `[A-Za-z0-9_-]{1,64}`;
+  the PNG lands at `<run>/screenshots/screenshot-<captureId>.png` and a
+  sequenced `screenshot` record reports `status` `captured` or `failed`.
 
 Actions: `profile.create`, `profile.select`, `ui.navigate`, `ui.language`,
 `settings.update`, `settings.save`, `input.set`, `input.clear`,
-`camera.toggle`, `pause.toggle`.
+`camera.toggle`, `pause.toggle`, `race.start`, `race.restart`,
+`race.exit`.
+
+`race.start` takes `vehicleId` + `eventId` (catalog: `car-01`,
+`motorcycle-01`, `practice-02`, `intro-01`) and needs a selected profile;
+`race.restart`/`race.exit` need an active race and take no parameters.
+`input.set` is available on `sandbox` and `driving` screens only; a
+`gadget` sample is rejected with `unavailable` while a race is active.
 
 Sequenced server records carry `protocolVersion`, `runId`, `deviceId`
 (random per run), `participantId`, `buildVersion`, `contentVersion`,
 contiguous `sequence`, `monotonicMs`, `tick`: `snapshot`, `state`,
-`result`, `discovery`, `lookup`, `health`, `finished`. The trace opens with
+`result`, `discovery`, `lookup`, `health`, `screenshot`, `finished`.
+`snapshot`/`state` records also carry `stateSchemaVersion` (currently `2`:
+the state adds the `driving` session slice, `drivingEvents`, and
+`driving.simulationTick` alongside the observation `tick`); consumers must
+reject unsupported schemas before trusting driving evidence.
+`contentVersion` now travels independently of `buildVersion` and names the
+driving content catalog (`driving-0.1`). The trace opens with
 a `snapshot` at sequence 1; an authenticated controller's first live frame
 is a fresh snapshot at the current sequence. Records emitted while no
 controller is attached are trace-only; queued records are never retargeted

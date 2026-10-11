@@ -29,6 +29,25 @@ namespace FamilyRacing.Automation
             public JObject frame;
         }
 
+        // Validation-only screenshot capture: arbitrary output paths are
+        // rejected, captures are sanitized file names under the run's
+        // screenshots/ folder, and each request resolves to exactly one
+        // sequenced screenshot record (captured or failed).
+        private sealed class PendingScreenshot
+        {
+            public string captureId;
+            public string file;
+            public string path;
+            public bool requested;
+            public double deadline;
+        }
+
+        private const int MaxPendingScreenshots = 4;
+        private const double ScreenshotTimeoutSeconds = 8.0;
+
+        private readonly Queue<PendingScreenshot> screenshots =
+            new Queue<PendingScreenshot>();
+
         private readonly FoundationService service;
         private readonly Func<GameCommand, CommandResult> executeAndEmit;
         private readonly Action<string> markInputSource;
@@ -67,7 +86,8 @@ namespace FamilyRacing.Automation
             Directory.CreateDirectory(Path.Combine(directory, "profiles"));
 
             stream = new StateStream(directory, runId, deviceId,
-                FoundationService.RequiredParticipant, BuildVersion);
+                FoundationService.RequiredParticipant, BuildVersion,
+                () => service.ContentVersion);
             stream.Start();
 
             listener = new TcpListener(IPAddress.Loopback, 0);
@@ -93,6 +113,8 @@ namespace FamilyRacing.Automation
             info["token"] = token;
             info["runId"] = runId;
             info["participantId"] = FoundationService.RequiredParticipant;
+            info["stateSchemaVersion"] = 2;
+            info["contentVersion"] = service.ContentVersion;
             File.WriteAllText(Path.Combine(directory, "connection.json"),
                 ValidationJson.Line(info) + "\n");
         }
@@ -103,6 +125,7 @@ namespace FamilyRacing.Automation
         {
             AttachPending();
             DetectDisconnect();
+            ProcessScreenshots();
             InboundItem item;
             while (inbound.TryDequeue(out item))
             {
@@ -205,6 +228,7 @@ namespace FamilyRacing.Automation
                 case "snapshot": stream.EmitSnapshot(service.Snapshot()); break;
                 case "lookup": HandleLookup(frame); break;
                 case "health": HandleHealth(); break;
+                case "screenshot": HandleScreenshot(frame); break;
                 case "finish": HandleFinish(); break;
                 case "hello": stream.EmitError("unexpectedHello"); break;
                 default: stream.EmitError("unknownType"); break;
@@ -267,6 +291,84 @@ namespace FamilyRacing.Automation
             var state = service.Snapshot();
             stream.EmitHealth(state.captureValid, state.captureError,
                 inboundCount, stream.PendingCommands, session != null, state.tick);
+        }
+
+        private void HandleScreenshot(JObject frame)
+        {
+            var captureId = ValidationJson.Text(frame, "captureId");
+            if (captureId == null || captureId.Length == 0 || captureId.Length > 64 ||
+                !IsSafeId(captureId))
+            {
+                stream.EmitError("badScreenshot");
+                return;
+            }
+            if (screenshots.Count >= MaxPendingScreenshots)
+            {
+                stream.EmitError("screenshotQueueFull");
+                return;
+            }
+            var file = "screenshot-" + captureId + ".png";
+            screenshots.Enqueue(new PendingScreenshot
+            {
+                captureId = captureId,
+                file = file,
+                path = Path.Combine(directory, "screenshots", file)
+            });
+        }
+
+        private static bool IsSafeId(string id)
+        {
+            foreach (var c in id)
+            {
+                var ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                    (c >= '0' && c <= '9') || c == '-' || c == '_';
+                if (!ok) return false;
+            }
+            return true;
+        }
+
+        // Head-of-line processing each Pump: an unissued request schedules a
+        // capture; an issued one resolves when the file lands or the
+        // deadline expires (headless/graphics-less runs report "failed").
+        private void ProcessScreenshots()
+        {
+            while (screenshots.Count > 0)
+            {
+                var shot = screenshots.Peek();
+                var now = UnityEngine.Time.unscaledTimeAsDouble;
+                if (!shot.requested)
+                {
+                    try
+                    {
+                        Directory.CreateDirectory(Path.GetDirectoryName(shot.path));
+                        UnityEngine.ScreenCapture.CaptureScreenshot(shot.path);
+                    }
+                    catch (Exception)
+                    {
+                        screenshots.Dequeue();
+                        stream.EmitScreenshot(shot.captureId, shot.file, "failed",
+                            service.Snapshot().tick);
+                        continue;
+                    }
+                    shot.requested = true;
+                    shot.deadline = now + ScreenshotTimeoutSeconds;
+                }
+                if (File.Exists(shot.path))
+                {
+                    screenshots.Dequeue();
+                    stream.EmitScreenshot(shot.captureId, shot.file, "captured",
+                        service.Snapshot().tick);
+                    continue;
+                }
+                if (now > shot.deadline)
+                {
+                    screenshots.Dequeue();
+                    stream.EmitScreenshot(shot.captureId, shot.file, "failed",
+                        service.Snapshot().tick);
+                    continue;
+                }
+                break;
+            }
         }
 
         private void HandleFinish()
@@ -355,7 +457,7 @@ namespace FamilyRacing.Automation
         {
             return "{\"type\":\"hello\",\"protocolVersion\":1,\"runId\":\"" + runId +
                 "\",\"buildVersion\":\"" + BuildVersion + "\",\"contentVersion\":\"" +
-                BuildVersion + "\"}";
+                service.ContentVersion + "\",\"stateSchemaVersion\":2}";
         }
 
         public void Dispose()
