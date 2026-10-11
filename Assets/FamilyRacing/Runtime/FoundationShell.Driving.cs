@@ -25,6 +25,16 @@ namespace FamilyRacing
                 () => StartRace("car-01"), "practice.car");
             var moto = AddButton(picker, T("practice.motorcycle", state), Seafoam,
                 () => StartRace("motorcycle-01"), "practice.motorcycle");
+            // Optional onboarding entry: the same tutorial.start command
+            // an agent uses, one button per vehicle class.
+            var tutorialRow = Row(root);
+            AddLabel(tutorialRow, T("practice.tutorial", state), 22, Deep);
+            var learnCar = AddButton(tutorialRow, T("practice.car", state), Ocean,
+                () => StartTutorial("car-01"), "tutorial.car");
+            var learnMoto = AddButton(tutorialRow, T("practice.motorcycle", state), Ocean,
+                () => StartTutorial("motorcycle-01"), "tutorial.motorcycle");
+            ApplyAvailability(learnCar, "tutorial.start");
+            ApplyAvailability(learnMoto, "tutorial.start");
             var actions = Row(root);
             var back = AddButton(actions, T("action.back", state), Deep,
                 () => app.Dispatch("ui.navigate", Screen("sandbox")), "action.back");
@@ -43,6 +53,13 @@ namespace FamilyRacing
             p["vehicleId"] = vehicleId;
             p["eventId"] = "practice-02";
             app.Dispatch("race.start", p);
+        }
+
+        private void StartTutorial(string vehicleId)
+        {
+            var p = new Dictionary<string, string>();
+            p["vehicleId"] = vehicleId;
+            app.Dispatch("tutorial.start", p);
         }
 
         // --- race HUD ------------------------------------------------------
@@ -83,6 +100,35 @@ namespace FamilyRacing
                 boostFill.style.borderBottomLeftRadius = boostFill.style.borderBottomRightRadius = 12;
             boostTrack.Add(boostFill);
             boostRow.Add(boostTrack);
+
+            // Tutorial cue strip: icon (animated by TutorialPresenter),
+            // the spoken-prompt text, lesson progress and replay/exit —
+            // shown only while a tutorial session is active, routed
+            // through the same tutorial.* commands agents use.
+            tutorialPanel = new VisualElement();
+            tutorialPanel.name = "tutorial.panel";
+            tutorialPanel.style.display = DisplayStyle.None;
+            tutorialPanel.style.flexDirection = FlexDirection.Row;
+            tutorialPanel.style.justifyContent = Justify.Center;
+            tutorialPanel.style.alignItems = Align.Center;
+            tutorialPanel.style.backgroundColor = new Color(0.99f, 0.97f, 0.92f, 0.85f);
+            tutorialPanel.style.borderTopLeftRadius = tutorialPanel.style.borderTopRightRadius =
+                tutorialPanel.style.borderBottomLeftRadius = tutorialPanel.style.borderBottomRightRadius = 14;
+            tutorialPanel.style.marginTop = 6;
+            tutorialPanel.style.paddingTop = tutorialPanel.style.paddingBottom = 4;
+            tutorialIconLabel = AddLabel(tutorialPanel, "", 44, Coral);
+            tutorialIconLabel.name = "tutorial.icon";
+            tutorialCueLabel = AddLabel(tutorialPanel, "", 26, Deep);
+            tutorialCueLabel.name = "tutorial.cue";
+            tutorialProgressLabel = AddLabel(tutorialPanel, "", 20, Ocean);
+            tutorialProgressLabel.name = "tutorial.progress";
+            var replay = AddButton(tutorialPanel, T("tutorial.replay", state), Ocean,
+                () => app.Dispatch("tutorial.replay", emptyParams), "tutorial.replay");
+            var tutorialExit = AddButton(tutorialPanel, T("tutorial.exit", state), Deep,
+                () => app.Dispatch("tutorial.exit", emptyParams), "tutorial.exit");
+            ApplyAvailability(replay, "tutorial.replay");
+            ApplyAvailability(tutorialExit, "tutorial.exit");
+            root.Add(tutorialPanel);
 
             var spacer = new VisualElement();
             spacer.style.flexGrow = 1f;
@@ -214,6 +260,24 @@ namespace FamilyRacing
             if (speedLabel != null && session.motor != null)
                 speedLabel.text = T("hud.speed", state) + " " +
                     ((int)(session.motor.speed * 3.6f)).ToString();
+            if (tutorialPanel != null)
+            {
+                var tutorial = session.tutorial;
+                tutorialPanel.style.display = tutorial != null
+                    ? DisplayStyle.Flex : DisplayStyle.None;
+                if (tutorial != null)
+                {
+                    if (tutorialIconLabel != null)
+                        tutorialIconLabel.text = tutorial.icon;
+                    if (tutorialCueLabel != null)
+                        tutorialCueLabel.text = T(tutorial.objective, state);
+                    if (tutorialProgressLabel != null)
+                        tutorialProgressLabel.text = tutorial.phase == "lessons"
+                            ? T("tutorial.lesson", state) + " " +
+                                (tutorial.lessonIndex + 1) + "/" + tutorial.lessonTotal
+                            : "";
+                }
+            }
             if (finishOverlay != null)
             {
                 var done = session.phase == "finished";

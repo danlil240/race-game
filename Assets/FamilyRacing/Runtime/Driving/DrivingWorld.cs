@@ -16,6 +16,7 @@ namespace FamilyRacing
         [SerializeField] private VehicleDefinitionAsset[] vehicles;
         [SerializeField] private TrackDefinitionAsset track;
         [SerializeField] private EventDefinitionAsset[] events;
+        [SerializeField] private TutorialDefinitionAsset tutorial;
         [SerializeField] private GameObject coursePrefab;
         [SerializeField] private string contentVersion = "driving-0.1";
         [SerializeField] private Vector3 cameraOffset = new Vector3(0f, 38f, -22f);
@@ -38,6 +39,12 @@ namespace FamilyRacing
 
         public DrivingContentCatalog Catalog { get { return catalog; } }
         public UnityMotorWorld MotorWorld { get { return motorWorld; } }
+        // The validated tutorial definition for FoundationService and the
+        // authored asset for the presenter's clip slots. Tutorial stays
+        // optional content: without it the races still load and
+        // tutorial.start simply reports contentUnavailable.
+        public Core.Tutorial.TutorialDefinition Tutorial { get; private set; }
+        public TutorialDefinitionAsset TutorialAsset { get { return tutorial; } }
         public DrivingCameraState CameraFacts { get { return cameraFacts; } }
 
         // Build + validate the catalog once. Returns null (fail-closed:
@@ -88,6 +95,22 @@ namespace FamilyRacing
                     }
                     defs.Add(evt);
                 }
+            Tutorial = null;
+            if (tutorial != null)
+            {
+                string tutorialError;
+                Tutorial = tutorial.ToDefinition(out tutorialError);
+                if (Tutorial == null)
+                {
+                    Debug.LogError("DrivingWorld: " + tutorialError);
+                    return null;
+                }
+            }
+            else
+            {
+                Debug.LogWarning("DrivingWorld: no tutorial definition assigned; " +
+                    "tutorial.start will report contentUnavailable.");
+            }
             try
             {
                 catalog = DrivingContentCatalog.Create(contentVersion,

@@ -24,6 +24,7 @@ namespace FamilyRacing
         private FoundationService service;
         private DrivingWorld drivingWorld;
         private DrivingCamera drivingCamera;
+        private TutorialPresenter tutorialPresenter;
         private ValidationBridge bridge;
         private FoundationInput driverInput;
         private FoundationShell shell;
@@ -60,10 +61,18 @@ namespace FamilyRacing
             // from sequence 1. A validation failure leaves no catalog and
             // race.start reports contentUnavailable.
             drivingWorld = GetComponent<DrivingWorld>();
+            tutorialPresenter = GetComponent<TutorialPresenter>();
+            if (tutorialPresenter == null)
+                tutorialPresenter = gameObject.AddComponent<TutorialPresenter>();
             if (drivingWorld != null)
             {
                 var catalog = drivingWorld.Load();
                 if (catalog != null) service.SetDrivingContent(catalog);
+                // Validated tutorial content enables tutorial.start; its
+                // asset carries the presenter's bundled clip slots.
+                if (drivingWorld.Tutorial != null)
+                    service.SetTutorialDefinition(drivingWorld.Tutorial);
+                tutorialPresenter.Bind(drivingWorld.TutorialAsset);
             }
             driverInput = GetComponent<FoundationInput>();
             shell = GetComponent<FoundationShell>();
@@ -139,6 +148,11 @@ namespace FamilyRacing
             }
             RefreshPresentation(state);
             shell?.Refresh(state);
+            // Cue announcements and icon demonstrations follow the latest
+            // published tutorial state — never the other way around.
+            if (tutorialPresenter != null)
+                tutorialPresenter.ApplyFrame(state,
+                    shell != null ? shell.TutorialCueIcon : null);
         }
 
         // Shared entry for every UI/physical command; the agent channel calls

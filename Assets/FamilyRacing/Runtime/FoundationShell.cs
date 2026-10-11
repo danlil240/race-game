@@ -44,6 +44,10 @@ namespace FamilyRacing
         private Label gateLabel;
         private Label finishTimeLabel;
         private VisualElement boostFill;
+        private VisualElement tutorialPanel;
+        private Label tutorialIconLabel;
+        private Label tutorialCueLabel;
+        private Label tutorialProgressLabel;
         private Button saveButton;
         private readonly Dictionary<string, string> emptyParams = new Dictionary<string, string>(0);
         private readonly Dictionary<string, string> settingsParams = new Dictionary<string, string>();
@@ -57,6 +61,13 @@ namespace FamilyRacing
             root = document.rootVisualElement;
             ApplyTextConfiguration(root);
             rebuildKey = "";
+        }
+
+        // The tutorial cue icon the presenter animates; null off the
+        // driving screen or before the first rebuild.
+        public VisualElement TutorialCueIcon
+        {
+            get { return tutorialIconLabel; }
         }
 
         // Applied only on bind/rebind so a deliberate mutation of the root's
@@ -108,6 +119,8 @@ namespace FamilyRacing
             pauseOverlay = finishOverlay = boostFill = null;
             elapsedLabel = phaseLabel = speedLabel = null;
             lapLabel = gateLabel = finishTimeLabel = null;
+            tutorialPanel = null;
+            tutorialIconLabel = tutorialCueLabel = tutorialProgressLabel = null;
             saveButton = null;
             musicSlider = effectsSlider = voiceSlider = null;
             chaseButton = overheadButton = shakeButton = langEnButton = langHeButton = null;

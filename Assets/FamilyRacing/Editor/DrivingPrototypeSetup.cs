@@ -20,6 +20,10 @@ namespace FamilyRacing.EditorTools
         public static void Create()
         {
             EnsureFolder("Assets/FamilyRacing/Generated", "Driving");
+            // Bundled tutorial prompt recordings live here; only licensed
+            // local assets may be committed into it.
+            EnsureFolder("Assets/FamilyRacing", "Audio");
+            EnsureFolder("Assets/FamilyRacing/Audio", "Tutorial");
             var groundMat = EnsureMaterial("GrayboxGround.mat",
                 new Color(0.83f, 0.80f, 0.72f));
             var wallMat = EnsureMaterial("GrayboxWall.mat",
@@ -34,9 +38,13 @@ namespace FamilyRacing.EditorTools
             var track = EnsureTrack();
             var practice = EnsureEvent("practice-02", track, laps: 2);
             var intro = EnsureEvent("intro-01", track, laps: 1);
+            // The tutorial free-drive stage: laps are effectively
+            // unbounded so a lap finish can never freeze the lesson sim.
+            var free = EnsureEvent("tutorial-01", track, laps: 99);
+            var tutorial = EnsureTutorial();
             var course = EnsureCoursePrefab(groundMat, wallMat, gateMat, driftMat);
 
-            WireScene(car, moto, track, practice, intro, course);
+            WireScene(car, moto, track, practice, intro, free, tutorial, course);
             AssetDatabase.SaveAssets();
         }
 
@@ -145,6 +153,63 @@ namespace FamilyRacing.EditorTools
             return asset;
         }
 
+        // The ordered onboarding: steering -> drift -> boost -> jump ->
+        // recovery, then the intro-01 one-lap trial. Completion rules are
+        // authored here as content; clip slots stay empty until licensed
+        // EN/HE recordings are bundled under Assets/FamilyRacing/Audio/Tutorial.
+        private static TutorialDefinitionAsset EnsureTutorial()
+        {
+            // Distinct filename from the tutorial-01 free-drive *event*
+            // asset — same-path assets of different ScriptableObject types
+            // would overwrite each other.
+            var asset = EnsureAsset<TutorialDefinitionAsset>("tutorial-def-01.asset");
+            asset.tutorialId = "tutorial-01";
+            asset.freeDriveEventId = "tutorial-01";
+            asset.trialEventId = "intro-01";
+            asset.lessons = new[]
+            {
+                Lesson("steering", "steerTicks", "", 0, 45, 0.3f,
+                    "tutorial.cue.steering", "◀▶"),
+                Lesson("drift", "event", "motor.driftStart", 1, 0, 0f,
+                    "tutorial.cue.drift", "∿"),
+                Lesson("boost", "event", "motor.boostStart", 1, 0, 0f,
+                    "tutorial.cue.boost", "»"),
+                Lesson("jump", "event", "motor.landed", 1, 0, 0f,
+                    "tutorial.cue.jump", "⌃"),
+                Lesson("recovery", "event", "race.recovered", 1, 0, 0f,
+                    "tutorial.cue.recovery", "↻")
+            };
+            asset.trialCue = Cue("tutorial.cue.trial", "★");
+            asset.finishedCue = Cue("tutorial.done", "★");
+            EditorUtility.SetDirty(asset);
+            return asset;
+        }
+
+        private static TutorialDefinitionAsset.Lesson Lesson(string id,
+            string rule, string eventKind, int requiredCount, int steerTicks,
+            float minSteering, string textKey, string icon)
+        {
+            return new TutorialDefinitionAsset.Lesson
+            {
+                lessonId = id,
+                rule = rule,
+                eventKind = eventKind,
+                requiredCount = requiredCount > 0 ? requiredCount : 1,
+                requiredSteerTicks = steerTicks > 0 ? steerTicks : 30,
+                minSteering = minSteering > 0f ? minSteering : 0.25f,
+                cue = Cue(textKey, icon)
+            };
+        }
+
+        private static TutorialDefinitionAsset.Cue Cue(string textKey, string icon)
+        {
+            return new TutorialDefinitionAsset.Cue
+            {
+                textKey = textKey,
+                icon = icon
+            };
+        }
+
         // The course prefab is pure graybox: one ground slab, perimeter
         // walls, chicane barriers, one landmark ramp, two island blocks
         // that each split the route into a longer main branch and an
@@ -239,7 +304,8 @@ namespace FamilyRacing.EditorTools
         // component or missing references are repaired in place. Scenes
         // already open stay open; scenes we opened are closed afterwards.
         private static void WireScene(Object car, Object moto, Object track,
-            Object practice, Object intro, GameObject course)
+            Object practice, Object intro, Object free, Object tutorial,
+            GameObject course)
         {
             var alreadyOpen = false;
             var scene = new Scene();
@@ -263,7 +329,8 @@ namespace FamilyRacing.EditorTools
                 var serialized = new SerializedObject(world);
                 dirty |= AssignArray(serialized, "vehicles", car, moto);
                 dirty |= Assign(serialized, "track", track);
-                dirty |= AssignArray(serialized, "events", practice, intro);
+                dirty |= AssignArray(serialized, "events", practice, intro, free);
+                dirty |= Assign(serialized, "tutorial", tutorial);
                 dirty |= Assign(serialized, "coursePrefab", course);
                 var version = serialized.FindProperty("contentVersion");
                 if (version != null && version.stringValue != ContentVersion)
