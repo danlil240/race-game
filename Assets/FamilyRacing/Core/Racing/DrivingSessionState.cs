@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using FamilyRacing.Core.Driving;
 using FamilyRacing.Core.Foundation;
+using FamilyRacing.Core.Tutorial;
 
 namespace FamilyRacing.Core.Racing
 {
@@ -96,7 +97,12 @@ namespace FamilyRacing.Core.Racing
         public InputState input;
         public List<PendingActionState> pendingActions = new List<PendingActionState>();
         public DrivingCameraState camera;
-        public string tutorial = "notImplemented";
+        // Ordered lesson/trial onboarding state while a tutorial session
+        // runs (null outside a tutorial). Filled by the owning service —
+        // the session itself never mutates tutorial progress. The
+        // full-release tutorial incl. gadget onboarding stays deferred;
+        // featureCoverage keeps reporting that honestly.
+        public TutorialState tutorial;
         public List<string> controls = new List<string>();
     }
 

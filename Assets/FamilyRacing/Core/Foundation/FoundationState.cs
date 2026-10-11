@@ -74,10 +74,14 @@ namespace FamilyRacing.Core.Foundation
 
     // Later-gameplay features are named explicitly so observers can
     // distinguish implemented foundation coverage from remaining gaps.
+    // `tutorial` tracks the full-release tutorial (incl. gadget
+    // onboarding) and stays notImplemented; `drivingOnboarding` records
+    // the M2 ordered-lesson intro onboarding only.
     [Serializable]
     public sealed class FeatureCoverage
     {
         public string tutorial = "notImplemented";
+        public string drivingOnboarding = "implemented";
         public string drivingSimulation = "implemented";
         public string campaign = "notImplemented";
         public string rewardsUpgradesCosmetics = "notImplemented";

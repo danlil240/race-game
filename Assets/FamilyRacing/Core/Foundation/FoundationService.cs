@@ -6,6 +6,7 @@ using FamilyRacing.Core.Automation;
 using FamilyRacing.Core.Driving;
 using FamilyRacing.Core.Profiles;
 using FamilyRacing.Core.Racing;
+using FamilyRacing.Core.Tutorial;
 
 namespace FamilyRacing.Core.Foundation
 {
@@ -127,7 +128,10 @@ namespace FamilyRacing.Core.Foundation
             Schema("race.start",
                 Param("vehicleId", "string", null), Param("eventId", "string", null)),
             Schema("race.restart"),
-            Schema("race.exit")
+            Schema("race.exit"),
+            Schema("tutorial.start", Param("vehicleId", "string", null)),
+            Schema("tutorial.replay"),
+            Schema("tutorial.exit")
         };
 
         private static readonly Dictionary<string, ParameterSpec[]> SchemaMap =
@@ -155,6 +159,8 @@ namespace FamilyRacing.Core.Foundation
         private PresentationState presentation = new PresentationState();
         private DrivingContentCatalog drivingContent;
         private DrivingSession driving;
+        private TutorialDefinition tutorialContent;
+        private DrivingTutorial tutorial;
         private long raceCounter;
         private readonly List<DrivingEvent> drivingEvents = new List<DrivingEvent>();
         private DrivingCameraState cameraFacts = new DrivingCameraState();
@@ -196,6 +202,18 @@ namespace FamilyRacing.Core.Foundation
             drivingContent = catalog;
         }
 
+        // The validated tutorial definition travels with the run like the
+        // driving catalog; tutorial.start reports contentUnavailable until
+        // the runtime injects one.
+        public void SetTutorialDefinition(TutorialDefinition definition)
+        {
+            if (definition == null)
+                throw new ArgumentException("Invalid tutorial definition: null");
+            if (!definition.Validate(out var error))
+                throw new ArgumentException("Invalid tutorial definition: " + error);
+            tutorialContent = definition.Copy();
+        }
+
         // Runtime camera facts travel with the state so captures can
         // reconstruct framing; the sim never reads them.
         public void SetDrivingCameraFacts(DrivingCameraState facts)
@@ -212,6 +230,7 @@ namespace FamilyRacing.Core.Foundation
             if (driving == null || paused || world == null) return;
             var result = driving.Step(input, world);
             AppendDrivingEvents(result.events);
+            if (tutorial != null) AdvanceTutorial(result);
         }
 
         public CommandResult Execute(GameCommand command)
@@ -286,6 +305,7 @@ namespace FamilyRacing.Core.Foundation
             {
                 state.driving = driving.Snapshot();
                 state.driving.camera = cameraFacts != null ? cameraFacts.Copy() : new DrivingCameraState();
+                state.driving.tutorial = tutorial != null ? tutorial.Snapshot() : null;
                 FillDrivingControls(state.driving);
             }
             foreach (var ev in drivingEvents)
@@ -416,6 +436,9 @@ namespace FamilyRacing.Core.Foundation
                     case "race.start": return RaceStart(command);
                     case "race.restart": return RaceRestart(command);
                     case "race.exit": return RaceExit(command);
+                    case "tutorial.start": return TutorialStart(command);
+                    case "tutorial.replay": return TutorialReplay(command);
+                    case "tutorial.exit": return TutorialExit(command);
                     default: return Result(command, CommandResult.Rejected, "unknownAction");
                 }
             }
@@ -675,7 +698,13 @@ namespace FamilyRacing.Core.Foundation
             if (driving == null)
                 return Result(command, CommandResult.Rejected, "unavailable");
             var tuning = drivingContent.Vehicles[driving.VehicleId];
-            var evt = drivingContent.Events[driving.EventId];
+            // Inside a tutorial retry stays on the current stage: the
+            // free-drive lesson event or the one-lap trial. Completed
+            // lessons are kept; a graduated tutorial retries the trial.
+            var evt = tutorial != null
+                ? drivingContent.Events[tutorial.Phase == DrivingTutorial.PhaseLessons
+                    ? tutorial.FreeDriveEventId : tutorial.TrialEventId]
+                : drivingContent.Events[driving.EventId];
             // The old identity ends; retry creates a new race identity
             // inside the same run. Duplicate delivery replays the cached
             // result and never reaches here.
@@ -683,6 +712,12 @@ namespace FamilyRacing.Core.Foundation
             driving.EmitLifecycle("race.ended", command.CommandId, "restarted");
             DrainDrivingEvents();
             driving = CreateSession(tuning, evt, command);
+            if (tutorial != null)
+            {
+                tutorial.Restart();
+                driving.EmitLifecycle("tutorial.cue", command.CommandId,
+                    tutorial.Snapshot().cueId);
+            }
             screen = ScreenDriving;
             ClearInput();
             DrainDrivingEvents();
@@ -696,6 +731,106 @@ namespace FamilyRacing.Core.Foundation
             EndRace("raceExit", command);
             screen = ScreenPractice;
             return Result(command, CommandResult.Applied, "");
+        }
+
+        // --- tutorial commands ----------------------------------------------
+        // Ordered onboarding: tutorial.start opens the free-drive lesson
+        // stage, tutorial.replay re-announces the current cue without any
+        // progression, and tutorial.exit abandons the run. There is no
+        // tutorial.complete or checkpoint-teleport action — lessons and the
+        // graduation lap advance only from genuine driving events consumed
+        // in AdvanceTutorial.
+
+        private CommandResult TutorialStart(GameCommand command)
+        {
+            if (drivingContent == null || tutorialContent == null)
+                return Result(command, CommandResult.Rejected, "contentUnavailable");
+            if (activeSlot < 0)
+                return Result(command, CommandResult.Rejected, "unavailable");
+            if (driving != null)
+                return Result(command, CommandResult.Rejected, "raceActive");
+            var vehicleId = command.Parameters["vehicleId"];
+            VehicleTuning tuning;
+            EventDefinition evt;
+            if (!drivingContent.Vehicles.TryGetValue(vehicleId, out tuning))
+                return Result(command, CommandResult.Rejected, "unknownVehicle");
+            if (!drivingContent.Events.TryGetValue(tutorialContent.freeDriveEventId, out evt))
+                return Result(command, CommandResult.Rejected, "unknownEvent");
+            if (!evt.AllowsVehicle(vehicleId))
+                return Result(command, CommandResult.Rejected, "vehicleNotForEvent");
+            driving = CreateSession(tuning, evt, command);
+            tutorial = new DrivingTutorial(tutorialContent);
+            driving.EmitLifecycle("tutorial.started", command.CommandId,
+                tutorial.CurrentLessonId);
+            screen = ScreenDriving;
+            ClearInput();
+            DrainDrivingEvents();
+            return Result(command, CommandResult.Applied, "");
+        }
+
+        private CommandResult TutorialReplay(GameCommand command)
+        {
+            if (tutorial == null)
+                return Result(command, CommandResult.Rejected, "unavailable");
+            tutorial.Replay();
+            if (driving != null)
+            {
+                // Observable cue re-issue: the same objective/cue identity
+                // with a bumped sequence, correlated to this command.
+                driving.EmitLifecycle("tutorial.cue", command.CommandId,
+                    tutorial.Snapshot().cueId);
+                DrainDrivingEvents();
+            }
+            return Result(command, CommandResult.Applied, "");
+        }
+
+        private CommandResult TutorialExit(GameCommand command)
+        {
+            if (tutorial == null)
+                return Result(command, CommandResult.Rejected, "unavailable");
+            EndRace("raceExit", command);
+            screen = ScreenPractice;
+            return Result(command, CommandResult.Applied, "");
+        }
+
+        // One tutorial Advance per simulated boundary: the consumed
+        // session events are the only progression source. Lesson
+        // completions emit correlated tutorial.lesson records; finishing
+        // the last lesson swaps the session onto the one-lap trial (new
+        // race identity inside the run) and a genuine race.finished on
+        // that trial marks graduation.
+        private void AdvanceTutorial(DrivingStepResult result)
+        {
+            var advance = tutorial.Advance(result.state, result.events);
+            if (advance.completedLessonId != null && driving != null)
+            {
+                driving.EmitLifecycle("tutorial.lesson", "", advance.completedLessonId);
+                DrainDrivingEvents();
+            }
+            if (advance.newPhase == DrivingTutorial.PhaseTrial)
+                TransitionToTrial();
+            else if (advance.newPhase == DrivingTutorial.PhaseGraduated && driving != null)
+            {
+                driving.EmitLifecycle("tutorial.graduated", "", tutorial.TrialEventId);
+                DrainDrivingEvents();
+            }
+        }
+
+        // The lessons are done: end the free-drive session and start the
+        // introductory event as the graduation trial, same vehicle, new
+        // race identity inside the same run.
+        private void TransitionToTrial()
+        {
+            var session = driving;
+            var tuning = drivingContent.Vehicles[session.VehicleId];
+            var evt = drivingContent.Events[tutorial.TrialEventId];
+            session.CancelPending("tutorialTrial");
+            session.EmitLifecycle("race.ended", "", "tutorialTrial");
+            DrainSessionEvents(session);
+            driving = CreateSession(tuning, evt, null);
+            driving.EmitLifecycle("tutorial.trial", "", tutorial.TrialEventId);
+            ClearInput();
+            DrainDrivingEvents();
         }
 
         private DrivingSession CreateSession(VehicleTuning tuning, EventDefinition evt,
@@ -720,6 +855,15 @@ namespace FamilyRacing.Core.Foundation
             if (driving == null) return;
             var session = driving;
             session.CancelPending(reason);
+            // Any session end (exit, profile switch, lifecycle) also ends
+            // an active tutorial — tutorial state is session-local, so it
+            // simply dies with the run and reports why.
+            if (tutorial != null)
+            {
+                session.EmitLifecycle("tutorial.exited",
+                    command != null ? command.CommandId : "", reason);
+                tutorial = null;
+            }
             session.EmitLifecycle(reason == "raceExit" ? "race.exited" : "race.ended",
                 command != null ? command.CommandId : "", reason);
             driving = null;
@@ -759,7 +903,7 @@ namespace FamilyRacing.Core.Foundation
         {
             foreach (var action in new[]
                 { "input.set", "input.clear", "camera.toggle", "pause.toggle",
-                  "race.restart", "race.exit" })
+                  "race.restart", "race.exit", "tutorial.replay", "tutorial.exit" })
             {
                 bool available;
                 string reason;
@@ -845,6 +989,31 @@ namespace FamilyRacing.Core.Foundation
                     {
                         available = false;
                         reason = "noActiveRace";
+                    }
+                    break;
+                case "tutorial.start":
+                    if (drivingContent == null || tutorialContent == null)
+                    {
+                        available = false;
+                        reason = "contentUnavailable";
+                    }
+                    else if (activeSlot < 0)
+                    {
+                        available = false;
+                        reason = "requiresSelectedProfile";
+                    }
+                    else if (driving != null)
+                    {
+                        available = false;
+                        reason = "raceActive";
+                    }
+                    break;
+                case "tutorial.replay":
+                case "tutorial.exit":
+                    if (tutorial == null)
+                    {
+                        available = false;
+                        reason = "noActiveTutorial";
                     }
                     break;
                 case "ui.navigate":

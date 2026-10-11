@@ -797,7 +797,8 @@ namespace FamilyRacing.Tests
                 "profile.create", "profile.select", "ui.navigate", "ui.language",
                 "settings.update", "settings.save", "input.set", "input.clear",
                 "camera.toggle", "pause.toggle",
-                "race.start", "race.restart", "race.exit"
+                "race.start", "race.restart", "race.exit",
+                "tutorial.start", "tutorial.replay", "tutorial.exit"
             }));
             var create = Descriptor(service.Discover(), "profile.create");
             Assert.That(RequiredNames(create), Is.EquivalentTo(new[] { "slot", "language" }));
