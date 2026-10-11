@@ -69,8 +69,11 @@ namespace FamilyRacing
 
         private void Rebuild(VehicleDefinitionAsset asset)
         {
+            // DestroyImmediate: a deferred Destroy would leave the old
+            // silhouette's parts alive in the scene for a full frame —
+            // visible to same-frame queries and physics alike.
             foreach (var part in parts)
-                if (part != null) Destroy(part);
+                if (part != null) DestroyImmediate(part);
             parts.Clear();
             if (asset.silhouette == "motorcycle")
                 BuildMotorcycle(asset);
@@ -148,9 +151,12 @@ namespace FamilyRacing
             part.transform.localRotation = localRotation;
             part.transform.localScale = localScale;
             // Visual only: collision lives entirely in the motor's swept
-            // box, so no part may carry a collider.
+            // box, so no part may carry a collider. DestroyImmediate —
+            // a deferred Destroy would leave the collider live in the
+            // physics scene for a full frame, where camera occlusion
+            // linecasts and same-frame motor sweeps can still hit it.
             var collider = part.GetComponent<Collider>();
-            if (collider != null) Destroy(collider);
+            if (collider != null) DestroyImmediate(collider);
             part.GetComponent<Renderer>().sharedMaterial = material;
             parts.Add(part);
             return part;

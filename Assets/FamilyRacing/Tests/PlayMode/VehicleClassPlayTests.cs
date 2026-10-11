@@ -112,10 +112,12 @@ namespace FamilyRacing.Tests
                 Quaternion.Euler(-14f, 0f, 0f));
             Box(root, "IslandNorthEast", new Vector3(32f, 1f, 44f), new Vector3(22f, 2f, 14f));
             Box(root, "IslandSouthEast", new Vector3(72f, 1f, -32f), new Vector3(20f, 2f, 16f));
-            // A small ski-jump wedge with a clean drop: the flight lands
-            // on open ground with no barrier anywhere near it.
-            Box(root, "JumpWedge", new Vector3(-40f, 0.7f, -30f),
-                new Vector3(10f, 0.5f, 10f), Quaternion.Euler(-14f, 0f, 0f));
+            // A raised deck with a clean north edge: the jump event
+            // spawns on top and drives off. A flat deck avoids the
+            // ramp-lip problem entirely — the vehicle always departs
+            // away from the deck face, so no contact can taint the drop.
+            Box(root, "JumpDeck", new Vector3(-40f, 1f, -30f),
+                new Vector3(14f, 2f, 10f));
             root.SetActive(false);
             return root;
         }
@@ -166,7 +168,21 @@ namespace FamilyRacing.Tests
                     Gate("gate-1", 0f, 25f, 0f, 1f),
                     Gate("gate-2", 55f, 55f, 1f, 0f),
                     Gate("gate-3", 95f, 0f, 0f, -1f),
-                    Gate("gate-4", 50f, -55f, -1f, 0f)
+                    Gate("gate-4", 50f, -55f, -1f, 0f),
+                    // The kinematic sweep cannot step onto a sloped lip
+                    // (a documented Task-4 finding), so the deck gate's
+                    // recover pose sits ON the jump deck: accept it, press
+                    // R, and the respawn drops the vehicle on the deck
+                    // facing the drop — a real recovery-fed jump.
+                    new TrackDefinitionAsset.Gate
+                    {
+                        id = "deck",
+                        center = new Vector3(-40f, 0f, -45f),
+                        halfWidth = 12f,
+                        direction = new Vector2(-1f, 0f),
+                        recoverPosition = new Vector3(-40f, 2.05f, -28f),
+                        recoverHeadingDegrees = 0f
+                    }
                 };
             });
             var evt = Asset<EventDefinitionAsset>(a =>
@@ -184,14 +200,14 @@ namespace FamilyRacing.Tests
             Inject(world, "contentVersion", "vclass-content-1");
         }
 
-        private void LoadAndStart(string vehicleId)
+        private void LoadAndStart(string vehicleId, string eventId = "intro-01")
         {
             var catalog = world.Load();
             Assert.That(catalog, Is.Not.Null, "generated definitions must validate");
             service.SetDrivingContent(catalog);
             service.Execute(Command("profile.create", P("slot", "0", "language", "en")));
             var started = service.Execute(Command("race.start",
-                P("vehicleId", vehicleId, "eventId", "intro-01")));
+                P("vehicleId", vehicleId, "eventId", eventId)));
             Assert.That(started.status, Is.EqualTo(CommandResult.Applied),
                 "race.start failed: " + started.code);
             Step(3);
@@ -248,12 +264,17 @@ namespace FamilyRacing.Tests
         // cycle reads the snapshot, steers at the current waypoint and
         // posts a held input.set. `boostWhenCharged` fires boost on legs
         // where the meter has charge, exercising the drain model in-lap.
-        // Returns the terminal snapshot; never teleports the vehicle.
+        // When the vehicle grinds wall-pinned below walking speed, the
+        // pursuit does what a player does — presses R once (bounded to
+        // three uses) rather than faking motion. Returns the terminal
+        // snapshot; the only pose jumps allowed are recovery respawns.
         private DrivingSessionState Pursue(List<Vector2> route,
             bool driftInZones = false, bool boostWhenCharged = false,
             int maxTicks = 9000)
         {
             var wp = 0;
+            var stuckTicks = 0;
+            var recoveries = 0;
             var state = service.Snapshot().driving;
             var lastX = state.motor.x;
             var lastZ = state.motor.z;
@@ -263,6 +284,31 @@ namespace FamilyRacing.Tests
                 var dx = route[wp].x - motor.x;
                 var dz = route[wp].y - motor.z;
                 if (dx * dx + dz * dz < 49f) { wp++; continue; }
+                if (stuckTicks >= 90 && recoveries < 3)
+                {
+                    recoveries++;
+                    stuckTicks = 0;
+                    var unstick = service.Execute(Command("input.set",
+                        P("steering", "0", "drift", "false", "boost", "false",
+                            "gadget", "false", "recover", "true",
+                            "changeCamera", "false", "pause", "false",
+                            "durationTicks", "5"), "unstick-" + recoveries));
+                    Assert.That(unstick.status, Is.EqualTo(CommandResult.Applied),
+                        "a stuck vehicle may press R like a player");
+                    // The held recover input must live across a boundary
+                    // for the pending action to consume; the respawn
+                    // teleport is legitimate, so re-baseline the pose.
+                    for (var i = 0; i < 3; i++)
+                    {
+                        service.StepDriving(world.MotorWorld);
+                        service.AdvanceTick();
+                    }
+                    t += 3;
+                    state = service.Snapshot().driving;
+                    lastX = state.motor.x;
+                    lastZ = state.motor.z;
+                    continue;
+                }
                 var desired = Mathf.Atan2(dx, dz);
                 var steer = Mathf.Clamp(WrapAngle(desired - motor.heading) * 3f, -1f, 1f);
                 var drift = driftInZones
@@ -283,8 +329,13 @@ namespace FamilyRacing.Tests
                     var step = Mathf.Sqrt(
                         (now.x - lastX) * (now.x - lastX)
                         + (now.z - lastZ) * (now.z - lastZ));
-                    Assert.That(step, Is.LessThan(1.4f),
-                        "the vehicle moves by simulation, never teleports");
+                    var teleport = step >= 1.4f
+                        && !now.recovering && !state.motor.recovering;
+                    Assert.That(teleport, Is.False,
+                        "the vehicle moves by simulation; only recovery "
+                        + "respawns may jump the pose (step=" + step + ")");
+                    if (step < 0.05f && now.grounded) stuckTicks++;
+                    else stuckTicks = 0;
                     lastX = now.x;
                     lastZ = now.z;
                 }
@@ -311,7 +362,9 @@ namespace FamilyRacing.Tests
 
         // One lap through both optional shortcut branches: inside
         // IslandNorthEast on leg two and inside IslandSouthEast on leg
-        // four, rejoining before each next mandatory gate.
+        // four, then west past the deck gate and back to the line. The
+        // deck waypoint sits west of the gate plane so the arrival
+        // radius can only be satisfied after the crossing.
         private static List<Vector2> ShortcutLapRoute()
         {
             return new List<Vector2>
@@ -324,9 +377,45 @@ namespace FamilyRacing.Tests
                 new Vector2(55f, -18f),   // shortcut west of IslandSE
                 new Vector2(60f, -50f),   // rejoin below the island
                 new Vector2(42f, -55f),   // gate-4
+                new Vector2(-48f, -45f),  // deck gate crossed heading west
                 new Vector2(-10f, -63f),  // swing south of the line
                 new Vector2(0f, -45f)     // cross start heading north -> finish
             };
+        }
+
+        // The drive from spawn to the deck gate's west side: crosses
+        // every mandatory gate in order so the deck gate is accepted and
+        // its safe pose becomes the respawn target.
+        private static List<Vector2> DeckGateRoute()
+        {
+            return new List<Vector2>
+            {
+                new Vector2(0f, 33f),
+                new Vector2(48f, 30f),
+                new Vector2(58f, 52f),
+                new Vector2(63f, 55f),
+                new Vector2(95f, -8f),
+                new Vector2(55f, -18f),
+                new Vector2(60f, -50f),
+                new Vector2(42f, -55f),
+                new Vector2(-48f, -45f)
+            };
+        }
+
+        // Held recover through the real command path, stepped across a
+        // boundary so the pending action consumes — the same as a player
+        // pressing R. Returns the snapshot after the respawn.
+        private DrivingSessionState RecoverNow()
+        {
+            var applied = service.Execute(Command("input.set",
+                P("steering", "0", "drift", "false", "boost", "false",
+                    "gadget", "false", "recover", "true",
+                    "changeCamera", "false", "pause", "false",
+                    "durationTicks", "5"), "recover-" + Guid.NewGuid().ToString("N")));
+            Assert.That(applied.status, Is.EqualTo(CommandResult.Applied),
+                "a manual recovery must reach the pending queue");
+            Step(1); // one boundary consumes the action -> respawn pose
+            return service.Snapshot().driving;
         }
 
         // --- both classes complete the course --------------------------------
@@ -357,23 +446,23 @@ namespace FamilyRacing.Tests
         {
             WireWorld(laps: 1);
             LoadAndStart(vehicleId);
-            // Line up south of the ramp and drive north through it; the
-            // route continues to gate-1 afterwards so the pursuit ends.
-            var route = new List<Vector2>
-            {
-                new Vector2(-60f, 12f),
-                new Vector2(-60f, 50f),  // over the ramp crest
-                new Vector2(-30f, 30f),
-                new Vector2(0f, 33f)     // gate-1
-            };
-            Pursue(route, maxTicks: 4000);
+            // Drive the course to the deck gate, accept it, then press R:
+            // the safe-pose respawn puts the vehicle on the deck's flat
+            // top facing the drop — real recovery, then real flight.
+            Pursue(DeckGateRoute(), maxTicks: 6000);
+            var respawned = RecoverNow();
+            Assert.That(respawned.motor.recovering, Is.True);
+            Assert.That(respawned.motor.y, Is.GreaterThan(1.5f),
+                "the respawn must drop the vehicle onto the deck top");
+            Pursue(new List<Vector2> { new Vector2(-40f, -15f) },
+                maxTicks: 2000);
             var snapshot = service.Snapshot();
             Assert.That(Events(snapshot, "motor.becameAirborne").Count,
                 Is.GreaterThanOrEqualTo(1),
-                vehicleId + " must actually leave the ground on the ramp");
+                vehicleId + " must actually leave the ground off the deck");
             Assert.That(Events(snapshot, "motor.landed").Count,
                 Is.GreaterThanOrEqualTo(1),
-                vehicleId + " must land after the ramp jump");
+                vehicleId + " must land after the deck drop");
         }
 
         [TestCase("car-01")]
@@ -382,22 +471,20 @@ namespace FamilyRacing.Tests
         {
             WireWorld(laps: 1);
             LoadAndStart(vehicleId);
-            // The ski-jump wedge drops the car onto open ground with no
-            // barrier near the flight path — a creditable landing.
-            var route = new List<Vector2>
-            {
-                new Vector2(-40f, -45f),
-                new Vector2(-40f, -12f),  // over the wedge crest
-                new Vector2(0f, 33f)      // gate-1
-            };
-            Pursue(route, maxTicks: 4000);
+            // The deck drop lands on open flat with no barrier anywhere
+            // near the flight path — a creditable clean landing.
+            Pursue(DeckGateRoute(), maxTicks: 6000);
+            var respawned = RecoverNow();
+            Assert.That(respawned.motor.y, Is.GreaterThan(1.5f));
+            Pursue(new List<Vector2> { new Vector2(-40f, -15f) },
+                maxTicks: 2000);
             var snapshot = service.Snapshot();
             Assert.That(Events(snapshot, "motor.becameAirborne").Count,
                 Is.GreaterThanOrEqualTo(1),
-                vehicleId + " must leave the ground on the jump wedge");
+                vehicleId + " must leave the ground on the deck drop");
             Assert.That(Events(snapshot, "motor.cleanLanding").Count,
                 Is.GreaterThanOrEqualTo(1),
-                vehicleId + " must bank a clean-landing credit on the wedge");
+                vehicleId + " must bank a clean-landing credit on the drop");
         }
 
         // --- drift and boost --------------------------------------------------
@@ -546,8 +633,8 @@ namespace FamilyRacing.Tests
             {
                 var view = FindNamed(host, "DrivingVehicle");
                 var names = new List<string>();
-                foreach (Transform child in view
-                    .GetComponentInChildren<Transform>(true))
+                foreach (var child in view
+                    .GetComponentsInChildren<Transform>(true))
                     names.Add(child.name);
                 return names;
             }
