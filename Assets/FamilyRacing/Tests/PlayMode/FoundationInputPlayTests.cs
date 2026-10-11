@@ -2,8 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
+using FamilyRacing.Core.Driving;
 using FamilyRacing.Core.Foundation;
 using FamilyRacing.Core.Profiles;
+using FamilyRacing.Core.Racing;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.InputSystem;
@@ -30,6 +32,28 @@ namespace FamilyRacing.Tests
         private GameObject inputGo;
         private FoundationInput driverInput;
         private Keyboard keyboard;
+        private readonly FlatWorld world = new FlatWorld();
+
+        // Analytic flat world for deterministic motor stepping — the same
+        // surface the Core tests drive, so identical inputs must produce
+        // bit-identical motor trajectories.
+        private sealed class FlatWorld : IMotorWorld
+        {
+            public GroundHit ProbeGround(MotorPose pose, float probeDistance)
+            {
+                return new GroundHit
+                {
+                    hit = pose.y <= probeDistance, x = pose.x, y = 0f, z = pose.z,
+                    normalY = 1f, distance = pose.y, surfaceId = "ground"
+                };
+            }
+
+            public SweepHit SweepBody(MotorPose pose, float dx, float dy, float dz,
+                float halfWidth, float halfLength, float height)
+            {
+                return new SweepHit { hit = false, fraction = 1f };
+            }
+        }
 
         // Runs after InputTestFixture.Setup() (base-class [SetUp] methods go
         // first), so the reset input system sees exactly the keyboard added
@@ -411,6 +435,130 @@ namespace FamilyRacing.Tests
             Assert.That(Snapshot().input.steering, Is.EqualTo(1f).Within(0.001f),
                 "After a real release the key must arm and drive again.");
             Release(keyboard.rightArrowKey);
+        }
+
+        // Physical-vs-command parity must reach the simulated motor, not
+        // stop at matching input.steering state: a held right-steer key
+        // through the real composition produces the identical motor
+        // outcome as the equivalent input.set command on the same
+        // deterministic world.
+        [Test]
+        public void PhysicalSteerMatchesCommandSteerInActualMotorOutcome()
+        {
+            service.SetDrivingContent(ParityCatalog());
+            var physical = RunSteerRace(physical: true);
+            var command = RunSteerRace(physical: false);
+
+            Assert.That(command.Item1, Is.EqualTo(physical.Item1).Within(0.0001f),
+                "x position must match the command path exactly");
+            Assert.That(command.Item2, Is.EqualTo(physical.Item2).Within(0.0001f),
+                "z position must match the command path exactly");
+            Assert.That(command.Item3, Is.EqualTo(physical.Item3).Within(0.0001f),
+                "heading must match the command path exactly");
+            Assert.That(command.Item4, Is.EqualTo(physical.Item4).Within(0.0001f),
+                "speed must match the command path exactly");
+            Assert.That(command.Item5, Is.EqualTo(physical.Item5),
+                "elapsed race ticks must match the command path exactly");
+            Assert.That(command.Item6, Is.EqualTo(physical.Item6),
+                "simulation ticks must match the command path exactly");
+        }
+
+        // Drives a fresh race for exactly 40 simulated steps while
+        // steering +1 through either the physical key composition or a
+        // direct input.set command; returns (x, z, heading, speed,
+        // elapsedTicks, simulationTick) at the end.
+        private Tuple<float, float, float, float, long, long> RunSteerRace(bool physical)
+        {
+            if (Snapshot().activeSlot < 0)
+            {
+                var created = app.Dispatch("profile.create",
+                    Params(("slot", "0"), ("language", "en")));
+                Assert.That(created.status, Is.EqualTo("applied"));
+            }
+            if (Snapshot().driving != null)
+            {
+                var exited = app.Dispatch("race.exit", Params());
+                Assert.That(exited.status, Is.EqualTo("applied"));
+            }
+            var started = app.Dispatch("race.start",
+                Params(("vehicleId", "car-01"), ("eventId", "intro-parity")));
+            Assert.That(started.status, Is.EqualTo("applied"));
+
+            // Burn the authored countdown on real simulated steps; the
+            // input hold must only begin in the running phase.
+            for (var guard = 0; guard < 10
+                && Snapshot().driving.phase == "countdown"; guard++)
+            {
+                service.StepDriving(world);
+                service.AdvanceTick();
+            }
+            Assert.That(Snapshot().driving.phase, Is.EqualTo("running"));
+
+            if (physical)
+            {
+                // The virtual key composes through FoundationInput.Pump
+                // into the same input.set command path (30-tick hold).
+                Press(keyboard.dKey);
+                driverInput.Pump(false, "driving");
+                Release(keyboard.dKey);
+            }
+            else
+            {
+                var held = app.Dispatch("input.set", Params(
+                    ("steering", "1"), ("drift", "false"), ("boost", "false"),
+                    ("gadget", "false"), ("recover", "false"),
+                    ("changeCamera", "false"), ("pause", "false"),
+                    ("durationTicks", "30")));
+                Assert.That(held.status, Is.EqualTo("applied"));
+            }
+            Assert.That(Snapshot().input.steering, Is.EqualTo(1f).Within(0.001f),
+                "Both paths must land steering +1 before the motor runs.");
+
+            var startX = Snapshot().driving.motor.x;
+            var startZ = Snapshot().driving.motor.z;
+            for (var i = 0; i < 40; i++)
+            {
+                service.StepDriving(world);
+                service.AdvanceTick();
+            }
+            var driving = Snapshot().driving;
+            var motor = driving.motor;
+            var travelled = System.Math.Abs(motor.x - startX)
+                + System.Math.Abs(motor.z - startZ);
+            Assert.That(travelled, Is.GreaterThan(0.5f),
+                "The steer must measurably move the vehicle, not just set state.");
+            Assert.That(System.Math.Abs(motor.heading), Is.GreaterThan(0.01f),
+                "The steer must measurably turn the vehicle.");
+            return Tuple.Create(motor.x, motor.z, motor.heading, motor.speed,
+                driving.elapsedTicks, driving.simulationTick);
+        }
+
+        private static DrivingContentCatalog ParityCatalog()
+        {
+            var course = new CourseDefinition
+            {
+                id = "course-parity",
+                checkpoints = new List<CheckpointGate>
+                {
+                    new CheckpointGate { id = "start", x = 0f, y = 0f, z = 0f,
+                        halfWidth = 6f, dirX = 0f, dirZ = 1f,
+                        recoverX = 0f, recoverZ = -3f },
+                    new CheckpointGate { id = "gate-1", x = 0f, y = 0f, z = 2000f,
+                        halfWidth = 6f, dirX = 0f, dirZ = 1f,
+                        recoverX = 0f, recoverZ = 1997f }
+                }
+            };
+            var intro = new EventDefinition
+            {
+                id = "intro-parity",
+                courseId = "course-parity",
+                laps = 1,
+                countdownTicks = 2,
+                vehicleIds = new List<string> { "car-01" }
+            };
+            return DrivingContentCatalog.Create("test-content-parity",
+                new[] { VehicleTuning.Car01() },
+                new[] { course }, new[] { intro });
         }
     }
 }

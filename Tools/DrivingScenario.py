@@ -469,6 +469,7 @@ def run(connection, evidence):
         # Bounded load probes: pending outgoing records sampled via health.
         client.send({"type": "health"})
         health = client.wait(lambda event: event.get("type") == "health")
+        dropped_events = client.state.get("droppedDrivingEvents", 0)
         measurement = {
             "measured": stats,
             "scheduleSeconds": SCHEDULE_SECONDS,
@@ -478,7 +479,10 @@ def run(connection, evidence):
                        "traceBytes": TRACE_CAPACITY_BYTES},
             "maxBacklogSteps": client.max_backlog_steps,
             "pendingOutgoingAtFinish": health["outgoingRecords"],
-            "droppedDrivingEvents": client.state.get("droppedDrivingEvents", 0),
+            "droppedDrivingEvents": dropped_events,
+            # Task 7 owns the real 30-minute graybox soak; these figures
+            # are an honest projection of this measured run, not a soak.
+            "basis": "projection from a measured ~%d s run, not a sustained soak" % wall_seconds,
         }
         assert projected["commandIdentities"] < IDENTITY_CAPACITY, \
             "Representative schedule exhausts the command-identity cache"
@@ -488,6 +492,8 @@ def run(connection, evidence):
             "Outgoing queue saturated during qualification"
         assert client.max_backlog_steps < MAX_STEPS_PER_FRAME, \
             "Sustained overload: backlog never drained during the run"
+        assert dropped_events == 0, \
+            "Driving history was silently evicted during qualification: %d" % dropped_events
         checks.append(
             "capacity measured: %.1f MiB trace / %d commands observed, "
             "projected %d MiB / %d identities over %d s" % (
@@ -532,11 +538,17 @@ def main():
         result["status"] = "passed"
         result["runId"] = connection["runId"]
         result["notVerified"] = [
-            "physical keyboard/touch input and UI parity",
+            "physical keyboard/touch device input and UI parity "
+            "(motor-effect parity covered by FoundationInputPlayTests."
+            "PhysicalSteerMatchesCommandSteerInActualMotorOutcome)",
             "visual/Hebrew/audio quality", "Android device behavior",
-            "30-minute soak (capacity was measured and projected, not run)",
+            "real 30-minute soak (deferred to Task 7 — capacity here is a "
+            "projection of a measured ~76 s run, not a sustained session)",
             "fault-injection outcomes (StreamRobustness/FinishDelivery own them)",
         ]
+        result["deferredToTask7"] = (
+            "real 30-minute graybox soak: capacity figures above are "
+            "projections from a measured ~76 s run, not a measured soak")
     except Exception as error:
         result["error"] = type(error).__name__ + ": " + str(error)
     (args.evidence / "result.json").write_text(
