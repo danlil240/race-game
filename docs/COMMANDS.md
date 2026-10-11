@@ -114,8 +114,9 @@ Actions: `profile.create`, `profile.select`, `ui.navigate`, `ui.language`,
 `race.exit`, `tutorial.start`, `tutorial.replay`, `tutorial.exit`.
 
 `race.start` takes `vehicleId` + `eventId` (catalog: `car-01`,
-`motorcycle-01`, `practice-02`, `intro-01`, plus the `tutorial-01`
-free-drive stage used internally) and needs a selected profile;
+`motorcycle-01`, `practice-02`, `intro-01`; the `tutorial-01` free-drive
+stage is internal and `race.start` rejects it with `unavailable` — only
+`tutorial.start` may open it) and needs a selected profile;
 `race.restart`/`race.exit` need an active race and take no parameters.
 `input.set` is available on `sandbox` and `driving` screens only; a
 `gadget` sample is rejected with `unavailable` while a race is active.

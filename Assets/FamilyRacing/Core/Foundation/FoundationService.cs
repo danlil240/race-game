@@ -684,6 +684,11 @@ namespace FamilyRacing.Core.Foundation
                 return Result(command, CommandResult.Rejected, "unknownVehicle");
             if (!drivingContent.Events.TryGetValue(eventId, out evt))
                 return Result(command, CommandResult.Rejected, "unknownEvent");
+            // The tutorial free-drive stage is internal content: it may
+            // only be opened by tutorial.start, never as a bare race.
+            if (tutorialContent != null
+                && eventId == tutorialContent.freeDriveEventId)
+                return Result(command, CommandResult.Rejected, "unavailable");
             if (!evt.AllowsVehicle(vehicleId))
                 return Result(command, CommandResult.Rejected, "vehicleNotForEvent");
             driving = CreateSession(tuning, evt, command);
@@ -697,14 +702,22 @@ namespace FamilyRacing.Core.Foundation
         {
             if (driving == null)
                 return Result(command, CommandResult.Rejected, "unavailable");
-            var tuning = drivingContent.Vehicles[driving.VehicleId];
+            VehicleTuning tuning;
+            if (!drivingContent.Vehicles.TryGetValue(driving.VehicleId, out tuning))
+                return Result(command, CommandResult.Rejected, "contentUnavailable");
             // Inside a tutorial retry stays on the current stage: the
             // free-drive lesson event or the one-lap trial. Completed
             // lessons are kept; a graduated tutorial retries the trial.
-            var evt = tutorial != null
-                ? drivingContent.Events[tutorial.Phase == DrivingTutorial.PhaseLessons
-                    ? tutorial.FreeDriveEventId : tutorial.TrialEventId]
-                : drivingContent.Events[driving.EventId];
+            // Lookups are TryGetValue (not the throwing indexer): a
+            // catalog that cannot supply the stage rejects honestly
+            // instead of throwing inside a command boundary.
+            var eventId = tutorial != null
+                ? (tutorial.Phase == DrivingTutorial.PhaseLessons
+                    ? tutorial.FreeDriveEventId : tutorial.TrialEventId)
+                : driving.EventId;
+            EventDefinition evt;
+            if (!drivingContent.Events.TryGetValue(eventId, out evt))
+                return Result(command, CommandResult.Rejected, "contentUnavailable");
             // The old identity ends; retry creates a new race identity
             // inside the same run. Duplicate delivery replays the cached
             // result and never reaches here.
@@ -752,11 +765,17 @@ namespace FamilyRacing.Core.Foundation
             var vehicleId = command.Parameters["vehicleId"];
             VehicleTuning tuning;
             EventDefinition evt;
+            EventDefinition trial;
             if (!drivingContent.Vehicles.TryGetValue(vehicleId, out tuning))
                 return Result(command, CommandResult.Rejected, "unknownVehicle");
             if (!drivingContent.Events.TryGetValue(tutorialContent.freeDriveEventId, out evt))
                 return Result(command, CommandResult.Rejected, "unknownEvent");
-            if (!evt.AllowsVehicle(vehicleId))
+            // The trial is resolved up front, fail-closed: lessons can
+            // only be entered when the graduation lap they unlock is
+            // guaranteed to exist and to accept the chosen vehicle.
+            if (!drivingContent.Events.TryGetValue(tutorialContent.trialEventId, out trial))
+                return Result(command, CommandResult.Rejected, "unknownEvent");
+            if (!evt.AllowsVehicle(vehicleId) || !trial.AllowsVehicle(vehicleId))
                 return Result(command, CommandResult.Rejected, "vehicleNotForEvent");
             driving = CreateSession(tuning, evt, command);
             tutorial = new DrivingTutorial(tutorialContent);
@@ -818,12 +837,21 @@ namespace FamilyRacing.Core.Foundation
 
         // The lessons are done: end the free-drive session and start the
         // introductory event as the graduation trial, same vehicle, new
-        // race identity inside the same run.
+        // race identity inside the same run. The trial was validated at
+        // tutorial.start; if the catalog can no longer supply it the
+        // tutorial ends honestly instead of throwing out of StepDriving.
         private void TransitionToTrial()
         {
             var session = driving;
-            var tuning = drivingContent.Vehicles[session.VehicleId];
-            var evt = drivingContent.Events[tutorial.TrialEventId];
+            VehicleTuning tuning;
+            EventDefinition evt;
+            if (session == null
+                || !drivingContent.Vehicles.TryGetValue(session.VehicleId, out tuning)
+                || !drivingContent.Events.TryGetValue(tutorial.TrialEventId, out evt))
+            {
+                EndRace("tutorialContent", null);
+                return;
+            }
             session.CancelPending("tutorialTrial");
             session.EmitLifecycle("race.ended", "", "tutorialTrial");
             DrainSessionEvents(session);
@@ -992,7 +1020,9 @@ namespace FamilyRacing.Core.Foundation
                     }
                     break;
                 case "tutorial.start":
-                    if (drivingContent == null || tutorialContent == null)
+                    if (drivingContent == null || tutorialContent == null
+                        || !drivingContent.Events.ContainsKey(tutorialContent.freeDriveEventId)
+                        || !drivingContent.Events.ContainsKey(tutorialContent.trialEventId))
                     {
                         available = false;
                         reason = "contentUnavailable";

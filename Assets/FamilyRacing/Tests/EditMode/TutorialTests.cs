@@ -78,9 +78,9 @@ namespace FamilyRacing.Tests
         // Small loop: the start/finish plane accepts only -z crossings so
         // the introductory trial needs one real out-and-back lap; the
         // plateau edge supplies the jump the lessons need.
-        private static DrivingContentCatalog TestCatalog()
+        private static CourseDefinition TestCourse()
         {
-            var course = new CourseDefinition
+            return new CourseDefinition
             {
                 id = "course-test",
                 spawnZ = -10f,
@@ -94,7 +94,11 @@ namespace FamilyRacing.Tests
                         recoverX = 0f, recoverZ = 37f }
                 }
             };
-            var free = new EventDefinition
+        }
+
+        private static EventDefinition FreeEvent()
+        {
+            return new EventDefinition
             {
                 id = "tutorial-test",
                 courseId = "course-test",
@@ -102,15 +106,25 @@ namespace FamilyRacing.Tests
                 countdownTicks = 2,
                 vehicleIds = new List<string> { "car-01", "motorcycle-01" }
             };
-            var intro = new EventDefinition
+        }
+
+        private static EventDefinition IntroEvent(bool motorcycleOnly = false)
+        {
+            return new EventDefinition
             {
                 id = "intro-test",
                 courseId = "course-test",
                 laps = 1,
                 countdownTicks = 2,
-                vehicleIds = new List<string> { "car-01", "motorcycle-01" }
+                vehicleIds = motorcycleOnly
+                    ? new List<string> { "motorcycle-01" }
+                    : new List<string> { "car-01", "motorcycle-01" }
             };
-            var practice = new EventDefinition
+        }
+
+        private static EventDefinition PracticeEvent()
+        {
+            return new EventDefinition
             {
                 id = "practice-test",
                 courseId = "course-test",
@@ -118,10 +132,37 @@ namespace FamilyRacing.Tests
                 countdownTicks = 2,
                 vehicleIds = new List<string> { "car-01", "motorcycle-01" }
             };
+        }
+
+        private static DrivingContentCatalog CatalogWith(
+            params EventDefinition[] events)
+        {
             return DrivingContentCatalog.Create("test-content-1",
                 new[] { VehicleTuning.Car01(), VehicleTuning.Motorcycle01() },
-                new[] { course },
-                new[] { free, intro, practice });
+                new[] { TestCourse() }, events);
+        }
+
+        private static DrivingContentCatalog TestCatalog()
+        {
+            return CatalogWith(FreeEvent(), IntroEvent(), PracticeEvent());
+        }
+
+        // The free-drive stage is present but the trial the lessons
+        // unlock cannot be supplied — the failure-path fixtures.
+        private static DrivingContentCatalog CatalogWithoutTrial()
+        {
+            return CatalogWith(FreeEvent(), PracticeEvent());
+        }
+
+        private static DrivingContentCatalog CatalogWithoutFreeDrive()
+        {
+            return CatalogWith(IntroEvent(), PracticeEvent());
+        }
+
+        private static DrivingContentCatalog CatalogWithMotoOnlyTrial()
+        {
+            return CatalogWith(FreeEvent(), IntroEvent(motorcycleOnly: true),
+                PracticeEvent());
         }
 
         private static TutorialDefinition TestTutorial()
@@ -763,6 +804,105 @@ namespace FamilyRacing.Tests
             var controls = service.Snapshot().driving.controls;
             Assert.That(controls, Does.Contain("tutorial.replay"));
             Assert.That(controls, Does.Contain("tutorial.exit"));
+        }
+
+        // --- fail-closed tutorial content -------------------------------
+
+        [Test]
+        public void TutorialStartFailsClosedWhenTrialContentCannotRun()
+        {
+            // Missing trial event: the graduation lap the lessons unlock
+            // cannot be entered, so the tutorial must not start.
+            var noTrial = new FoundationService(
+                new ProfileStore(directory + "-notrial", new TestJsonSerializer()),
+                "en", RunId);
+            noTrial.SetDrivingContent(CatalogWithoutTrial());
+            noTrial.SetTutorialDefinition(TestTutorial());
+            noTrial.Execute(Cmd("profile.create", P("slot", "0", "language", "en")));
+            var missing = noTrial.Execute(
+                Cmd("tutorial.start", P("vehicleId", "car-01")));
+            Assert.That(missing.status, Is.EqualTo(CommandResult.Rejected));
+            Assert.That(missing.code, Is.EqualTo("unknownEvent"));
+            Assert.That(noTrial.Snapshot().driving, Is.Null,
+                "a rejected start leaves no session behind");
+            Assert.That(Descriptor(noTrial, "tutorial.start").reason,
+                Is.EqualTo("contentUnavailable"));
+
+            // Trial exists but rejects the chosen vehicle: same honest
+            // rejection before any lesson runs.
+            var blocked = new FoundationService(
+                new ProfileStore(directory + "-blocked", new TestJsonSerializer()),
+                "en", RunId);
+            blocked.SetDrivingContent(CatalogWithMotoOnlyTrial());
+            blocked.SetTutorialDefinition(TestTutorial());
+            blocked.Execute(Cmd("profile.create", P("slot", "0", "language", "en")));
+            var wrongVehicle = blocked.Execute(
+                Cmd("tutorial.start", P("vehicleId", "car-01")));
+            Assert.That(wrongVehicle.status, Is.EqualTo(CommandResult.Rejected));
+            Assert.That(wrongVehicle.code, Is.EqualTo("vehicleNotForEvent"));
+            Assert.That(blocked.Snapshot().driving, Is.Null);
+            // The vehicle the trial does allow still starts.
+            var allowed = blocked.Execute(
+                Cmd("tutorial.start", P("vehicleId", "motorcycle-01")));
+            Assert.That(allowed.status, Is.EqualTo(CommandResult.Applied));
+        }
+
+        [Test]
+        public void RaceStartCannotOpenTheInternalFreeDriveStage()
+        {
+            CreateProfile();
+            var blocked = service.Execute(Cmd("race.start",
+                P("vehicleId", "car-01", "eventId", "tutorial-test")));
+            Assert.That(blocked.status, Is.EqualTo(CommandResult.Rejected));
+            Assert.That(blocked.code, Is.EqualTo("unavailable"),
+                "the internal lesson stage is not a raceable event");
+            Assert.That(service.Snapshot().driving, Is.Null);
+
+            // Ordinary events still start: the filter covers only the
+            // tutorial's own free-drive stage.
+            var normal = service.Execute(Cmd("race.start",
+                P("vehicleId", "car-01", "eventId", "intro-test")));
+            Assert.That(normal.status, Is.EqualTo(CommandResult.Applied));
+        }
+
+        [Test]
+        public void MissingTrialContentEndsTheTutorialHonestlyMidRun()
+        {
+            CreateProfile();
+            StartTutorialRunning();
+            Drive(0.8f, ticks: 20);
+            Drive(0.9f, drift: true, ticks: 30);
+            Drive(0f, boost: true, ticks: 10);
+            CompleteJumpLesson();
+            // The catalog can no longer supply the trial the last lesson
+            // unlocks: the transition must end the tutorial honestly and
+            // never throw out of the step path.
+            service.SetDrivingContent(CatalogWithoutTrial());
+            service.Execute(Cmd("input.set",
+                P("steering", "0", "drift", "false", "boost", "false",
+                    "gadget", "false", "recover", "true", "changeCamera", "false",
+                    "pause", "false", "durationTicks", "5")));
+            Assert.DoesNotThrow(() => Boundary(1));
+            var state = service.Snapshot();
+            Assert.That(state.driving, Is.Null);
+            Assert.That(state.screen, Is.EqualTo("practice"));
+            Assert.That(Events(state, "tutorial.exited").Count, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void RaceRestartRejectsWhenTutorialContentDisappears()
+        {
+            CreateProfile();
+            StartTutorialRunning();
+            // The current stage's event is gone: retry cannot rebuild the
+            // session and must reject honestly, leaving the run intact.
+            service.SetDrivingContent(CatalogWithoutFreeDrive());
+            var restarted = service.Execute(Cmd("race.restart", null));
+            Assert.That(restarted.status, Is.EqualTo(CommandResult.Rejected));
+            Assert.That(restarted.code, Is.EqualTo("contentUnavailable"));
+            Assert.That(service.Snapshot().driving, Is.Not.Null,
+                "a rejected retry leaves the running session untouched");
+            Assert.That(service.Snapshot().driving.tutorial, Is.Not.Null);
         }
     }
 }

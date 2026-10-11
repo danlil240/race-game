@@ -318,6 +318,14 @@ def run(connection, evidence):
         checks.append("paused observation and input cleanup")
 
         # --- tutorial onboarding ------------------------------------------
+        # The tutorial free-drive stage is internal content: race.start
+        # must refuse it, and only tutorial.start may open it.
+        reserved, _ = client.command(
+            "race.start", {"vehicleId": "car-01", "eventId": "tutorial-01"})
+        assert reserved["status"] == "rejected" \
+            and reserved["code"] == "unavailable", reserved
+        checks.append("internal tutorial stage rejected by race.start")
+
         # Ordered lessons start through the shared command path and
         # advance only on genuine driving output; replay re-issues the cue
         # without progress, exit abandons cleanly.
