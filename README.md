@@ -98,12 +98,22 @@ tests are discovered.
 
 ## Remaining gates (Task 3 qualification)
 
-- Windows IL2CPP module still missing (Windows ships Mono development build;
-  Android Build Support incl. SDK/NDK/OpenJDK present).
-- Android APK (`Builds\Android\FamilyRacing.apk`, ~47 MB) is now built by the
+- Windows IL2CPP module is now installed for the pinned editor
+  (`Tools\Verify.ps1 -Mode CheckEnvironment` OK since 2026-10-11,
+  owner-approved). No IL2CPP build has been produced or qualified yet —
+  Windows still ships the Mono development build, and M1 acceptance does
+  not require a particular Windows scripting backend. Kept as a separate
+  build-hardening item. Android Build Support incl. SDK/NDK/OpenJDK is
+  present and exercised by the offline build path.
+- Android APK (`Builds\Android\FamilyRacing.apk`, ~47 MB) is built by the
   offline path (`Tools\Verify.ps1 -Mode Android`, Unity export + bundled
   Gradle `--offline`; `Logs\android-offline\<runId>\result.json` records
-  status/hash). Still not device-qualified — no ADB/on-device run exists.
+  status/hash). Latest run rebuilt the APK from current source
+  (`Logs\android-offline\20261011-193051-31b4d38aaa6f49fa9d4791f5fe422f76\result.json`,
+  SHA-256 `DD8EF19C…70CB0B`). Still not device-qualified — `adb devices`
+  (bundled platform-tools) found no attached device on 2026-10-11; no
+  ADB/on-device run exists. Report:
+  `docs\tasks\foundation-device-qualification-report.md`.
 - Saved-profile restart evidence now exists: `Tools\RestartScenario.py`
   drove two real player processes against one synthetic store and verified
   identical identities, all six settings, and unchanged save-file hashes
@@ -111,7 +121,10 @@ tests are discovered.
   `--validation-profile-dir` override is honored only next to
   `--validation-dir` in editor/development builds and is ignored by ordinary
   family launches.
-- NuGet restore blocked pending network approval.
+- NuGet restore is no longer blocked: the nuget.org user-level source was
+  added with owner approval (2026-10-11) and `Tools\Verify.ps1 -Mode Core`
+  passes 225/225. `Tools\Verify.ps1 -Mode CoreOffline` remains the
+  no-network path.
 - Packaged bilingual fonts implemented: pinned Noto Sans / Noto Sans
   Hebrew / Noto Sans Symbols2 sources under `Assets\FamilyRacing\Fonts\`
   with OFL license and provenance (`README.md` there); generated dynamic
@@ -145,14 +158,12 @@ tests are discovered.
   invalid and a byte-frozen trace prefix — 18/18 checks
   (`Logs\qualification-external-stream-robustness\external-run-2\result.json`;
   report `docs\tasks\foundation-external-stream-report.md`).
-  Still unverified per `notVerified`: full physical keyboard/touch
-  coverage, finish delivery to the original non-reading controller
-  (PlayMode only — the external scenario observes the independent
-  failure without finish, and the reconnected reader's finish stays
-  invalid), graceful-exit autosave and the normal user profile path
-  (restart and fault evidence cover explicit synthetic saves only),
-  human Hebrew reading/quality review, Android on-device behavior, any
-  racing features.
+  Unverified per `notVerified` at that stage (partially superseded by
+  the foundation-gaps wave below): full physical keyboard/touch
+  coverage, finish delivery to the original non-reading controller,
+  graceful-exit autosave and the normal user profile path, human Hebrew
+  reading/quality review, Android on-device behavior, any racing
+  features.
 - Settings-screen UI/command parity is now covered by real-widget PlayMode
   tests: `FoundationSettingsPlayTests` drives actual `Slider.value` callbacks
   and pooled pointer down/up on the rendered buttons against a synthetic
@@ -163,3 +174,23 @@ tests are discovered.
   `Logs\qualification-settings-parity\`; report
   `docs\tasks\foundation-settings-parity-report.md`. These are synthetic UI
   Toolkit callbacks — not OS touch and not a process-restart check.
+- Foundation-gaps wave (2026-10-11, `docs\FOUNDATION_GAPS_PLAN.md`)
+  closed the remaining automatable `notVerified` surfaces:
+  `--validation-normal-profiles` (real `persistentDataPath` store under
+  agent control), `Application.runInBackground` inside validation
+  launches only (gate-found unfocused-player freeze), and hold-button
+  registrations moved to trickle-down (test-found `Button.Clickable`
+  defect that blocked real touch holds). New external evidence:
+  `Tools\FinishDeliveryScenario.py` 6/6 (stalled-controller finish →
+  terminal `streamError`, `captureClosed` for new controllers) and
+  `Tools\NormalProfileScenario.py` 6/6 (real store, `taskkill` graceful
+  exit → `processExit`, saved profiles survive, drafts never
+  autopersist) (`Logs\qualification-gaps\`, `Logs\qualification-exit\`;
+  report `docs\tasks\foundation-gaps-report.md`). **Latest recorded
+  gate: EditMode 253/253, PlayMode 53/53** (`Logs\verify-editmode-results.xml`,
+  `Logs\verify-playmode-results.xml`), Core `dotnet test` 225/225,
+  AgentScenario 11/11, Restart 6/6, StreamRobustness 18/18 — the earlier
+  249/25 and 249/30 counts cited above are historical per-pass records.
+  Still open: OS-level physical keyboard/touch coverage, human Hebrew
+  reading/quality review, Android on-device/ADB behavior, IL2CPP build
+  qualification, and all racing features (`notImplemented`).

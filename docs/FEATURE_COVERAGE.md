@@ -133,9 +133,11 @@ clean finish completes the second capture.
   ATG enabled, and live readiness recomputes each refresh; lead-accepted
   en/he window captures exist (`Logs\qualification-fonts\player-evidence-2\screenshot-*.png`).
   Human Hebrew review is still not claimed.
-- Android device behavior (APK is now built by the enforced-offline path —
-  latest run `Logs\android-offline\20261011-134021-98837ad9964547dba7f88ab9fbe916cb\result.json` —
-  but no ADB/on-device run has been attempted).
+- Android device behavior (APK is built by the enforced-offline path —
+  latest run `Logs\android-offline\20261011-193051-31b4d38aaa6f49fa9d4791f5fe422f76\result.json`
+  rebuilt from current source — but no ADB/on-device run exists; the
+  bundled platform-tools `adb devices` check on 2026-10-11 found no
+  attached device).
 - Windows IL2CPP module is now installed for the pinned editor
   (`CheckEnvironment` OK) but no IL2CPP build has been produced or qualified
   — preview remains Mono development.
