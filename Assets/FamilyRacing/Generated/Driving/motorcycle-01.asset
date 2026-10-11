@@ -15,23 +15,30 @@ MonoBehaviour:
   vehicleId: motorcycle-01
   maxSpeed: 20
   acceleration: 7
-  steeringRate: 3.2
-  steeringReferenceSpeed: 6
-  grip: 4
-  driftMinSpeed: 6
-  driftSteeringFactor: 1.5
-  driftLateralAcceleration: 6
-  boostMaxSpeed: 26
-  boostAcceleration: 12
-  boostDurationSeconds: 2.5
-  boostChargeSeconds: 6
-  gravity: 22
-  terminalFallSpeed: 30
+  steeringRate: 3.4
+  steeringReferenceSpeed: 5
+  grip: 5
+  driftMinSpeed: 5
+  driftSteeringFactor: 1.35
+  driftLateralAcceleration: 5
+  driftChargePerSecond: 0.35
+  boostMaxSpeed: 28
+  boostAcceleration: 14
+  boostDurationSeconds: 2.2
+  boostDrainPerSecond: 0.45
+  boostMinCharge: 0.1
+  boostChargeSeconds: 5.5
+  cleanLandingCredit: 0.25
+  landingMinAirSeconds: 0.25
+  gravity: 24
+  terminalFallSpeed: 34
   groundProbe: 0.8
-  rideHeight: 0.55
-  halfWidth: 0.45
+  rideHeight: 0.6
+  halfWidth: 0.5
   halfLength: 1.1
   height: 1.4
-  wallSpeedRetention: 0.15
+  wallSpeedRetention: 0.1
+  silhouette: motorcycle
+  leanDegrees: 24
   bodyScale: {x: 0.9, y: 1.4, z: 2.2}
   bodyColor: {r: 0.5, g: 0.78, b: 0.7, a: 1}

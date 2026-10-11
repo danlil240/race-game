@@ -27,7 +27,7 @@ namespace FamilyRacing
         private DrivingContentCatalog catalog;
         private GameObject courseInstance;
         private GameObject vehicleView;
-        private Material vehicleMaterial;
+        private VehiclePresentation presentation;
         private string shownVehicleId = "";
         private Camera mainCamera;
         private Vector3 savedCameraPosition;
@@ -108,15 +108,11 @@ namespace FamilyRacing
             }
             if (vehicleView == null)
             {
-                vehicleView = GameObject.CreatePrimitive(PrimitiveType.Cube);
-                vehicleView.name = "DrivingVehicle";
+                vehicleView = new GameObject("DrivingVehicle");
                 vehicleView.transform.SetParent(transform, false);
                 // Visual only: the swept motor handles collision through
-                // IMotorWorld, so this object must not carry a collider.
-                var collider = vehicleView.GetComponent<Collider>();
-                if (collider != null) Destroy(collider);
-                vehicleMaterial = new Material(Shader.Find("Universal Render Pipeline/Lit"));
-                vehicleView.GetComponent<Renderer>().sharedMaterial = vehicleMaterial;
+                // IMotorWorld, so this hierarchy carries no colliders.
+                presentation = vehicleView.AddComponent<VehiclePresentation>();
                 vehicleView.SetActive(false);
             }
             if (mainCamera == null) mainCamera = Camera.main;
@@ -138,7 +134,8 @@ namespace FamilyRacing
             if (active)
             {
                 var motor = session.motor;
-                ApplyVehicleVisual(session.vehicleId, motor);
+                ApplyVehicleVisual(session.vehicleId, motor,
+                    session.input != null ? session.input.steering : 0f);
                 ApplyOverviewCamera(motor);
             }
             else if (overviewActive)
@@ -148,23 +145,17 @@ namespace FamilyRacing
             }
         }
 
-        private void ApplyVehicleVisual(string vehicleId, MotorState motor)
+        private void ApplyVehicleVisual(string vehicleId, MotorState motor, float steering)
         {
-            if (vehicleView == null) return;
+            if (vehicleView == null || presentation == null) return;
             if (vehicleId != shownVehicleId)
             {
                 VehicleDefinitionAsset asset;
                 if (vehicleAssets.TryGetValue(vehicleId ?? "", out asset) && asset != null)
-                {
-                    vehicleView.transform.localScale = asset.bodyScale;
-                    if (vehicleMaterial != null) vehicleMaterial.color = asset.bodyColor;
-                }
+                    presentation.SetVehicle(asset);
                 shownVehicleId = vehicleId;
             }
-            var scale = vehicleView.transform.localScale;
-            vehicleView.transform.SetPositionAndRotation(
-                new Vector3(motor.x, motor.y + scale.y * 0.5f, motor.z),
-                Quaternion.Euler(0f, motor.heading * Mathf.Rad2Deg, 0f));
+            presentation.ApplyPose(motor, steering);
         }
 
         private void ApplyOverviewCamera(MotorState motor)
@@ -207,7 +198,7 @@ namespace FamilyRacing
 
         private void OnDestroy()
         {
-            if (vehicleMaterial != null) Destroy(vehicleMaterial);
+            // VehiclePresentation owns its generated materials.
         }
     }
 }

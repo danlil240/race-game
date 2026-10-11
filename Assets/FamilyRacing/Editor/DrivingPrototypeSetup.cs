@@ -72,7 +72,12 @@ namespace FamilyRacing.EditorTools
         private static VehicleDefinitionAsset EnsureCar()
         {
             var asset = EnsureAsset<VehicleDefinitionAsset>("car-01.asset");
-            asset.vehicleId = "car-01";
+            // The Core preset is the single source of tuning truth; the
+            // generated asset is rewritten from it so the two can never
+            // diverge silently.
+            asset.ApplyPreset(FamilyRacing.Core.Driving.VehicleTuning.Car01());
+            asset.silhouette = "car";
+            asset.leanDegrees = 4f;
             asset.bodyScale = new Vector3(1.8f, 1.1f, 3.2f);
             asset.bodyColor = new Color(0.91f, 0.51f, 0.42f);
             EditorUtility.SetDirty(asset);
@@ -82,13 +87,9 @@ namespace FamilyRacing.EditorTools
         private static VehicleDefinitionAsset EnsureMotorcycle()
         {
             var asset = EnsureAsset<VehicleDefinitionAsset>("motorcycle-01.asset");
-            asset.vehicleId = "motorcycle-01";
-            asset.maxSpeed = 20f;
-            asset.acceleration = 7f;
-            asset.steeringRate = 3.2f;
-            asset.halfWidth = 0.45f;
-            asset.halfLength = 1.1f;
-            asset.height = 1.4f;
+            asset.ApplyPreset(FamilyRacing.Core.Driving.VehicleTuning.Motorcycle01());
+            asset.silhouette = "motorcycle";
+            asset.leanDegrees = 24f;
             asset.bodyScale = new Vector3(0.9f, 1.4f, 2.2f);
             asset.bodyColor = new Color(0.50f, 0.78f, 0.70f);
             EditorUtility.SetDirty(asset);

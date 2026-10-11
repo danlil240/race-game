@@ -21,10 +21,15 @@ MonoBehaviour:
   driftMinSpeed: 6
   driftSteeringFactor: 1.5
   driftLateralAcceleration: 6
+  driftChargePerSecond: 0.3
   boostMaxSpeed: 26
   boostAcceleration: 12
   boostDurationSeconds: 2.5
+  boostDrainPerSecond: 0.4
+  boostMinCharge: 0.1
   boostChargeSeconds: 6
+  cleanLandingCredit: 0.2
+  landingMinAirSeconds: 0.25
   gravity: 22
   terminalFallSpeed: 30
   groundProbe: 0.8
@@ -33,5 +38,7 @@ MonoBehaviour:
   halfLength: 1.6
   height: 1.1
   wallSpeedRetention: 0.15
+  silhouette: car
+  leanDegrees: 4
   bodyScale: {x: 1.8, y: 1.1, z: 3.2}
   bodyColor: {r: 0.91, g: 0.51, b: 0.42, a: 1}
