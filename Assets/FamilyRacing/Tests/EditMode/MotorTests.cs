@@ -174,18 +174,18 @@ namespace FamilyRacing.Tests
             var clearance = 20f - state.z;
             Assert.That(clearance, Is.GreaterThanOrEqualTo(tuning.halfLength - 0.01f),
                 "the swept body must stop with its nose at or before the wall");
-            var hit = false;
             var probe = world.SweepBody(
                 new MotorPose { x = state.x, y = state.y, z = state.z, heading = state.heading },
                 0f, 0f, tuning.maxSpeed * Dt,
                 tuning.halfWidth, tuning.halfLength, tuning.height);
             Assert.That(probe.hit, Is.True, "one more step of motion must still be blocked");
+            Assert.That(probe.fraction, Is.LessThan(1f),
+                "the blocked sweep reports a real contact fraction, not a pass-through");
             // Sliding along the wall must not accumulate penetration either.
             var sliding = StepN(state, Steering(0.5f), tuning, world, 120);
             Assert.That(20f - sliding.z, Is.GreaterThanOrEqualTo(
                 tuning.halfLength * 0.5f - 0.01f),
                 "sliding must keep the body out of the wall");
-            Assert.That(hit || true, Is.True);
         }
 
         [Test]

@@ -704,6 +704,10 @@ namespace FamilyRacing.Core.Foundation
             var course = drivingContent.Courses[evt.courseId];
             var raceId = "race-" + (++raceCounter).ToString(
                 System.Globalization.CultureInfo.InvariantCulture);
+            // A new race identity always starts unpaused: pause is a race
+            // affordance (sandbox/driving only) and must never leak into a
+            // fresh session started from a screen without one.
+            paused = false;
             return new DrivingSession(raceId, tuning, course, evt,
                 drivingContent.Version, command != null ? command.CommandId : "");
         }
@@ -721,6 +725,10 @@ namespace FamilyRacing.Core.Foundation
             driving = null;
             DrainSessionEvents(session);
             if (screen == ScreenDriving) screen = ScreenPractice;
+            // Pause belongs to the race affordance: it cannot survive the
+            // session end, or practice/profile screens (where pause.toggle
+            // is unavailable) would be left invisibly frozen.
+            paused = false;
             ClearInput();
         }
 

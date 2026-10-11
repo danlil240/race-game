@@ -444,5 +444,48 @@ namespace FamilyRacing.Tests
             Assert.That(ok.status, Is.EqualTo(CommandResult.Applied));
             Assert.That(service.Snapshot().driving.vehicleId, Is.EqualTo("motorcycle-01"));
         }
+
+        // Pause is a race affordance: it must never leak past a session
+        // boundary into screens that offer no way back out of it.
+        [Test]
+        public void RaceLifecycleClearsPause()
+        {
+            CreateProfile();
+            StartRunning();
+            service.Execute(Cmd("pause.toggle", null));
+            Assert.That(service.Snapshot().paused, Is.True, "setup: paused mid-race");
+
+            var exit = service.Execute(Cmd("race.exit", null));
+            Assert.That(exit.status, Is.EqualTo(CommandResult.Applied));
+            var afterExit = service.Snapshot();
+            Assert.That(afterExit.paused, Is.False,
+                "race.exit while paused must clear the pause state");
+            Assert.That(afterExit.screen, Is.EqualTo("practice"));
+
+            var started = StartRace();
+            Assert.That(started.status, Is.EqualTo(CommandResult.Applied));
+            Boundary(2);
+            var running = service.Snapshot();
+            Assert.That(running.driving.phase, Is.EqualTo("running"));
+            Assert.That(running.paused, Is.False);
+            var sim = running.driving.simulationTick;
+            Boundary(3);
+            var moved = service.Snapshot().driving;
+            Assert.That(moved.simulationTick, Is.GreaterThan(sim),
+                "a race started after a paused exit must actually simulate");
+            Assert.That(moved.motor.speed, Is.GreaterThan(0f));
+
+            service.Execute(Cmd("pause.toggle", null));
+            Assert.That(service.Snapshot().paused, Is.True);
+            var restart = service.Execute(Cmd("race.restart", null));
+            Assert.That(restart.status, Is.EqualTo(CommandResult.Applied));
+            var fresh = service.Snapshot();
+            Assert.That(fresh.paused, Is.False,
+                "race.restart while paused must clear the pause state");
+            Assert.That(fresh.driving.phase, Is.EqualTo("countdown"));
+            Boundary(3);
+            Assert.That(service.Snapshot().driving.simulationTick,
+                Is.GreaterThan(0L), "the restarted race must not be frozen");
+        }
     }
 }
