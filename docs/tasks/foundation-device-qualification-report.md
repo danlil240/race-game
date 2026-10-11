@@ -1,7 +1,8 @@
 # Foundation device qualification report
 
 Date: 2026-10-11. Task: M1 acceptance closeout, agent-doable slice
-(Task 0 of `docs/superpowers/plans/2026-10-11-driving-prototype.md`).
+(Task 0 of `docs/superpowers/plans/2026-10-11-driving-prototype.md` —
+uncommitted planning document).
 Status: **Executed — documentation reconciled, Android rebuilt from
 current source, device check attempted. M1 remains open: physical-device
 and human-review gates are outstanding and no device was attached.**
@@ -20,7 +21,7 @@ open blockers. M1 is **not** marked complete anywhere.
 
 | Surface | Evidence |
 |---|---|
-| Core tests | `Tools\Verify.ps1 -Mode Core` 225/225 (NuGet restore owner-approved 2026-10-11); `python -B -m unittest discover -s Tools -p 'Test*.py'` 52/52; `Tools\Test-VerifyTooling.ps1` 12/12 |
+| Core tests | `Tools\Verify.ps1 -Mode Core` 225/225 (NuGet restore owner-approved 2026-10-11); `python -B -m unittest discover -s Tools -p 'Test*.py'` 52/52 and `Tools\Test-VerifyTooling.ps1` 12/12 (latest recorded counts per the 2026-10-11 M2 plan evidence table; not rerun this pass) |
 | Unity suites (latest recorded) | EditMode 253/253 `Logs\verify-editmode-results.xml`; PlayMode 53/53 `Logs\verify-playmode-results.xml` (gaps-wave gate; earlier 249/25 and 249/30 figures are historical per-pass records) |
 | Windows player | Latest reviewed Mono development build `Logs\verify-unity-windows.log`; Mono is a deliberate `FoundationProjectSetup.ApplyPlayerSettings` choice — no IL2CPP build exists or is required for M1 |
 | External scenarios on real players | AgentScenario 11/11, Restart 6/6, StreamRobustness 18/18, FinishDelivery 6/6, NormalProfile 6/6 — `Logs\qualification-gaps\`, `Logs\qualification-exit\`, `Logs\qualification-external-stream-robustness\`; reports `docs\tasks\foundation-gaps-report.md`, `foundation-external-stream-report.md`, `foundation-stream-robustness-report.md`, `foundation-settings-parity-report.md` |
@@ -48,7 +49,11 @@ open blockers. M1 is **not** marked complete anywhere.
 - Artifact: `Builds\Android\FamilyRacing.apk`, 47,404,615 bytes, SHA-256
   `DD8EF19CC7ACA31B183E10135EA53B388308BF3CC209C334C505EC574370CB0B`
   (verified against `Get-FileHash`). This build supersedes the previous
-  APK (`20129690…78F74`), which predated the stream/settings/input fixes.
+  APK (`20129690…78F74`): the M2 plan's evidence table assesses that
+  build as predating the later stream/settings/input fixes; hash and
+  size differ, and the earlier run directories predate
+  `source-state.txt` recording, so per-run source provenance is not
+  available for them.
 
 ### Device check — no device attached
 
