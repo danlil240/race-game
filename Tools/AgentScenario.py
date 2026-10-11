@@ -228,9 +228,12 @@ def run(connection, evidence):
             "settings.update", "settings.save", "input.set", "input.clear",
             "camera.toggle", "pause.toggle",
             "race.start", "race.restart", "race.exit",
+            "tutorial.start", "tutorial.replay", "tutorial.exit",
         }, actions
-        assert not any(action.startswith("tutorial.") for action in actions), \
-            "Tutorial commands are out of scope for this slice"
+        # There is deliberately no tutorial.complete or teleport command:
+        # onboarding can only advance on genuine driving events.
+        assert not any(action.startswith("tutorial.complete")
+                       or "teleport" in action for action in actions)
         assert discovery["featureCoverage"], "Missing future-feature coverage gaps"
         checks.append("command discovery")
 
@@ -313,6 +316,46 @@ def run(connection, evidence):
         client.applied("pause.toggle")
         client.applied("input.clear")
         checks.append("paused observation and input cleanup")
+
+        # --- tutorial onboarding ------------------------------------------
+        # Ordered lessons start through the shared command path and
+        # advance only on genuine driving output; replay re-issues the cue
+        # without progress, exit abandons cleanly.
+        begun, _ = client.applied("tutorial.start", {"vehicleId": "car-01"})
+        state = client.action_state(begun["commandId"])
+        assert state["screen"] == "driving" and state["driving"]
+        tutorial = state["driving"]["tutorial"]
+        assert tutorial["phase"] == "lessons" \
+            and tutorial["lessonId"] == "steering" \
+            and tutorial["objective"] == "tutorial.cue.steering", tutorial
+        checks.append("tutorial.start enters the ordered lesson stage")
+
+        client.wait(lambda event: event.get("type") == "state"
+                    and event["state"].get("driving")
+                    and event["state"]["driving"]["phase"] == "running",
+                    timeout=30)
+        replayed, _ = client.applied("tutorial.replay")
+        state = client.action_state(replayed["commandId"])
+        assert state["driving"]["tutorial"]["cueSequence"] \
+            == tutorial["cueSequence"] + 1
+        assert state["driving"]["tutorial"]["lessonId"] == "steering", \
+            "Replay must not advance the lesson"
+        checks.append("tutorial.replay re-issues the cue without progress")
+
+        # The steering lesson completes only after enough simulated
+        # boundaries of real held steering input.
+        client.applied("input.set", inputs(steering=0.8, duration=150))
+        client.wait(lambda event: event.get("type") == "state"
+                    and event["state"].get("driving")
+                    and event["state"]["driving"].get("tutorial")
+                    and event["state"]["driving"]["tutorial"]["lessonId"]
+                    == "drift", timeout=60)
+        checks.append("steering lesson completes on genuine held steering")
+
+        exited, _ = client.applied("tutorial.exit")
+        state = client.action_state(exited["commandId"])
+        assert state["screen"] == "practice" and state["driving"] is None
+        checks.append("tutorial.exit abandons the onboarding session")
 
         # --- driving slice -------------------------------------------------
         client.applied("ui.navigate", {"screen": "practice"})

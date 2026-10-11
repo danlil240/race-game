@@ -111,13 +111,30 @@ no duplicate keys, no trailing content, strict UTF-8:
 Actions: `profile.create`, `profile.select`, `ui.navigate`, `ui.language`,
 `settings.update`, `settings.save`, `input.set`, `input.clear`,
 `camera.toggle`, `pause.toggle`, `race.start`, `race.restart`,
-`race.exit`.
+`race.exit`, `tutorial.start`, `tutorial.replay`, `tutorial.exit`.
 
 `race.start` takes `vehicleId` + `eventId` (catalog: `car-01`,
-`motorcycle-01`, `practice-02`, `intro-01`) and needs a selected profile;
+`motorcycle-01`, `practice-02`, `intro-01`, plus the `tutorial-01`
+free-drive stage used internally) and needs a selected profile;
 `race.restart`/`race.exit` need an active race and take no parameters.
 `input.set` is available on `sandbox` and `driving` screens only; a
 `gadget` sample is rejected with `unavailable` while a race is active.
+
+`tutorial.start` takes `vehicleId` and needs a selected profile plus
+validated tutorial content; it opens the ordered onboarding (steering →
+drift → boost → jump → recovery lessons inside the free-drive event,
+then the unlocked one-lap `intro-01` trial). `tutorial.replay`
+re-announces the current cue without any progression; `tutorial.exit`
+abandons the session. There is intentionally no `tutorial.complete` or
+checkpoint-teleport action — lessons and the graduation lap advance only
+from genuine driving events (`motor.driftStart`, `motor.boostStart`,
+`motor.landed`, `race.recovered`, `race.finished`, held-steering
+boundaries). `race.restart` inside a tutorial retries the current stage
+without losing completed lessons; `race.exit` and profile switches end
+the session-local tutorial state. `driving.tutorial` in the state slice
+is `null` unless a tutorial is active; `featureCoverage.tutorial` stays
+`notImplemented` (the full-release tutorial incl. gadget onboarding is
+deferred) while `featureCoverage.drivingOnboarding` reports this slice.
 
 Sequenced server records carry `protocolVersion`, `runId`, `deviceId`
 (random per run), `participantId`, `buildVersion`, `contentVersion`,
