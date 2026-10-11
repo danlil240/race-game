@@ -72,6 +72,13 @@ Tools\Verify.ps1 -Mode Android    # Logs\android-offline\<runId>\result.json
 # gets a fresh capture directory:
 python Tools\RestartScenario.py Builds\Windows\FamilyRacing.exe --evidence <new-dir>
 
+# Expected-fault qualification on the same build — launches three fresh
+# validation players (graceful disconnect, TCP reset, stalled sink) and
+# verifies durable invalid status, reconnect, original outcome lookup and
+# duplicate protection. Passing means the injected faults were detected —
+# every capture stays INVALID; it never certifies missing history:
+python Tools\StreamRobustnessScenario.py Builds\Windows\FamilyRacing.exe --evidence Logs\stream-fault-<new-name>
+
 # Validation: keep this launch terminal alive (background its shell in an
 # agent environment), then run the scenario from a second terminal.
 $exe = (Resolve-Path "Builds\Windows\FamilyRacing.exe").Path
@@ -93,7 +100,7 @@ tests are discovered.
 
 - Windows IL2CPP module still missing (Windows ships Mono development build;
   Android Build Support incl. SDK/NDK/OpenJDK present).
-- Android APK (`Builds\Android\FamilyRacing.apk`, ~46 MB) is now built by the
+- Android APK (`Builds\Android\FamilyRacing.apk`, ~47 MB) is now built by the
   offline path (`Tools\Verify.ps1 -Mode Android`, Unity export + bundled
   Gradle `--offline`; `Logs\android-offline\<runId>\result.json` records
   status/hash). Still not device-qualified — no ADB/on-device run exists.
@@ -105,16 +112,54 @@ tests are discovered.
   `--validation-dir` in editor/development builds and is ignored by ordinary
   family launches.
 - NuGet restore blocked pending network approval.
-- Hebrew/Latin font assets not yet bundled; the shell surfaces an explicit
-  missing-font qualification warning instead of wrong glyphs.
+- Packaged bilingual fonts implemented: pinned Noto Sans / Noto Sans
+  Hebrew / Noto Sans Symbols2 sources under `Assets\FamilyRacing\Fonts\`
+  with OFL license and provenance (`README.md` there); generated dynamic
+  FontAssets, Advanced Text Generator enabled, live font-readiness
+  warning recomputes each refresh. OFL is also bundled into
+  `Assets\StreamingAssets\ThirdPartyLicenses\Noto-OFL.txt` (verified
+  byte-identical inside the Windows player and the APK).
 - Physical device testing (A7 Lite etc.) still required.
-- Lead agent scenario passed all 9 checks on the current build
-  (`Logs\evidence-lead\result.json` and, post-blank-shell-fix,
-  `Logs\evidence-visible-lead\result.json`); the game-window capture
-  `Logs\game-window.png` was reviewed and accepted as the actual UI.
+- External agent scenario passed 11/11 checks on the final packaged-font
+  build (`Logs\qualification-fonts\agent-evidence\result.json`), including
+  the packaged-font/locale and camera-toggle steps; earlier lead runs
+  passed 9/9 (`Logs\evidence-lead\result.json`, `Logs\evidence-visible-lead\result.json`).
+  English and Hebrew window captures were lead-accepted
+  (`Logs\qualification-fonts\player-evidence-2\screenshot-*.png`); the
+  stream-robustness gate at that stage was EditMode 249/249 and
+  PlayMode 25/25.
+- Stalled-sink robustness is now bounded and evidenced: every synchronous
+  validation socket write carries a 2000 ms send timeout
+  (`ControllerSession.SendTimeoutMs`), a failed write closes the exact
+  failed session so queued records skip it, and writer failure flips the
+  sticky capture/`capture-status.json` contract without needing finish,
+  overflow, or teardown — real loopback PlayMode regressions
+  (`ValidationStreamRobustnessPlayTests`, RED observed before the fix);
+  report `docs\tasks\foundation-stream-robustness-report.md`.
+- External expected-fault qualification now passed on the same reviewed
+  build: `Tools\StreamRobustnessScenario.py` drove three fresh validation
+  players through graceful disconnect, TCP reset and stalled sink —
+  durable invalid/incomplete status while each process lived, a fresh
+  same-run snapshot with neutral input, original outcome lookup,
+  duplicate redelivery with unchanged save-file hashes, finish staying
+  invalid and a byte-frozen trace prefix — 18/18 checks
+  (`Logs\qualification-external-stream-robustness\external-run-2\result.json`;
+  report `docs\tasks\foundation-external-stream-report.md`).
   Still unverified per `notVerified`: full physical keyboard/touch
-  coverage, reconnect/failure scenarios beyond PlayMode coverage,
-  graceful-exit autosave and the normal user profile path (the restart
-  evidence covers explicitly saved synthetic profiles only), Hebrew font
-  quality (blank glyphs — no bundled font), Android on-device behavior, any
+  coverage, finish delivery to the original non-reading controller
+  (PlayMode only — the external scenario observes the independent
+  failure without finish, and the reconnected reader's finish stays
+  invalid), graceful-exit autosave and the normal user profile path
+  (restart and fault evidence cover explicit synthetic saves only),
+  human Hebrew reading/quality review, Android on-device behavior, any
   racing features.
+- Settings-screen UI/command parity is now covered by real-widget PlayMode
+  tests: `FoundationSettingsPlayTests` drives actual `Slider.value` callbacks
+  and pooled pointer down/up on the rendered buttons against a synthetic
+  `ProfileStore`, and proved a stale-captured-draft bug that dropped pending
+  edits (fixed in `FoundationShell.Screens.cs`: `UpdateSettings` merges the
+  live `Snapshot().draftProfile`). RED 4-fail/GREEN 5-pass evidence and the
+  full gate (EditMode 249/249, PlayMode 30/30, Windows Mono build) are under
+  `Logs\qualification-settings-parity\`; report
+  `docs\tasks\foundation-settings-parity-report.md`. These are synthetic UI
+  Toolkit callbacks — not OS touch and not a process-restart check.

@@ -16,6 +16,10 @@ namespace FamilyRacing.Automation
     internal sealed class ControllerSession : IDisposable
     {
         private const int AuthTimeoutMs = 5000;
+        // Every synchronous socket write — hello/error replies and stream
+        // records — is bounded so a peer that stops reading cannot stall the
+        // writer forever.
+        internal const int SendTimeoutMs = 2000;
         private const string Oversize = "\0";
         private const string BadUtf8 = "\x01";
         private static readonly UTF8Encoding StrictUtf8 = new UTF8Encoding(false, true);
@@ -42,6 +46,7 @@ namespace FamilyRacing.Automation
             this.serverHello = serverHello;
             this.enqueue = enqueue;
             Stream = client.GetStream();
+            client.SendTimeout = SendTimeoutMs;
             reader = new Thread(ReaderLoop) { IsBackground = true, Name = "ValidationReader" };
             reader.Start();
         }
@@ -121,7 +126,13 @@ namespace FamilyRacing.Automation
                     Stream.Flush();
                 }
             }
-            catch (Exception) { alive = false; }
+            catch (Exception)
+            {
+                // A failed reply write means this session's sink is gone:
+                // close it so nothing else pays another send timeout on it.
+                alive = false;
+                Dispose();
+            }
         }
 
         // Reads one \n-terminated frame bounded to MaxFrameChars. Returns null
@@ -177,6 +188,7 @@ namespace FamilyRacing.Automation
                 var bytes = Encoding.UTF8.GetBytes(
                     "{\"type\":\"error\",\"protocolVersion\":1,\"runId\":\"" + runId +
                     "\",\"code\":\"" + code + "\"}\n");
+                client.SendTimeout = SendTimeoutMs;
                 client.GetStream().Write(bytes, 0, bytes.Length);
                 client.GetStream().Flush();
                 // Drain unread client bytes and shut down gracefully: closing

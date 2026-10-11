@@ -6,6 +6,7 @@ using FamilyRacing.Core.Automation;
 using FamilyRacing.Core.Foundation;
 using FamilyRacing.Core.Profiles;
 using UnityEngine;
+using UnityEngine.UIElements;
 
 namespace FamilyRacing
 {
@@ -21,6 +22,7 @@ namespace FamilyRacing
         private ValidationBridge bridge;
         private FoundationInput driverInput;
         private FoundationShell shell;
+        private UIDocument document;
         private PresentationState presentation = new PresentationState();
         private string runId;
         private string lastInputSource = "";
@@ -50,10 +52,14 @@ namespace FamilyRacing
             service = new FoundationService(store, "en", runId);
             driverInput = GetComponent<FoundationInput>();
             shell = GetComponent<FoundationShell>();
+            document = GetComponent<UIDocument>();
             presentation.buildTarget = Application.platform.ToString();
             if (validationDir != null)
             {
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
+                // A validation agent must not depend on window focus: a paused
+                // player would freeze Pump and the controller could never attach.
+                Application.runInBackground = true;
                 bridge = new ValidationBridge(service, runId, validationDir,
                     ExecuteAndEmit, MarkInputSource);
                 presentation.validationActive = true;
@@ -117,18 +123,17 @@ namespace FamilyRacing
 
         private void RefreshPresentation(FoundationState state)
         {
-            var languageChanged = state.language != lastLanguage;
-            if (languageChanged)
+            if (state.language != lastLanguage)
             {
                 presentation.textDirection = state.language == "he" ? "rtl" : "ltr";
-                // No Hebrew font asset ships in this iteration: an explicit
-                // qualification warning replaces silently wrong glyphs.
-                presentation.hebrewFontAvailable = false;
-                presentation.fontWarning = state.language == "he"
-                    ? "Hebrew font asset missing; text shows fallback glyphs (qualification gap)."
-                    : "";
                 lastLanguage = state.language;
             }
+            // Font/ATG readiness is recomputed at every refresh boundary,
+            // not just on locale changes: a broken binding must surface as a
+            // warning even in English because the Hebrew control is visible.
+            presentation.hebrewFontAvailable = FoundationFonts.IsReady(document);
+            presentation.fontWarning = presentation.hebrewFontAvailable
+                ? "" : FoundationFonts.Warning;
             var source = AgentControlsInput
                 ? "agent"
                 : driverInput != null && driverInput.PhysicalActive ? "physical" : "none";
@@ -166,7 +171,9 @@ namespace FamilyRacing
 
         // A development/editor validation launch may point profiles at a
         // separately owned synthetic store shared across fresh capture
-        // directories; malformed overrides fail loudly instead of silently
+        // directories, or at the real user store via the valueless
+        // --validation-normal-profiles flag (mutually exclusive with the
+        // override); malformed combinations fail loudly instead of silently
         // exercising the wrong store.
         private static string SelectProfilesDirectory(string validationDirectory,
             string persistentDataPath, string[] arguments)
@@ -175,8 +182,17 @@ namespace FamilyRacing
             if (validationDirectory != null)
             {
                 string overrideDirectory = null;
+                var normalProfiles = false;
                 for (var i = 0; i < arguments.Length; i++)
                 {
+                    if (arguments[i] == "--validation-normal-profiles")
+                    {
+                        if (normalProfiles)
+                            throw new ArgumentException(
+                                "--validation-normal-profiles may be specified at most once.");
+                        normalProfiles = true;
+                        continue;
+                    }
                     if (arguments[i] != "--validation-profile-dir") continue;
                     if (overrideDirectory != null)
                         throw new ArgumentException(
@@ -191,6 +207,11 @@ namespace FamilyRacing
                             "--validation-profile-dir requires a directory value.");
                     overrideDirectory = value;
                 }
+                if (normalProfiles && overrideDirectory != null)
+                    throw new ArgumentException(
+                        "--validation-normal-profiles and --validation-profile-dir are mutually exclusive.");
+                if (normalProfiles)
+                    return Path.Combine(persistentDataPath, "Profiles");
                 return overrideDirectory != null
                     ? Path.GetFullPath(overrideDirectory)
                     : Path.Combine(validationDirectory, "profiles");

@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: FoundationTextSettings
   m_EditorClassIdentifier: UnityEngine.dll::UnityEngine.UIElements.PanelTextSettings
   m_Version: 
-  m_DefaultFontAsset: {fileID: 0}
+  m_DefaultFontAsset: {fileID: 11400000, guid: f7f1ed966b6560e4dbf773e3b0899658, type: 2}
   m_DefaultFontAssetPath: Fonts & Materials/
   m_FallbackFontAssets: []
   m_FallbackOSFontAssets: []

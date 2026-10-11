@@ -26,13 +26,23 @@ Tools\Verify.ps1 -Mode Windows
 ```
 
 `Verify.ps1` modes write `Logs\verify-unity-<mode>.log` and propagate the
-editor exit code. `dotnet test` (`-Mode Core`) still needs a one-time
-`dotnet restore`, which requires explicit network approval.
+editor exit code. `dotnet test` (`-Mode Core`) works after the approved
+one-time `dotnet restore` (nuget.org added as a user-level package source;
+225/225 green on 2026-10-11). `-Mode CoreOffline` still runs the same checks
+without NuGet.
 
-There is intentionally no `-Mode Android`: the current Gradle path does not
-force `--offline`, so an Android build requires explicit network approval.
-The APK at `Builds\Android\FamilyRacing.apk` (~46 MB) was produced by such a
-non-forced build and is **unqualified** for offline certification.
+```powershell
+# Repeatable offline Android build -> Builds\Android\FamilyRacing.apk:
+Tools\Verify.ps1 -Mode Android
+```
+
+The Android mode exports with the pinned editor and builds the exported
+Gradle project with the bundled JDK/Gradle under `--offline`; the produced
+APK is a build artifact only — no device/ADB qualification is claimed.
+
+The Windows IL2CPP module is now installed for 6000.3.26f1
+(`CheckEnvironment` reports it OK); `FoundationBuild.Windows` still emits the
+Mono development player.
 
 ## Validation run
 
@@ -50,11 +60,32 @@ $player.WaitForExit()
 
 The directory receives `connection.json` (`runId`, `token`, `port`,
 `protocolVersion`, `participantId`), `state.ndjson` (sequenced NDJSON
-records), `capture-status.json`, and an isolated `profiles/` store. The
-lead-owned scenario drives it via:
+records), `capture-status.json`, and an isolated `profiles/` store. Two
+development-only flags change the profile store selection (ignored entirely
+without `--validation-dir` and in ordinary builds):
+
+- `--validation-profile-dir <path>` — point at a specific synthetic store
+  (shareable across fresh capture dirs for restart scenarios; mutually
+  exclusive with `--validation-normal-profiles`).
+- `--validation-normal-profiles` — use the REAL
+  `persistentDataPath\Profiles` store; valueless; exercised by
+  `Tools\NormalProfileScenario.py`.
+
+Validation launches set `Application.runInBackground = true` so agents do
+not depend on window focus; ordinary launches keep focus-pause.
+
+The lead-owned scenario drives it via:
 
 ```powershell
 python Tools\AgentScenario.py <dir>\connection.json --evidence <new-evidence-dir>
+# Restart persistence across two player processes:
+python Tools\RestartScenario.py <player.exe> --evidence <new-dir>
+# Expected-fault stream robustness (disconnect/reset/stalled sink):
+python Tools\StreamRobustnessScenario.py <player.exe> --evidence <new-dir>
+# Finish delivery to a stalled non-reading controller (expected-fault):
+python Tools\FinishDeliveryScenario.py <player.exe> --evidence <new-dir>
+# Real profile store + graceful exit (WM_CLOSE) + restart:
+python Tools\NormalProfileScenario.py <player.exe> --evidence <new-dir>
 ```
 
 Proven recipe (wave-3 build, 2026-10-11): preview at

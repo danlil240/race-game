@@ -30,6 +30,7 @@ namespace FamilyRacing.EditorTools
             GraphicsSettings.defaultRenderPipeline = urp;
             QualitySettings.renderPipeline = urp;
             var panel = EnsurePanelSettings();
+            FoundationFontSetup.EnsureAssets(panel);
             EnsureScene(panel);
             EnsureSceneInBuild();
             ApplyPlayerSettings();
@@ -73,19 +74,35 @@ namespace FamilyRacing.EditorTools
         private static PanelSettings EnsurePanelSettings()
         {
             var panel = AssetDatabase.LoadAssetAtPath<PanelSettings>(PanelSettingsPath);
-            if (panel != null) return panel;
+            if (panel != null)
+            {
+                // Existing panel is preserved: sizing/reference settings are
+                // authored state. A missing text-settings binding is the only
+                // field repaired in place.
+                if (panel.textSettings == null)
+                {
+                    panel.textSettings = EnsureTextSettings();
+                    EditorUtility.SetDirty(panel);
+                }
+                return panel;
+            }
+            panel = ScriptableObject.CreateInstance<PanelSettings>();
+            panel.textSettings = EnsureTextSettings();
+            panel.scaleMode = PanelScaleMode.ScaleWithScreenSize;
+            panel.referenceResolution = new Vector2Int(1280, 800);
+            AssetDatabase.CreateAsset(panel, PanelSettingsPath);
+            return panel;
+        }
+
+        private static PanelTextSettings EnsureTextSettings()
+        {
             var text = AssetDatabase.LoadAssetAtPath<PanelTextSettings>(TextSettingsPath);
             if (text == null)
             {
                 text = ScriptableObject.CreateInstance<PanelTextSettings>();
                 AssetDatabase.CreateAsset(text, TextSettingsPath);
             }
-            panel = ScriptableObject.CreateInstance<PanelSettings>();
-            panel.textSettings = text;
-            panel.scaleMode = PanelScaleMode.ScaleWithScreenSize;
-            panel.referenceResolution = new Vector2Int(1280, 800);
-            AssetDatabase.CreateAsset(panel, PanelSettingsPath);
-            return panel;
+            return text;
         }
 
         private static void EnsureScene(PanelSettings panel)

@@ -3,7 +3,9 @@
   "rootNamespace": "FamilyRacing.Tests",
   "references": [
     "FamilyRacing.Core",
-    "FamilyRacing.Runtime"
+    "FamilyRacing.Runtime",
+    "Unity.InputSystem",
+    "Unity.InputSystem.TestFramework"
   ],
   "overrideReferences": true,
   "precompiledReferences": ["Newtonsoft.Json.dll"],

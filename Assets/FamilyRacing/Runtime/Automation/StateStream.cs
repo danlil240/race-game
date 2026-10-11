@@ -13,11 +13,12 @@ namespace FamilyRacing.Automation
 {
     // Sequenced NDJSON record stream: every emitted record goes to the run's
     // state.ndjson trace and (while the controller session captured at emit
-    // time is still attached) to that session's socket. Emit*/Invalidate/
-    // RequestFinish are game-thread calls; a single writer thread performs
-    // file and socket IO. The trace opens once with CreateNew, is bounded by
-    // exact UTF-8 byte counts, and never reopens after failure — a captured
-    // prefix can never be truncated.
+    // time is still attached) to that session's socket. Emit*/RequestFinish
+    // are game-thread calls; Invalidate runs on the game thread and on the
+    // writer thread when a socket write fails — a single writer thread
+    // performs file and socket IO. The trace opens once with CreateNew, is
+    // bounded by exact UTF-8 byte counts, and never reopens after failure —
+    // a captured prefix can never be truncated.
     internal sealed class StateStream : IDisposable
     {
         internal const int DefaultMaxOutgoing = 256;
@@ -281,12 +282,12 @@ namespace FamilyRacing.Automation
                         if (item.traceWrite && !traceClosed)
                             WriteTraceLine(item);
                         if (!SendToTarget(item))
-                            failure = failure ?? "streamError";
+                            Invalidate("streamError");
                     }
                 }
                 catch (Exception)
                 {
-                    failure = failure ?? "streamError";
+                    Invalidate("streamError");
                     if (item.finishCapture) finishCompleted = true;
                 }
             }
@@ -365,7 +366,16 @@ namespace FamilyRacing.Automation
                 }
                 return true;
             }
-            catch (Exception) { return false; }
+            catch (Exception)
+            {
+                // Invalidate before closing so a racing disconnect check can
+                // never relabel a sink write failure; then close the exact
+                // failed session so queued records skip it instead of each
+                // paying the send timeout.
+                Invalidate("streamError");
+                session.Dispose();
+                return false;
+            }
         }
 
         // Sends to the session captured when the item was emitted. Records
@@ -387,7 +397,12 @@ namespace FamilyRacing.Automation
                 }
                 return true;
             }
-            catch (Exception) { return false; }
+            catch (Exception)
+            {
+                Invalidate("streamError");
+                session.Dispose();
+                return false;
+            }
         }
 
         private void WriteTraceLine(WorkItem item)

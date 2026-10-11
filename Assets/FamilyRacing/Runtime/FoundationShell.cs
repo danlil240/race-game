@@ -47,8 +47,22 @@ namespace FamilyRacing
             app = owner;
             document = GetComponent<UIDocument>();
             root = document.rootVisualElement;
-            root.style.flexGrow = 1f;
+            ApplyTextConfiguration(root);
             rebuildKey = "";
+        }
+
+        // Applied only on bind/rebind so a deliberate mutation of the root's
+        // text generator or font is surfaced by readiness, not corrected
+        // silently on the next refresh.
+        private void ApplyTextConfiguration(VisualElement element)
+        {
+            element.style.flexGrow = 1f;
+            var settings = document != null && document.panelSettings != null
+                ? document.panelSettings.textSettings : null;
+            if (settings == null || settings.defaultFontAsset == null) return;
+            element.style.unityTextGenerator = TextGeneratorType.Advanced;
+            element.style.unityFontDefinition =
+                FontDefinition.FromSDFFont(settings.defaultFontAsset);
         }
 
         public void Refresh(FoundationState state)
@@ -60,7 +74,7 @@ namespace FamilyRacing
                 var live = document != null ? document.rootVisualElement : null;
                 if (live == null) return;
                 root = live;
-                root.style.flexGrow = 1f;
+                ApplyTextConfiguration(root);
                 rebuildKey = "";
             }
             if (state == null) return;
@@ -127,6 +141,11 @@ namespace FamilyRacing
         // Held touch controls capture the pressing pointer explicitly and
         // track pointer IDs: a hold ends on pointer up, cancel, capture loss
         // or element detach (e.g. a locale rebuild), never only on up.
+        // The pointer callbacks register in the TrickleDown phase: Button's
+        // built-in Clickable consumes PointerDown/Up/Cancel in the bubble
+        // phase (StopImmediatePropagation on down), and trickle-down
+        // handlers run before bubble handlers even on the same element —
+        // without it a primary/touch down never reaches the hold logic.
         private void AddHoldButton(VisualElement parent, string text, Color bg,
             Action<bool> onHold, string name = null)
         {
@@ -152,15 +171,19 @@ namespace FamilyRacing
                 heldPointers.Add(evt.pointerId);
                 button.CapturePointer(evt.pointerId);
                 onHold(true);
-            });
+            }, TrickleDown.TrickleDown);
             button.RegisterCallback<PointerUpEvent>(evt =>
             {
                 if (heldPointers.Contains(evt.pointerId))
                     button.ReleasePointer(evt.pointerId);
                 release(evt.pointerId);
-            });
-            button.RegisterCallback<PointerCancelEvent>(evt => release(evt.pointerId));
-            button.RegisterCallback<PointerCaptureOutEvent>(evt => release(evt.pointerId));
+            }, TrickleDown.TrickleDown);
+            button.RegisterCallback<PointerCancelEvent>(evt => release(evt.pointerId),
+                TrickleDown.TrickleDown);
+            button.RegisterCallback<PointerCaptureOutEvent>(evt => release(evt.pointerId),
+                TrickleDown.TrickleDown);
+            // DetachFromPanelEvent has no trickle-down phase; the default
+            // (bubble) registration still fires at the target.
             button.RegisterCallback<DetachFromPanelEvent>(_ =>
             {
                 if (heldPointers.Count > 0)

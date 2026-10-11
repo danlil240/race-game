@@ -8,6 +8,7 @@ using FamilyRacing.Core.Profiles;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using UnityEngine.TextCore.Text;
 using UnityEngine.TestTools;
 using UnityEngine.UIElements;
 
@@ -88,6 +89,93 @@ namespace FamilyRacing.Tests
                 panel.textSettings = original;
                 document.rootVisualElement.style.unityTextGenerator = TextGeneratorType.Advanced;
             }
+        }
+
+        [UnityTest]
+        public IEnumerator ReadinessDropsWhenHebrewFallbackRemovedAndRecoversOnRestore()
+        {
+            var latin = document.panelSettings.textSettings.defaultFontAsset;
+            var original = new List<FontAsset>(latin.fallbackFontAssetTable);
+            var hebrew = original.Find(f => f != null && f.name.Contains("Hebrew"));
+            var sourceless = ScriptableObject.CreateInstance<FontAsset>();
+            try
+            {
+                Assert.That(hebrew, Is.Not.Null, "Packaged Hebrew fallback must exist first.");
+                latin.fallbackFontAssetTable = original.FindAll(f => f != hebrew);
+                yield return null;
+                Assert.That(app.Service.Snapshot().presentation.hebrewFontAvailable, Is.False,
+                    "Removing the Hebrew fallback must drop readiness without a locale change.");
+                latin.fallbackFontAssetTable = new List<FontAsset>(original);
+                yield return null;
+                Assert.That(app.Service.Snapshot().presentation.hebrewFontAvailable, Is.True);
+                latin.fallbackFontAssetTable = new List<FontAsset>(original) { sourceless };
+                yield return null;
+                Assert.That(app.Service.Snapshot().presentation.hebrewFontAvailable, Is.False,
+                    "A reachable source-less font must not report readiness.");
+            }
+            finally
+            {
+                latin.fallbackFontAssetTable = original;
+                UnityEngine.Object.DestroyImmediate(sourceless);
+                UnityEditor.EditorUtility.SetDirty(latin);
+                UnityEditor.AssetDatabase.SaveAssets();
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator ReadinessReflectsRootAttachmentAndInlineStyleChanges()
+        {
+            yield return null;
+            var font = document.panelSettings.textSettings.defaultFontAsset;
+            try
+            {
+                var root = document.rootVisualElement;
+                Assert.That(FontsReady(document), Is.True,
+                    "Attached configured root must be ready.");
+
+                root.RemoveFromHierarchy();
+                Assert.That(FontsReady(document), Is.False,
+                    "A detached root must fail readiness before the shell rebinds.");
+
+                document.enabled = false;
+                document.enabled = true;
+                yield return null;
+                root = document.rootVisualElement;
+                Assert.That(root.panel, Is.Not.Null);
+                Assert.That(FontsReady(document), Is.True,
+                    "A re-created attached root must recover readiness.");
+
+                root.style.unityTextGenerator = TextGeneratorType.Standard;
+                Assert.That(FontsReady(document), Is.False,
+                    "Explicit inline Standard must fail immediately.");
+                root.style.unityTextGenerator = TextGeneratorType.Advanced;
+                Assert.That(FontsReady(document), Is.True,
+                    "Inline Advanced must restore readiness without a frame.");
+
+                root.style.unityFontDefinition = new FontDefinition();
+                Assert.That(FontsReady(document), Is.False,
+                    "A null bound font must fail readiness.");
+                root.style.unityFontDefinition = FontDefinition.FromSDFFont(font);
+                Assert.That(FontsReady(document), Is.True);
+            }
+            finally
+            {
+                var live = document.rootVisualElement;
+                if (live != null)
+                {
+                    live.style.unityTextGenerator = TextGeneratorType.Advanced;
+                    if (font != null)
+                        live.style.unityFontDefinition = FontDefinition.FromSDFFont(font);
+                }
+            }
+        }
+
+        private static bool FontsReady(UIDocument doc)
+        {
+            var method = typeof(FoundationApp).Assembly
+                .GetType("FamilyRacing.FoundationFonts")
+                .GetMethod("IsReady", BindingFlags.Static | BindingFlags.NonPublic);
+            return (bool)method.Invoke(null, new object[] { doc });
         }
 
         [TearDown]

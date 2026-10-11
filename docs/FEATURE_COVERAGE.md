@@ -14,12 +14,12 @@ are explicitly `notImplemented`; additional QA gaps are listed below.
 | `profile.create` | creates and selects a slot | `activeSlot`, `slots[].profile/status`, `savedProfile`, `draftProfile`, `screen`, `persistenceStatus` | scenario check 3; Core `CreateAndSelectEachSlotSurvivesFreshService` |
 | `profile.select` | changes selection, clears input and pending edits | `activeSlot`, `savedProfile`, `draftProfile`, `language`, `input`, `pendingSettings` | scenario check 6 |
 | `ui.navigate` | changes screen, clears sandbox input on transition | `screen`, `input` | scenario enters sandbox before check 7; Core `LeavingSandboxClearsInput` |
-| `ui.language` | changes unselected-profile UI/default language | `language`, `presentation.textDirection/fontWarning` | Core `UiLanguageChangesDefaultOnProfilesScreen`; PlayMode `LocaleBoundaryCarriesRtlPresentation`; not called by the external scenario |
+| `ui.language` | changes unselected-profile UI/default language | `language`, `presentation.textDirection/fontWarning` | Core `UiLanguageChangesDefaultOnProfilesScreen`; PlayMode `LocaleBoundaryCarriesRtlPresentation`; external scenario `agent-evidence/result.json` check "packaged bilingual fonts and locale command boundaries" (he + en) |
 | `settings.update` | changes draft only | `draftProfile`, `language`, `pendingSettings`, `presentation` | scenario check 4 (draft/save separation), check 5 (invalid update) |
 | `settings.save` | persists and commits draft | `savedProfile`, `draftProfile`, `slots[].profile`, `pendingSettings`, `persistenceStatus` | scenario check 4 (save and duplicate delivery); Core save-failure tests |
 | `input.set` | changes held input and pulses | `input.*`, `draftProfile.camera`, `pendingSettings`, `paused` | scenario check 7 (controls and camera pulse), check 8 (paused expiry); PlayMode `OpposingTouchInputsComposeNeutral` |
 | `input.clear` | clears held/transient input | `input.*` | scenario check 8 explicitly clears input; separate PlayMode dead-session/disable tests cover cleanup |
-| `camera.toggle` | toggles draft camera | `draftProfile.camera`, `pendingSettings` | Core `CameraToggleRequiresWritableSelectedProfile`; external scenario tests only a conflicting-identity rejection of this action, not its successful execution |
+| `camera.toggle` | toggles draft camera | `draftProfile.camera`, `pendingSettings` | Core `CameraToggleRequiresWritableSelectedProfile`; external scenario `agent-evidence/result.json` check "camera toggle command updates selected profile draft" plus the conflicting-identity rejection |
 | `pause.toggle` | toggles sandbox pause, clears input | `paused`, `input` | scenario check 8 |
 
 ## Streamed state (every record carries)
@@ -34,33 +34,110 @@ is a profile field (`savedProfile.camera` / `draftProfile.camera`), not a
 top-level state field. Hello and parser-error replies are unsequenced;
 they must not be mistaken for sequenced state records.
 
-## Verified (frozen lead scenarios — `evidence-lead/result.json` and `evidence-visible-lead/result.json`, 9 checks each on successive builds)
+## Verified (external `Tools/AgentScenario.py` runs on real players)
 
-Isolated fresh profiles; command discovery; real profile
-creation/persistence; draft/save separation, duplicate protection, outcome
-lookup; conflicting identity and invalid settings rejected; profile
-switching preserves identity/settings; held controls, transient pulses,
-camera, bounded expiry; paused observation + input cleanup; unimplemented
-features rejected; capture finished cleanly (`captureValid=true`,
-`captureComplete=true`).
+Latest run on the final packaged-font build: 11/11 checks
+(`Logs\qualification-fonts\agent-evidence\result.json`) — isolated fresh
+profiles; command discovery; packaged bilingual fonts and locale command
+boundaries; real profile creation/persistence; draft/save separation,
+duplicate protection, outcome lookup; conflicting identity and invalid
+settings rejected; profile switching preserves identity/settings; held
+controls, transient pulses, camera, bounded expiry; camera toggle updates
+the selected profile draft; paused observation + input cleanup;
+unimplemented features rejected; capture finished cleanly.
+
+Earlier frozen lead scenarios: `evidence-lead/result.json` and
+`evidence-visible-lead/result.json`, 9 checks each on successive builds
+(same coverage minus the packaged-font and camera-toggle steps).
+
+## Verified (external `Tools/StreamRobustnessScenario.py` expected-fault run)
+
+Accepted run: 18/18 checks on the unchanged reviewed Windows build
+(`Logs\qualification-external-stream-robustness\external-run-2\result.json`)
+— graceful disconnect (`controllerDisconnected` 0.032 s; reconnect
+snapshot sequence 105, tick 96, original create tick 81), TCP reset
+(`controllerDisconnected` 0.016 s; a reset may surface as
+`controllerDisconnected` or `streamError`), stalled sink (`streamError`
+2.094 s with `SO_RCVBUF` 1024 and 32 legal lookup frames carrying
+16000-byte ASCII commandIds, each below the 16 KiB frame limit; snapshot
+sequence 199, tick 158). Per phase: durable invalid/incomplete status
+while the process lived — before reconnect, finish or teardown; a fresh
+same-run snapshot (same run/device/build identity, advancing sequence
+and ticks, neutral input); original outcome lookup at the original
+execution tick; identical command redelivery returned `duplicate=true`
+with unchanged synthetic save-file hashes; finish stayed invalid and the
+trace prefix stayed byte-frozen (each trace begins at sequence 1 and
+ends before the fault-observation records). Passing means the injected
+faults were correctly detected — no capture is certified by this run.
+
+## Verified (synthetic UI Toolkit PlayMode callbacks)
+
+`FoundationSettingsPlayTests` (5 tests, RED 4-fail before the fix, GREEN 5/5)
+drives the rendered settings screen end-to-end — real `Slider.value` change
+callbacks and pooled pointer down/up events on `Button`s — against a real
+`FoundationService` and a synthetic `ProfileStore`: sequential volume edits
+keep all pending values, the reduced-shake button toggles both directions,
+command-driven `settings.update` drafts survive later UI edits, an explicit
+save persists all six fields through a store reload on the same synthetic
+directory, and a refused save restores the saved draft with byte-identical
+files (`Logs\qualification-settings-parity\`; report
+`docs/tasks/foundation-settings-parity-report.md`). These are synthetic UI
+Toolkit callbacks — not OS/physical touch and not a process restart.
+
+## Verified (synthetic input/UI parity PlayMode callbacks)
+
+`FoundationInputPlayTests` (10 tests) drives a virtual `Keyboard` through
+`InputTestFixture` into `FoundationInput.Pump`: arrows/A-D steering with
+release-to-neutral, opposing arrows neutral, Space drift + Shift boost
+holds, E/R one-frame pulses, C→`camera.toggle`, Esc→`pause.toggle`,
+agent-ownership and off-sandbox suppression, `OnDisable`→`input.clear`,
+`ResetPhysical`. `FoundationScreensPlayTests` (8 tests) drives pooled
+pointer events on the remaining screens: profile-card create/select,
+profiles language toggle + RTL, navigation/back buttons, sandbox hold
+buttons (down→held, up→release, cancel→release through `input.set` parity)
+and the gadget pulse. These are synthetic callbacks, not OS input — they
+also exposed and locked a real defect: `Button.Clickable` consumed primary
+pointer-downs before the hold handlers, so `AddHoldButton` registrations now
+run in the trickle-down phase (`Logs\qualification-gaps\`; report
+`docs/tasks/foundation-gaps-report.md`).
+
+## Verified (external fault + real-store scenarios on real players)
+
+`Tools\FinishDeliveryScenario.py` 6/6 on the post-gap build
+(`Logs\qualification-gaps\finish-delivery\result.json`): a stalled
+non-reading controller sends `finish`; the writer's bounded send produces
+terminal `streamError` status, fresh controllers are rejected
+`captureClosed` (game thread never blocked), and the trace prefix stays
+frozen. `Tools\NormalProfileScenario.py` 6/6
+(`Logs\qualification-gaps\normal-profile\result.json`): two real processes
+with `--validation-normal-profiles` — create+save lands in the REAL
+`persistentDataPath\Profiles` store, `taskkill` (WM_CLOSE, no `/F`) stamps
+terminal `captureError:"processExit"`, the saved profile survives into the
+relaunch's saved AND draft state, unsaved drafts are never persisted, and a
+clean finish completes the second capture.
 
 ## Known QA gaps (`notVerified` — do not read as passed)
 
-- Full physical keyboard/touch coverage and on-device UI (the accepted
-  `PrintWindow` capture `Logs\game-window.png` shows the rendered shell —
-  title + four profile cards — but is a static image, not input coverage;
-  a real pointer down/up profile click is covered by PlayMode
-  `FoundationSceneRendersLiveShell`).
-- Reconnect and failure-injection beyond PlayMode coverage. Restart of
-  explicitly saved synthetic profiles is now evidenced
-  (`Logs\qualification-continuation\restart-final\result.json`, 6/6 checks)
-  — it does not cover graceful-exit autosave, the normal user profile path,
-  or reconnect.
-- Visual/Hebrew/audio quality — Hebrew font assets absent by design this
-  iteration (`fontWarning` surfaces it).
+- Physical input/UI parity is covered by synthetic PlayMode callbacks only
+  (keyboard device simulation + pointer events); OS-level key/touch and
+  on-device UI remain unverified.
+- Reconnect and sink failure: external-player expected-fault coverage
+  now exists — see the section above (18/18 on the reviewed build,
+  re-run on the post-gap build `Logs\qualification-gaps\stream-robustness\`)
+  plus the new stalled-finish and graceful-exit evidence above.
+  Loopback PlayMode covers the sink side
+  (`ValidationStreamRobustnessPlayTests`; report
+  `docs/tasks/foundation-stream-robustness-report.md`).
+- Visual/Hebrew/audio quality — packaged Noto Latin/Hebrew/Symbols2 fonts
+  are now bundled (OFL, provenance in `Assets\FamilyRacing\Fonts\README.md`),
+  ATG enabled, and live readiness recomputes each refresh; lead-accepted
+  en/he window captures exist (`Logs\qualification-fonts\player-evidence-2\screenshot-*.png`).
+  Human Hebrew review is still not claimed.
 - Android device behavior (APK is now built by the enforced-offline path —
-  `Logs\android-offline\20261011-123733-d853a75210284129ba058d708bd3606e\result.json` —
+  latest run `Logs\android-offline\20261011-134021-98837ad9964547dba7f88ab9fbe916cb\result.json` —
   but no ADB/on-device run has been attempted).
-- Windows IL2CPP release configuration (preview is Mono development).
+- Windows IL2CPP module is now installed for the pinned editor
+  (`CheckEnvironment` OK) but no IL2CPP build has been produced or qualified
+  — preview remains Mono development.
 - All racing gameplay: simulation, campaign, rewards/upgrades/cosmetics,
   LAN multiplayer, content — `notImplemented`, later milestones.

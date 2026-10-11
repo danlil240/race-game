@@ -76,5 +76,65 @@ namespace FamilyRacing.Tests
             Assert.That(selector.Invoke(null, new object[] { null, "normal", malformed }),
                 Is.EqualTo(Path.Combine("normal", "Profiles")));
         }
+
+        [Test]
+        public void NormalProfilesFlagSelectsTheRealUserStoreInValidationMode()
+        {
+            var selector = Selector();
+            var args = new[] { "player.exe", "--validation-dir", "run",
+                "--validation-normal-profiles" };
+            Assert.That(selector.Invoke(null, new object[] { "run", "normal", args }),
+                Is.EqualTo(Path.Combine("normal", "Profiles")));
+            // Without the flag the synthetic per-run store is still selected.
+            Assert.That(selector.Invoke(null, new object[] { "run", "normal",
+                    new[] { "player.exe", "--validation-dir", "run" } }),
+                Is.EqualTo(Path.Combine("run", "profiles")));
+        }
+
+        [Test]
+        public void NormalProfilesFlagIsMutuallyExclusiveWithProfileDirOverride()
+        {
+            var selector = Selector();
+            var both = new[]
+            {
+                new[] { "player.exe", "--validation-normal-profiles",
+                    "--validation-profile-dir", "synthetic-store" },
+                new[] { "player.exe", "--validation-profile-dir", "synthetic-store",
+                    "--validation-normal-profiles" },
+            };
+            foreach (var args in both)
+            {
+                var error = Assert.Throws<TargetInvocationException>(
+                    () => selector.Invoke(null, new object[] { "run", "normal", args }));
+                Assert.That(error.InnerException, Is.TypeOf<ArgumentException>());
+            }
+        }
+
+        [Test]
+        public void DuplicateNormalProfilesFlagIsRejected()
+        {
+            var selector = Selector();
+            var args = new[] { "player.exe", "--validation-normal-profiles",
+                "--validation-normal-profiles" };
+            var error = Assert.Throws<TargetInvocationException>(
+                () => selector.Invoke(null, new object[] { "run", "normal", args }));
+            Assert.That(error.InnerException, Is.TypeOf<ArgumentException>());
+        }
+
+        [Test]
+        public void OrdinaryLaunchIgnoresNormalProfilesFlagAndConflictingFlags()
+        {
+            var selector = Selector();
+            Assert.That(selector.Invoke(null, new object[] { null, "normal",
+                    new[] { "player.exe", "--validation-normal-profiles" } }),
+                Is.EqualTo(Path.Combine("normal", "Profiles")));
+            // Even a duplicate plus a conflicting override is ignored: without
+            // --validation-dir the arguments are never inspected.
+            var conflicting = new[] { "player.exe", "--validation-normal-profiles",
+                "--validation-normal-profiles",
+                "--validation-profile-dir", "synthetic-store" };
+            Assert.That(selector.Invoke(null, new object[] { null, "normal", conflicting }),
+                Is.EqualTo(Path.Combine("normal", "Profiles")));
+        }
     }
 }

@@ -94,27 +94,26 @@ namespace FamilyRacing
             var langRow = Row(root);
             AddLabel(langRow, T("settings.language", state), 22, Deep);
             langEnButton = AddButton(langRow, "English", Ocean,
-                () => UpdateSettings(state, language: "en"), "settings.language.en");
+                () => UpdateSettings(language: "en"), "settings.language.en");
             langHeButton = AddButton(langRow, "עברית", Ocean,
-                () => UpdateSettings(state, language: "he"), "settings.language.he");
+                () => UpdateSettings(language: "he"), "settings.language.he");
             var camRow = Row(root);
             AddLabel(camRow, T("settings.camera", state), 22, Deep);
             chaseButton = AddButton(camRow, T("settings.camera.chase", state), Ocean,
-                () => UpdateSettings(state, camera: "chase"), "settings.camera.chase");
+                () => UpdateSettings(camera: "chase"), "settings.camera.chase");
             overheadButton = AddButton(camRow, T("settings.camera.overhead", state), Ocean,
-                () => UpdateSettings(state, camera: "overhead"), "settings.camera.overhead");
+                () => UpdateSettings(camera: "overhead"), "settings.camera.overhead");
             var shakeRow = Row(root);
             shakeButton = AddButton(shakeRow, T("settings.reducedShake", state), Ocean,
-                () => UpdateSettings(state, shake: !(draft != null && draft.reducedCameraShake)),
-                "settings.reducedShake");
+                () => UpdateSettings(toggleShake: true), "settings.reducedShake");
             musicSlider = AddSlider(root, T("settings.volume.music", state),
-                draft != null ? draft.musicVolume : 0.8f, v => UpdateSettings(state, music: v),
+                draft != null ? draft.musicVolume : 0.8f, v => UpdateSettings(music: v),
                 "settings.volume.music");
             effectsSlider = AddSlider(root, T("settings.volume.effects", state),
-                draft != null ? draft.effectsVolume : 0.8f, v => UpdateSettings(state, effects: v),
+                draft != null ? draft.effectsVolume : 0.8f, v => UpdateSettings(effects: v),
                 "settings.volume.effects");
             voiceSlider = AddSlider(root, T("settings.volume.voice", state),
-                draft != null ? draft.voiceVolume : 0.8f, v => UpdateSettings(state, voice: v),
+                draft != null ? draft.voiceVolume : 0.8f, v => UpdateSettings(voice: v),
                 "settings.volume.voice");
             foreach (var control in new VisualElement[]
                 { langEnButton, langHeButton, chaseButton, overheadButton,
@@ -151,16 +150,19 @@ namespace FamilyRacing
             return slider;
         }
 
-        private void UpdateSettings(FoundationState state, string language = null,
-            string camera = null, bool? shake = null, float? music = null,
+        private void UpdateSettings(string language = null,
+            string camera = null, bool toggleShake = false, float? music = null,
             float? effects = null, float? voice = null)
         {
-            var draft = state.draftProfile;
+            // The settings tree refreshes in place between edits, so callbacks
+            // must merge against the live draft — the FoundationState captured
+            // at build time would silently drop earlier pending values.
+            var draft = app.Service.Snapshot().draftProfile;
             if (draft == null) return;
             settingsParams["language"] = language ?? draft.language;
             settingsParams["camera"] = camera ?? draft.camera;
-            settingsParams["reducedCameraShake"] =
-                (shake ?? draft.reducedCameraShake) ? "true" : "false";
+            var shake = toggleShake ? !draft.reducedCameraShake : draft.reducedCameraShake;
+            settingsParams["reducedCameraShake"] = shake ? "true" : "false";
             settingsParams["musicVolume"] = Format(music ?? draft.musicVolume);
             settingsParams["effectsVolume"] = Format(effects ?? draft.effectsVolume);
             settingsParams["voiceVolume"] = Format(voice ?? draft.voiceVolume);
