@@ -17,8 +17,12 @@ namespace FamilyRacing
     {
         public const int ProtocolVersion = ValidationBridge.ProtocolVersion;
         public const float TickRate = 30f;
+        // Catch-up work per frame is bounded; unsimulated backlog is kept
+        // (never dropped) and reported through presentation diagnostics.
+        private const int MaxStepsPerFrame = 8;
 
         private FoundationService service;
+        private DrivingWorld drivingWorld;
         private ValidationBridge bridge;
         private FoundationInput driverInput;
         private FoundationShell shell;
@@ -50,6 +54,16 @@ namespace FamilyRacing
             var store = new ProfileStore(profilesDir, new UnityProfileSerializer());
             runId = Guid.NewGuid().ToString("N");
             service = new FoundationService(store, "en", runId);
+            // Load and validate driving content before the bridge opens so
+            // race.start availability and record contentVersion are honest
+            // from sequence 1. A validation failure leaves no catalog and
+            // race.start reports contentUnavailable.
+            drivingWorld = GetComponent<DrivingWorld>();
+            if (drivingWorld != null)
+            {
+                var catalog = drivingWorld.Load();
+                if (catalog != null) service.SetDrivingContent(catalog);
+            }
             driverInput = GetComponent<FoundationInput>();
             shell = GetComponent<FoundationShell>();
             document = GetComponent<UIDocument>();
@@ -80,16 +94,31 @@ namespace FamilyRacing
             driverInput?.Pump(AgentControlsInput, CurrentScreen);
             accumulator += Time.unscaledDeltaTime;
             var step = 1f / TickRate;
-            while (accumulator >= step)
+            var steps = 0;
+            while (accumulator >= step && steps < MaxStepsPerFrame)
             {
                 accumulator -= step;
+                steps++;
+                // Boundary order per the timing contract: the session
+                // samples held input and consumes pending actions first,
+                // then the observation tick expires leases and publishes.
+                service.StepDriving(drivingWorld != null ? drivingWorld.MotorWorld : null);
                 service.AdvanceTick();
                 // Presentation (input source, geometry, direction) is part of
                 // the captured tick boundary — refresh before emitting.
                 RefreshPresentation(service.Snapshot());
                 bridge?.EmitTick();
             }
+            presentation.backlogSteps = (int)(accumulator / step);
+            if (steps == MaxStepsPerFrame && accumulator >= step)
+                presentation.stepOverloads++;
             var state = service.Snapshot();
+            if (drivingWorld != null)
+            {
+                drivingWorld.ApplyFrame(state);
+                service.SetDrivingCameraFacts(drivingWorld.CameraFacts);
+                state = service.Snapshot();
+            }
             RefreshPresentation(state);
             shell?.Refresh(state);
         }
@@ -161,7 +190,7 @@ namespace FamilyRacing
         {
             if (service == null) return;
             Dispatch("input.clear", EmptyParameters.Value);
-            driverInput?.ResetPhysical();
+            driverInput?.RequireRearm();
         }
 
         private void OnApplicationQuit()

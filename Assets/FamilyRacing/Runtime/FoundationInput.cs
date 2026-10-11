@@ -21,6 +21,8 @@ namespace FamilyRacing
         private DriverInput lastSent = new DriverInput(0f, false, false, false, false, false, false);
         private bool sentNeutral = true;
         private double nextRefresh;
+        private bool pausedSeen;
+        private bool rearmRequired;
         private readonly Dictionary<string, string> parameters =
             new Dictionary<string, string>(System.StringComparer.Ordinal);
         private static readonly IReadOnlyDictionary<string, string> Empty =
@@ -45,6 +47,16 @@ namespace FamilyRacing
             pendingGadget = pendingRecover = false;
         }
 
+        // Focus loss / disable cleanup: a key still physically held must be
+        // released before any held action is dispatched again — the 500 ms
+        // hold refresh must not reassert it on its own.
+        public void RequireRearm()
+        {
+            ResetPhysical();
+            MarkStale();
+            rearmRequired = true;
+        }
+
         // Forget the last dispatched value so re-entry into the sandbox (or
         // ownership returning) re-dispatches the current held state instead
         // of leaking or suppressing a hold across the transition.
@@ -67,17 +79,21 @@ namespace FamilyRacing
 
         public void Pump(bool agentOwned, string screen)
         {
+            var service = app != null ? app.Service : null;
+            var paused = service != null && service.Paused;
             if (agentOwned)
             {
                 // The authenticated controller owns driving input; suppress
                 // physical driving without dispatching neutrals that would
                 // overwrite its holds. Marking stale means a still-held key
-                // re-dispatches when ownership returns.
+                // re-dispatches when ownership returns — unless a pause
+                // happened in between, which requires rearm like a resume.
+                pausedSeen = paused;
                 ResetPhysical();
                 MarkStale();
                 return;
             }
-            if (screen != "sandbox")
+            if (screen != "sandbox" && screen != "driving")
             {
                 ResetPhysical();
                 MarkStale();
@@ -96,8 +112,28 @@ namespace FamilyRacing
                 keyBoost = keyboard.shiftKey.isPressed || keyboard.leftShiftKey.isPressed;
                 keyGadget = keyboard.eKey.wasPressedThisFrame;
                 keyRecover = keyboard.rKey.wasPressedThisFrame;
+                // Camera and pause stay immediate application actions,
+                // including while the game is paused.
                 if (keyboard.cKey.wasPressedThisFrame) app.Dispatch("camera.toggle", Empty);
                 if (keyboard.escapeKey.wasPressedThisFrame) app.Dispatch("pause.toggle", Empty);
+            }
+            paused = service != null && service.Paused;
+            if (paused)
+            {
+                // While paused, held driving input is suppressed and its
+                // dispatched state forgotten — resuming requires rearm.
+                pausedSeen = true;
+                ResetPhysical();
+                MarkStale();
+                return;
+            }
+            if (pausedSeen)
+            {
+                // Resume/focus regain — including a pause that just ended on
+                // this Pump's pause.toggle dispatch: physical controls must
+                // release and rearm before submitting another held action.
+                pausedSeen = false;
+                rearmRequired = true;
             }
             var keyInput = new DriverInput(keySteer, keyDrift, keyBoost, keyGadget, keyRecover, false, false);
             // Opposing touches cancel rather than preferring one side.
@@ -107,13 +143,22 @@ namespace FamilyRacing
             pendingGadget = pendingRecover = false;
             var composed = DriverInputComposer.Compose(keyInput, touchInput);
 
+            if (rearmRequired)
+            {
+                var neutral = keySteer == 0f && !keyDrift && !keyBoost && !keyGadget && !keyRecover
+                    && !touchLeft && !touchRight && !touchDrift && !touchBoost
+                    && composed.Steering == 0f;
+                if (!neutral) return; // swallow until every control releases
+                rearmRequired = false;
+            }
+
             var now = Time.unscaledTimeAsDouble * 1000.0;
             var unchanged = composed.Equals(lastSent);
             if (unchanged && (sentNeutral || now < nextRefresh)) return;
             DispatchInput(composed);
             lastSent = composed;
-            var neutral = composed.Steering == 0f && !composed.Drift && !composed.Boost;
-            sentNeutral = neutral;
+            var neutralSent = composed.Steering == 0f && !composed.Drift && !composed.Boost;
+            sentNeutral = neutralSent;
             nextRefresh = now + HoldRefreshSecondsNumerator;
         }
 

@@ -36,6 +36,9 @@ namespace FamilyRacing
         private readonly Dictionary<string, VisualElement> leds =
             new Dictionary<string, VisualElement>();
         private Label pauseOverlay;
+        private Label elapsedLabel;
+        private Label phaseLabel;
+        private Label speedLabel;
         private Button saveButton;
         private readonly Dictionary<string, string> emptyParams = new Dictionary<string, string>(0);
         private readonly Dictionary<string, string> settingsParams = new Dictionary<string, string>();
@@ -97,16 +100,23 @@ namespace FamilyRacing
             root.Clear();
             leds.Clear();
             statusLabel = warningLabel = steeringLabel = pauseOverlay = null;
+            elapsedLabel = phaseLabel = speedLabel = null;
             saveButton = null;
             musicSlider = effectsSlider = voiceSlider = null;
             chaseButton = overheadButton = shakeButton = langEnButton = langHeButton = null;
-            root.style.backgroundColor = Sand;
+            // Driving needs a transparent overlay: the graybox world renders
+            // through and only the controls sit on top (Task 4 ships the real
+            // HUD and switchable cameras in its place).
+            root.style.backgroundColor =
+                state.screen == "driving" ? new Color(0, 0, 0, 0) : Sand;
             root.style.paddingTop = root.style.paddingBottom = 16;
             root.style.paddingLeft = root.style.paddingRight = 16;
             switch (state.screen)
             {
                 case "settings": BuildSettings(state); break;
                 case "sandbox": BuildSandbox(state); break;
+                case "practice": BuildPractice(state); break;
+                case "driving": BuildDriving(state); break;
                 default: BuildProfiles(state); break;
             }
         }
@@ -261,9 +271,10 @@ namespace FamilyRacing
                 SetLed("boost", state.input.boost);
                 SetLed("gadget", state.input.gadget);
                 SetLed("recover", state.input.recover);
-                if (pauseOverlay != null)
-                    pauseOverlay.style.display = state.paused ? DisplayStyle.Flex : DisplayStyle.None;
             }
+            UpdateDrivingIndicators(state);
+            if (pauseOverlay != null)
+                pauseOverlay.style.display = state.paused ? DisplayStyle.Flex : DisplayStyle.None;
             if (state.screen == "settings" && state.draftProfile != null)
             {
                 Highlight(langEnButton, state.draftProfile.language == "en");

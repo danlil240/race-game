@@ -33,6 +33,7 @@ namespace FamilyRacing.EditorTools
             FoundationFontSetup.EnsureAssets(panel);
             EnsureScene(panel);
             EnsureSceneInBuild();
+            DrivingPrototypeSetup.Create();
             ApplyPlayerSettings();
             EnableInputSystem();
             AssetDatabase.SaveAssets();

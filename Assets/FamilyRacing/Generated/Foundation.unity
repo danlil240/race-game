@@ -312,6 +312,7 @@ GameObject:
   - component: {fileID: 1932726463}
   - component: {fileID: 1932726462}
   - component: {fileID: 1932726461}
+  - component: {fileID: 1932726466}
   m_Layer: 0
   m_Name: FoundationApp
   m_TagString: Untagged
@@ -393,6 +394,29 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1932726466
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1932726460}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ad8ec043b8c3d584eb0e4d16a1877935, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: FamilyRacing.Runtime::FamilyRacing.DrivingWorld
+  vehicles:
+  - {fileID: 11400000, guid: 6e56a23a14074514c974ffdda537df0a, type: 2}
+  - {fileID: 11400000, guid: 5b988d49da496e8499c46634c6a9b3f9, type: 2}
+  track: {fileID: 11400000, guid: 15fda47ea6ac2b247bf2ba7b75a8eb4b, type: 2}
+  events:
+  - {fileID: 11400000, guid: 94452f5fbe5414d4380a55c93085da0b, type: 2}
+  - {fileID: 11400000, guid: 20bfbffe4b275da4dabe4ef0e76bbee5, type: 2}
+  coursePrefab: {fileID: 4656068473831479409, guid: 27d614269b044ec4f8407710870a80be, type: 3}
+  contentVersion: driving-0.1
+  cameraOffset: {x: 0, y: 38, z: -22}
+  cameraPitchDegrees: 62
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

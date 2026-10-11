@@ -370,5 +370,47 @@ namespace FamilyRacing.Tests
             Assert.That(state.gadget, Is.False,
                 "A pending touch-gadget flag must not survive ResetPhysical.");
         }
+
+        [Test]
+        public void HeldKeyCannotRearmUntilReleasedAfterPause()
+        {
+            GoToSandbox();
+            Press(keyboard.rightArrowKey);
+            PumpSandbox();
+            Assert.That(Snapshot().input.steering, Is.EqualTo(1f).Within(0.001f));
+
+            // Pause with the arrow still held: held input neutralizes.
+            Press(keyboard.escapeKey);
+            PumpSandbox();
+            var paused = Snapshot();
+            Assert.That(paused.paused, Is.True);
+            Assert.That(paused.input.steering, Is.EqualTo(0f).Within(0.001f));
+            Release(keyboard.escapeKey);
+            NextFrame();
+
+            // Resume while the arrow is STILL held: the hold refresh must
+            // not rearm it — no input.set may reach the service.
+            Press(keyboard.escapeKey);
+            PumpSandbox();
+            Assert.That(Snapshot().paused, Is.False);
+            Release(keyboard.escapeKey);
+            NextFrame();
+            for (var i = 0; i < 3; i++)
+            {
+                PumpSandbox();
+                NextFrame();
+            }
+            Assert.That(Snapshot().input.steering, Is.EqualTo(0f).Within(0.001f),
+                "A key held since before the pause must not rearm on resume.");
+
+            // A real release re-arms it; the next press drives again.
+            Release(keyboard.rightArrowKey);
+            PumpSandbox();
+            Press(keyboard.rightArrowKey);
+            PumpSandbox();
+            Assert.That(Snapshot().input.steering, Is.EqualTo(1f).Within(0.001f),
+                "After a real release the key must arm and drive again.");
+            Release(keyboard.rightArrowKey);
+        }
     }
 }
