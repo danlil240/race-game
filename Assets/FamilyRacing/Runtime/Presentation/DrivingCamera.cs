@@ -12,7 +12,9 @@ namespace FamilyRacing
     //   chase    — smoothed behind-and-above the vehicle, pulled in front of
     //              solid geometry that would block the view (triggers such
     //              as checkpoint volumes are ignored);
-    //   overhead — an elevated, gently tilted follower.
+    //   overhead — an elevated, gently tilted follower that likewise drops
+    //              in front of any solid geometry occluding the downward
+    //              view (canopies, bridges, tall blocks).
     // Both modes converge with exponential smoothing; "reduce camera shake"
     // slows the convergence instead of switching behaviour off. A
     // teleport-scale target jump (respawn) snaps rather than gliding the
@@ -43,6 +45,10 @@ namespace FamilyRacing
 
         public DrivingCameraState Facts { get { return facts; } }
         public Camera RenderCamera { get { return cam; } }
+
+        // Diagnostics for tests/debugging: which collider most recently
+        // pulled the camera in (null when the view is clear).
+        internal string LastObstacleName { get; private set; }
 
         // Capture the pre-game camera pose as early as possible — before any
         // session-driven framing has moved the camera — so race teardown can
@@ -102,7 +108,12 @@ namespace FamilyRacing
             var desired = mode == "overhead"
                 ? OverheadDesired(smoothTarget)
                 : ChaseDesired(motor, smoothTarget);
-            var look = Quaternion.LookRotation(smoothTarget - desired, Vector3.up);
+            var lookDir = smoothTarget - desired;
+            // An occluder flush against the vehicle can pull the camera
+            // nearly onto the target; keep the previous heading then.
+            var look = lookDir.sqrMagnitude > 1e-4f
+                ? Quaternion.LookRotation(lookDir, Vector3.up)
+                : cam.transform.rotation;
             if (firstFrame || teleported)
             {
                 cam.transform.SetPositionAndRotation(desired, look);
@@ -127,22 +138,45 @@ namespace FamilyRacing
         {
             var forward = new Vector3(
                 Mathf.Sin(motor.heading), 0f, Mathf.Cos(motor.heading));
-            var desired = target - forward * chaseBack + Vector3.up * chaseUp;
-            RaycastHit hit;
-            // Trigger volumes (checkpoint gates) are not view obstacles.
-            if (Physics.Linecast(target, desired, out hit,
-                    ~0, QueryTriggerInteraction.Ignore))
-            {
-                var towardTarget = (target - hit.point);
-                if (towardTarget.sqrMagnitude > 1e-6f)
-                    desired = hit.point + towardTarget.normalized * obstacleMargin;
-            }
-            return desired;
+            return ClearOfObstacles(target,
+                target - forward * chaseBack + Vector3.up * chaseUp);
         }
 
         private Vector3 OverheadDesired(Vector3 target)
         {
-            return target + new Vector3(0f, overheadUp, -overheadBack);
+            return ClearOfObstacles(target,
+                target + new Vector3(0f, overheadUp, -overheadBack));
+        }
+
+        // Pull the desired camera spot in front of the first solid occluder
+        // on the target→camera ray so the vehicle stays visible. Trigger
+        // volumes (checkpoint gates, the drift pad) are not view obstacles,
+        // and neither is the vehicle's own silhouette — the ray can exit
+        // through the Cabin/Rider parts the presentation builds. Shared by
+        // both modes: chase yields side/behind blockers, overhead yields
+        // canopies and tall blocks over the vehicle.
+        private Vector3 ClearOfObstacles(Vector3 target, Vector3 desired)
+        {
+            LastObstacleName = null;
+            var delta = desired - target;
+            var distance = delta.magnitude;
+            if (distance < 1e-6f) return desired;
+            var hits = Physics.RaycastAll(target, delta / distance, distance,
+                ~0, QueryTriggerInteraction.Ignore);
+            System.Array.Sort(hits,
+                (a, b) => a.distance.CompareTo(b.distance));
+            foreach (var hit in hits)
+            {
+                if (hit.collider == null) continue;
+                if (hit.collider.GetComponentInParent<VehiclePresentation>()
+                        != null)
+                    continue; // the vehicle itself never occludes itself
+                var towardTarget = target - hit.point;
+                if (towardTarget.sqrMagnitude <= 1e-6f) continue;
+                LastObstacleName = hit.collider.name;
+                return hit.point + towardTarget.normalized * obstacleMargin;
+            }
+            return desired;
         }
 
         private void Disengage()

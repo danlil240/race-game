@@ -423,8 +423,14 @@ namespace FamilyRacing.Tests
 
             Assert.That(drivingCamera.Facts.mode, Is.EqualTo("overhead"),
                 "the actual camera follows the toggled draft preference");
-            Assert.That(renderCamera.transform.position.y, Is.GreaterThan(20f),
-                "the overhead camera is elevated above the course");
+            // Let the smoothed climb converge, then assert the elevated
+            // framing actually arrived.
+            for (var i = 0; i < 12; i++) Frame(0.1f);
+            state = Snapshot();
+            Assert.That(renderCamera.transform.position.y, Is.GreaterThan(25f),
+                "the overhead camera is elevated above the course; py="
+                + renderCamera.transform.position.y
+                + " blocker=" + (drivingCamera.LastObstacleName ?? "none"));
             Assert.That(state.driving.camera.mode, Is.EqualTo("overhead"));
         }
 
@@ -737,6 +743,266 @@ namespace FamilyRacing.Tests
             var state = Snapshot();
             Assert.That(state.input.recover || state.driving.pendingActions.Count > 0,
                 Is.True, "the recover button must reach the same input.set path as R");
+        }
+
+        // --- generated-course camera coverage -------------------------------
+        // Camera behaviour must hold on the real graybox course, not only
+        // on the flat fixture slab: the ramp crest/landing, both shortcut
+        // islands, and overhead occluders. Two shapes — motor states
+        // placed against the real colliders, and a driven section of the
+        // real generated event through the shared command path.
+
+        private GameObject SpawnRealCourse()
+        {
+            var prefab =
+#if UNITY_EDITOR
+                UnityEditor.AssetDatabase.LoadAssetAtPath<GameObject>(
+                    "Assets/FamilyRacing/Generated/Driving/GrayboxCourse.prefab");
+#else
+                null;
+#endif
+            Assert.That(prefab, Is.Not.Null,
+                "the generated GrayboxCourse prefab must exist");
+            var instance = Object.Instantiate(prefab);
+            loose.Add(instance);
+            Physics.SyncTransforms();
+            return instance;
+        }
+
+        private static float WrapAngle(float radians)
+        {
+            while (radians > Mathf.PI) radians -= 2f * Mathf.PI;
+            while (radians <= -Mathf.PI) radians += 2f * Mathf.PI;
+            return radians;
+        }
+
+        [Test]
+        public void ChaseCameraPullsInBesideBothRealShortcutIslands()
+        {
+            SpawnRealCourse();
+
+            // IslandNorthEast's north face sits at z=51: a vehicle heading
+            // north with its tail at the face wants a chase spot inside
+            // the island — the real collider must pull the camera out.
+            var state = FakeDriving(32f, 0f, 51.9f, 0f);
+            for (var i = 0; i < 4; i++)
+                drivingCamera.ApplyFrame(state, 0.1f);
+            Assert.That(drivingCamera.Facts.mode, Is.EqualTo("chase"));
+            Assert.That(drivingCamera.Facts.pz, Is.GreaterThan(51f)
+                .And.LessThan(51.9f),
+                "IslandNE must push the chase spot out of its face; pz="
+                + drivingCamera.Facts.pz);
+            Assert.That(drivingCamera.Facts.py, Is.LessThan(2f),
+                "the pull-in hugs the island face, py=" + drivingCamera.Facts.py);
+
+            // IslandSouthEast's south face sits at z=-40: the same check
+            // heading south proves both shortcut blockers occlude the view.
+            state = FakeDriving(72f, 0f, -40.9f, Mathf.PI);
+            for (var i = 0; i < 4; i++)
+                drivingCamera.ApplyFrame(state, 0.1f);
+            Assert.That(drivingCamera.Facts.pz, Is.GreaterThan(-40.9f)
+                .And.LessThan(-39.4f),
+                "IslandSE must pull the chase spot out of its face; pz="
+                + drivingCamera.Facts.pz);
+            Assert.That(drivingCamera.Facts.py, Is.LessThan(2f));
+        }
+
+        [Test]
+        public void OverheadCameraStaysElevatedAndDropsBelowRealCanopy()
+        {
+            SpawnRealCourse();
+
+            // Clear sky on the real course: the elevated follower keeps
+            // its height above the vehicle.
+            var state = FakeDriving(0f, 0f, -30f, 0f, camera: "overhead");
+            for (var i = 0; i < 4; i++)
+                drivingCamera.ApplyFrame(state, 0.1f);
+            Assert.That(drivingCamera.Facts.mode, Is.EqualTo("overhead"));
+            Assert.That(drivingCamera.Facts.py, Is.GreaterThan(25f),
+                "unobstructed overhead must stay elevated, py="
+                + drivingCamera.Facts.py);
+
+            // A solid canopy over the vehicle occludes the downward view;
+            // the same linecast pull-in the chase mode uses must drop the
+            // overhead camera in front of the blocker.
+            var canopy = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            loose.Add(canopy);
+            canopy.transform.SetPositionAndRotation(
+                new Vector3(0f, 20f, -30f), Quaternion.identity);
+            canopy.transform.localScale = new Vector3(30f, 1f, 30f);
+            Physics.SyncTransforms();
+
+            for (var i = 0; i < 14; i++)
+                drivingCamera.ApplyFrame(state, 0.1f);
+            Assert.That(drivingCamera.Facts.py, Is.LessThan(19.6f),
+                "the canopy must pull the overhead camera below its face; py="
+                + drivingCamera.Facts.py);
+            Assert.That(drivingCamera.Facts.py, Is.GreaterThan(1.3f),
+                "the camera still stays above the vehicle, py="
+                + drivingCamera.Facts.py);
+        }
+
+        [Test]
+        public void DrivenRealCourseCameraTracksRampLandingAndShortcuts()
+        {
+            // Wire a DrivingWorld straight onto the generated assets —
+            // the real track/event/vehicle definitions and course prefab,
+            // not fixture mirrors.
+            var realGo = new GameObject("real-course-world");
+            loose.Add(realGo);
+            var realWorld = realGo.AddComponent<DrivingWorld>();
+            VehicleDefinitionAsset car = null;
+            VehicleDefinitionAsset moto = null;
+            TrackDefinitionAsset track = null;
+            EventDefinitionAsset evt = null;
+            GameObject prefab = null;
+#if UNITY_EDITOR
+            car = UnityEditor.AssetDatabase.LoadAssetAtPath<VehicleDefinitionAsset>(
+                "Assets/FamilyRacing/Generated/Driving/car-01.asset");
+            moto = UnityEditor.AssetDatabase.LoadAssetAtPath<VehicleDefinitionAsset>(
+                "Assets/FamilyRacing/Generated/Driving/motorcycle-01.asset");
+            track = UnityEditor.AssetDatabase.LoadAssetAtPath<TrackDefinitionAsset>(
+                "Assets/FamilyRacing/Generated/Driving/graybox-01.asset");
+            evt = UnityEditor.AssetDatabase.LoadAssetAtPath<EventDefinitionAsset>(
+                "Assets/FamilyRacing/Generated/Driving/practice-02.asset");
+            prefab = UnityEditor.AssetDatabase.LoadAssetAtPath<GameObject>(
+                "Assets/FamilyRacing/Generated/Driving/GrayboxCourse.prefab");
+#endif
+            Assert.That(car, Is.Not.Null);
+            Assert.That(moto, Is.Not.Null,
+                "practice-02 allows both vehicles; the catalog needs both");
+            Assert.That(track, Is.Not.Null);
+            Assert.That(evt, Is.Not.Null);
+            Assert.That(prefab, Is.Not.Null);
+            Inject(realWorld, "vehicles", new[] { car, moto });
+            Inject(realWorld, "track", track);
+            Inject(realWorld, "events", new[] { evt });
+            Inject(realWorld, "coursePrefab", prefab);
+            Inject(realWorld, "contentVersion", "generated-course-under-test");
+            var catalog = realWorld.Load();
+            Assert.That(catalog, Is.Not.Null, "generated content must validate");
+            service.SetDrivingContent(catalog);
+
+            StartRace();
+            for (var i = 0; i < 90; i++)
+            {
+                service.StepDriving(realWorld.MotorWorld);
+                service.AdvanceTick();
+            }
+            var session = Snapshot().driving;
+            Assert.That(session.phase, Is.EqualTo("running"));
+            // Activate the real course colliders before the motor sweeps.
+            realWorld.ApplyFrame(Snapshot());
+            Physics.SyncTransforms();
+
+            // Real graybox route: up the start straight, west past the
+            // landmark ramp's flank into its flat landing apron (the
+            // current motor sweep cannot step onto the ramp's leading
+            // lip — the placed test below covers the climb/landing
+            // elevation track), then the inside shortcut legs beside
+            // both islands — south of IslandNorthEast and west/south of
+            // IslandSouthEast.
+            var route = new List<Vector2>
+            {
+                new Vector2(0f, -30f),
+                new Vector2(-50f, -5f),
+                new Vector2(-70f, 20f),   // skirt the ramp's west flank
+                new Vector2(-62f, 52f),   // ramp landing apron, north side
+                new Vector2(-30f, 55f),
+                new Vector2(30f, 28f),    // inside shortcut south of IslandNE
+                new Vector2(70f, 32f),
+                new Vector2(97f, -12f),   // down the east side
+                new Vector2(55f, -18f),   // inside shortcut west of IslandSE
+                new Vector2(58f, -52f)    // rejoin south of the island
+            };
+            var wp = 0;
+            var facts = drivingCamera.Facts;
+            for (var t = 0; t < 4000 && wp < route.Count; t += 5)
+            {
+                var motor = session.motor;
+                var dx = route[wp].x - motor.x;
+                var dz = route[wp].y - motor.z;
+                if (dx * dx + dz * dz < 49f) { wp++; continue; }
+                var desired = Mathf.Atan2(dx, dz);
+                var steer = Mathf.Clamp(
+                    WrapAngle(desired - motor.heading) * 3f, -1f, 1f);
+                var applied = app.Dispatch("input.set", Params(
+                    ("steering", steer.ToString("0.###",
+                        System.Globalization.CultureInfo.InvariantCulture)),
+                    ("drift", "false"), ("boost", "false"), ("gadget", "false"),
+                    ("recover", "false"), ("changeCamera", "false"),
+                    ("pause", "false"), ("durationTicks", "5")));
+                Assert.That(applied.status, Is.EqualTo("applied"),
+                    "steering input must apply while driving the real course");
+                for (var i = 0; i < 5; i++)
+                {
+                    service.StepDriving(realWorld.MotorWorld);
+                    service.AdvanceTick();
+                }
+                // Same order as FoundationApp.Update: world visuals, then
+                // the presentation camera, then published facts.
+                realWorld.ApplyFrame(Snapshot());
+                Physics.SyncTransforms();
+                drivingCamera.ApplyFrame(Snapshot(), 0.05f);
+                service.SetDrivingCameraFacts(facts);
+                session = Snapshot().driving;
+                if (session == null || session.motor == null) break;
+                Assert.That(facts.mode, Is.EqualTo("chase"));
+                Assert.That(facts.px,
+                    Is.EqualTo(renderCamera.transform.position.x).Within(0.001f),
+                    "published facts must describe the actual render-camera pose");
+                Assert.That(facts.pz,
+                    Is.EqualTo(renderCamera.transform.position.z).Within(0.001f));
+                Assert.That(Mathf.Abs(facts.tx - session.motor.x), Is.LessThan(15f),
+                    "the camera target must keep tracking the driven vehicle");
+            }
+            Assert.That(session, Is.Not.Null);
+            Assert.That(session.motor, Is.Not.Null);
+            Assert.That(wp, Is.EqualTo(route.Count),
+                "the drive must reach every waypoint; stopped at index " + wp
+                + " near " + (session.motor != null
+                    ? session.motor.x + "," + session.motor.z : "?"));
+            Assert.That(session.motor.grounded, Is.True,
+                "the whole driven route stays on the real course surface");
+            Assert.That(facts.ty, Is.EqualTo(session.motor.y + 1.2f).Within(1.5f),
+                "the camera target tracks the vehicle height end to end");
+        }
+
+        [Test]
+        public void ChaseCameraFollowsVehicleUpRealRampAndDownOnLanding()
+        {
+            SpawnRealCourse();
+
+            // Ride the real ramp's surface line (x=-60): the 14-degree
+            // wedge emerges from the ground near z=24 and crests near
+            // z=38 around y=3.4, then the landing apron drops back to the
+            // flat. Placed motor states — the current motor sweep cannot
+            // step onto the lip, recorded as a Task-4 finding.
+            var maxFactsPy = -999f;
+            for (var i = 0; i <= 40; i++)
+            {
+                var z = 20f + i * 0.6f;                  // z 20 -> 44
+                var surfaceAt = z < 22f || z > 38f
+                    ? 0f
+                    : Mathf.Max(0f, 1.51f + 0.242f * (z - 30f));
+                var state = FakeDriving(-60f, surfaceAt, z, 0f);
+                drivingCamera.ApplyFrame(state, 0.1f);
+                Assert.That(drivingCamera.Facts.mode, Is.EqualTo("chase"));
+                maxFactsPy = Mathf.Max(maxFactsPy, drivingCamera.Facts.py);
+            }
+            Assert.That(maxFactsPy, Is.GreaterThan(7f),
+                "the chase camera must climb with the vehicle over the "
+                + "real ramp crest (peak py " + maxFactsPy + ")");
+
+            // Landing: the motor returns to the flat past the crest and
+            // the camera settles back to ground-level framing.
+            for (var i = 0; i < 15; i++)
+                drivingCamera.ApplyFrame(FakeDriving(-60f, 0f, 46f + i, 0f), 0.1f);
+            Assert.That(drivingCamera.Facts.py, Is.LessThan(6.5f),
+                "after the landing the camera settles back down, py="
+                + drivingCamera.Facts.py);
+            Assert.That(drivingCamera.Facts.ty, Is.EqualTo(1.2f).Within(0.6f),
+                "the smoothed target re-converges to the landed vehicle");
         }
     }
 }
