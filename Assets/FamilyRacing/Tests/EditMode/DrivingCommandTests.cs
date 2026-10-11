@@ -70,8 +70,14 @@ namespace FamilyRacing.Tests
                 id = "course-test",
                 checkpoints = new List<CheckpointGate>
                 {
-                    new CheckpointGate { id = "gate-1", x = 0f, y = 0f, z = 30f,
-                        halfWidth = 6f, dirX = 0f, dirZ = 1f }
+                    // Gate 0 is the start/finish line; the second gate sits
+                    // far away so command tests never trigger progress.
+                    new CheckpointGate { id = "start", x = 0f, y = 0f, z = 0f,
+                        halfWidth = 6f, dirX = 0f, dirZ = 1f,
+                        recoverX = 0f, recoverZ = -3f },
+                    new CheckpointGate { id = "gate-1", x = 0f, y = 0f, z = 2000f,
+                        halfWidth = 6f, dirX = 0f, dirZ = 1f,
+                        recoverX = 0f, recoverZ = 1997f }
                 }
             };
             var intro = new EventDefinition
@@ -228,7 +234,7 @@ namespace FamilyRacing.Tests
             Assert.That(state.driving.raceId, Is.Not.Null.And.Not.Empty);
             Assert.That(state.driving.motor, Is.Not.Null);
             Assert.That(state.driving.pendingActions, Is.Not.Null);
-            Assert.That(state.driving.checkpoints.Count, Is.EqualTo(1));
+            Assert.That(state.driving.checkpoints.Count, Is.EqualTo(2));
             Assert.That(state.drivingEvents.Count, Is.GreaterThanOrEqualTo(1));
             Assert.That(state.drivingEvents[0].kind, Is.EqualTo("race.started"));
             Assert.That(state.drivingEvents[0].commandId, Is.EqualTo(started.commandId));
@@ -382,7 +388,7 @@ namespace FamilyRacing.Tests
             Assert.That(fresh.driving.motor.x, Is.EqualTo(0f).Within(0.001f));
             Assert.That(fresh.driving.motor.speed, Is.EqualTo(0f));
             Assert.That(fresh.driving.phase, Is.EqualTo("running"));
-            Assert.That(fresh.driving.checkpoints.Count, Is.EqualTo(1));
+            Assert.That(fresh.driving.checkpoints.Count, Is.EqualTo(2));
             Assert.That(fresh.drivingEvents.Count, Is.GreaterThanOrEqualTo(1));
         }
 
@@ -432,7 +438,13 @@ namespace FamilyRacing.Tests
                 new[]
                 {
                     new CourseDefinition { id = "course-test",
-                        checkpoints = new List<CheckpointGate>() }
+                        checkpoints = new List<CheckpointGate>
+                        {
+                            new CheckpointGate { id = "start", x = 0f, z = 0f,
+                                halfWidth = 6f, dirX = 0f, dirZ = 1f },
+                            new CheckpointGate { id = "gate-1", x = 0f, z = 2000f,
+                                halfWidth = 6f, dirX = 0f, dirZ = 1f }
+                        } }
                 },
                 new[] { motoOnly }));
             var result = service.Execute(Cmd("race.start",

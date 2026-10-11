@@ -61,7 +61,11 @@ namespace FamilyRacing.Core.Racing
             if (string.IsNullOrEmpty(id)) { error = "id"; return false; }
             if (!Finite(spawnX) || !Finite(spawnY) || !Finite(spawnZ) || !Finite(spawnHeading))
             { error = "spawn"; return false; }
-            if (checkpoints == null) { error = "checkpoints"; return false; }
+            // Gate 0 is the start/finish line; a real course needs at
+            // least one more mandatory gate — a single line would let
+            // repeated crossings manufacture laps without any circuit.
+            if (checkpoints == null || checkpoints.Count < 2)
+            { error = "checkpoints"; return false; }
             var seen = new HashSet<string>(StringComparer.Ordinal);
             foreach (var gate in checkpoints)
             {

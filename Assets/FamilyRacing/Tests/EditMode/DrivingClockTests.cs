@@ -80,7 +80,17 @@ namespace FamilyRacing.Tests
                 spawnY = 0f,
                 spawnZ = 0f,
                 spawnHeading = 0f,
-                checkpoints = new List<CheckpointGate>()
+                checkpoints = new List<CheckpointGate>
+                {
+                    // Gate 0 is the start/finish line; the second gate sits
+                    // far away so clock tests never trigger progress.
+                    new CheckpointGate { id = "start", x = 0f, z = 0f,
+                        halfWidth = 6f, dirX = 0f, dirZ = 1f,
+                        recoverX = 0f, recoverZ = -3f },
+                    new CheckpointGate { id = "gate-1", x = 0f, z = 2000f,
+                        halfWidth = 6f, dirX = 0f, dirZ = 1f,
+                        recoverX = 0f, recoverZ = 1997f }
+                }
             };
             var evt = new EventDefinition
             {

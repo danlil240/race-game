@@ -114,6 +114,14 @@ namespace FamilyRacing.Tests
                 a.spawnHeadingDegrees = 0f;
                 a.gates = new[]
                 {
+                    // Gate 0 is the start/finish line on the spawn.
+                    new TrackDefinitionAsset.Gate
+                    {
+                        id = "start",
+                        center = new Vector3(0f, 0f, 0f),
+                        halfWidth = 8f,
+                        direction = new Vector2(0f, 1f)
+                    },
                     new TrackDefinitionAsset.Gate
                     {
                         id = "gate-1",

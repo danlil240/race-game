@@ -362,6 +362,29 @@ namespace FamilyRacing.Tests
         // --- authoring validation -------------------------------------------
 
         [Test]
+        public void ValidationRejectsEmptyGateList()
+        {
+            var course = CircleCourse();
+            course.checkpoints.Clear();
+            string error;
+            Assert.That(course.Validate(out error), Is.False,
+                "a course with no gates must never validate");
+            Assert.That(error, Is.EqualTo("checkpoints"));
+        }
+
+        [Test]
+        public void ValidationRejectsSingleGateCourse()
+        {
+            var course = CircleCourse();
+            course.checkpoints.RemoveRange(1, course.checkpoints.Count - 1);
+            string error;
+            Assert.That(course.Validate(out error), Is.False,
+                "a lone start/finish line would let repeated crossings " +
+                "manufacture laps without any circuit");
+            Assert.That(error, Is.EqualTo("checkpoints"));
+        }
+
+        [Test]
         public void ValidationRejectsDuplicateGateIds()
         {
             var course = CircleCourse();
