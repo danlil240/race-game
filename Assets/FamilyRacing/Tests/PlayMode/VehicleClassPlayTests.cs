@@ -200,7 +200,42 @@ namespace FamilyRacing.Tests
             Inject(world, "contentVersion", "vclass-content-1");
         }
 
-        private void LoadAndStart(string vehicleId, string eventId = "intro-01")
+        // Wire the real generated assets — the shipped prefab, track,
+        // event and vehicle definitions — so milestone-level evidence
+        // runs on what players actually drive, not the fixture mirror.
+        private void WireRealCourse()
+        {
+            VehicleDefinitionAsset car = null;
+            VehicleDefinitionAsset moto = null;
+            TrackDefinitionAsset track = null;
+            EventDefinitionAsset evt = null;
+            GameObject prefab = null;
+#if UNITY_EDITOR
+            car = UnityEditor.AssetDatabase.LoadAssetAtPath<VehicleDefinitionAsset>(
+                "Assets/FamilyRacing/Generated/Driving/car-01.asset");
+            moto = UnityEditor.AssetDatabase.LoadAssetAtPath<VehicleDefinitionAsset>(
+                "Assets/FamilyRacing/Generated/Driving/motorcycle-01.asset");
+            track = UnityEditor.AssetDatabase.LoadAssetAtPath<TrackDefinitionAsset>(
+                "Assets/FamilyRacing/Generated/Driving/graybox-01.asset");
+            evt = UnityEditor.AssetDatabase.LoadAssetAtPath<EventDefinitionAsset>(
+                "Assets/FamilyRacing/Generated/Driving/practice-02.asset");
+            prefab = UnityEditor.AssetDatabase.LoadAssetAtPath<GameObject>(
+                "Assets/FamilyRacing/Generated/Driving/GrayboxCourse.prefab");
+#endif
+            Assert.That(car, Is.Not.Null, "generated car-01 must exist");
+            Assert.That(moto, Is.Not.Null, "generated motorcycle-01 must exist");
+            Assert.That(track, Is.Not.Null, "generated graybox-01 must exist");
+            Assert.That(evt, Is.Not.Null, "generated practice-02 must exist");
+            Assert.That(prefab, Is.Not.Null, "GrayboxCourse prefab must exist");
+            Inject(world, "vehicles", new[] { car, moto });
+            Inject(world, "track", track);
+            Inject(world, "events", new[] { evt });
+            Inject(world, "coursePrefab", prefab);
+            Inject(world, "contentVersion", "vclass-generated-1");
+        }
+
+        private void LoadAndStart(string vehicleId, string eventId = "intro-01",
+            int countdownTicks = 3)
         {
             var catalog = world.Load();
             Assert.That(catalog, Is.Not.Null, "generated definitions must validate");
@@ -210,7 +245,7 @@ namespace FamilyRacing.Tests
                 P("vehicleId", vehicleId, "eventId", eventId)));
             Assert.That(started.status, Is.EqualTo(CommandResult.Applied),
                 "race.start failed: " + started.code);
-            Step(3);
+            Step(countdownTicks);
             Assert.That(service.Snapshot().driving.phase, Is.EqualTo("running"));
             world.ApplyFrame(service.Snapshot());
             Physics.SyncTransforms();
@@ -444,25 +479,36 @@ namespace FamilyRacing.Tests
         [TestCase("motorcycle-01")]
         public void RampJumpProducesAirborneAndLanding(string vehicleId)
         {
-            WireWorld(laps: 1);
-            LoadAndStart(vehicleId);
-            // Drive the course to the deck gate, accept it, then press R:
-            // the safe-pose respawn puts the vehicle on the deck's flat
-            // top facing the drop — real recovery, then real flight.
-            Pursue(DeckGateRoute(), maxTicks: 6000);
-            var respawned = RecoverNow();
-            Assert.That(respawned.motor.recovering, Is.True);
-            Assert.That(respawned.motor.y, Is.GreaterThan(1.5f),
-                "the respawn must drop the vehicle onto the deck top");
-            Pursue(new List<Vector2> { new Vector2(-40f, -15f) },
-                maxTicks: 2000);
-            var snapshot = service.Snapshot();
-            Assert.That(Events(snapshot, "motor.becameAirborne").Count,
+            // Milestone-level jump evidence on shipped geometry: the real
+            // generated course prefab and assets. Line up south of the
+            // landmark ramp on its centre line (x=-60, toe meets the
+            // ground near z=24), climb the slope and leave the crest at
+            // z~38 airborne — real sweep + ground probes, no teleport.
+            WireRealCourse();
+            LoadAndStart(vehicleId, "practice-02", countdownTicks: 90);
+            Pursue(new List<Vector2>
+                {
+                    new Vector2(-60f, 10f),
+                    new Vector2(-60f, 50f)
+                },
+                maxTicks: 6000);
+            var state = service.Snapshot();
+            var motor = state.driving.motor;
+            Assert.That(Events(state, "motor.becameAirborne").Count,
                 Is.GreaterThanOrEqualTo(1),
-                vehicleId + " must actually leave the ground off the deck");
-            Assert.That(Events(snapshot, "motor.landed").Count,
+                vehicleId + " must leave the ground off the shipped ramp");
+            Assert.That(Events(state, "motor.landed").Count,
                 Is.GreaterThanOrEqualTo(1),
-                vehicleId + " must land after the deck drop");
+                vehicleId + " must land after the shipped ramp flight");
+            // No cleanLanding assert here: a departing box legitimately
+            // grazes the ramp's own lip, which honestly marks the flight
+            // wall-touched — clean-credit proof lives in the deck-drop
+            // test and the Core ramp test.
+            Assert.That(motor.z, Is.GreaterThan(38f),
+                vehicleId + " never crossed the ramp crest (z="
+                + motor.z.ToString("F1") + ")");
+            Assert.That(motor.grounded, Is.True,
+                vehicleId + " still airborne after the ramp");
         }
 
         [TestCase("car-01")]
@@ -471,8 +517,10 @@ namespace FamilyRacing.Tests
         {
             WireWorld(laps: 1);
             LoadAndStart(vehicleId);
-            // The deck drop lands on open flat with no barrier anywhere
-            // near the flight path — a creditable clean landing.
+            // Mechanism coverage only (the shipped-course jump proof is
+            // RampJumpProducesAirborneAndLanding): the fixture deck drop
+            // lands on open flat with no barrier near the flight path —
+            // a guaranteed creditable clean landing.
             Pursue(DeckGateRoute(), maxTicks: 6000);
             var respawned = RecoverNow();
             Assert.That(respawned.motor.y, Is.GreaterThan(1.5f));
@@ -493,14 +541,26 @@ namespace FamilyRacing.Tests
         [TestCase("motorcycle-01")]
         public void DriftChargesBoostBeyondPassiveRecharge(string vehicleId)
         {
-            WireWorld(laps: 1);
-            LoadAndStart(vehicleId);
+            WireRealCourse();
+            LoadAndStart(vehicleId, "practice-02", countdownTicks: 90);
             var tuning = vehicleId == "car-01"
                 ? VehicleTuning.Car01()
                 : VehicleTuning.Motorcycle01();
-            // Cruise into the open south half of the course, then burn
-            // the charge down so the drift gain has headroom to show.
-            Pursue(new List<Vector2> { new Vector2(-20f, -30f) }, maxTicks: 3000);
+            // Cruise the real drift pad (≈45,66) with zone drift armed:
+            // east around IslandNorthEast, then zig-zag inside the pad so
+            // steering exceeds the drift threshold on shipped geometry —
+            // then burn the charge down so the drift gain has headroom.
+            Pursue(new List<Vector2>
+                {
+                    new Vector2(0f, 33f),
+                    new Vector2(48f, 30f),
+                    new Vector2(58f, 52f),
+                    new Vector2(62f, 64f),
+                    new Vector2(38f, 72f),
+                    new Vector2(10f, 40f),
+                    new Vector2(-20f, -30f)
+                },
+                driftInZones: true, maxTicks: 8000);
             Drive(0f, boost: true, durationTicks: 60);
             Step(60);
             var drained = service.Snapshot().driving.motor;

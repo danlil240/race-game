@@ -121,6 +121,40 @@ namespace FamilyRacing.Core.Driving
                 nx = sweep.normalX;
                 nz = sweep.normalZ;
                 var allowed = Math.Max(0f, sweep.fraction - SweepBackoffFraction);
+                // Bounded step-climb: when the body is fully wedged
+                // (overlap reports a zero-distance hit with an unusable
+                // normal), retry the same move one probe-step up. A
+                // buried ramp toe or a crest lip clears the lifted cast,
+                // so the pose advances and ground-follow settles it back
+                // onto the surface; walls and ledges taller than one
+                // probe step still block, bounding the climb to surfaces
+                // the ground probe can already follow.
+                var stepped = false;
+                if (allowed <= 0f)
+                {
+                    var liftedPose = new MotorPose
+                    {
+                        x = state.x,
+                        y = state.y + tuning.groundProbe,
+                        z = state.z,
+                        heading = state.heading
+                    };
+                    var lifted = world.SweepBody(liftedPose, dx, 0f, dz,
+                        tuning.halfWidth, tuning.halfLength, tuning.height);
+                    var liftedAllowed = lifted.hit
+                        ? Math.Max(0f, lifted.fraction - SweepBackoffFraction)
+                        : 1f;
+                    if (liftedAllowed > 0f)
+                    {
+                        state.x += dx * liftedAllowed;
+                        state.z += dz * liftedAllowed;
+                        state.y += tuning.groundProbe;
+                        contacted = false; // a slope or step, not a barrier
+                        stepped = true;
+                    }
+                }
+                if (!stepped)
+                {
                 state.x += dx * allowed;
                 state.z += dz * allowed;
                 // Slide the remaining motion along the contact plane once.
@@ -152,6 +186,7 @@ namespace FamilyRacing.Core.Driving
                     state.speed = vx * fx + vz * fz;
                     state.lateralSpeed = vx * rx + vz * rz;
                     result.events.Add(new MotorEvent("wallHit", intoWall));
+                }
                 }
             }
             else

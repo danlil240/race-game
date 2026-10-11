@@ -41,12 +41,14 @@ namespace FamilyRacing.Core.Driving
         public const float NudgeMaxDeltaSpeed = 4f;
 
         // Drift engagement: held input, steering intent, grounded and at
-        // least the tuning minimum speed.
+        // least the tuning minimum speed — and not recovery-flagged, so
+        // a respawn boundary can never emit a phantom driftStart.
         public static bool DriftEligible(DriverInput input, MotorState state,
             VehicleTuning tuning)
         {
             return input.Drift
                 && state.grounded
+                && !state.recovering
                 && Math.Abs(input.Steering) > DriftSteeringThreshold
                 && state.speed >= tuning.driftMinSpeed;
         }

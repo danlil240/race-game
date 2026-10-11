@@ -19,6 +19,12 @@ namespace FamilyRacing.Tests
         private sealed class FlatWorld : IMotorWorld
         {
             internal float GroundY = 0f;
+            // Optional ramp: north of RampToeZ the surface rises RampSlope
+            // per metre up to RampCrestZ, then drops back to the plane —
+            // the shipped wedge's buried toe and falling crest edge.
+            internal float RampToeZ = float.NaN;
+            internal float RampCrestZ;
+            internal float RampSlope = 0.25f;
 
             internal struct Wall
             {
@@ -27,19 +33,27 @@ namespace FamilyRacing.Tests
 
             internal readonly List<Wall> Walls = new List<Wall>();
 
+            private float SurfaceAt(float z)
+            {
+                if (float.IsNaN(RampToeZ)) return GroundY;
+                if (z <= RampToeZ || z >= RampCrestZ) return GroundY;
+                return GroundY + (z - RampToeZ) * RampSlope;
+            }
+
             public GroundHit ProbeGround(MotorPose pose, float probeDistance)
             {
-                var hit = pose.y - GroundY <= probeDistance;
+                var surface = SurfaceAt(pose.z);
+                var hit = pose.y - surface <= probeDistance;
                 return new GroundHit
                 {
                     hit = hit,
                     x = pose.x,
-                    y = GroundY,
+                    y = surface,
                     z = pose.z,
                     normalX = 0f,
                     normalY = 1f,
                     normalZ = 0f,
-                    distance = pose.y - GroundY,
+                    distance = pose.y - surface,
                     surfaceId = "ground"
                 };
             }
@@ -76,6 +90,41 @@ namespace FamilyRacing.Tests
                         pointZ = pose.z + dz * fraction,
                         surfaceId = "wall"
                     };
+                }
+                if (!float.IsNaN(RampToeZ))
+                {
+                    // The wedge blocks where its rising surface reaches the
+                    // body's underside: material sits under the box only
+                    // while the nose overlaps the slope and the tail has
+                    // not cleared the crest — the same zero-fraction
+                    // signal a tilted-box collider gives Unity's cast.
+                    var extentZ = Math.Abs(fz) * halfLength
+                        + Math.Abs(fx) * halfWidth;
+                    var contactZ = RampToeZ
+                        + Math.Max(0f, (pose.y - GroundY) / RampSlope);
+                    var n0 = pose.z + extentZ;
+                    var n1 = n0 + dz;
+                    if (contactZ < RampCrestZ && n1 > contactZ
+                        && pose.z - extentZ < RampCrestZ)
+                    {
+                        var f = n1 == n0 ? 0f : (contactZ - n0) / (n1 - n0);
+                        if (f < 0f) f = 0f;
+                        if (!best.hit || f < best.fraction)
+                        {
+                            best = new SweepHit
+                            {
+                                hit = true,
+                                fraction = f,
+                                normalX = 0f,
+                                normalY = 0f,
+                                normalZ = -1f,
+                                pointX = pose.x + dx * f,
+                                pointY = pose.y,
+                                pointZ = pose.z + dz * f,
+                                surfaceId = "ramp"
+                            };
+                        }
+                    }
                 }
                 return best;
             }
@@ -264,6 +313,70 @@ namespace FamilyRacing.Tests
             Assert.That(state.grounded, Is.True);
             Assert.That(state.y, Is.EqualTo(world.GroundY).Within(0.001f));
             Assert.That(state.verticalSpeed, Is.EqualTo(0f));
+        }
+
+        [Test]
+        public void RampToeClimbsAndLeapsOffTheCrest()
+        {
+            // A buried-toe slope ending in a falling lip — the same
+            // geometry the shipped landmark ramp presents. The wedged
+            // body must step-climb the slope, then leave the crest
+            // airborne and land: no wall blocks it, no teleport moves it.
+            var world = new FlatWorld
+            {
+                RampToeZ = 10f,
+                RampCrestZ = 24f,
+                RampSlope = 0.25f
+            };
+            var tuning = VehicleTuning.Car01();
+            var crestHeight = (world.RampCrestZ - world.RampToeZ)
+                * world.RampSlope;
+            var state = Spawn();
+            var airborne = false;
+            var landed = false;
+            var clean = false;
+            var maxY = 0f;
+            for (var i = 0; i < 900 && !landed; i++)
+            {
+                var result = ArcadeMotor.Step(state, Neutral(), tuning, world, Dt);
+                Assert.That(result.rejected, Is.False, "step unexpectedly rejected");
+                state = result.state;
+                maxY = Math.Max(maxY, state.y);
+                foreach (var ev in result.events)
+                {
+                    if (ev.kind == "becameAirborne") airborne = true;
+                    if (ev.kind == "landed") landed = true;
+                    if (ev.kind == "cleanLanding") clean = true;
+                }
+            }
+            Assert.That(maxY, Is.GreaterThan(crestHeight * 0.9f),
+                "the step-climb must carry the body near the crest (maxY="
+                + maxY + " crest=" + crestHeight + ")");
+            Assert.That(airborne, Is.True,
+                "leaving the crest must produce a real airborne episode");
+            Assert.That(landed, Is.True, "the flight must land");
+            Assert.That(clean, Is.True,
+                "an untouched ramp flight earns the clean-landing credit");
+            Assert.That(state.grounded, Is.True);
+            Assert.That(state.z, Is.GreaterThan(world.RampCrestZ),
+                "the car must land beyond the crest, z=" + state.z);
+        }
+
+        [Test]
+        public void WedgedAgainstFlatWallDoesNotStepClimb()
+        {
+            // The bounded step only fires where a surface the ground
+            // probe can follow lies above the pose — a flat floor next to
+            // a tall wall gives the lifted cast no clearance either.
+            var world = new FlatWorld();
+            world.Walls.Add(new FlatWorld.Wall { nx = 0f, nz = 1f, d = 20f });
+            var tuning = VehicleTuning.Car01();
+            var state = StepN(Spawn(), Neutral(), tuning, world, 600);
+            Assert.That(20f - state.z, Is.GreaterThanOrEqualTo(
+                    tuning.halfLength - 0.01f),
+                "a wall still blocks: step-climb must not vault it");
+            Assert.That(state.y, Is.LessThan(0.5f),
+                "the pose must never be lifted over a real wall");
         }
 
         [Test]
