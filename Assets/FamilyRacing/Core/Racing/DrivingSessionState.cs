@@ -26,18 +26,19 @@ namespace FamilyRacing.Core.Racing
         }
     }
 
-    // Ordered progress marker for one course gate. Task 2 attaches the
-    // crossing rules; the state shape is fixed now.
+    // Ordered progress marker for one course gate in the published
+    // snapshot. The session-internal tracker it mirrors is
+    // CheckpointProgress.CheckpointState.
     [Serializable]
-    public sealed class CheckpointState
+    public sealed class CheckpointMark
     {
         public string id;
         public int index;
         public bool crossed;
 
-        public CheckpointState Copy()
+        public CheckpointMark Copy()
         {
-            return new CheckpointState { id = id, index = index, crossed = crossed };
+            return new CheckpointMark { id = id, index = index, crossed = crossed };
         }
     }
 
@@ -88,7 +89,7 @@ namespace FamilyRacing.Core.Racing
         public int lap;
         public int lapsRequired;
         public int nextCheckpoint;
-        public List<CheckpointState> checkpoints = new List<CheckpointState>();
+        public List<CheckpointMark> checkpoints = new List<CheckpointMark>();
         public bool finished;
         public long finishTicks;
         public MotorState motor;

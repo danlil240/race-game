@@ -26,13 +26,15 @@ namespace FamilyRacing.EditorTools
                 new Color(0.24f, 0.49f, 0.63f));
             var gateMat = EnsureMaterial("GrayboxGate.mat",
                 new Color(0.91f, 0.51f, 0.42f));
+            var driftMat = EnsureMaterial("GrayboxDrift.mat",
+                new Color(0.36f, 0.36f, 0.40f));
 
             var car = EnsureCar();
             var moto = EnsureMotorcycle();
             var track = EnsureTrack();
             var practice = EnsureEvent("practice-02", track, laps: 2);
             var intro = EnsureEvent("intro-01", track, laps: 1);
-            var course = EnsureCoursePrefab(groundMat, wallMat, gateMat);
+            var course = EnsureCoursePrefab(groundMat, wallMat, gateMat, driftMat);
 
             WireScene(car, moto, track, practice, intro, course);
             AssetDatabase.SaveAssets();
@@ -94,8 +96,9 @@ namespace FamilyRacing.EditorTools
         }
 
         // Graybox loop: spawn south heading north; gates sit at leg
-        // midpoints of a counter-clockwise rectangle. Checkpoint rules are
-        // Task 2 — these only need valid, ordered data now.
+        // midpoints of the rectangle. Gate 0 is the start/finish line and
+        // is pre-crossed by the spawn. Each gate carries a safe respawn
+        // pose just behind its plane along the travel direction.
         private static TrackDefinitionAsset EnsureTrack()
         {
             var asset = EnsureAsset<TrackDefinitionAsset>("graybox-01.asset");
@@ -122,7 +125,9 @@ namespace FamilyRacing.EditorTools
                 id = id,
                 center = new Vector3(x, 0f, z),
                 halfWidth = 12f,
-                direction = new Vector2(dirX, dirZ)
+                direction = new Vector2(dirX, dirZ),
+                recoverPosition = new Vector3(x - dirX * 3f, 0f, z - dirZ * 3f),
+                recoverHeadingDegrees = Mathf.Atan2(dirX, dirZ) * Mathf.Rad2Deg
             };
         }
 
@@ -140,16 +145,18 @@ namespace FamilyRacing.EditorTools
         }
 
         // The course prefab is pure graybox: one ground slab, perimeter
-        // walls, two chicane barriers, one ramp, and trigger gate volumes.
-        // Gate colliders are triggers so the motor's probe/sweep (which
-        // ignores triggers) only ever collides with solid course geometry.
+        // walls, chicane barriers, one landmark ramp, two island blocks
+        // that each split the route into a longer main branch and an
+        // optional shortcut branch (both rejoin before the next mandatory
+        // checkpoint), a flat drift-zone pad, and trigger gate volumes.
+        // Gate/drift colliders are triggers so the motor's probe/sweep
+        // (which ignores triggers) only ever collides with solid geometry.
+        // The prefab is regenerated in place so authored layout changes
+        // flow through; saving over the same path keeps its GUID.
         private static GameObject EnsureCoursePrefab(
-            Material groundMat, Material wallMat, Material gateMat)
+            Material groundMat, Material wallMat, Material gateMat, Material driftMat)
         {
             var path = DrivingDir + "/GrayboxCourse.prefab";
-            var existing = AssetDatabase.LoadAssetAtPath<GameObject>(path);
-            if (existing != null) return existing;
-
             var root = new GameObject("GrayboxCourse");
             try
             {
@@ -167,9 +174,24 @@ namespace FamilyRacing.EditorTools
                     new Vector3(6f, 2f, 30f), Quaternion.identity, wallMat);
                 Box(root, "BarrierB", new Vector3(-30f, 1f, 10f),
                     new Vector3(30f, 2f, 6f), Quaternion.identity, wallMat);
+                // Landmark ramp west of the loop with a forgiving flat
+                // landing area around it.
                 Box(root, "Ramp", new Vector3(-60f, 1.2f, 30f),
                     new Vector3(12f, 0.6f, 16f),
                     Quaternion.Euler(-14f, 0f, 0f), wallMat);
+                // Islands block the straight gate-to-gate lines; each
+                // leaves a longer main branch and a shorter inside branch
+                // that both rejoin before the next mandatory checkpoint.
+                Box(root, "IslandNorthEast", new Vector3(32f, 1f, 44f),
+                    new Vector3(22f, 2f, 14f), Quaternion.identity, wallMat);
+                Box(root, "IslandSouthEast", new Vector3(72f, 1f, -32f),
+                    new Vector3(20f, 2f, 16f), Quaternion.identity, wallMat);
+
+                // Drift zone: a flat visual-only pad over the wide
+                // north-east sweep. Trigger so it never affects physics.
+                var pad = Box(root, "DriftZone", new Vector3(45f, 0.02f, 66f),
+                    new Vector3(40f, 0.04f, 22f), Quaternion.identity, driftMat);
+                pad.GetComponent<Collider>().isTrigger = true;
 
                 var gates = new GameObject("Gates");
                 gates.transform.SetParent(root.transform, false);

@@ -5,7 +5,8 @@ namespace FamilyRacing.Core.Racing
 {
     // One playable driving event: which course, how many laps, the
     // countdown length (simulation ticks that do not charge race elapsed
-    // time), and which vehicles may enter.
+    // time), which vehicles may enter, and the data-driven recovery
+    // thresholds.
     public sealed class EventDefinition
     {
         public string id = "";
@@ -13,6 +14,7 @@ namespace FamilyRacing.Core.Racing
         public int laps = 1;
         public int countdownTicks = 90;
         public List<string> vehicleIds = new List<string>();
+        public RecoverySettings recovery = new RecoverySettings();
 
         public bool Validate(out string error)
         {
@@ -24,6 +26,8 @@ namespace FamilyRacing.Core.Racing
             if (vehicleIds == null || vehicleIds.Count == 0) { error = "vehicleIds"; return false; }
             foreach (var vehicleId in vehicleIds)
                 if (string.IsNullOrEmpty(vehicleId)) { error = "vehicleIds"; return false; }
+            if (recovery == null) { error = "recovery"; return false; }
+            if (!recovery.Validate(out error)) return false;
             return true;
         }
 
@@ -40,7 +44,8 @@ namespace FamilyRacing.Core.Racing
                 courseId = courseId,
                 laps = laps,
                 countdownTicks = countdownTicks,
-                vehicleIds = vehicleIds == null ? null : new List<string>(vehicleIds)
+                vehicleIds = vehicleIds == null ? null : new List<string>(vehicleIds),
+                recovery = recovery == null ? null : recovery.Copy()
             };
         }
     }

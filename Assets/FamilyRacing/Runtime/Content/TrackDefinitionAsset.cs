@@ -19,6 +19,10 @@ namespace FamilyRacing
             public Vector3 center;
             public float halfWidth = 6f;
             public Vector2 direction = new Vector2(0f, 1f);
+            // Safe respawn after this gate is accepted: authored just
+            // behind the plane along the travel direction.
+            public Vector3 recoverPosition;
+            public float recoverHeadingDegrees;
         }
 
         public string courseId = "graybox-01";
@@ -49,7 +53,11 @@ namespace FamilyRacing
                         z = gate.center.z,
                         halfWidth = gate.halfWidth,
                         dirX = gate.direction.x,
-                        dirZ = gate.direction.y
+                        dirZ = gate.direction.y,
+                        recoverX = gate.recoverPosition.x,
+                        recoverY = gate.recoverPosition.y,
+                        recoverZ = gate.recoverPosition.z,
+                        recoverHeading = gate.recoverHeadingDegrees * Mathf.Deg2Rad
                     });
                 }
             if (!course.Validate(out error))

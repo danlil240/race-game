@@ -3,9 +3,12 @@ using System.Collections.Generic;
 
 namespace FamilyRacing.Core.Racing
 {
-    // One ordered course gate. Progress rules arrive in Task 2; the data
-    // contract (ordered ids, position, gate half-width and intended
-    // crossing direction) is fixed now so content can be authored.
+    // One ordered course gate. Index 0 is the start/finish line. A gate
+    // counts when the swept previous->current pose segment crosses its
+    // plane forward (along dirX/dirZ) within halfWidth. The safe recovery
+    // pose is where a respawn returns the vehicle after this gate is
+    // accepted — authored just behind the plane along the travel
+    // direction, facing the way the lap flows.
     [Serializable]
     public sealed class CheckpointGate
     {
@@ -16,6 +19,10 @@ namespace FamilyRacing.Core.Racing
         public float halfWidth;
         public float dirX;
         public float dirZ;
+        public float recoverX;
+        public float recoverY;
+        public float recoverZ;
+        public float recoverHeading;
 
         public CheckpointGate Copy()
         {
@@ -27,7 +34,11 @@ namespace FamilyRacing.Core.Racing
                 z = z,
                 halfWidth = halfWidth,
                 dirX = dirX,
-                dirZ = dirZ
+                dirZ = dirZ,
+                recoverX = recoverX,
+                recoverY = recoverY,
+                recoverZ = recoverZ,
+                recoverHeading = recoverHeading
             };
         }
     }
@@ -60,6 +71,12 @@ namespace FamilyRacing.Core.Racing
                     || !Finite(gate.halfWidth) || gate.halfWidth <= 0f
                     || !Finite(gate.dirX) || !Finite(gate.dirZ))
                 { error = "checkpoint." + gate.id; return false; }
+                // A zero direction cannot define a directional crossing.
+                if (gate.dirX * gate.dirX + gate.dirZ * gate.dirZ < 0.0001f)
+                { error = "checkpoint.direction"; return false; }
+                if (!Finite(gate.recoverX) || !Finite(gate.recoverY)
+                    || !Finite(gate.recoverZ) || !Finite(gate.recoverHeading))
+                { error = "checkpoint.recover"; return false; }
             }
             return true;
         }

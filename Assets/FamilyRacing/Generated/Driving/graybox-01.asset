@@ -20,19 +20,29 @@ MonoBehaviour:
     center: {x: 0, y: 0, z: -60}
     halfWidth: 12
     direction: {x: 0, y: 1}
+    recoverPosition: {x: 0, y: 0, z: -63}
+    recoverHeadingDegrees: 0
   - id: gate-1
     center: {x: 0, y: 0, z: 25}
     halfWidth: 12
     direction: {x: 0, y: 1}
+    recoverPosition: {x: 0, y: 0, z: 22}
+    recoverHeadingDegrees: 0
   - id: gate-2
     center: {x: 55, y: 0, z: 55}
     halfWidth: 12
     direction: {x: 1, y: 0}
+    recoverPosition: {x: 52, y: 0, z: 55}
+    recoverHeadingDegrees: 90
   - id: gate-3
     center: {x: 95, y: 0, z: 0}
     halfWidth: 12
     direction: {x: 0, y: -1}
+    recoverPosition: {x: 95, y: 0, z: 3}
+    recoverHeadingDegrees: 180
   - id: gate-4
     center: {x: 50, y: 0, z: -55}
     halfWidth: 12
     direction: {x: -1, y: 0}
+    recoverPosition: {x: 53, y: 0, z: -55}
+    recoverHeadingDegrees: -90

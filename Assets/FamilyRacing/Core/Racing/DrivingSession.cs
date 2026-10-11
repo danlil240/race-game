@@ -105,7 +105,6 @@ namespace FamilyRacing.Core.Racing
         private readonly EventDefinition evt;
         private readonly string contentVersion;
         private readonly List<PendingAction> pending = new List<PendingAction>();
-        private readonly List<CheckpointState> checkpoints = new List<CheckpointState>();
         private readonly List<DrivingEvent> staged = new List<DrivingEvent>();
 
         private MotorState motor;
@@ -115,6 +114,10 @@ namespace FamilyRacing.Core.Racing
         private long simulationTick;
         private long elapsedTicks;
         private long eventSequence;
+        private CheckpointState progress;
+        private MotorPose lastSafePose;
+        private readonly RecoveryRules recovery = new RecoveryRules();
+        private long finishTicks;
 
         public DrivingSession(string raceId, VehicleTuning tuning, CourseDefinition course,
             EventDefinition evt, string contentVersion, string startCommandId)
@@ -144,15 +147,15 @@ namespace FamilyRacing.Core.Racing
                 heading = course.spawnHeading,
                 grounded = true
             };
-            for (var i = 0; i < course.checkpoints.Count; i++)
+            progress = CheckpointProgress.Create(course, evt.laps);
+            // With no accepted gate the safe respawn is the spawn itself.
+            lastSafePose = new MotorPose
             {
-                checkpoints.Add(new CheckpointState
-                {
-                    id = course.checkpoints[i].id,
-                    index = i,
-                    crossed = false
-                });
-            }
+                x = course.spawnX,
+                y = course.spawnY,
+                z = course.spawnZ,
+                heading = course.spawnHeading
+            };
             Emit("race.started", startCommandId ?? "", evt.id);
         }
 
@@ -231,10 +234,12 @@ namespace FamilyRacing.Core.Racing
             }
 
             simulationTick++;
-            ConsumePendingOnce();
+            var consumed = ConsumePendingOnce();
 
             if (phase == PhaseCountdown)
             {
+                if (consumed != null && consumed.kind == "recover")
+                    ApplyRecovery("manual", consumed.commandId);
                 countdownRemaining--;
                 if (countdownRemaining <= 0)
                 {
@@ -245,23 +250,59 @@ namespace FamilyRacing.Core.Racing
             else if (phase == PhaseRunning)
             {
                 elapsedTicks++;
-                var step = ArcadeMotor.Step(motor, input, tuning, world, StepSeconds);
-                if (step.rejected)
+                if (consumed != null && consumed.kind == "recover")
                 {
-                    // A rejected step leaves the motor state untouched.
-                    Emit("motor.error", "", step.error ?? "rejected");
+                    // Manual recovery replaces the pose on this boundary;
+                    // no motor step and no progress evaluation run, so the
+                    // teleport can never manufacture a crossing.
+                    ApplyRecovery("manual", consumed.commandId);
                 }
                 else
                 {
-                    motor = step.state;
-                    motor.tick = simulationTick;
-                    foreach (var motorEvent in step.events)
+                    var previousPose = motor.Pose;
+                    var step = ArcadeMotor.Step(motor, input, tuning, world, StepSeconds);
+                    if (step.rejected)
                     {
-                        var detail = motorEvent.value != 0f
-                            ? motorEvent.value.ToString("0.###",
-                                System.Globalization.CultureInfo.InvariantCulture)
-                            : "";
-                        Emit("motor." + motorEvent.kind, "", detail);
+                        // A rejected step leaves the motor state untouched.
+                        Emit("motor.error", "", step.error ?? "rejected");
+                    }
+                    else
+                    {
+                        motor = step.state;
+                        motor.tick = simulationTick;
+                        motor.recovering = false;
+                        foreach (var motorEvent in step.events)
+                        {
+                            var detail = motorEvent.value != 0f
+                                ? motorEvent.value.ToString("0.###",
+                                    System.Globalization.CultureInfo.InvariantCulture)
+                                : "";
+                            Emit("motor." + motorEvent.kind, "", detail);
+                        }
+                        var advance = CheckpointProgress.Advance(
+                            course, progress, previousPose, motor.Pose);
+                        foreach (var progressEvent in advance.events)
+                        {
+                            if (progressEvent.kind == "checkpoint")
+                                Emit("checkpoint.crossed", "", progressEvent.gateId ?? "");
+                            else if (progressEvent.kind == "lap")
+                                Emit("race.lap", "", progressEvent.lap.ToString(
+                                    System.Globalization.CultureInfo.InvariantCulture));
+                        }
+                        if (advance.recoveryPoseUpdated)
+                            lastSafePose = advance.recoveryPose;
+                        if (progress.finished)
+                        {
+                            phase = PhaseFinished;
+                            finishTicks = elapsedTicks;
+                            Emit("race.finished", "", elapsedTicks.ToString(
+                                System.Globalization.CultureInfo.InvariantCulture));
+                        }
+                        else
+                        {
+                            var reason = recovery.Evaluate(motor, evt.recovery, StepSeconds);
+                            if (reason != null) ApplyRecovery(reason, "");
+                        }
                     }
                 }
             }
@@ -271,15 +312,39 @@ namespace FamilyRacing.Core.Racing
             return result;
         }
 
-        // At most one pending action is consumed per simulated boundary.
-        private void ConsumePendingOnce()
+        // Respawn at the last accepted safe pose: velocity and held motion
+        // (drift, active boost) reset, the existing boost charge is
+        // preserved (recovery never creates charge), the boundary is
+        // flagged `recovering` so progress/landing evaluation skips it,
+        // and the race clock keeps running via the elapsedTicks increment
+        // the caller already applied.
+        private void ApplyRecovery(string reason, string commandId)
         {
-            if (pending.Count == 0) return;
+            var charge = motor.boostCharge;
+            motor = new MotorState
+            {
+                x = lastSafePose.x,
+                y = lastSafePose.y,
+                z = lastSafePose.z,
+                heading = lastSafePose.heading,
+                grounded = true,
+                recovering = true,
+                lastContact = "ground",
+                boostCharge = charge,
+                tick = simulationTick
+            };
+            recovery.Reset();
+            Emit("race.recovered", commandId ?? "", reason ?? "");
+        }
+
+        // At most one pending action is consumed per simulated boundary.
+        private PendingAction ConsumePendingOnce()
+        {
+            if (pending.Count == 0) return null;
             var entry = pending[0];
             pending.RemoveAt(0);
             Emit("action.consumed", entry.commandId, entry.kind);
-            // Actual recovery rules arrive in Task 2; consumption is the
-            // observable Task-1 contract.
+            return entry;
         }
 
         public DrivingSessionState Snapshot()
@@ -295,11 +360,11 @@ namespace FamilyRacing.Core.Racing
                 countdownTicksRemaining = countdownRemaining,
                 simulationTick = simulationTick,
                 elapsedTicks = elapsedTicks,
-                lap = 0,
+                lap = progress.lap,
                 lapsRequired = evt.laps,
-                nextCheckpoint = 0,
+                nextCheckpoint = progress.expectedCheckpoint,
                 finished = phase == PhaseFinished,
-                finishTicks = 0,
+                finishTicks = finishTicks,
                 motor = motor.Copy(),
                 input = new InputState
                 {
@@ -312,7 +377,7 @@ namespace FamilyRacing.Core.Racing
                     pause = lastInput.Pause
                 },
                 pendingActions = new List<PendingActionState>(),
-                checkpoints = new List<CheckpointState>(),
+                checkpoints = new List<CheckpointMark>(),
                 camera = null,
                 controls = new List<string>()
             };
@@ -325,8 +390,8 @@ namespace FamilyRacing.Core.Racing
                     enqueuedTick = entry.enqueuedTick
                 });
             }
-            foreach (var gate in checkpoints)
-                state.checkpoints.Add(gate.Copy());
+            foreach (var mark in progress.marks)
+                state.checkpoints.Add(mark.Copy());
             return state;
         }
 
