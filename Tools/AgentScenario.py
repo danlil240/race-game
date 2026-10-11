@@ -5,6 +5,7 @@ not visual quality, physical input, or the unimplemented racing features.
 """
 
 import argparse
+import copy
 import json
 import math
 import socket
@@ -15,8 +16,12 @@ from collections import deque
 from pathlib import Path
 
 
-SEQUENCED_TYPES = {"snapshot", "state", "result", "discovery", "lookup",
-                   "health", "screenshot", "finished"}
+SEQUENCED_TYPES = {"snapshot", "state", "delta", "result", "discovery",
+                   "lookup", "health", "screenshot", "finished"}
+
+# State-carrying boundary records: snapshot/state embed the full state;
+# delta names the boundary it extends plus changed/removed fields.
+BOUNDARY_TYPES = {"snapshot", "state", "delta"}
 
 # Schemas this consumer can interpret. Records without the field are
 # treated as schema 1 (pre-driving baseline); anything outside the
@@ -24,14 +29,92 @@ SEQUENCED_TYPES = {"snapshot", "state", "result", "discovery", "lookup",
 SUPPORTED_STATE_SCHEMAS = {1, 2}
 
 
-def validate_state_schema(event):
-    """Reject state records carrying a schema this consumer cannot read."""
-    if event.get("type") not in ("snapshot", "state"):
+def _remove_path(state, path):
+    """Apply one delta `removed` dot-path; unresolved paths are corrupt."""
+    assert type(path) is str and path, "Removed path must be a non-empty string"
+    segments = path.split(".")
+    node = state
+    for segment in segments[:-1]:
+        assert isinstance(node, dict), "Removed path crosses a non-object"
+        node = node.get(segment)
+    assert isinstance(node, dict) and segments[-1] in node, \
+        "Removed path does not resolve: " + path
+    del node[segments[-1]]
+
+
+def _merge_changed(state, changed):
+    """Recursive object merge: object values merge, everything else
+    (scalars, arrays, null) replaces wholesale."""
+    for key, value in changed.items():
+        current = state.get(key)
+        if isinstance(value, dict) and isinstance(current, dict):
+            _merge_changed(current, value)
+        else:
+            state[key] = value
+
+
+class StateReconstructor:
+    """Independent snapshot+delta consumer for the schema-2 stream.
+
+    Rebuilds the complete application state at every boundary without
+    sharing any producer diff logic: `snapshot`/`state` records replace
+    the baseline; `delta` records must name the applied boundary
+    sequence in `base` and carry a nested `changed` merge object plus a
+    `removed` list of dot-paths. A delta record is never silently read
+    as a full state; a corrupt/missing base or unresolved path fails
+    reconstruction. A fresh snapshot restores observation after a gap
+    but cannot repair missing history: contiguous sequence validation
+    still owns that check.
+    """
+
+    def __init__(self):
+        self._baseline = None
+        self.base_sequence = None
+
+    def apply(self, event):
+        """Apply one sequenced record; return the reconstructed boundary
+        state dict, or None for non-boundary records.
+
+        The returned dict is a fresh copy: caller mutations can never
+        corrupt the internal baseline that later deltas extend."""
+        kind = event.get("type")
+        if kind == "snapshot" or kind == "state":
+            state = event.get("state")
+            assert isinstance(state, dict), "Boundary record without a full state"
+            self._baseline = copy.deepcopy(state)
+            self.base_sequence = event["sequence"]
+            return copy.deepcopy(self._baseline)
+        if kind == "delta":
+            assert self._baseline is not None, "Delta arrived before any baseline"
+            base = event.get("base")
+            assert type(base) is int and base == self.base_sequence, \
+                "Delta base does not name the applied boundary"
+            changed = event.get("changed")
+            removed = event.get("removed", [])
+            assert isinstance(changed, dict) and isinstance(removed, list), \
+                "Malformed delta payload"
+            merged = copy.deepcopy(self._baseline)
+            for path in removed:
+                _remove_path(merged, path)
+            _merge_changed(merged, changed)
+            self._baseline = merged
+            self.base_sequence = event["sequence"]
+            return copy.deepcopy(merged)
+        return None
+
+
+def validate_state_schema(event, state):
+    """Reject boundary records carrying a schema this consumer cannot read.
+
+    `state` is the reconstructed boundary state (for delta records, the
+    result of StateReconstructor.apply) — a delta is never itself
+    interpreted as a full state.
+    """
+    if event.get("type") not in BOUNDARY_TYPES:
         return
     schema = event.get("stateSchemaVersion", 1)
     assert type(schema) is int and schema in SUPPORTED_STATE_SCHEMAS, \
         "Unsupported state schema: " + repr(schema)
-    state = event["state"]
     if schema >= 2:
         assert "driving" in state and "drivingEvents" in state, \
             "Schema-2 state is missing the driving slice"
@@ -69,11 +152,10 @@ def validate_record(event, info, previous_sequence, previous_time):
     return sequence, now
 
 
-def validate_state_tick(event, previous_tick):
-    if event.get("type") not in ("state", "snapshot"):
-        return previous_tick
-    tick = event["state"].get("tick")
-    assert type(tick) is int and tick == event["tick"], "State/record tick mismatch"
+def validate_state_tick(state, event_tick, previous_tick):
+    """Boundary tick continuity on the reconstructed state."""
+    tick = state.get("tick")
+    assert type(tick) is int and tick == event_tick, "State/record tick mismatch"
     if previous_tick is not None:
         assert previous_tick <= tick <= previous_tick + 1, "Missing state boundary or tick rollback"
     return tick
@@ -86,6 +168,7 @@ def verify_trace(directory, info):
     state_tick = None
     first = True
     last = None
+    reconstructor = StateReconstructor()
     with trace.open(encoding="utf-8-sig") as source:
         for line in source:
             assert line.endswith("\n"), "Incomplete trace record"
@@ -95,10 +178,11 @@ def verify_trace(directory, info):
                 assert event.get("type") == "snapshot" and event.get("sequence") == 1
                 first = False
             sequence, timestamp = validate_record(event, info, sequence, timestamp)
-            validate_state_schema(event)
-            state_tick = validate_state_tick(event, state_tick)
-            if event.get("type") in ("state", "snapshot"):
-                assert event["state"]["captureValid"], event["state"].get("captureError")
+            boundary = reconstructor.apply(event)
+            if boundary is not None:
+                validate_state_schema(event, boundary)
+                state_tick = validate_state_tick(boundary, event["tick"], state_tick)
+                assert boundary["captureValid"], boundary.get("captureError")
             last = event
     assert last and last["type"] == "finished" and last["captureValid"], "Trace did not finish"
     status = json.loads((directory / "capture-status.json").read_text(encoding="utf-8-sig"))
@@ -113,7 +197,9 @@ class Client:
         self.last_sequence = None
         self.last_time = None
         self.last_state_tick = None
+        self.reconstructor = StateReconstructor()
         self.state = None
+        self.action_states = {}
         self.sock = socket.create_connection(("127.0.0.1", connection["port"]), timeout=10)
         self.reader = self.sock.makefile("rb")
         self.incoming = (evidence / "observed.ndjson").open("x", encoding="utf-8")
@@ -125,6 +211,7 @@ class Client:
         hello = self.wait(lambda event: event.get("type") == "hello")
         assert hello.get("stateSchemaVersion", 1) in SUPPORTED_STATE_SCHEMAS, \
             "Server advertises an unsupported state schema"
+        self.hello = hello
         self.wait(lambda event: event.get("type") == "snapshot")
 
     def send(self, frame):
@@ -145,11 +232,15 @@ class Client:
         event = json.loads(line)
         self.last_sequence, self.last_time = validate_record(
             event, self.info, self.last_sequence, self.last_time)
-        validate_state_schema(event)
-        self.last_state_tick = validate_state_tick(event, self.last_state_tick)
+        boundary = self.reconstructor.apply(event)
         assert self.info["token"] not in line.decode("utf-8"), "Credential leaked"
-        if event.get("type") in ("snapshot", "state"):
-            self.state = event["state"]
+        if boundary is not None:
+            validate_state_schema(event, boundary)
+            self.last_state_tick = validate_state_tick(
+                boundary, event["tick"], self.last_state_tick)
+            self.state = boundary
+            if event.get("commandId") is not None:
+                self.action_states[event["commandId"]] = boundary
             assert self.state["captureValid"], self.state.get("captureError")
             assert len(self.state["slots"]) == 4, "Incomplete profile state"
         self.incoming.write(json.dumps(event, ensure_ascii=False) + "\n")
@@ -185,10 +276,10 @@ class Client:
         return result, frame
 
     def action_state(self, command_id):
-        for event in reversed(self.events):
-            if event.get("type") == "state" and event.get("commandId") == command_id:
-                return event["state"]
-        raise AssertionError("Missing command-correlated action-boundary state")
+        state = self.action_states.get(command_id)
+        if state is None:
+            raise AssertionError("Missing command-correlated action-boundary state")
+        return state
 
     def close(self):
         self.reader.close()
@@ -297,9 +388,9 @@ def run(connection, evidence):
         assert state["input"]["boost"] and state["input"]["gadget"]
         assert state["input"]["recover"] and state["input"]["changeCamera"]
         assert state["draftProfile"]["camera"] == "overhead"
-        client.wait(lambda event: event.get("type") == "state"
-                    and event["state"]["tick"] >= drive["tick"] + 10
-                    and event["state"]["input"]["steering"] == 0)
+        client.wait(lambda event: event.get("type") in BOUNDARY_TYPES
+                    and client.state["tick"] >= drive["tick"] + 10
+                    and client.state["input"]["steering"] == 0)
         checks.append("held controls, transient pulses, camera, bounded expiry")
 
         toggled, _ = client.applied("camera.toggle")
@@ -309,10 +400,10 @@ def run(connection, evidence):
         paused, _ = client.applied("pause.toggle")
         assert client.action_state(paused["commandId"])["paused"]
         held, _ = client.applied("input.set", inputs(steering=-1, boost=True, duration=2))
-        client.wait(lambda event: event.get("type") == "state"
-                    and event["state"]["paused"]
-                    and event["state"]["tick"] >= held["tick"] + 2
-                    and event["state"]["input"]["steering"] == 0)
+        client.wait(lambda event: event.get("type") in BOUNDARY_TYPES
+                    and client.state["paused"]
+                    and client.state["tick"] >= held["tick"] + 2
+                    and client.state["input"]["steering"] == 0)
         client.applied("pause.toggle")
         client.applied("input.clear")
         checks.append("paused observation and input cleanup")
@@ -338,9 +429,9 @@ def run(connection, evidence):
             and tutorial["objective"] == "tutorial.cue.steering", tutorial
         checks.append("tutorial.start enters the ordered lesson stage")
 
-        client.wait(lambda event: event.get("type") == "state"
-                    and event["state"].get("driving")
-                    and event["state"]["driving"]["phase"] == "running",
+        client.wait(lambda event: event.get("type") in BOUNDARY_TYPES
+                    and client.state.get("driving")
+                    and client.state["driving"]["phase"] == "running",
                     timeout=30)
         replayed, _ = client.applied("tutorial.replay")
         state = client.action_state(replayed["commandId"])
@@ -353,10 +444,10 @@ def run(connection, evidence):
         # The steering lesson completes only after enough simulated
         # boundaries of real held steering input.
         client.applied("input.set", inputs(steering=0.8, duration=150))
-        client.wait(lambda event: event.get("type") == "state"
-                    and event["state"].get("driving")
-                    and event["state"]["driving"].get("tutorial")
-                    and event["state"]["driving"]["tutorial"]["lessonId"]
+        client.wait(lambda event: event.get("type") in BOUNDARY_TYPES
+                    and client.state.get("driving")
+                    and client.state["driving"].get("tutorial")
+                    and client.state["driving"]["tutorial"]["lessonId"]
                     == "drift", timeout=60)
         checks.append("steering lesson completes on genuine held steering")
 
@@ -376,22 +467,22 @@ def run(connection, evidence):
         assert driving["phase"] == "countdown" and driving["raceId"]
         checks.append("race.start enters driving through the shared command path")
 
-        client.wait(lambda event: event.get("type") == "state"
-                    and event["state"].get("driving")
-                    and event["state"]["driving"]["phase"] == "running",
+        client.wait(lambda event: event.get("type") in BOUNDARY_TYPES
+                    and client.state.get("driving")
+                    and client.state["driving"]["phase"] == "running",
                     timeout=30)
         # Auto-acceleration: the car moves without any held input.
         spawn_z = driving["motor"]["z"]
-        client.wait(lambda event: event.get("type") == "state"
-                    and event["state"].get("driving")
-                    and event["state"]["driving"]["motor"]["z"] > spawn_z + 5.0,
+        client.wait(lambda event: event.get("type") in BOUNDARY_TYPES
+                    and client.state.get("driving")
+                    and client.state["driving"]["motor"]["z"] > spawn_z + 5.0,
                     timeout=60)
         motor = client.state["driving"]["motor"]
         heading0 = motor["heading"]
         client.applied("input.set", inputs(steering=1, duration=90))
-        client.wait(lambda event: event.get("type") == "state"
-                    and event["state"].get("driving")
-                    and abs(event["state"]["driving"]["motor"]["heading"] - heading0)
+        client.wait(lambda event: event.get("type") in BOUNDARY_TYPES
+                    and client.state.get("driving")
+                    and abs(client.state["driving"]["motor"]["heading"] - heading0)
                     > 0.3, timeout=30)
         client.applied("input.clear")
         checks.append("command input moves and steers the physical car")
@@ -400,8 +491,8 @@ def run(connection, evidence):
         paused_state = client.action_state(paused["commandId"])
         assert paused_state["paused"]
         sim_tick = paused_state["driving"]["simulationTick"]
-        client.wait(lambda event: event.get("type") == "state"
-                    and event["state"]["tick"] >= paused_state["tick"] + 30)
+        client.wait(lambda event: event.get("type") in BOUNDARY_TYPES
+                    and client.state["tick"] >= paused_state["tick"] + 30)
         assert client.state["driving"]["simulationTick"] == sim_tick, \
             "Simulation kept running while paused"
         client.applied("pause.toggle")

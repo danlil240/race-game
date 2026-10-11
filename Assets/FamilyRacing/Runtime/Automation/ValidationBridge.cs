@@ -154,7 +154,7 @@ namespace FamilyRacing.Automation
 
         internal void EmitTick()
         {
-            if (!finishRequested) stream.EmitState(service.Snapshot(), null);
+            if (!finishRequested) stream.EmitDeltaBoundary(service.Snapshot(), null);
         }
 
         internal void EmitCommandBoundary(CommandResult result)
@@ -162,7 +162,7 @@ namespace FamilyRacing.Automation
             if (finishRequested || result == null) return;
             // Action boundary publishes the post-execution state before the
             // result so the result lands on a state boundary.
-            stream.EmitState(service.Snapshot(), result.commandId);
+            stream.EmitDeltaBoundary(service.Snapshot(), result.commandId);
             stream.EmitResult(result);
         }
 
@@ -296,15 +296,20 @@ namespace FamilyRacing.Automation
         private void HandleScreenshot(JObject frame)
         {
             var captureId = ValidationJson.Text(frame, "captureId");
+            // Rejections are sequenced screenshot records so the trace keeps
+            // durable, ordered evidence of every refused request — an
+            // unsequenced error would leave gaps only the socket saw.
             if (captureId == null || captureId.Length == 0 || captureId.Length > 64 ||
                 !IsSafeId(captureId))
             {
-                stream.EmitError("badScreenshot");
+                stream.EmitScreenshot(captureId ?? "", "", "rejected",
+                    service.Snapshot().tick, "badScreenshot");
                 return;
             }
             if (screenshots.Count >= MaxPendingScreenshots)
             {
-                stream.EmitError("screenshotQueueFull");
+                stream.EmitScreenshot(captureId, "", "rejected",
+                    service.Snapshot().tick, "screenshotQueueFull");
                 return;
             }
             var file = "screenshot-" + captureId + ".png";
@@ -378,7 +383,7 @@ namespace FamilyRacing.Automation
             service.ClearInput();
             markInputSource?.Invoke("none");
             var state = service.Snapshot();
-            stream.EmitState(state, null);
+            stream.EmitDeltaBoundary(state, null);
             // Async finish: the writer flushes the finished trace line and
             // durable capture-status, then sends the finished record; Pump
             // closes the session once FinishCompleted. The game thread and

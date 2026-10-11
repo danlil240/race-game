@@ -32,6 +32,10 @@ namespace FamilyRacing.Core.Foundation
         public PresentationState presentation;
         public DrivingSessionState driving;
         public List<DrivingEvent> drivingEvents;
+        // Durable marker for bounded-event pressure: the number of events
+        // evicted from drivingEvents by the capacity bound. An observer
+        // never sees events disappear without this counter moving.
+        public int droppedDrivingEvents;
     }
 
     // Runtime-visible presentation facts (geometry, input ownership, locale,

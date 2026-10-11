@@ -163,6 +163,9 @@ namespace FamilyRacing.Core.Foundation
         private DrivingTutorial tutorial;
         private long raceCounter;
         private readonly List<DrivingEvent> drivingEvents = new List<DrivingEvent>();
+        // Honest capacity accounting: evicted events are never silent —
+        // every drop moves this marker into the published state.
+        private int droppedDrivingEvents;
         private DrivingCameraState cameraFacts = new DrivingCameraState();
 
         public FoundationService(ProfileStore store, string defaultLanguage, string runId)
@@ -299,7 +302,8 @@ namespace FamilyRacing.Core.Foundation
                 featureCoverage = new FeatureCoverage(),
                 presentation = CopyPresentation(presentation),
                 driving = null,
-                drivingEvents = new List<DrivingEvent>()
+                drivingEvents = new List<DrivingEvent>(),
+                droppedDrivingEvents = droppedDrivingEvents
             };
             if (driving != null)
             {
@@ -413,7 +417,9 @@ namespace FamilyRacing.Core.Foundation
                 hebrewFontAvailable = value.hebrewFontAvailable,
                 fontWarning = value.fontWarning,
                 buildTarget = value.buildTarget,
-                validationActive = value.validationActive
+                validationActive = value.validationActive,
+                backlogSteps = value.backlogSteps,
+                stepOverloads = value.stepOverloads
             };
         }
 
@@ -920,8 +926,13 @@ namespace FamilyRacing.Core.Foundation
             foreach (var ev in events)
             {
                 drivingEvents.Add(ev);
+                // The event slice is bounded; eviction is allowed only
+                // because the durable drop marker records every removal.
                 if (drivingEvents.Count > MaxDrivingEvents)
+                {
                     drivingEvents.RemoveAt(0);
+                    droppedDrivingEvents++;
+                }
             }
         }
 

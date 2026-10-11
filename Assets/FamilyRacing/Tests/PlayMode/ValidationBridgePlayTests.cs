@@ -24,6 +24,8 @@ namespace FamilyRacing.Tests
         {
             private readonly TcpClient client;
             private readonly NetworkStream stream;
+            internal readonly StreamReconstructor Reconstructor =
+                new StreamReconstructor();
 
             public Client(int port)
             {
@@ -47,13 +49,30 @@ namespace FamilyRacing.Tests
                 stream.Flush();
             }
 
+            private JObject appliedBoundary;
+
             public JObject Read()
             {
                 var buffer = new MemoryStream();
                 int b;
                 while ((b = stream.ReadByte()) >= 0 && b != '\n') buffer.WriteByte((byte)b);
                 if (buffer.Length == 0 && b < 0) return null;
-                return JObject.Parse(Encoding.UTF8.GetString(buffer.ToArray()));
+                var record = JObject.Parse(Encoding.UTF8.GetString(buffer.ToArray()));
+                appliedBoundary = Reconstructor.Apply(record);
+                return record;
+            }
+
+            // Read until the next boundary record; returns {record,
+            // reconstructed state}.
+            public JObject[] ReadBoundary()
+            {
+                for (var i = 0; i < 64; i++)
+                {
+                    var record = Read();
+                    if (appliedBoundary != null) return new[] { record, appliedBoundary };
+                }
+                Assert.Fail("No boundary record within 64 records");
+                return null;
             }
 
             public void Dispose() { try { client.Close(); } catch { } }
@@ -160,10 +179,10 @@ namespace FamilyRacing.Tests
                 client.Send(command);
                 yield return PumpSeconds(0.5f);
 
-                var boundary = client.Read();
-                Assert.That((string)boundary["type"], Is.EqualTo("state"));
-                Assert.That((string)boundary["commandId"], Is.EqualTo("cmd-create-1"));
-                Assert.That((string)boundary["state"]["screen"], Is.EqualTo("settings"));
+                var pair = client.ReadBoundary();
+                Assert.That((string)pair[0]["type"], Is.EqualTo("delta"));
+                Assert.That((string)pair[0]["commandId"], Is.EqualTo("cmd-create-1"));
+                Assert.That((string)pair[1]["screen"], Is.EqualTo("settings"));
 
                 var result = client.Read();
                 Assert.That((string)result["type"], Is.EqualTo("result"));
@@ -177,7 +196,7 @@ namespace FamilyRacing.Tests
                 client.Send(finish);
                 yield return PumpSeconds(0.5f);
                 var finalState = client.Read();
-                Assert.That((string)finalState["type"], Is.EqualTo("state"));
+                Assert.That((string)finalState["type"], Is.EqualTo("delta"));
                 var finished = client.Read();
                 Assert.That((string)finished["type"], Is.EqualTo("finished"));
                 Assert.That((bool)finished["captureValid"], Is.True);
@@ -442,7 +461,8 @@ namespace FamilyRacing.Tests
                 client.Send(finish);
                 yield return PumpSeconds(0.6f);
                 var last = client.Read();
-                if ((string)last["type"] == "state") last = client.Read();
+                var lastType = (string)last["type"];
+                if (lastType == "state" || lastType == "delta") last = client.Read();
                 Assert.That((string)last["type"], Is.EqualTo("finished"));
             }
             yield return PumpSeconds(0.3f);
@@ -571,7 +591,8 @@ namespace FamilyRacing.Tests
                 client.Send(finish);
                 yield return PumpSeconds(0.6f);
                 var last = client.Read();
-                if ((string)last["type"] == "state") last = client.Read();
+                var lastType = (string)last["type"];
+                if (lastType == "state" || lastType == "delta") last = client.Read();
                 Assert.That((string)last["type"], Is.EqualTo("finished"));
                 Assert.That((bool)last["captureValid"], Is.False,
                     "Finished reply must reflect the failed status write.");

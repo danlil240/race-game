@@ -17,7 +17,8 @@ import sys
 import time
 from pathlib import Path
 
-from AgentScenario import SEQUENCED_TYPES, validate_record, validate_state_tick
+from AgentScenario import (SEQUENCED_TYPES, StateReconstructor,
+                           validate_record, validate_state_tick)
 from RestartScenario import build_fingerprint, file_hash, wait_connection, write_json
 from StreamRobustnessScenario import (
     open_client, validate_invalid_status, wait_invalid_status)
@@ -56,6 +57,7 @@ def verify_stalled_trace(trace, info):
     count = 0
     identity = None
     finished_seen = False
+    reconstructor = StateReconstructor()
     with trace.open(encoding="utf-8-sig") as source:
         for line in source:
             assert line.endswith("\n"), "Truncated trace prefix"
@@ -77,7 +79,9 @@ def verify_stalled_trace(trace, info):
             if count == 0:
                 assert event.get("type") == "snapshot" and event.get("sequence") == 1
             sequence, timestamp = validate_record(event, info, sequence, timestamp)
-            tick = validate_state_tick(event, tick)
+            boundary = reconstructor.apply(event)
+            if boundary is not None:
+                tick = validate_state_tick(boundary, event["tick"], tick)
             count += 1
     assert count > 0
     return {"records": count, "lastSequence": sequence, "finishedTraced": finished_seen,

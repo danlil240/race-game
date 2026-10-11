@@ -82,6 +82,8 @@ python Tools\AgentScenario.py <dir>\connection.json --evidence <new-evidence-dir
 python Tools\RestartScenario.py <player.exe> --evidence <new-dir>
 # Expected-fault stream robustness (disconnect/reset/stalled sink):
 python Tools\StreamRobustnessScenario.py <player.exe> --evidence <new-dir>
+# Complete driving observation (both vehicles, reconstruction, capacity):
+python Tools\DrivingScenario.py <dir>\connection.json --evidence <new-evidence-dir>
 # Finish delivery to a stalled non-reading controller (expected-fault):
 python Tools\FinishDeliveryScenario.py <player.exe> --evidence <new-dir>
 # Real profile store + graceful exit (WM_CLOSE) + restart:
@@ -106,7 +108,9 @@ no duplicate keys, no trailing content, strict UTF-8:
 - `{"type":"discover"|"snapshot"|"health"|"finish"}`, `{"type":"lookup","commandId":...}`,
   `{"type":"screenshot","captureId":...}` — `captureId` is `[A-Za-z0-9_-]{1,64}`;
   the PNG lands at `<run>/screenshots/screenshot-<captureId>.png` and a
-  sequenced `screenshot` record reports `status` `captured` or `failed`.
+  sequenced `screenshot` record reports `status` `captured`, `failed`, or
+  `rejected` (invalid ids and queue overflow are refused with a `code`,
+  never an unsequenced error).
 
 Actions: `profile.create`, `profile.select`, `ui.navigate`, `ui.language`,
 `settings.update`, `settings.save`, `input.set`, `input.clear`,
@@ -140,11 +144,23 @@ deferred) while `featureCoverage.drivingOnboarding` reports this slice.
 Sequenced server records carry `protocolVersion`, `runId`, `deviceId`
 (random per run), `participantId`, `buildVersion`, `contentVersion`,
 contiguous `sequence`, `monotonicMs`, `tick`: `snapshot`, `state`,
-`result`, `discovery`, `lookup`, `health`, `screenshot`, `finished`.
-`snapshot`/`state` records also carry `stateSchemaVersion` (currently `2`:
-the state adds the `driving` session slice, `drivingEvents`, and
-`driving.simulationTick` alongside the observation `tick`); consumers must
-reject unsupported schemas before trusting driving evidence.
+`delta`, `result`, `discovery`, `lookup`, `health`, `screenshot`,
+`finished`.
+`snapshot`/`state` records carry a complete `state` payload and
+`stateSchemaVersion` (currently `2`: the state adds the `driving` session
+slice, `drivingEvents`, and `driving.simulationTick` alongside the
+observation `tick`); consumers must reject unsupported schemas before
+trusting driving evidence.
+Tick and command boundaries emit as `delta` records: `base` names the
+previous boundary's `sequence`, `changed` is a recursive object merge
+(scalars/arrays/nulls replace wholesale), and `removed` lists dot-paths
+absent from the new state. A `delta` is never a complete state on its own
+— an independent consumer reconstructs by applying it to the named base
+boundary; a wrong or missing base, unresolved removed path, or
+non-contiguous sequence fails reconstruction. Complete snapshots are still
+emitted for attach and explicit `snapshot` resynchronization.
+`droppedDrivingEvents` in the state counts events evicted by the bounded
+`drivingEvents` slice — eviction is never silent.
 `contentVersion` now travels independently of `buildVersion` and names the
 driving content catalog (`driving-0.1`). The trace opens with
 a `snapshot` at sequence 1; an authenticated controller's first live frame

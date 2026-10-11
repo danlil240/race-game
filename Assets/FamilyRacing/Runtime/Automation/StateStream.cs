@@ -26,12 +26,14 @@ namespace FamilyRacing.Automation
 
         private sealed class WorkItem
         {
+            // Serialized on the writer thread: emit-time code only builds
+            // the immutable record, so UTF-8 work stays off the game thread.
             public string line;
             public bool traceWrite;
             public ControllerSession target; // session captured at emit time
             public bool finishCapture;
             public bool finishValid;
-            public JObject record; // finished payload, patched at write time
+            public JObject record; // immutable payload; finished records are re-patched at write time
         }
 
         private readonly string directory;
@@ -51,6 +53,12 @@ namespace FamilyRacing.Automation
         private bool traceClosed;
         private ControllerSession attachedSession;
         private int sequence;
+        // Producer-side baseline for schema-2 delta boundaries: the last
+        // emitted boundary payload (deep copy) plus its stream sequence.
+        // Only boundary records advance it, so a delta's `base` always
+        // names the boundary an independent consumer last applied.
+        private JObject baseline;
+        private long baselineSequence;
         private bool captureActive = true;
         private string captureInvalidCode = "";
         private bool finishRequested;
@@ -124,17 +132,107 @@ namespace FamilyRacing.Automation
 
         internal void EmitSnapshot(FoundationState state)
         {
+            var payload = JObject.FromObject(state);
             var record = Record("snapshot", state.tick, null);
             record["stateSchemaVersion"] = state.stateSchemaVersion;
-            record["state"] = JObject.FromObject(state);
-            Emit(record);
+            record["state"] = payload;
+            EmitBoundary(record, payload);
         }
 
         internal void EmitState(FoundationState state, string commandId)
         {
+            var payload = JObject.FromObject(state);
             var record = Record("state", state.tick, commandId);
             record["stateSchemaVersion"] = state.stateSchemaVersion;
-            record["state"] = JObject.FromObject(state);
+            record["state"] = payload;
+            EmitBoundary(record, payload);
+        }
+
+        // Ordered boundary emission: a delta naming the previous boundary's
+        // sequence plus its changed/removed fields, or a full `state` record
+        // when no baseline exists. A delta with empty changed/removed is a
+        // legitimate boundary — a tick boundary exists even when no fields
+        // change.
+        internal void EmitDeltaBoundary(FoundationState state, string commandId)
+        {
+            var payload = JObject.FromObject(state);
+            if (baseline == null)
+            {
+                var full = Record("state", state.tick, commandId);
+                full["stateSchemaVersion"] = state.stateSchemaVersion;
+                full["state"] = payload;
+                EmitBoundary(full, payload);
+                return;
+            }
+            var changed = DiffChanged(baseline, payload);
+            var removed = new JArray();
+            CollectRemoved(baseline, payload, "", removed);
+            var record = Record("delta", state.tick, commandId);
+            record["stateSchemaVersion"] = state.stateSchemaVersion;
+            record["base"] = baselineSequence;
+            record["changed"] = changed;
+            record["removed"] = removed;
+            EmitBoundary(record, payload);
+        }
+
+        // Recursive object merge producer: object-vs-object diffs nest,
+        // everything else (scalars, arrays, null) replaces wholesale.
+        private static JObject DiffChanged(JObject oldObj, JObject newObj)
+        {
+            var changed = new JObject();
+            foreach (var property in newObj.Properties())
+            {
+                var oldValue = oldObj[property.Name];
+                var newValue = property.Value;
+                if (oldValue == null)
+                {
+                    changed[property.Name] = newValue;
+                    continue;
+                }
+                var oldChild = oldValue as JObject;
+                var newChild = newValue as JObject;
+                if (oldChild != null && newChild != null)
+                {
+                    var child = DiffChanged(oldChild, newChild);
+                    if (child.HasValues) changed[property.Name] = child;
+                    continue;
+                }
+                if (!JToken.DeepEquals(oldValue, newValue))
+                    changed[property.Name] = newValue;
+            }
+            return changed;
+        }
+
+        // Dot-path removals mirror the consumer's removed-path semantics:
+        // only keys absent from the new state are removed; present-but-null
+        // is a change, never a removal.
+        private static void CollectRemoved(JObject oldObj, JObject newObj,
+            string prefix, JArray removed)
+        {
+            foreach (var property in oldObj.Properties())
+            {
+                var path = prefix.Length == 0 ? property.Name : prefix + "." + property.Name;
+                var newValue = newObj[property.Name];
+                if (newValue == null)
+                {
+                    removed.Add(path);
+                    continue;
+                }
+                var oldChild = property.Value as JObject;
+                var newChild = newValue as JObject;
+                if (oldChild != null && newChild != null)
+                    CollectRemoved(oldChild, newChild, path, removed);
+            }
+        }
+
+        // Queues a boundary record and advances the producer baseline. The
+        // baseline is a deep copy so the writer can serialize the queued
+        // record while the game thread diffs the next tick without sharing
+        // mutable objects across threads.
+        private void EmitBoundary(JObject record, JObject payload)
+        {
+            baselineSequence = (long)record["sequence"];
+            baseline = (JObject)payload.DeepClone();
             Emit(record);
         }
 
@@ -179,13 +277,17 @@ namespace FamilyRacing.Automation
 
         // Screenshot completion is a sequenced capture record correlated by
         // captureId: "captured" carries the run-relative file, "failed" is
-        // an honest outcome (e.g. headless capture), never silent.
-        internal void EmitScreenshot(string captureId, string file, string status, long tick)
+        // an honest outcome (e.g. headless capture), "rejected" carries the
+        // refusal code for invalid/overflowing requests — never an
+        // unsequenced error that leaves no durable trace evidence.
+        internal void EmitScreenshot(string captureId, string file, string status,
+            long tick, string code = null)
         {
             var record = Record("screenshot", tick, null);
             record["captureId"] = captureId;
             record["file"] = file ?? "";
             record["status"] = status;
+            if (code != null) record["code"] = code;
             Emit(record);
         }
 
@@ -197,7 +299,7 @@ namespace FamilyRacing.Automation
             record["protocolVersion"] = 1;
             record["runId"] = runId;
             record["code"] = code ?? "streamError";
-            Enqueue(new WorkItem { line = ValidationJson.Line(record), target = attachedSession });
+            Enqueue(new WorkItem { record = record, target = attachedSession });
         }
 
         private void Emit(JObject record)
@@ -206,7 +308,7 @@ namespace FamilyRacing.Automation
             if (disposed || finishRequested) return;
             Enqueue(new WorkItem
             {
-                line = ValidationJson.Line(record),
+                record = record,
                 traceWrite = captureActive,
                 target = attachedSession
             });
@@ -298,6 +400,10 @@ namespace FamilyRacing.Automation
                     }
                     else
                     {
+                        // Serialization lives here so emit-time work on the
+                        // game thread stays bounded to building the record.
+                        if (item.line == null)
+                            item.line = ValidationJson.Line(item.record);
                         if (item.traceWrite && !traceClosed)
                             WriteTraceLine(item);
                         if (!SendToTarget(item))

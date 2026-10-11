@@ -13,7 +13,9 @@ import sys
 import time
 from pathlib import Path
 
-from AgentScenario import Client, SEQUENCED_TYPES, inputs, validate_record, validate_state_tick
+from AgentScenario import (BOUNDARY_TYPES, Client, SEQUENCED_TYPES,
+                           StateReconstructor, inputs, validate_record,
+                           validate_state_tick)
 from RestartScenario import build_fingerprint, file_hash, wait_connection, write_json
 
 
@@ -49,6 +51,7 @@ def verify_failed_prefix(trace, info):
     sequence, timestamp, tick = None, None, None
     count = 0
     identity = None
+    reconstructor = StateReconstructor()
     with trace.open(encoding="utf-8-sig") as source:
         for line in source:
             assert line.endswith("\n"), "Truncated trace prefix"
@@ -64,7 +67,9 @@ def verify_failed_prefix(trace, info):
             if count == 0:
                 assert event.get("type") == "snapshot" and event.get("sequence") == 1
             sequence, timestamp = validate_record(event, info, sequence, timestamp)
-            tick = validate_state_tick(event, tick)
+            boundary = reconstructor.apply(event)
+            if boundary is not None:
+                tick = validate_state_tick(boundary, event["tick"], tick)
             count += 1
     assert count > 0
     return {"records": count, "lastSequence": sequence,
@@ -82,7 +87,10 @@ class FaultClient(Client):
         event = json.loads(line)
         self.last_sequence, self.last_time = validate_record(
             event, self.info, self.last_sequence, self.last_time)
-        self.last_state_tick = validate_state_tick(event, self.last_state_tick)
+        boundary = self.reconstructor.apply(event)
+        if boundary is not None:
+            self.last_state_tick = validate_state_tick(
+                boundary, event["tick"], self.last_state_tick)
         assert self.info["token"] not in line.decode("utf-8"), "Credential leaked"
         if "sequence" in event:
             identity = tuple(event[key] for key in (
@@ -92,8 +100,10 @@ class FaultClient(Client):
                 self.identity = identity
                 self.first_snapshot = event
             assert identity == self.identity, "Stream identity changed within attachment"
-        if event.get("type") in ("snapshot", "state"):
-            self.state = event["state"]
+        if boundary is not None:
+            self.state = boundary
+            if event.get("commandId") is not None:
+                self.action_states[event["commandId"]] = boundary
             assert type(self.state["captureValid"]) is bool and len(self.state["slots"]) == 4
         self.incoming.write(json.dumps(event, ensure_ascii=False) + "\n")
         self.incoming.flush()

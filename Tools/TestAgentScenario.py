@@ -61,7 +61,7 @@ class IntegrityTests(unittest.TestCase):
         record["state"]["driving"] = None
         record["state"]["drivingEvents"] = []
         record["state"]["stateSchemaVersion"] = 2
-        validate_state_schema(record)
+        validate_state_schema(record, record["state"])
         live = self.record()
         live["stateSchemaVersion"] = 2
         live["state"]["driving"] = {
@@ -72,27 +72,27 @@ class IntegrityTests(unittest.TestCase):
         }
         live["state"]["drivingEvents"] = []
         live["state"]["stateSchemaVersion"] = 2
-        validate_state_schema(live)
+        validate_state_schema(live, live["state"])
 
     def test_schema_2_states_without_driving_are_rejected(self):
         record = self.record()
         record["stateSchemaVersion"] = 2
         record["state"]["stateSchemaVersion"] = 2
         with self.assertRaises(AssertionError):
-            validate_state_schema(record)
+            validate_state_schema(record, record["state"])
 
     def test_unsupported_schemas_are_rejected_before_driving_evidence(self):
         for schema in (0, 3, "2", True):
             record = self.record()
             record["stateSchemaVersion"] = schema
             with self.subTest(schema=schema), self.assertRaises(AssertionError):
-                validate_state_schema(record)
+                validate_state_schema(record, record["state"])
 
     def test_schema_1_records_stay_compatible(self):
         record = self.record()
-        validate_state_schema(record)  # no field: baseline schema
+        validate_state_schema(record, record["state"])  # no field: baseline schema
         record["stateSchemaVersion"] = 1
-        validate_state_schema(record)
+        validate_state_schema(record, record["state"])
 
     def test_screenshot_is_a_sequenced_record_type(self):
         record = self.record(kind="screenshot")
@@ -108,11 +108,11 @@ class IntegrityTests(unittest.TestCase):
         state = self.record(sequence=2)
         state["tick"] = state["state"]["tick"] = 4
         with self.assertRaises(AssertionError):
-            validate_state_tick(state, 1)
+            validate_state_tick(state["state"], state["tick"], 1)
         state["tick"] = state["state"]["tick"] = 1
-        self.assertEqual(validate_state_tick(state, 1), 1)
+        self.assertEqual(validate_state_tick(state["state"], state["tick"], 1), 1)
         state["tick"] = state["state"]["tick"] = 2
-        self.assertEqual(validate_state_tick(state, 1), 2)
+        self.assertEqual(validate_state_tick(state["state"], state["tick"], 1), 2)
 
     def test_invalid_time_and_wrong_run_fail(self):
         for key, value in (("monotonicMs", float("nan")), ("monotonicMs", -1),

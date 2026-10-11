@@ -29,14 +29,22 @@ are explicitly `notImplemented`; additional QA gaps are listed below.
 (contiguous), `monotonicMs`, `tick`; state/snapshot bodies carry `screen`,
 `language`, `activeSlot`, `slots[]`, `savedProfile`, `draftProfile`,
 `pendingSettings`, `input`, `paused`, `persistenceStatus`,
-`captureValid/captureError`, `presentation`, `featureCoverage`. Camera mode
+`captureValid/captureError`, `presentation` (incl. `backlogSteps`,
+`stepOverloads`), `featureCoverage`, `driving`, `drivingEvents`,
+`droppedDrivingEvents`. Boundaries may also arrive as `delta` records
+(`base` = previous boundary sequence, recursive `changed` merge, dot-path
+`removed` list) — an independent reconstructor rebuilds the full state at
+every boundary; a delta alone is never a complete state. Camera mode
 is a profile field (`savedProfile.camera` / `draftProfile.camera`), not a
 top-level state field. Hello and parser-error replies are unsequenced;
 they must not be mistaken for sequenced state records.
 
 ## Verified (external `Tools/AgentScenario.py` runs on real players)
 
-Latest run on the final packaged-font build: 11/11 checks
+Latest run on the schema-2 driving build: 21/21 checks
+(`Logs\evidence-agent6\result.json`) — adds tutorial onboarding and
+command-driven driving checks over the delta stream. Previous run on the
+final packaged-font build: 11/11 checks
 (`Logs\qualification-fonts\agent-evidence\result.json`) — isolated fresh
 profiles; command discovery; packaged bilingual fonts and locale command
 boundaries; real profile creation/persistence; draft/save separation,
@@ -69,6 +77,31 @@ with unchanged synthetic save-file hashes; finish stayed invalid and the
 trace prefix stayed byte-frozen (each trace begins at sequence 1 and
 ends before the fault-observation records). Passing means the injected
 faults were correctly detected — no capture is certified by this run.
+
+## Verified (external `Tools/DrivingScenario.py` driving observation run)
+
+Accepted run on the schema-2 build (`Logs\evidence-driving\result.json`,
+27 checks, run `Logs\validation-driving2\`): both `car-01` and
+`motorcycle-01` completed the authored `intro-01` lap through the shared
+command path only — bounded `input.set` holds re-evaluated from observed
+motor state (never teleports, never sleeps-as-proof): ordered gates
+1–4 plus the start-line wrap finish, `boostStart` with charge drain,
+`driftStart`/`driftEnd` through the west turn, the landmark-ramp
+`becameAirborne`/`landed` episode, a mid-drive explicit resnapshot that
+re-baselined reconstruction onto the live race identity, pause freezing
+`simulationTick`/`elapsedTicks` while observation ticks advanced,
+`camera.toggle` switching the real `driving.camera.mode`, a latched
+recovery consumed on a simulated boundary respawning at the authored
+gate-3 safe pose with no manufactured progress, `race.restart` producing
+a new race identity, `race.exit` returning to practice, and durable
+screenshots inside the run directory. The full `state.ndjson` was
+independently reconstructed (snapshot/delta chain, contiguous sequence,
+boundary-per-tick including unchanged ticks, schema-2 validation);
+capacity was measured at 1.6 MiB trace / 210 commands / 2497 boundaries
+over 76 s and projected to ~37 MiB / ~4965 identities over the
+representative 30-minute schedule — under the 256 MiB trace cap and the
+10,000-identity bound, with zero backlog steps, zero overloads and zero
+dropped driving events.
 
 ## Verified (synthetic UI Toolkit PlayMode callbacks)
 
@@ -141,5 +174,9 @@ clean finish completes the second capture.
 - Windows IL2CPP module is now installed for the pinned editor
   (`CheckEnvironment` OK) but no IL2CPP build has been produced or qualified
   — preview remains Mono development.
-- All racing gameplay: simulation, campaign, rewards/upgrades/cosmetics,
-  LAN multiplayer, content — `notImplemented`, later milestones.
+- Remaining racing gameplay: campaign, rewards/upgrades/cosmetics,
+  LAN multiplayer, richer content — `notImplemented`, later milestones.
+  The graybox driving slice (`drivingSimulation`, `drivingOnboarding`)
+  is qualified by the DrivingScenario run and PlayMode suites above.
+- A real 30-minute soak is projected, not run — the DrivingScenario
+  capacity measurement extrapolates observed stream load honestly.
