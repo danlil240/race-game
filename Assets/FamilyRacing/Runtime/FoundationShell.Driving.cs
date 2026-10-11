@@ -5,10 +5,13 @@ using UnityEngine.UIElements;
 
 namespace FamilyRacing
 {
-    // Driving screens for the shell: the practice picker and the temporary
-    // transparent driving overlay. Task 4 replaces the overlay with the
-    // final HUD; the shape (readouts + held controls + action buttons) is
-    // deliberate so real-agent input works end-to-end already.
+    // Driving screens for the shell: the practice picker and the real race
+    // HUD. The HUD is transparent over the graybox course — a top strip of
+    // readouts (time, lap, next gate, speed, countdown/finish), a boost
+    // charge bar, large held touch controls, and pause/finish overlays.
+    // Every control carries a stable semantic name (driving.*) and routes
+    // through the same input.set / camera.toggle / pause.toggle / race.*
+    // commands the keyboard and agents use.
     public sealed partial class FoundationShell
     {
         // --- practice picker ---------------------------------------------
@@ -42,50 +45,130 @@ namespace FamilyRacing
             app.Dispatch("race.start", p);
         }
 
-        // --- driving overlay ---------------------------------------------
-        // Transparent over the graybox course: a top strip of readouts, a
-        // bottom row of held touch controls, and action buttons. The pause
-        // overlay label gets an opaque backing so it stays readable over
-        // the world.
+        // --- race HUD ------------------------------------------------------
+        // The root is transparent (see RebuildTree): the course renders
+        // through and only the controls sit on top. Readouts update in place
+        // so held controls keep pointer capture.
 
         private void BuildDriving(FoundationState state)
         {
             var top = Row(root);
-            elapsedLabel = AddLabel(top, "0:00.0", 30, Deep);
+            elapsedLabel = AddLabel(top, "", 28, Deep);
             elapsedLabel.name = "hud.elapsed";
-            phaseLabel = AddLabel(top, "", 30, Coral);
-            phaseLabel.name = "hud.phase";
-            speedLabel = AddLabel(top, "", 30, Deep);
+            lapLabel = AddLabel(top, "", 28, Deep);
+            lapLabel.name = "hud.lap";
+            gateLabel = AddLabel(top, "", 28, Deep);
+            gateLabel.name = "hud.gate";
+            speedLabel = AddLabel(top, "", 28, Deep);
             speedLabel.name = "hud.speed";
+            phaseLabel = AddLabel(top, "", 32, Coral);
+            phaseLabel.name = "hud.phase";
+
+            var boostRow = Row(root);
+            var boostCaption = AddLabel(boostRow, T("input.boost", state), 20, Deep);
+            boostCaption.name = "hud.boostLabel";
+            var boostTrack = new VisualElement();
+            boostTrack.name = "hud.boostTrack";
+            boostTrack.style.width = 260;
+            boostTrack.style.height = 26;
+            boostTrack.style.backgroundColor = Off;
+            boostTrack.style.borderTopLeftRadius = boostTrack.style.borderTopRightRadius =
+                boostTrack.style.borderBottomLeftRadius = boostTrack.style.borderBottomRightRadius = 12;
+            boostFill = new VisualElement();
+            boostFill.name = "hud.boostFill";
+            boostFill.style.height = new Length(100f, LengthUnit.Percent);
+            boostFill.style.width = new Length(100f, LengthUnit.Percent);
+            boostFill.style.backgroundColor = Seafoam;
+            boostFill.style.borderTopLeftRadius = boostFill.style.borderTopRightRadius =
+                boostFill.style.borderBottomLeftRadius = boostFill.style.borderBottomRightRadius = 12;
+            boostTrack.Add(boostFill);
+            boostRow.Add(boostTrack);
+
             var spacer = new VisualElement();
             spacer.style.flexGrow = 1f;
             root.Add(spacer);
+
+            // Steering keeps its physical meaning in both locales: the row
+            // is locked LTR so the left steer button stays on the left of
+            // the screen and the right one on the right under Hebrew RTL.
             var controls = Row(root);
-            AddHoldButton(controls, "◀", Ocean, held => app.Input.TouchLeft(held), "input.left");
-            AddHoldButton(controls, "▶", Ocean, held => app.Input.TouchRight(held), "input.right");
+            controls.name = "hud.controls";
+            controls.languageDirection = LanguageDirection.LTR;
+            AddHoldButton(controls, "◀", Ocean,
+                held => app.Input.TouchLeft(held), "driving.steerLeft");
+            AddHoldButton(controls, "▶", Ocean,
+                held => app.Input.TouchRight(held), "driving.steerRight");
             AddHoldButton(controls, T("input.drift", state), Seafoam,
-                held => app.Input.TouchDrift(held), "input.drift");
+                held => app.Input.TouchDrift(held), "driving.drift");
             AddHoldButton(controls, T("input.boost", state), Coral,
-                held => app.Input.TouchBoost(held), "input.boost");
+                held => app.Input.TouchBoost(held), "driving.boost");
             foreach (var held in controls.Children()) ApplyAvailability(held, "input.set");
+
             var actions = Row(root);
             var recover = AddButton(actions, T("input.recovery", state), Deep,
-                () => app.Input.TouchRecover(), "input.recover");
+                () => app.Input.TouchRecover(), "driving.recover");
             var camera = AddButton(actions, T("settings.camera", state), Ocean,
-                () => app.Dispatch("camera.toggle", emptyParams), "action.camera");
+                () => app.Dispatch("camera.toggle", emptyParams), "driving.camera");
+            // Gadgets are deferred content: the affordance exists but is
+            // visibly disabled with an honest label/tooltip instead of
+            // promising input the command path would reject.
+            var gadget = AddButton(actions, T("hud.gadget.soon", state), Off,
+                () => { }, "driving.gadget");
+            gadget.SetEnabled(false);
+            gadget.tooltip = T("hud.gadget.unavailable", state);
             var pause = AddButton(actions, T("input.pause", state), Coral,
-                () => app.Dispatch("pause.toggle", emptyParams), "action.pause");
+                () => app.Dispatch("pause.toggle", emptyParams), "driving.pause");
             var exit = AddButton(actions, T("driving.exit", state), Deep,
-                () => app.Dispatch("race.exit", emptyParams), "action.exit");
+                () => app.Dispatch("race.exit", emptyParams), "driving.exit");
             ApplyAvailability(recover, "input.set");
             ApplyAvailability(camera, "camera.toggle");
             ApplyAvailability(pause, "pause.toggle");
             ApplyAvailability(exit, "race.exit");
-            pauseOverlay = AddLabel(root, T("input.pause", state), 44, Coral);
-            pauseOverlay.name = "overlay.pause";
-            pauseOverlay.style.backgroundColor = new Color(0.99f, 0.97f, 0.92f, 0.85f);
+
+            // Pause and finish overlays cover the screen when shown; both
+            // keep the world dimly visible and offer their own actions.
+            pauseOverlay = Overlay("overlay.pause");
+            AddLabel(pauseOverlay, T("hud.paused", state), 44, Deep);
+            var pauseRow = Row(pauseOverlay);
+            var resume = AddButton(pauseRow, T("hud.resume", state), Seafoam,
+                () => app.Dispatch("pause.toggle", emptyParams), "driving.resume");
+            var pauseRetry = AddButton(pauseRow, T("hud.retry", state), Coral,
+                () => app.Dispatch("race.restart", emptyParams), "driving.retry");
+            ApplyAvailability(resume, "pause.toggle");
+            ApplyAvailability(pauseRetry, "race.restart");
+
+            finishOverlay = Overlay("overlay.finish");
+            var finished = AddLabel(finishOverlay, T("hud.finished", state), 44, Coral);
+            finished.name = "hud.finishTitle";
+            finishTimeLabel = AddLabel(finishOverlay, "", 30, Deep);
+            finishTimeLabel.name = "hud.finishTime";
+            var finishRow = Row(finishOverlay);
+            var retry = AddButton(finishRow, T("hud.retry", state), Seafoam,
+                () => app.Dispatch("race.restart", emptyParams), "driving.retry");
+            var finishExit = AddButton(finishRow, T("driving.exit", state), Deep,
+                () => app.Dispatch("race.exit", emptyParams), "driving.exit");
+            ApplyAvailability(retry, "race.restart");
+            ApplyAvailability(finishExit, "race.exit");
+
             statusLabel = AddLabel(root, "", 18, Deep);
             statusLabel.name = "status.persistence";
+        }
+
+        // Full-screen semi-opaque overlay, hidden until shown by the
+        // indicator update; children (labels/buttons) still receive input.
+        private VisualElement Overlay(string name)
+        {
+            var overlay = new VisualElement();
+            overlay.name = name;
+            overlay.style.position = Position.Absolute;
+            overlay.style.left = overlay.style.right = 0;
+            overlay.style.top = overlay.style.bottom = 0;
+            overlay.style.backgroundColor = new Color(0.99f, 0.97f, 0.92f, 0.85f);
+            overlay.style.alignItems = Align.Center;
+            overlay.style.justifyContent = Justify.Center;
+            overlay.style.display = DisplayStyle.None;
+            root.Add(overlay);
+            return overlay;
         }
 
         private void UpdateDrivingIndicators(FoundationState state)
@@ -96,30 +179,64 @@ namespace FamilyRacing
             if (elapsedLabel != null)
                 elapsedLabel.text = T("hud.time", state) + " " +
                     FormatRaceTime(session.elapsedTicks);
+            if (lapLabel != null)
+                lapLabel.text = T("hud.lap", state) + " " +
+                    Mathf.Min(session.lap + 1, session.lapsRequired) + "/" +
+                    session.lapsRequired;
+            if (gateLabel != null)
+            {
+                // nextCheckpoint is the expected gate index; gate 0 is the
+                // start/finish line, so the readable gate number for the
+                // child counts only the non-start gates ahead.
+                var total = session.checkpoints.Count;
+                var nonStart = Mathf.Max(total - 1, 1);
+                var next = session.nextCheckpoint == 0
+                    ? nonStart
+                    : Mathf.Min(session.nextCheckpoint, nonStart);
+                gateLabel.text = session.finished || total == 0
+                    ? ""
+                    : T("hud.gate", state) + " " + next + "/" + nonStart;
+            }
+            if (boostFill != null && session.motor != null)
+            {
+                var charge = Mathf.Clamp01(session.motor.boostCharge);
+                boostFill.style.width = new Length(charge * 100f, LengthUnit.Percent);
+                boostFill.style.backgroundColor =
+                    session.motor.boostActive ? Coral : Seafoam;
+            }
             if (phaseLabel != null)
             {
-                if (session.phase == "countdown" && session.countdownTicksRemaining > 0)
-                    phaseLabel.text = ((session.countdownTicksRemaining + 29) / 30).ToString();
-                else if (session.phase == "finished")
-                    phaseLabel.text = T("hud.finished", state);
-                else
-                    phaseLabel.text = "";
+                phaseLabel.text =
+                    session.phase == "countdown" && session.countdownTicksRemaining > 0
+                        ? ((session.countdownTicksRemaining + 29) / 30).ToString()
+                        : "";
             }
             if (speedLabel != null && session.motor != null)
                 speedLabel.text = T("hud.speed", state) + " " +
                     ((int)(session.motor.speed * 3.6f)).ToString();
+            if (finishOverlay != null)
+            {
+                var done = session.phase == "finished";
+                finishOverlay.style.display = done ? DisplayStyle.Flex : DisplayStyle.None;
+                if (done && finishTimeLabel != null)
+                    finishTimeLabel.text = T("hud.time", state) + " " +
+                        FormatRaceTime(session.finishTicks > 0
+                            ? session.finishTicks
+                            : session.elapsedTicks);
+            }
         }
 
         private static string FormatRaceTime(long ticks)
         {
             // Simulation ticks at 30 Hz; race time is displayed as m:ss.d
-            // with invariant digits (numbers stay LTR in both locales).
+            // with invariant digits, prefixed by a left-to-right mark so the
+            // timer stays LTR inside the Hebrew RTL shell.
             var deciseconds = ticks * 10 / 30;
             var minutes = deciseconds / 600;
             var seconds = deciseconds % 600 / 10;
             var tenth = deciseconds % 10;
-            return minutes.ToString() + ":" +
-                seconds.ToString("00") + "." + tenth.ToString();
+            return "\u200E" + minutes.ToString() + ":"
+                + seconds.ToString("00") + "." + tenth.ToString();
         }
     }
 }

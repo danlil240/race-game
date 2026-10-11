@@ -35,10 +35,15 @@ namespace FamilyRacing
         private Label steeringLabel;
         private readonly Dictionary<string, VisualElement> leds =
             new Dictionary<string, VisualElement>();
-        private Label pauseOverlay;
+        private VisualElement pauseOverlay;
+        private VisualElement finishOverlay;
         private Label elapsedLabel;
         private Label phaseLabel;
         private Label speedLabel;
+        private Label lapLabel;
+        private Label gateLabel;
+        private Label finishTimeLabel;
+        private VisualElement boostFill;
         private Button saveButton;
         private readonly Dictionary<string, string> emptyParams = new Dictionary<string, string>(0);
         private readonly Dictionary<string, string> settingsParams = new Dictionary<string, string>();
@@ -99,8 +104,10 @@ namespace FamilyRacing
         {
             root.Clear();
             leds.Clear();
-            statusLabel = warningLabel = steeringLabel = pauseOverlay = null;
+            statusLabel = warningLabel = steeringLabel = null;
+            pauseOverlay = finishOverlay = boostFill = null;
             elapsedLabel = phaseLabel = speedLabel = null;
+            lapLabel = gateLabel = finishTimeLabel = null;
             saveButton = null;
             musicSlider = effectsSlider = voiceSlider = null;
             chaseButton = overheadButton = shakeButton = langEnButton = langHeButton = null;

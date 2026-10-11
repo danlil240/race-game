@@ -23,6 +23,7 @@ namespace FamilyRacing
 
         private FoundationService service;
         private DrivingWorld drivingWorld;
+        private DrivingCamera drivingCamera;
         private ValidationBridge bridge;
         private FoundationInput driverInput;
         private FoundationShell shell;
@@ -66,6 +67,12 @@ namespace FamilyRacing
             }
             driverInput = GetComponent<FoundationInput>();
             shell = GetComponent<FoundationShell>();
+            // The Task-4 presentation camera owns real chase/overhead framing
+            // whenever a session is active; added here so the bootstrap scene
+            // needs no wiring and fixtures without it keep the world's
+            // temporary overview fallback.
+            drivingCamera = GetComponent<DrivingCamera>();
+            if (drivingCamera == null) drivingCamera = gameObject.AddComponent<DrivingCamera>();
             document = GetComponent<UIDocument>();
             presentation.buildTarget = Application.platform.ToString();
             if (validationDir != null)
@@ -116,7 +123,18 @@ namespace FamilyRacing
             if (drivingWorld != null)
             {
                 drivingWorld.ApplyFrame(state);
-                service.SetDrivingCameraFacts(drivingWorld.CameraFacts);
+                if (drivingCamera != null)
+                {
+                    // Applied after the world visuals so its transform wins;
+                    // the published facts describe the camera the player
+                    // actually sees this frame.
+                    drivingCamera.ApplyFrame(state);
+                    service.SetDrivingCameraFacts(drivingCamera.Facts);
+                }
+                else
+                {
+                    service.SetDrivingCameraFacts(drivingWorld.CameraFacts);
+                }
                 state = service.Snapshot();
             }
             RefreshPresentation(state);
