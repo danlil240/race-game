@@ -1,14 +1,20 @@
 using System;
 using System.Collections.Generic;
 using FamilyRacing.Core.Profiles;
+using FamilyRacing.Core.Racing;
 
 namespace FamilyRacing.Core.Foundation
 {
     // Serializable full-state DTO. Every Snapshot() call returns an
     // independent deep copy; callers can freely mutate what they receive.
+    // stateSchemaVersion 2 expands the record with the driving session
+    // observation; consumers must negotiate the schema, never silently
+    // reinterpret it.
     [Serializable]
     public sealed class FoundationState
     {
+        public int stateSchemaVersion = 2;
+        public string contentVersion = "";
         public string screen;
         public string language;
         public int activeSlot;
@@ -24,6 +30,8 @@ namespace FamilyRacing.Core.Foundation
         public string captureError;
         public FeatureCoverage featureCoverage;
         public PresentationState presentation;
+        public DrivingSessionState driving;
+        public List<DrivingEvent> drivingEvents;
     }
 
     // Runtime-visible presentation facts (geometry, input ownership, locale,
@@ -40,6 +48,8 @@ namespace FamilyRacing.Core.Foundation
         public string fontWarning = "";
         public string buildTarget = "";
         public bool validationActive;
+        public int backlogSteps;
+        public long stepOverloads;
     }
 
     [Serializable]
@@ -68,10 +78,10 @@ namespace FamilyRacing.Core.Foundation
     public sealed class FeatureCoverage
     {
         public string tutorial = "notImplemented";
-        public string drivingSimulation = "notImplemented";
+        public string drivingSimulation = "implemented";
         public string campaign = "notImplemented";
         public string rewardsUpgradesCosmetics = "notImplemented";
         public string lan = "notImplemented";
-        public string content = "notImplemented";
+        public string content = "graybox";
     }
 }

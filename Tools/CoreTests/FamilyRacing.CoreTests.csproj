@@ -15,6 +15,7 @@
   <ItemGroup>
     <Compile Include="../../Assets/FamilyRacing/Core/Profiles/*.cs" Link="Profiles/%(Filename)%(Extension)" />
     <Compile Include="../../Assets/FamilyRacing/Core/Driving/*.cs" Link="Driving/%(Filename)%(Extension)" />
+    <Compile Include="../../Assets/FamilyRacing/Core/Racing/*.cs" Link="Racing/%(Filename)%(Extension)" />
     <Compile Include="../../Assets/FamilyRacing/Core/Localization/*.cs" Link="Localization/%(Filename)%(Extension)" />
     <Compile Include="../../Assets/FamilyRacing/Core/Foundation/*.cs" Link="Foundation/%(Filename)%(Extension)" />
     <Compile Include="../../Assets/FamilyRacing/Core/Automation/*.cs" Link="Automation/%(Filename)%(Extension)" />

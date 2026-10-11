@@ -5,6 +5,7 @@ using System.Linq;
 using FamilyRacing.Core.Automation;
 using FamilyRacing.Core.Driving;
 using FamilyRacing.Core.Profiles;
+using FamilyRacing.Core.Racing;
 
 namespace FamilyRacing.Core.Foundation
 {
@@ -23,6 +24,9 @@ namespace FamilyRacing.Core.Foundation
         private const string ScreenProfiles = "profiles";
         private const string ScreenSettings = "settings";
         private const string ScreenSandbox = "sandbox";
+        private const string ScreenPractice = "practice";
+        private const string ScreenDriving = "driving";
+        private const int MaxDrivingEvents = 128;
 
         private sealed class ParameterSpec
         {
@@ -94,7 +98,9 @@ namespace FamilyRacing.Core.Foundation
 
         private static readonly string[] Languages = { "en", "he" };
         private static readonly string[] Cameras = { "chase", "overhead" };
-        private static readonly string[] Screens = { "profiles", "settings", "sandbox" };
+        // "driving" is never a navigation target: race.start enters it and
+        // race.exit is the only way back out.
+        private static readonly string[] Screens = { "profiles", "settings", "sandbox", "practice" };
         private static readonly string[] Slots = { "0", "1", "2", "3" };
         private static readonly string[] Bools = { "true", "false" };
 
@@ -117,7 +123,11 @@ namespace FamilyRacing.Core.Foundation
                 Param("pause", "boolean", Bools), Param("durationTicks", "integer", null)),
             Schema("input.clear"),
             Schema("camera.toggle"),
-            Schema("pause.toggle")
+            Schema("pause.toggle"),
+            Schema("race.start",
+                Param("vehicleId", "string", null), Param("eventId", "string", null)),
+            Schema("race.restart"),
+            Schema("race.exit")
         };
 
         private static readonly Dictionary<string, ParameterSpec[]> SchemaMap =
@@ -143,6 +153,11 @@ namespace FamilyRacing.Core.Foundation
         private DriverInput input;
         private int holdTicksRemaining;
         private PresentationState presentation = new PresentationState();
+        private DrivingContentCatalog drivingContent;
+        private DrivingSession driving;
+        private long raceCounter;
+        private readonly List<DrivingEvent> drivingEvents = new List<DrivingEvent>();
+        private DrivingCameraState cameraFacts = new DrivingCameraState();
 
         public FoundationService(ProfileStore store, string defaultLanguage, string runId)
         {
@@ -163,6 +178,40 @@ namespace FamilyRacing.Core.Foundation
                     Profile = CopyProfile(load.Profile)
                 };
             }
+        }
+
+        public bool Paused { get { return paused; } }
+        public bool Racing { get { return driving != null; } }
+
+        // Content is versioned separately from the build: the runtime
+        // injects the validated catalog before race.start can report
+        // available.
+        public string ContentVersion
+        {
+            get { return drivingContent != null ? drivingContent.Version : "none"; }
+        }
+
+        public void SetDrivingContent(DrivingContentCatalog catalog)
+        {
+            drivingContent = catalog;
+        }
+
+        // Runtime camera facts travel with the state so captures can
+        // reconstruct framing; the sim never reads them.
+        public void SetDrivingCameraFacts(DrivingCameraState facts)
+        {
+            cameraFacts = facts != null ? facts.Copy() : new DrivingCameraState();
+        }
+
+        // One simulated driving boundary. Called before AdvanceTick so the
+        // held-input sample (including its last leased tick) is consumed by
+        // the session before the observation tick expires leases. Frozen
+        // while paused: observation ticks continue, simulation time does not.
+        public void StepDriving(IMotorWorld world)
+        {
+            if (driving == null || paused || world == null) return;
+            var result = driving.Step(input, world);
+            AppendDrivingEvents(result.events);
         }
 
         public CommandResult Execute(GameCommand command)
@@ -204,6 +253,8 @@ namespace FamilyRacing.Core.Foundation
         {
             var state = new FoundationState
             {
+                stateSchemaVersion = 2,
+                contentVersion = ContentVersion,
                 screen = screen,
                 language = language,
                 activeSlot = activeSlot,
@@ -227,8 +278,18 @@ namespace FamilyRacing.Core.Foundation
                 captureValid = captureValid,
                 captureError = captureError,
                 featureCoverage = new FeatureCoverage(),
-                presentation = CopyPresentation(presentation)
+                presentation = CopyPresentation(presentation),
+                driving = null,
+                drivingEvents = new List<DrivingEvent>()
             };
+            if (driving != null)
+            {
+                state.driving = driving.Snapshot();
+                state.driving.camera = cameraFacts != null ? cameraFacts.Copy() : new DrivingCameraState();
+                FillDrivingControls(state.driving);
+            }
+            foreach (var ev in drivingEvents)
+                state.drivingEvents.Add(ev.Copy());
             for (var slot = 0; slot < slots.Length; slot++)
             {
                 state.slots.Add(new SlotState
@@ -293,10 +354,18 @@ namespace FamilyRacing.Core.Foundation
             input = new DriverInput(steering, drift, boost, false, false, false, false);
         }
 
+        // Neutralizes held input and cancels queued driving actions (pause,
+        // lifecycle, focus loss, disconnect and explicit input.clear all
+        // funnel through here).
         public void ClearInput()
         {
             holdTicksRemaining = 0;
             input = new DriverInput(0f, false, false, false, false, false, false);
+            if (driving != null)
+            {
+                driving.CancelPending("cleared");
+                DrainDrivingEvents();
+            }
         }
 
         public void SetCaptureFailure(string code)
@@ -344,6 +413,9 @@ namespace FamilyRacing.Core.Foundation
                     case "input.clear": ClearInput(); return Result(command, CommandResult.Applied, "");
                     case "camera.toggle": return ToggleCamera(command);
                     case "pause.toggle": return TogglePause(command);
+                    case "race.start": return RaceStart(command);
+                    case "race.restart": return RaceRestart(command);
+                    case "race.exit": return RaceExit(command);
                     default: return Result(command, CommandResult.Rejected, "unknownAction");
                 }
             }
@@ -373,6 +445,7 @@ namespace FamilyRacing.Core.Foundation
                 // Failed creations leave selection and prior files unchanged.
                 return Result(command, CommandResult.Failed, "saveFailed");
             }
+            EndRace("lifecycle", command);
             slots[slot].Status = "Loaded";
             slots[slot].Profile = CopyProfile(created);
             savedProfile = CopyProfile(created);
@@ -394,6 +467,7 @@ namespace FamilyRacing.Core.Foundation
             var info = slots[slot];
             if (info.Status != "Loaded" && info.Status != "RecoveredFromBackup")
                 return Result(command, CommandResult.Rejected, "unavailable");
+            EndRace("lifecycle", command);
             savedProfile = CopyProfile(info.Profile);
             draftProfile = CopyProfile(info.Profile);
             activeSlot = slot;
@@ -407,7 +481,11 @@ namespace FamilyRacing.Core.Foundation
         private CommandResult Navigate(GameCommand command)
         {
             var target = command.Parameters["screen"];
-            if ((target == ScreenSettings || target == ScreenSandbox) && activeSlot < 0)
+            // A running race is never abandoned silently: race.exit is the
+            // only way off the driving screen.
+            if (screen == ScreenDriving)
+                return Result(command, CommandResult.Rejected, "unavailable");
+            if (target != ScreenProfiles && activeSlot < 0)
                 return Result(command, CommandResult.Rejected, "unavailable");
             if (target != screen)
             {
@@ -479,7 +557,8 @@ namespace FamilyRacing.Core.Foundation
 
         private CommandResult SetInput(GameCommand command)
         {
-            if (screen != ScreenSandbox)
+            var drivingActive = screen == ScreenDriving && driving != null;
+            if (screen != ScreenSandbox && !drivingActive)
                 return Result(command, CommandResult.Rejected, "unavailable");
             var steering = ParseDecimal(command.Parameters["steering"]);
             if (float.IsNaN(steering) || float.IsInfinity(steering) || steering < -1f || steering > 1f)
@@ -493,6 +572,21 @@ namespace FamilyRacing.Core.Foundation
             var recover = IsTrue(command.Parameters["recover"]);
             var changeCamera = IsTrue(command.Parameters["changeCamera"]);
             var pausePulse = IsTrue(command.Parameters["pause"]);
+            // Gadget actions are explicitly unavailable while driving
+            // (gadget gameplay is deferred); the whole sample is refused
+            // before any input state is touched.
+            if (drivingActive && gadget)
+                return Result(command, CommandResult.Rejected, "unavailable");
+            // A recovery press is latched with its command identity until a
+            // simulation boundary consumes it; overflow refuses before the
+            // held-input sample mutates.
+            if (drivingActive && recover)
+            {
+                string queueError;
+                if (!driving.QueuePending("recover", command.CommandId, out queueError))
+                    return Result(command, CommandResult.Rejected, queueError);
+                DrainDrivingEvents();
+            }
             input = new DriverInput(steering, drift, boost, gadget, recover, changeCamera, pausePulse);
             holdTicksRemaining = duration;
             // Gadget/recover/changeCamera/pause are one-tick pulses. A camera
@@ -503,7 +597,18 @@ namespace FamilyRacing.Core.Foundation
                 draftProfile.camera = OtherCamera(draftProfile.camera);
                 pendingSettings = true;
             }
-            if (pausePulse) paused = !paused;
+            // A pause pulse toggles service pause and (entering pause)
+            // cancels queued actions; the pulse itself stays observable in
+            // this tick's input sample, unlike pause.toggle which clears.
+            if (pausePulse)
+            {
+                paused = !paused;
+                if (paused && driving != null)
+                {
+                    driving.CancelPending("paused");
+                    DrainDrivingEvents();
+                }
+            }
             return Result(command, CommandResult.Applied, "");
         }
 
@@ -518,11 +623,141 @@ namespace FamilyRacing.Core.Foundation
 
         private CommandResult TogglePause(GameCommand command)
         {
-            if (screen != ScreenSandbox)
+            if (screen != ScreenSandbox && screen != ScreenDriving)
                 return Result(command, CommandResult.Rejected, "unavailable");
-            paused = !paused;
-            ClearInput();
+            ApplyPauseToggle();
             return Result(command, CommandResult.Applied, "");
+        }
+
+        // Entering pause neutralizes held input and cancels queued actions;
+        // the simulation simply stops stepping so simulation and elapsed
+        // race time freeze while observation ticks continue.
+        private void ApplyPauseToggle()
+        {
+            paused = !paused;
+            if (paused && driving != null)
+            {
+                driving.CancelPending("paused");
+                DrainDrivingEvents();
+            }
+            ClearInput();
+        }
+
+        // --- driving session commands --------------------------------------
+
+        private CommandResult RaceStart(GameCommand command)
+        {
+            if (drivingContent == null)
+                return Result(command, CommandResult.Rejected, "contentUnavailable");
+            if (activeSlot < 0)
+                return Result(command, CommandResult.Rejected, "unavailable");
+            if (driving != null)
+                return Result(command, CommandResult.Rejected, "raceActive");
+            var vehicleId = command.Parameters["vehicleId"];
+            var eventId = command.Parameters["eventId"];
+            VehicleTuning tuning;
+            EventDefinition evt;
+            if (!drivingContent.Vehicles.TryGetValue(vehicleId, out tuning))
+                return Result(command, CommandResult.Rejected, "unknownVehicle");
+            if (!drivingContent.Events.TryGetValue(eventId, out evt))
+                return Result(command, CommandResult.Rejected, "unknownEvent");
+            if (!evt.AllowsVehicle(vehicleId))
+                return Result(command, CommandResult.Rejected, "vehicleNotForEvent");
+            driving = CreateSession(tuning, evt, command);
+            screen = ScreenDriving;
+            ClearInput();
+            DrainDrivingEvents();
+            return Result(command, CommandResult.Applied, "");
+        }
+
+        private CommandResult RaceRestart(GameCommand command)
+        {
+            if (driving == null)
+                return Result(command, CommandResult.Rejected, "unavailable");
+            var tuning = drivingContent.Vehicles[driving.VehicleId];
+            var evt = drivingContent.Events[driving.EventId];
+            // The old identity ends; retry creates a new race identity
+            // inside the same run. Duplicate delivery replays the cached
+            // result and never reaches here.
+            driving.CancelPending("restarted");
+            driving.EmitLifecycle("race.ended", command.CommandId, "restarted");
+            DrainDrivingEvents();
+            driving = CreateSession(tuning, evt, command);
+            screen = ScreenDriving;
+            ClearInput();
+            DrainDrivingEvents();
+            return Result(command, CommandResult.Applied, "");
+        }
+
+        private CommandResult RaceExit(GameCommand command)
+        {
+            if (driving == null)
+                return Result(command, CommandResult.Rejected, "unavailable");
+            EndRace("raceExit", command);
+            screen = ScreenPractice;
+            return Result(command, CommandResult.Applied, "");
+        }
+
+        private DrivingSession CreateSession(VehicleTuning tuning, EventDefinition evt,
+            GameCommand command)
+        {
+            var course = drivingContent.Courses[evt.courseId];
+            var raceId = "race-" + (++raceCounter).ToString(
+                System.Globalization.CultureInfo.InvariantCulture);
+            return new DrivingSession(raceId, tuning, course, evt,
+                drivingContent.Version, command != null ? command.CommandId : "");
+        }
+
+        // Ends the active session: latched actions cancel with their
+        // reason, a correlated end event lands on this boundary, and held
+        // input neutralizes. The driving screen falls back to practice.
+        private void EndRace(string reason, GameCommand command)
+        {
+            if (driving == null) return;
+            var session = driving;
+            session.CancelPending(reason);
+            session.EmitLifecycle(reason == "raceExit" ? "race.exited" : "race.ended",
+                command != null ? command.CommandId : "", reason);
+            driving = null;
+            DrainSessionEvents(session);
+            if (screen == ScreenDriving) screen = ScreenPractice;
+            ClearInput();
+        }
+
+        private void DrainDrivingEvents()
+        {
+            if (driving == null) return;
+            AppendDrivingEvents(driving.DrainEvents());
+        }
+
+        private void DrainSessionEvents(DrivingSession session)
+        {
+            AppendDrivingEvents(session.DrainEvents());
+        }
+
+        private void AppendDrivingEvents(IEnumerable<DrivingEvent> events)
+        {
+            foreach (var ev in events)
+            {
+                drivingEvents.Add(ev);
+                if (drivingEvents.Count > MaxDrivingEvents)
+                    drivingEvents.RemoveAt(0);
+            }
+        }
+
+        // Semantic HUD controls actually usable on the driving screen; the
+        // shell mirrors discovery, the capture records what was operable.
+        private void FillDrivingControls(DrivingSessionState state)
+        {
+            foreach (var action in new[]
+                { "input.set", "input.clear", "camera.toggle", "pause.toggle",
+                  "race.restart", "race.exit" })
+            {
+                bool available;
+                string reason;
+                Availability(action, out available, out reason);
+                if (available) state.controls.Add(action);
+            }
         }
 
         private bool WritableSelected()
@@ -573,10 +808,42 @@ namespace FamilyRacing.Core.Foundation
                     break;
                 case "input.set":
                 case "pause.toggle":
-                    if (screen != ScreenSandbox)
+                    if (screen != ScreenSandbox && screen != ScreenDriving)
                     {
                         available = false;
-                        reason = "sandboxOnly";
+                        reason = "drivingOrSandboxOnly";
+                    }
+                    break;
+                case "race.start":
+                    if (drivingContent == null)
+                    {
+                        available = false;
+                        reason = "contentUnavailable";
+                    }
+                    else if (activeSlot < 0)
+                    {
+                        available = false;
+                        reason = "requiresSelectedProfile";
+                    }
+                    else if (driving != null)
+                    {
+                        available = false;
+                        reason = "raceActive";
+                    }
+                    break;
+                case "race.restart":
+                case "race.exit":
+                    if (driving == null)
+                    {
+                        available = false;
+                        reason = "noActiveRace";
+                    }
+                    break;
+                case "ui.navigate":
+                    if (screen == ScreenDriving)
+                    {
+                        available = false;
+                        reason = "useRaceExit";
                     }
                     break;
             }

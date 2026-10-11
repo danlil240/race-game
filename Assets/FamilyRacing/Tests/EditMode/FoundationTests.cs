@@ -58,11 +58,11 @@ namespace FamilyRacing.Tests
                 Assert.That(state.slots[i].profile, Is.Null);
             }
             Assert.That(state.featureCoverage.tutorial, Is.EqualTo("notImplemented"));
-            Assert.That(state.featureCoverage.drivingSimulation, Is.EqualTo("notImplemented"));
+            Assert.That(state.featureCoverage.drivingSimulation, Is.EqualTo("implemented"));
             Assert.That(state.featureCoverage.campaign, Is.EqualTo("notImplemented"));
             Assert.That(state.featureCoverage.rewardsUpgradesCosmetics, Is.EqualTo("notImplemented"));
             Assert.That(state.featureCoverage.lan, Is.EqualTo("notImplemented"));
-            Assert.That(state.featureCoverage.content, Is.EqualTo("notImplemented"));
+            Assert.That(state.featureCoverage.content, Is.EqualTo("graybox"));
         }
 
         [TestCase(0)]
@@ -181,9 +181,9 @@ namespace FamilyRacing.Tests
         public void UnknownActionRejected()
         {
             var service = Service();
-            var result = service.Execute(Cmd("race.start", null));
+            var result = service.Execute(Cmd("warp.drive", null));
             Assert.That(result.status, Is.EqualTo(CommandResult.Rejected));
-            Assert.That(result.action, Is.EqualTo("race.start"));
+            Assert.That(result.action, Is.EqualTo("warp.drive"));
         }
 
         [Test]
@@ -796,7 +796,8 @@ namespace FamilyRacing.Tests
             {
                 "profile.create", "profile.select", "ui.navigate", "ui.language",
                 "settings.update", "settings.save", "input.set", "input.clear",
-                "camera.toggle", "pause.toggle"
+                "camera.toggle", "pause.toggle",
+                "race.start", "race.restart", "race.exit"
             }));
             var create = Descriptor(service.Discover(), "profile.create");
             Assert.That(RequiredNames(create), Is.EquivalentTo(new[] { "slot", "language" }));
