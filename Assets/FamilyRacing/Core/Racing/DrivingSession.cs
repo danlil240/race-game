@@ -260,6 +260,10 @@ namespace FamilyRacing.Core.Racing
                 else
                 {
                     var previousPose = motor.Pose;
+                    // The respawn boundary is flagged: its movement is
+                    // excluded from progress and landing evaluation, and
+                    // the flag clears when this step commits.
+                    var recoveryFlagged = motor.recovering;
                     var step = ArcadeMotor.Step(motor, input, tuning, world, StepSeconds);
                     if (step.rejected)
                     {
@@ -279,18 +283,21 @@ namespace FamilyRacing.Core.Racing
                                 : "";
                             Emit("motor." + motorEvent.kind, "", detail);
                         }
-                        var advance = CheckpointProgress.Advance(
-                            course, progress, previousPose, motor.Pose);
-                        foreach (var progressEvent in advance.events)
+                        if (!recoveryFlagged)
                         {
-                            if (progressEvent.kind == "checkpoint")
-                                Emit("checkpoint.crossed", "", progressEvent.gateId ?? "");
-                            else if (progressEvent.kind == "lap")
-                                Emit("race.lap", "", progressEvent.lap.ToString(
-                                    System.Globalization.CultureInfo.InvariantCulture));
+                            var advance = CheckpointProgress.Advance(
+                                course, progress, previousPose, motor.Pose);
+                            foreach (var progressEvent in advance.events)
+                            {
+                                if (progressEvent.kind == "checkpoint")
+                                    Emit("checkpoint.crossed", "", progressEvent.gateId ?? "");
+                                else if (progressEvent.kind == "lap")
+                                    Emit("race.lap", "", progressEvent.lap.ToString(
+                                        System.Globalization.CultureInfo.InvariantCulture));
+                            }
+                            if (advance.recoveryPoseUpdated)
+                                lastSafePose = advance.recoveryPose;
                         }
-                        if (advance.recoveryPoseUpdated)
-                            lastSafePose = advance.recoveryPose;
                         if (progress.finished)
                         {
                             phase = PhaseFinished;

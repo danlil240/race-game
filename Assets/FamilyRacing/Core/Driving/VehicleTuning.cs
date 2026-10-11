@@ -16,10 +16,15 @@ namespace FamilyRacing.Core.Driving
         public float driftMinSpeed = 6f;        // minimum speed to hold a drift
         public float driftSteeringFactor = 1.5f; // steering multiplier while drifting
         public float driftLateralAcceleration = 6f; // sideways kick while drifting
+        public float driftChargePerSecond = 0.3f; // charge gained per drift second
         public float boostMaxSpeed = 26f;       // m/s limit while boost is active
         public float boostAcceleration = 12f;   // m/s^2 while boosting
         public float boostDurationSeconds = 2.5f;
+        public float boostDrainPerSecond = 0.4f; // charge spent per boost second
+        public float boostMinCharge = 0.1f;     // minimum charge that can fire a boost
         public float boostChargeSeconds = 6f;   // time to refill one boost
+        public float cleanLandingCredit = 0.2f; // charge granted per clean landing
+        public float landingMinAirSeconds = 0.25f; // min air time for a creditable jump
         public float gravity = 22f;             // downward acceleration while airborne
         public float terminalFallSpeed = 30f;
         public float groundProbe = 0.8f;        // probe reach below the body origin
@@ -43,10 +48,20 @@ namespace FamilyRacing.Core.Driving
             if (!Positive(driftSteeringFactor)) { error = "driftSteeringFactor"; return false; }
             if (float.IsNaN(driftLateralAcceleration) || float.IsInfinity(driftLateralAcceleration)
                 || driftLateralAcceleration < 0f) { error = "driftLateralAcceleration"; return false; }
+            if (float.IsNaN(driftChargePerSecond) || float.IsInfinity(driftChargePerSecond)
+                || driftChargePerSecond < 0f) { error = "driftChargePerSecond"; return false; }
             if (!Positive(boostMaxSpeed) || boostMaxSpeed < maxSpeed) { error = "boostMaxSpeed"; return false; }
             if (!Positive(boostAcceleration)) { error = "boostAcceleration"; return false; }
             if (!Positive(boostDurationSeconds)) { error = "boostDurationSeconds"; return false; }
+            if (!Positive(boostDrainPerSecond)) { error = "boostDrainPerSecond"; return false; }
+            if (float.IsNaN(boostMinCharge) || float.IsInfinity(boostMinCharge)
+                || boostMinCharge < 0f || boostMinCharge > 1f)
+            { error = "boostMinCharge"; return false; }
             if (!Positive(boostChargeSeconds)) { error = "boostChargeSeconds"; return false; }
+            if (float.IsNaN(cleanLandingCredit) || float.IsInfinity(cleanLandingCredit)
+                || cleanLandingCredit < 0f || cleanLandingCredit > 1f)
+            { error = "cleanLandingCredit"; return false; }
+            if (!Positive(landingMinAirSeconds)) { error = "landingMinAirSeconds"; return false; }
             if (!Positive(gravity)) { error = "gravity"; return false; }
             if (!Positive(terminalFallSpeed)) { error = "terminalFallSpeed"; return false; }
             if (!Positive(groundProbe)) { error = "groundProbe"; return false; }
@@ -73,7 +88,10 @@ namespace FamilyRacing.Core.Driving
         }
 
         // Motorcycle: quicker steering and lighter feel; balance is
-        // automatic so no balance parameters exist.
+        // automatic so no balance parameters exist. This preset is the
+        // authored source of truth — the generated motorcycle-01 asset is
+        // written from it (see Editor/DrivingPrototypeSetup.ApplyPreset)
+        // and DriftBoostTests asserts the two stay identical.
         public static VehicleTuning Motorcycle01()
         {
             return new VehicleTuning
@@ -87,10 +105,15 @@ namespace FamilyRacing.Core.Driving
                 driftMinSpeed = 5f,
                 driftSteeringFactor = 1.35f,
                 driftLateralAcceleration = 5f,
+                driftChargePerSecond = 0.35f,
                 boostMaxSpeed = 28f,
                 boostAcceleration = 14f,
                 boostDurationSeconds = 2.2f,
+                boostDrainPerSecond = 0.45f,
+                boostMinCharge = 0.1f,
                 boostChargeSeconds = 5.5f,
+                cleanLandingCredit = 0.25f,
+                landingMinAirSeconds = 0.25f,
                 gravity = 24f,
                 terminalFallSpeed = 34f,
                 rideHeight = 0.6f,

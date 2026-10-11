@@ -12,11 +12,11 @@ namespace FamilyRacing.Core.Driving
     public static class ArcadeMotor
     {
         private const float SweepBackoffFraction = 0.02f;
-        private const float DriftSteeringThreshold = 0.15f;
         private const float TwoPi = (float)(Math.PI * 2.0);
 
         public static MotorStepResult Step(MotorState previous, DriverInput input,
-            VehicleTuning tuning, IMotorWorld world, float deltaSeconds)
+            VehicleTuning tuning, IMotorWorld world, float deltaSeconds,
+            IRacerContactSource racers = null)
         {
             if (tuning == null || !tuning.Validate(out _))
                 return MotorStepResult.Rejected(previous, "invalidTuning");
@@ -34,9 +34,7 @@ namespace FamilyRacing.Core.Driving
             // --- steering + drift ----------------------------------------
             var steer = input.Steering;
             var authority = Clamp01(Math.Abs(state.speed) / tuning.steeringReferenceSpeed);
-            var wantDrift = input.Drift && state.grounded
-                && Math.Abs(steer) > DriftSteeringThreshold
-                && state.speed >= tuning.driftMinSpeed;
+            var wantDrift = DriftBoostRules.DriftEligible(input, state, tuning);
             if (wantDrift && !state.drifting)
             {
                 state.drifting = true;
@@ -53,18 +51,23 @@ namespace FamilyRacing.Core.Driving
                 * (state.drifting ? tuning.driftSteeringFactor : 1f);
             state.heading = WrapAngle(state.heading + steer * rate * dt);
 
-            // --- boost -----------------------------------------------------
-            if (input.Boost && !state.boostActive && state.boostCharge >= 1f)
+            // --- boost: hold/release drain against a normalized charge ----
+            // Releasing the boost input rearms the one-shot latch so a
+            // held press cannot machine-gun the meter after emptying.
+            if (!input.Boost) state.boostLatched = false;
+            if (DriftBoostRules.CanStartBoost(state, input, tuning))
             {
                 state.boostActive = true;
+                state.boostLatched = true;
                 state.boostSecondsRemaining = tuning.boostDurationSeconds;
-                state.boostCharge = 0f;
                 result.events.Add(new MotorEvent("boostStart"));
             }
             if (state.boostActive)
             {
                 state.boostSecondsRemaining -= dt;
-                if (state.boostSecondsRemaining <= 0f)
+                state.boostCharge = Clamp01(
+                    state.boostCharge - tuning.boostDrainPerSecond * dt);
+                if (DriftBoostRules.MustEndBoost(state, input))
                 {
                     state.boostActive = false;
                     state.boostSecondsRemaining = 0f;
@@ -73,7 +76,10 @@ namespace FamilyRacing.Core.Driving
             }
             else if (state.boostCharge < 1f)
             {
-                state.boostCharge = Clamp01(state.boostCharge + dt / tuning.boostChargeSeconds);
+                // Passive recharge plus drift charge; recovery-flagged
+                // steps gain nothing (DriftBoostRules gates them).
+                state.boostCharge = Clamp01(state.boostCharge
+                    + DriftBoostRules.ChargeGained(state, tuning, dt));
             }
 
             // --- forward speed (auto-acceleration, traction requires ground)
@@ -154,6 +160,38 @@ namespace FamilyRacing.Core.Driving
                 state.z += dz;
             }
 
+            // --- racer contact seam --------------------------------------
+            // M2 has no AI racers so sessions pass null; when a contact
+            // source exists each nudge is a bounded velocity kick — the
+            // applied speed change can never exceed NudgeMaxDeltaSpeed.
+            if (racers != null)
+            {
+                var nudges = racers.NudgesFor(state);
+                if (nudges != null && nudges.Count > 0)
+                {
+                    float ix = 0f, iz = 0f;
+                    foreach (var nudge in nudges)
+                    {
+                        if (float.IsNaN(nudge.impulseX) || float.IsInfinity(nudge.impulseX)
+                            || float.IsNaN(nudge.impulseZ) || float.IsInfinity(nudge.impulseZ))
+                            continue;
+                        ix += nudge.impulseX;
+                        iz += nudge.impulseZ;
+                    }
+                    var magnitude = (float)Math.Sqrt(ix * ix + iz * iz);
+                    if (magnitude > 0f)
+                    {
+                        var applied = Math.Min(magnitude, DriftBoostRules.NudgeMaxDeltaSpeed);
+                        var scale = applied / magnitude;
+                        var dvx = ix * scale;
+                        var dvz = iz * scale;
+                        state.speed += dvx * fx + dvz * fz;
+                        state.lateralSpeed += dvx * rx + dvz * rz;
+                        result.events.Add(new MotorEvent("racerNudge", applied));
+                    }
+                }
+            }
+
             // --- vertical: ground follow / airborne fall ---------------------
             pose.x = state.x;
             pose.y = state.y;
@@ -172,21 +210,34 @@ namespace FamilyRacing.Core.Driving
                 {
                     state.grounded = false;
                     state.airSeconds = 0f;
+                    state.airWallContact = contacted;
                     result.events.Add(new MotorEvent("becameAirborne"));
                 }
             }
             if (!state.grounded)
             {
+                // A barrier clipped during flight invalidates the
+                // episode's landing credit.
+                if (contacted) state.airWallContact = true;
                 state.verticalSpeed = Math.Max(state.verticalSpeed - tuning.gravity * dt,
                     -tuning.terminalFallSpeed);
                 var newY = state.y + state.verticalSpeed * dt;
                 state.airSeconds += dt;
                 if (ground.hit && newY <= ground.y)
                 {
+                    var episodeWallContact = state.airWallContact || contacted;
+                    if (DriftBoostRules.LandingIsClean(state, episodeWallContact, tuning))
+                    {
+                        state.boostCharge = Clamp01(
+                            state.boostCharge + tuning.cleanLandingCredit);
+                        result.events.Add(
+                            new MotorEvent("cleanLanding", tuning.cleanLandingCredit));
+                    }
                     state.y = ground.y;
                     state.grounded = true;
                     state.verticalSpeed = 0f;
                     state.airSeconds = 0f;
+                    state.airWallContact = false;
                     result.events.Add(new MotorEvent("landed"));
                     state.lastContact = contacted ? "wall" : "ground";
                 }

@@ -26,6 +26,8 @@ namespace FamilyRacing.Core.Driving
         public float boostCharge = 1f;
         public bool boostActive;
         public float boostSecondsRemaining;
+        public bool boostLatched;    // set when a boost fires; cleared by releasing the input
+        public bool airWallContact;  // the current airborne episode clipped a barrier
         public bool recovering;
         public string lastContact = "none"; // "none" | "ground" | "wall" | "obstacle"
         public long tick;
@@ -53,6 +55,8 @@ namespace FamilyRacing.Core.Driving
                 boostCharge = boostCharge,
                 boostActive = boostActive,
                 boostSecondsRemaining = boostSecondsRemaining,
+                boostLatched = boostLatched,
+                airWallContact = airWallContact,
                 recovering = recovering,
                 lastContact = lastContact,
                 tick = tick
