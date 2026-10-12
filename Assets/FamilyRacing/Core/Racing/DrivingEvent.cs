@@ -7,6 +7,9 @@ namespace FamilyRacing.Core.Racing
     // identity ("" when none), and a short detail token. Events are
     // surfaced through DrivingSessionState drivingEvents boundaries so an
     // observer can reconstruct consumed/cancelled/phase transitions.
+    // Solo emissions leave participantId/attribution empty; the network
+    // race coordinator stamps the owning participantId plus "human"|"ai"
+    // at emission time so attribution never has to be re-derived later.
     [Serializable]
     public sealed class DrivingEvent
     {
@@ -15,6 +18,8 @@ namespace FamilyRacing.Core.Racing
         public string kind;
         public string commandId;
         public string detail;
+        public string participantId = "";
+        public string attribution = "";     // "" solo | "human" | "ai"
 
         public DrivingEvent Copy()
         {
@@ -24,7 +29,9 @@ namespace FamilyRacing.Core.Racing
                 tick = tick,
                 kind = kind,
                 commandId = commandId,
-                detail = detail
+                detail = detail,
+                participantId = participantId,
+                attribution = attribution
             };
         }
     }

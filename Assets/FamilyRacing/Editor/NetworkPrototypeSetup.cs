@@ -1,4 +1,5 @@
 using System.IO;
+using FamilyRacing.Core.Networking;
 using FamilyRacing.Networking;
 using UnityEditor;
 using UnityEngine;
@@ -36,6 +37,100 @@ namespace FamilyRacing.EditorTools
         {
             EnsureAndroidManifest();
             ApplyPlayerSettings();
+            EnsureLanRaceContent();
+        }
+
+        // --- LAN race content ---------------------------------------------
+        // Four non-overlapping grid slots on the shared graybox course:
+        // two staggered rows of two, >=5 m apart, inside the start gate
+        // band. The network race coordinator seats roster slot N at
+        // spawnSlots[N]; solo play ignores them entirely.
+        private const string DrivingContentDir = "Assets/FamilyRacing/Generated/Driving";
+        private const string LanTrackPath = DrivingContentDir + "/graybox-01.asset";
+        private const int LanEventLaps = 3;
+        private const int LanCountdownTicks = 90;
+        private static readonly Vector3[] LanSpawnPositions =
+        {
+            new Vector3(-5f, 0f, -57f),
+            new Vector3(5f, 0f, -57f),
+            new Vector3(-5f, 0f, -62f),
+            new Vector3(5f, 0f, -62f)
+        };
+
+        private static void EnsureLanRaceContent()
+        {
+            var track = AssetDatabase.LoadAssetAtPath<TrackDefinitionAsset>(LanTrackPath);
+            if (track == null)
+            {
+                // FoundationProjectSetup runs DrivingPrototypeSetup first;
+                // a standalone invocation reports the miss honestly
+                // instead of fabricating a partial track.
+                Debug.LogWarning("NetworkPrototypeSetup: " + LanTrackPath
+                    + " missing — LAN race content skipped");
+                return;
+            }
+            EnsureSpawnGrid(track);
+            // Separate class-pure event configurations per vehicle class;
+            // the authored coin fact rides on the event so a finalized
+            // race can award finishers (Task 8 applies it).
+            EnsureLanEvent("lan-car-01", track, "car-01");
+            EnsureLanEvent("lan-motorcycle-01", track, "motorcycle-01");
+        }
+
+        private static void EnsureSpawnGrid(TrackDefinitionAsset track)
+        {
+            var dirty = false;
+            if (track.spawnSlots == null
+                || track.spawnSlots.Length != LanSpawnPositions.Length)
+            {
+                track.spawnSlots =
+                    new TrackDefinitionAsset.SpawnSlot[LanSpawnPositions.Length];
+                dirty = true;
+            }
+            for (var i = 0; i < LanSpawnPositions.Length; i++)
+            {
+                if (track.spawnSlots[i] == null)
+                {
+                    track.spawnSlots[i] = new TrackDefinitionAsset.SpawnSlot();
+                    dirty = true;
+                }
+                if (track.spawnSlots[i].position != LanSpawnPositions[i]
+                    || track.spawnSlots[i].headingDegrees != 0f)
+                {
+                    track.spawnSlots[i].position = LanSpawnPositions[i];
+                    track.spawnSlots[i].headingDegrees = 0f;
+                    dirty = true;
+                }
+            }
+            if (dirty) EditorUtility.SetDirty(track);
+        }
+
+        private static void EnsureLanEvent(string eventId,
+            TrackDefinitionAsset track, string vehicleId)
+        {
+            var path = DrivingContentDir + "/" + eventId + ".asset";
+            var asset = AssetDatabase.LoadAssetAtPath<EventDefinitionAsset>(path);
+            if (asset == null)
+            {
+                asset = ScriptableObject.CreateInstance<EventDefinitionAsset>();
+                AssetDatabase.CreateAsset(asset, path);
+            }
+            var dirty = asset.eventId != eventId
+                || asset.track != track
+                || asset.laps != LanEventLaps
+                || asset.countdownTicks != LanCountdownTicks
+                || asset.completionCoins != NetworkSettings.LanCompletionCoins
+                || asset.vehicleIds == null
+                || asset.vehicleIds.Length != 1
+                || asset.vehicleIds[0] != vehicleId;
+            if (!dirty) return;
+            asset.eventId = eventId;
+            asset.track = track;
+            asset.laps = LanEventLaps;
+            asset.countdownTicks = LanCountdownTicks;
+            asset.vehicleIds = new[] { vehicleId };
+            asset.completionCoins = NetworkSettings.LanCompletionCoins;
+            EditorUtility.SetDirty(asset);
         }
 
         private static void EnsureAndroidManifest()

@@ -22,6 +22,20 @@ namespace FamilyRacing.Core.Networking
         // Four racers total; AI fills slots without a human (Task 4).
         public const int ParticipantCapacity = 4;
 
+        // One authoritative race clock shared by every racer in a session:
+        // 30 simulated boundaries per real second, and once the first
+        // racer finishes, the rest have 60 unpaused race seconds before
+        // they are recorded DNF.
+        public const int SimulationTicksPerSecond = 30;
+        public const int FinishGraceSeconds = 60;
+        public const long FinishGraceTicks =
+            (long)FinishGraceSeconds * SimulationTicksPerSecond;
+
+        // Authored completion reward facts for network races: finishing
+        // the prescribed laps in a finalized race awards this many coins;
+        // DNFs and aborted races award nothing (Task 8 applies them).
+        public const int LanCompletionCoins = 20;
+
         // In-flight asynchronous commands are bounded; excess is refused
         // without mutation.
         public const int PendingOperationCapacity = 128;

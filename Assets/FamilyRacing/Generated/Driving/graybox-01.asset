@@ -46,3 +46,12 @@ MonoBehaviour:
     direction: {x: -1, y: 0}
     recoverPosition: {x: 53, y: 0, z: -55}
     recoverHeadingDegrees: -90
+  spawnSlots:
+  - position: {x: -5, y: 0, z: -57}
+    headingDegrees: 0
+  - position: {x: 5, y: 0, z: -57}
+    headingDegrees: 0
+  - position: {x: -5, y: 0, z: -62}
+    headingDegrees: 0
+  - position: {x: 5, y: 0, z: -62}
+    headingDegrees: 0

@@ -19,6 +19,7 @@ MonoBehaviour:
   vehicleIds:
   - car-01
   - motorcycle-01
+  completionCoins: 0
   offCourseSeconds: 1.5
   minCourseY: -5
   stuckSpeed: 0.75

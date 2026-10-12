@@ -119,8 +119,12 @@ namespace FamilyRacing.Core.Racing
         private readonly RecoveryRules recovery = new RecoveryRules();
         private long finishTicks;
 
+        // `startPose` lets an authoritative coordinator seat this racer at
+        // an authored grid slot instead of the course's solo spawn; solo
+        // callers omit it and get the course spawn unchanged.
         public DrivingSession(string raceId, VehicleTuning tuning, CourseDefinition course,
-            EventDefinition evt, string contentVersion, string startCommandId)
+            EventDefinition evt, string contentVersion, string startCommandId,
+            MotorPose? startPose = null)
         {
             if (string.IsNullOrEmpty(raceId)) throw new ArgumentException("raceId", "raceId");
             if (tuning == null || course == null || evt == null)
@@ -131,6 +135,16 @@ namespace FamilyRacing.Core.Racing
                 throw new ArgumentException("Invalid course: " + courseError);
             if (!evt.Validate(out var eventError))
                 throw new ArgumentException("Invalid event: " + eventError);
+            var spawn = startPose ?? new MotorPose
+            {
+                x = course.spawnX,
+                y = course.spawnY,
+                z = course.spawnZ,
+                heading = course.spawnHeading
+            };
+            if (!Finite(spawn.x) || !Finite(spawn.y) || !Finite(spawn.z)
+                || !Finite(spawn.heading))
+                throw new ArgumentException("Invalid start pose.");
             this.raceId = raceId;
             vehicleId = tuning.vehicleId;
             this.tuning = tuning;
@@ -141,21 +155,15 @@ namespace FamilyRacing.Core.Racing
             if (countdownRemaining <= 0) phase = PhaseRunning;
             motor = new MotorState
             {
-                x = course.spawnX,
-                y = course.spawnY,
-                z = course.spawnZ,
-                heading = course.spawnHeading,
+                x = spawn.x,
+                y = spawn.y,
+                z = spawn.z,
+                heading = spawn.heading,
                 grounded = true
             };
             progress = CheckpointProgress.Create(course, evt.laps);
             // With no accepted gate the safe respawn is the spawn itself.
-            lastSafePose = new MotorPose
-            {
-                x = course.spawnX,
-                y = course.spawnY,
-                z = course.spawnZ,
-                heading = course.spawnHeading
-            };
+            lastSafePose = spawn;
             Emit("race.started", startCommandId ?? "", evt.id);
             // A countdown-free event goes straight to running: emit the
             // transition here or consumers waiting on race.running hang.
@@ -225,7 +233,10 @@ namespace FamilyRacing.Core.Racing
             return drained;
         }
 
-        public DrivingStepResult Step(DriverInput input, IMotorWorld world)
+        // `racers` is the shared racer-contact seam (Task 4): solo callers
+        // omit it and ArcadeMotor steps with racers:null exactly as before.
+        public DrivingStepResult Step(DriverInput input, IMotorWorld world,
+            IRacerContactSource racers = null)
         {
             var result = new DrivingStepResult();
             lastInput = input;
@@ -267,7 +278,7 @@ namespace FamilyRacing.Core.Racing
                     // excluded from progress and landing evaluation, and
                     // the flag clears when this step commits.
                     var recoveryFlagged = motor.recovering;
-                    var step = ArcadeMotor.Step(motor, input, tuning, world, StepSeconds);
+                    var step = ArcadeMotor.Step(motor, input, tuning, world, StepSeconds, racers);
                     if (step.rejected)
                     {
                         // A rejected step leaves the motor state untouched.
@@ -391,6 +402,31 @@ namespace FamilyRacing.Core.Racing
                 camera = null,
                 controls = new List<string>()
             };
+            // Clamped progress toward the next expected gate on the current
+            // legal segment — enough for an authoritative standings sort
+            // without reproducing checkpoint sweeps.
+            var gateCount = course.checkpoints != null ? course.checkpoints.Count : 0;
+            if (gateCount > 0)
+            {
+                var prevIndex = (progress.expectedCheckpoint - 1 + gateCount) % gateCount;
+                var prev = course.checkpoints[prevIndex];
+                var next = course.checkpoints[progress.expectedCheckpoint];
+                var segX = next.x - prev.x;
+                var segZ = next.z - prev.z;
+                var segLenSquared = segX * segX + segZ * segZ;
+                if (segLenSquared > 0.0001f)
+                {
+                    var along = ((motor.x - prev.x) * segX
+                        + (motor.z - prev.z) * segZ) / segLenSquared;
+                    var clamped = along < 0f ? 0f : along > 1f ? 1f : along;
+                    state.segmentProgressMeters = clamped
+                        * (float)System.Math.Sqrt(segLenSquared);
+                }
+                state.acceptedGatesThisLap =
+                    progress.expectedCheckpoint == 0
+                        ? gateCount - 1
+                        : progress.expectedCheckpoint - 1;
+            }
             foreach (var entry in pending)
             {
                 state.pendingActions.Add(new PendingActionState
@@ -403,6 +439,11 @@ namespace FamilyRacing.Core.Racing
             foreach (var mark in progress.marks)
                 state.checkpoints.Add(mark.Copy());
             return state;
+        }
+
+        private static bool Finite(float v)
+        {
+            return !(float.IsNaN(v) || float.IsInfinity(v));
         }
 
         private void Emit(string kind, string commandId, string detail)

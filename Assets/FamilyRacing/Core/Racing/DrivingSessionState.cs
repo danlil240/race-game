@@ -90,6 +90,11 @@ namespace FamilyRacing.Core.Racing
         public int lap;
         public int lapsRequired;
         public int nextCheckpoint;
+        // Progress facts for authoritative standings: gates accepted on
+        // the current lap plus clamped metres along the segment into the
+        // next expected gate. Zero-based positions; they never regress.
+        public int acceptedGatesThisLap;
+        public float segmentProgressMeters;
         public List<CheckpointMark> checkpoints = new List<CheckpointMark>();
         public bool finished;
         public long finishTicks;

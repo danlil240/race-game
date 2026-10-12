@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using FamilyRacing.Core.Driving;
 using FamilyRacing.Core.Racing;
 using UnityEngine;
 
@@ -25,10 +26,21 @@ namespace FamilyRacing
             public float recoverHeadingDegrees;
         }
 
+        // One authored multiplayer grid slot: the network race coordinator
+        // seats roster slot N at spawnSlots[N]. Solo play ignores this
+        // array and uses spawnPosition/spawnHeadingDegrees.
+        [Serializable]
+        public sealed class SpawnSlot
+        {
+            public Vector3 position;
+            public float headingDegrees;
+        }
+
         public string courseId = "graybox-01";
         public Vector3 spawnPosition = new Vector3(0f, 0f, -60f);
         public float spawnHeadingDegrees;
         public Gate[] gates = new Gate[0];
+        public SpawnSlot[] spawnSlots = new SpawnSlot[0];
 
         public CourseDefinition ToCourse(out string error)
         {
@@ -58,6 +70,18 @@ namespace FamilyRacing
                         recoverY = gate.recoverPosition.y,
                         recoverZ = gate.recoverPosition.z,
                         recoverHeading = gate.recoverHeadingDegrees * Mathf.Deg2Rad
+                    });
+                }
+            if (spawnSlots != null)
+                foreach (var slot in spawnSlots)
+                {
+                    if (slot == null) continue;
+                    course.spawnSlots.Add(new MotorPose
+                    {
+                        x = slot.position.x,
+                        y = slot.position.y,
+                        z = slot.position.z,
+                        heading = slot.headingDegrees * Mathf.Deg2Rad
                     });
                 }
             if (!course.Validate(out error))

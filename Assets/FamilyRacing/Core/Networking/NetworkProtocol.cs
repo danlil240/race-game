@@ -92,14 +92,13 @@ namespace FamilyRacing.Core.Networking
         }
 
         // M3 content convention: a vehicle id's class is the segment before
-        // its first '-' (car-01 -> car, motorcycle-01 -> motorcycle). Ids
-        // without a separator are their own class. Class-pure selection is
+        // its first '-' (car-01 -> car, motorcycle-01 -> motorcycle). The
+        // single implementation lives on VehicleTuning so the content layer
+        // and the race coordinator share it; class-pure selection is
         // enforced by lan.configure/lan.vehicle on top of this rule.
         public static string VehicleClass(string vehicleId)
         {
-            if (string.IsNullOrEmpty(vehicleId)) return "";
-            var dash = vehicleId.IndexOf('-');
-            return dash < 0 ? vehicleId : vehicleId.Substring(0, dash);
+            return FamilyRacing.Core.Driving.VehicleTuning.ClassIdOf(vehicleId);
         }
 
         public static bool IntField(IReadOnlyDictionary<string, string> fields,

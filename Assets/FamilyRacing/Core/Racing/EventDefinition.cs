@@ -15,6 +15,11 @@ namespace FamilyRacing.Core.Racing
         public int countdownTicks = 90;
         public List<string> vehicleIds = new List<string>();
         public RecoverySettings recovery = new RecoverySettings();
+        // Authored completion reward (coins) applied to racers that finish
+        // the prescribed laps in a finalized race. Zero outside events
+        // that carry a reward — the reward rule itself lives in the race
+        // coordinator, not in presentation.
+        public int completionCoins;
 
         public bool Validate(out string error)
         {
@@ -28,6 +33,7 @@ namespace FamilyRacing.Core.Racing
                 if (string.IsNullOrEmpty(vehicleId)) { error = "vehicleIds"; return false; }
             if (recovery == null) { error = "recovery"; return false; }
             if (!recovery.Validate(out error)) return false;
+            if (completionCoins < 0) { error = "completionCoins"; return false; }
             return true;
         }
 
@@ -45,7 +51,8 @@ namespace FamilyRacing.Core.Racing
                 laps = laps,
                 countdownTicks = countdownTicks,
                 vehicleIds = vehicleIds == null ? null : new List<string>(vehicleIds),
-                recovery = recovery == null ? null : recovery.Copy()
+                recovery = recovery == null ? null : recovery.Copy(),
+                completionCoins = completionCoins
             };
         }
     }

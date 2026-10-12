@@ -44,7 +44,10 @@ namespace FamilyRacing.Core.Foundation
         // until then — never silently aliased onto the solo `driving`
         // field.
         public NetworkSessionState network;
-        public object networkRace;
+        // Host-confirmed shared race state (Task 3). Same emitted field
+        // name as the object placeholder it replaces; null until a network
+        // race exists.
+        public NetworkRaceState networkRace;
         public object prediction;
         public object remotePresentation;
     }

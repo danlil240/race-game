@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using FamilyRacing.Core.Driving;
 
 namespace FamilyRacing.Core.Racing
 {
@@ -46,14 +47,22 @@ namespace FamilyRacing.Core.Racing
     // Unity-free course data: the shared graybox definition both vehicles
     // drive. Geometry lives in the generated prefab; this record carries
     // the sim-facing facts (spawn, ordered checkpoints).
+    // `spawnSlots` optionally authors a multiplayer starting grid — the
+    // network race coordinator seats slot N at spawnSlots[N]; solo play
+    // keeps using spawnX/Y/Z/Heading and never reads them. When present
+    // every slot must be finite and pairwise non-overlapping on the
+    // ground plane.
     public sealed class CourseDefinition
     {
+        public const float MinSpawnSeparationMeters = 3.5f;
+
         public string id = "";
         public float spawnX;
         public float spawnY;
         public float spawnZ;
         public float spawnHeading;
         public List<CheckpointGate> checkpoints = new List<CheckpointGate>();
+        public List<MotorPose> spawnSlots = new List<MotorPose>();
 
         public bool Validate(out string error)
         {
@@ -82,6 +91,24 @@ namespace FamilyRacing.Core.Racing
                     || !Finite(gate.recoverZ) || !Finite(gate.recoverHeading))
                 { error = "checkpoint.recover"; return false; }
             }
+            if (spawnSlots != null)
+            {
+                for (var i = 0; i < spawnSlots.Count; i++)
+                {
+                    var slot = spawnSlots[i];
+                    if (!Finite(slot.x) || !Finite(slot.y) || !Finite(slot.z)
+                        || !Finite(slot.heading))
+                    { error = "spawnSlots"; return false; }
+                    for (var j = i + 1; j < spawnSlots.Count; j++)
+                    {
+                        var dx = spawnSlots[i].x - spawnSlots[j].x;
+                        var dz = spawnSlots[i].z - spawnSlots[j].z;
+                        if (dx * dx + dz * dz
+                            < MinSpawnSeparationMeters * MinSpawnSeparationMeters)
+                        { error = "spawnSlots.overlap"; return false; }
+                    }
+                }
+            }
             return true;
         }
 
@@ -99,6 +126,18 @@ namespace FamilyRacing.Core.Racing
             if (checkpoints != null)
                 foreach (var gate in checkpoints)
                     copy.checkpoints.Add(gate == null ? null : gate.Copy());
+            if (spawnSlots != null)
+            {
+                copy.spawnSlots = new List<MotorPose>();
+                foreach (var slot in spawnSlots)
+                    copy.spawnSlots.Add(new MotorPose
+                    {
+                        x = slot.x,
+                        y = slot.y,
+                        z = slot.z,
+                        heading = slot.heading
+                    });
+            }
             return copy;
         }
 

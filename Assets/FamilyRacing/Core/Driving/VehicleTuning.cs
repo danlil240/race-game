@@ -89,6 +89,16 @@ namespace FamilyRacing.Core.Driving
             return !float.IsNaN(value) && !float.IsInfinity(value) && value > 0f;
         }
 
+        // Content convention shared with the LAN session layer: a vehicle
+        // id's class is the segment before its first '-' (car-01 -> car).
+        // Ids without a separator are their own class.
+        public static string ClassIdOf(string vehicleId)
+        {
+            if (string.IsNullOrEmpty(vehicleId)) return "";
+            var dash = vehicleId.IndexOf('-');
+            return dash < 0 ? vehicleId : vehicleId.Substring(0, dash);
+        }
+
         // Rally car: heavier, grippier, calmer steering.
         public static VehicleTuning Car01()
         {

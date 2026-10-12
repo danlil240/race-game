@@ -16,6 +16,10 @@ namespace FamilyRacing
         public int laps = 2;
         public int countdownTicks = 90;
         public string[] vehicleIds = { "car-01", "motorcycle-01" };
+        // Coins a finalized race awards each finisher; zero keeps the
+        // event reward-free (solo events award nothing here — rewards
+        // flow through the profile/economy slice instead).
+        public int completionCoins;
         [Header("Recovery")]
         public float offCourseSeconds = 1.5f;
         public float minCourseY = -5f;
@@ -44,7 +48,8 @@ namespace FamilyRacing
                     stuckSpeed = stuckSpeed,
                     stuckSeconds = stuckSeconds,
                     beachedSeconds = beachedSeconds
-                }
+                },
+                completionCoins = completionCoins
             };
             if (!evt.Validate(out error))
             {
