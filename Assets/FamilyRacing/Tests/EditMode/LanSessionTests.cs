@@ -32,6 +32,8 @@ namespace FamilyRacing.Tests
             public int StartHostCalls;
             public int StartClientCalls;
             public int StopCalls;
+            public string LastClientAddress;
+            public int LastClientPort;
             public readonly Queue<KeyValuePair<ulong, string>> Sent =
                 new Queue<KeyValuePair<ulong, string>>();
 
@@ -46,6 +48,8 @@ namespace FamilyRacing.Tests
             public bool StartClient(string address, ushort port, out string error)
             {
                 StartClientCalls++;
+                LastClientAddress = address;
+                LastClientPort = port;
                 error = "";
                 return true;
             }
@@ -65,6 +69,15 @@ namespace FamilyRacing.Tests
             {
                 var drained = new List<string>();
                 while (Sent.Count > 0) drained.Add(Sent.Dequeue().Value);
+                return drained;
+            }
+
+            // Same drain keeping the destination connection id, for tests
+            // that must attribute a reply to a specific peer.
+            public List<KeyValuePair<ulong, string>> DrainPairs()
+            {
+                var drained = new List<KeyValuePair<ulong, string>>();
+                while (Sent.Count > 0) drained.Add(Sent.Dequeue());
                 return drained;
             }
 
@@ -404,6 +417,173 @@ namespace FamilyRacing.Tests
             Assert.That(link.StopCalls, Is.GreaterThanOrEqualTo(1));
             Assert.That(service.CompleteNetworkCommand(outcomes[0]), Is.False,
                 "terminal cache update must apply exactly once");
+        }
+
+        // --- disconnect / rejoin / mid-race admission asymmetry -------------
+
+        // Configure must run before readiness — lan.configure clears the
+        // ready flags — then host-ready + lan.start + BeginRace drive a
+        // standalone host into the racing phase.
+        private void ConfigureCar(LanSessionService host)
+        {
+            Assert.That(host.Execute(Cmd("lan.configure",
+                P("eventId", "lan-mixed", "classId", "car"))).status,
+                Is.EqualTo(CommandResult.Applied));
+        }
+
+        private void ReadyAndStart(LanSessionService host)
+        {
+            Assert.That(host.Execute(Cmd("lan.ready", P("ready", "true"))).status,
+                Is.EqualTo(CommandResult.Applied));
+            Assert.That(host.Execute(Cmd("lan.start", null)).status,
+                Is.EqualTo(CommandResult.Applied));
+            Assert.That(host.BeginRace(), Is.True);
+            Assert.That(host.Phase, Is.EqualTo(LanSessionService.PhaseRacing));
+        }
+
+        private static void GuestReady(LanSessionService host, ulong conn, string tag)
+        {
+            host.OnLinkMessage(conn, NetworkProtocol.Encode(
+                NetworkProtocol.MsgReadySet, "cid", "rdy-" + tag, "rdy", "1"));
+        }
+
+        private static string RejectCode(FakeLanLink sent)
+        {
+            string code = null;
+            foreach (var payload in sent.DrainSent())
+            {
+                string type;
+                Dictionary<string, string> fields;
+                if (NetworkProtocol.TryDecode(payload, out type, out fields)
+                    && type == NetworkProtocol.MsgJoinReject)
+                    code = fields["code"];
+            }
+            return code;
+        }
+
+        private static int Occupied(NetworkSessionState state)
+        {
+            var count = 0;
+            foreach (var p in state.participants) if (p.occupied) count++;
+            return count;
+        }
+
+        [Test]
+        public void MidRaceDisconnectRetainsSlotAsAi()
+        {
+            var host = StandaloneHost(link, probe);
+            host.OnLinkConnected(9);
+            host.OnLinkMessage(9, JoinRequest("p-1"));
+            ConfigureCar(host);
+            GuestReady(host, 9, "1");
+            link.DrainSent();
+            ReadyAndStart(host);
+
+            host.OnLinkDisconnected(9, "lost");
+
+            var roster = host.Snapshot().participants;
+            var retained = false;
+            foreach (var p in roster)
+            {
+                if (!p.occupied || p.participantId != "p-1") continue;
+                retained = true;
+                Assert.That(p.connected, Is.False);
+                Assert.That(p.controlSource, Is.EqualTo("ai"),
+                    "a mid-race disconnect keeps the slot under ai control");
+                Assert.That(p.ownershipEpoch, Is.EqualTo(1));
+            }
+            Assert.That(retained, Is.True,
+                "the slot must be retained for the remainder of the race");
+            Assert.That(host.Snapshot().descriptor.joinable, Is.False);
+        }
+
+        [Test]
+        public void StrangerJoinRejectedWhileRacing()
+        {
+            var host = StandaloneHost(link, probe);
+            ConfigureCar(host);
+            ReadyAndStart(host);
+
+            host.OnLinkConnected(20);
+            host.OnLinkMessage(20, JoinRequest("stranger"));
+
+            Assert.That(RejectCode(link), Is.EqualTo("raceInProgress"),
+                "non-credentialed joins must refuse once the roster froze");
+            var roster = host.Snapshot().participants;
+            foreach (var p in roster)
+                Assert.That(p.participantId, Is.Not.EqualTo("stranger"));
+            Assert.That(Occupied(host.Snapshot()), Is.EqualTo(1));
+        }
+
+        [Test]
+        public void CredentialedRejoinReclaimsSlotWhenFull()
+        {
+            var host = StandaloneHost(link, probe);
+            string credential = null;
+            for (var i = 1; i <= 3; i++)
+            {
+                var conn = (ulong)(10 + i);
+                host.OnLinkConnected(conn);
+                host.OnLinkMessage(conn, JoinRequest("p-" + i));
+                // The private credential rides only on join.accept; capture
+                // the one issued to p-3 for its later rejoin.
+                foreach (var pair in link.DrainPairs())
+                {
+                    string type;
+                    Dictionary<string, string> fields;
+                    if (pair.Key != conn) continue;
+                    if (!NetworkProtocol.TryDecode(pair.Value, out type, out fields))
+                        continue;
+                    if (type == NetworkProtocol.MsgJoinAccept && i == 3)
+                        credential = fields["cred"];
+                }
+            }
+            Assert.That(credential, Is.Not.Null.And.Not.Empty,
+                "join.accept must carry the reconnect credential privately");
+            ConfigureCar(host);
+            for (var i = 1; i <= 3; i++) GuestReady(host, (ulong)(10 + i), i.ToString());
+            link.DrainSent();
+            ReadyAndStart(host);
+            Assert.That(Occupied(host.Snapshot()), Is.EqualTo(4));
+
+            // The roster is full and the race is running when p-3 drops.
+            host.OnLinkDisconnected(13, "lost");
+            var dropped = host.Snapshot().participants[3];
+            Assert.That(dropped.participantId, Is.EqualTo("p-3"));
+            Assert.That(dropped.connected, Is.False);
+            Assert.That(dropped.controlSource, Is.EqualTo("ai"));
+
+            host.OnLinkConnected(20);
+            host.OnLinkMessage(20, JoinRequest("p-3", credential: credential));
+            string acceptEpoch = null;
+            string rejected = null;
+            foreach (var pair in link.DrainPairs())
+            {
+                string type;
+                Dictionary<string, string> fields;
+                if (!NetworkProtocol.TryDecode(pair.Value, out type, out fields))
+                    continue;
+                if (type == NetworkProtocol.MsgJoinAccept) acceptEpoch = fields["ep"];
+                if (type == NetworkProtocol.MsgJoinReject) rejected = fields["code"];
+            }
+            Assert.That(rejected, Is.Null,
+                "a valid credential reclaims its slot even full and racing");
+            Assert.That(acceptEpoch, Is.EqualTo("2"),
+                "rejoin must bump the ownership epoch");
+
+            var roster = host.Snapshot().participants;
+            var claims = 0;
+            foreach (var p in roster)
+            {
+                if (!p.occupied || p.participantId != "p-3") continue;
+                claims++;
+                Assert.That(p.connected, Is.True);
+                Assert.That(p.controlSource, Is.EqualTo("remote"));
+                Assert.That(p.ownershipEpoch, Is.EqualTo(2));
+            }
+            Assert.That(claims, Is.EqualTo(1),
+                "reclaim must reuse the slot, not allocate a second one");
+            Assert.That(Occupied(host.Snapshot()), Is.EqualTo(4));
         }
     }
 }

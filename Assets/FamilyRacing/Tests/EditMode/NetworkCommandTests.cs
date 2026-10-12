@@ -286,5 +286,86 @@ namespace FamilyRacing.Tests
             Assert.That(outcomes.Count, Is.EqualTo(1));
             Assert.That(outcomes[0].status, Is.EqualTo(CommandResult.Applied));
         }
+
+        [Test]
+        public void PendingCapacityRefusesExtraOperation()
+        {
+            var clientLink = new LanSessionTests.FakeLanLink();
+            var clientProbe = new LanSessionTests.FakeLanProbe();
+            string joinId;
+            var client = JoinedClient(clientLink, clientProbe, out joinId);
+
+            for (var i = 0; i < NetworkSettings.PendingOperationCapacity; i++)
+            {
+                var result = client.Execute(Cmd("lan.ready",
+                    P("ready", "true"), "rdy-" + i));
+                Assert.That(result.status, Is.EqualTo(CommandResult.Accepted),
+                    "in-flight op " + i + " must be accepted");
+            }
+            var over = client.Execute(Cmd("lan.ready",
+                P("ready", "false"), "rdy-overflow"));
+            Assert.That(over.status, Is.EqualTo(CommandResult.Rejected));
+            Assert.That(over.code, Is.EqualTo("pendingFull"),
+                "the op beyond the bound is refused without mutation");
+            Assert.That(clientLink.Sent.Count,
+                Is.EqualTo(NetworkSettings.PendingOperationCapacity),
+                "a refused op must not reach the transport");
+            var state = client.Snapshot();
+            Assert.That(state.pendingOperations.Count,
+                Is.EqualTo(NetworkSettings.PendingOperationCapacity));
+            Assert.That(state.phase, Is.EqualTo(LanSessionService.PhaseLobby));
+        }
+
+        [Test]
+        public void ReconnectKeepsStoredEndpointAfterFailedJoin()
+        {
+            var clientLink = new LanSessionTests.FakeLanLink();
+            var clientProbe = new LanSessionTests.FakeLanProbe();
+            string joinId;
+            var client = JoinedClient(clientLink, clientProbe, out joinId);
+            Assert.That(clientLink.LastClientAddress, Is.EqualTo("10.0.0.2"));
+
+            // Drop to recovery, then let the first reconnect time out —
+            // the stored credential survives and the role returns to none.
+            client.OnLinkDisconnected(3, "lost");
+            Assert.That(client.Snapshot().phase,
+                Is.EqualTo(LanSessionService.PhaseRecovery));
+            var reconnect = client.Execute(Cmd("lan.reconnect", null));
+            Assert.That(reconnect.status, Is.EqualTo(CommandResult.Accepted));
+            client.AdvanceWallTime(6.0);
+            var timedOut = client.DrainOutcomes();
+            Assert.That(timedOut.Count, Is.EqualTo(1));
+            Assert.That(timedOut[0].code, Is.EqualTo("joinTimeout"));
+            Assert.That(client.Snapshot().role,
+                Is.EqualTo(LanSessionService.RoleNone));
+
+            // An intervening failed join elsewhere must not corrupt the
+            // stored reconnect endpoint.
+            var stray = client.Execute(Cmd("lan.join",
+                P("address", "10.0.0.9", "port", "49999")));
+            Assert.That(stray.status, Is.EqualTo(CommandResult.Accepted));
+            Assert.That(clientLink.LastClientAddress, Is.EqualTo("10.0.0.9"));
+            client.AdvanceWallTime(12.0);
+            Assert.That(client.DrainOutcomes()[0].code, Is.EqualTo("joinTimeout"));
+
+            var again = client.Execute(Cmd("lan.reconnect", null));
+            Assert.That(again.status, Is.EqualTo(CommandResult.Accepted));
+            Assert.That(clientLink.LastClientAddress, Is.EqualTo("10.0.0.2"),
+                "reconnect must target the stored session endpoint");
+            Assert.That(clientLink.LastClientPort, Is.EqualTo(47777));
+
+            // The accept must re-store the endpoint actually connected to —
+            // never the stray one the failed join left behind.
+            client.OnLinkConnected(4);
+            clientLink.DrainSent();
+            client.OnLinkMessage(4, LanSessionTests.JoinAccept(
+                "s-1", "client-p", 1, cid: again.commandId));
+            var outcome = client.DrainOutcomes();
+            Assert.That(outcome.Count, Is.EqualTo(1));
+            Assert.That(outcome[0].status, Is.EqualTo(CommandResult.Applied));
+            Assert.That(client.Snapshot().descriptor.hostAddress,
+                Is.EqualTo("10.0.0.2"),
+                "join.accept must not re-store the stray endpoint");
+        }
     }
 }

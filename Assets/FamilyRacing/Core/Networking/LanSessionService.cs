@@ -715,6 +715,12 @@ namespace FamilyRacing.Core.Networking
                 return Result(command, CommandResult.Rejected, "invalidPhase");
             if (!PendingCapacityOk())
                 return Result(command, CommandResult.Rejected, "pendingFull");
+            // The endpoint fields feed both the join.accept descriptor and
+            // the re-stored reconnect material; refresh them from the stored
+            // endpoint so an intervening failed join elsewhere can never
+            // corrupt where the next reconnect points.
+            joinAddress = storedJoinAddress;
+            joinPort = storedJoinPort;
             string error;
             if (!link.StartClient(storedJoinAddress, (ushort)storedJoinPort, out error))
             {
