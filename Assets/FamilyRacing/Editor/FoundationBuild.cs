@@ -23,6 +23,7 @@ namespace FamilyRacing.EditorTools
         public static void Windows()
         {
             FoundationProjectSetup.Create();
+            NetworkPrototypeSetup.VerifyBuildConfiguration(BuildTarget.StandaloneWindows64);
             var report = Build("Builds/Windows/FamilyRacing.exe",
                 BuildTarget.StandaloneWindows64, BuildOptions.Development);
             Report(report, "Windows Mono development build");
@@ -34,6 +35,7 @@ namespace FamilyRacing.EditorTools
         public static void WindowsOrdinary()
         {
             FoundationProjectSetup.Create();
+            NetworkPrototypeSetup.VerifyBuildConfiguration(BuildTarget.StandaloneWindows64);
             var report = Build("Builds/Windows-Ordinary/FamilyRacing.exe",
                 BuildTarget.StandaloneWindows64, BuildOptions.None);
             Report(report, "Windows Mono ordinary build (no validation)");
@@ -76,6 +78,7 @@ namespace FamilyRacing.EditorTools
                 EditorUserBuildSettings.exportAsGoogleAndroidProject = true;
                 EditorUserBuildSettings.buildAppBundle = false;
                 FoundationProjectSetup.Create();
+                NetworkPrototypeSetup.VerifyBuildConfiguration(BuildTarget.Android);
                 var report = Build(exportPath, BuildTarget.Android,
                     BuildOptions.Development | BuildOptions.AcceptExternalModificationsToPlayer);
                 Report(report, "Android Gradle export (APK build runs separately offline)");

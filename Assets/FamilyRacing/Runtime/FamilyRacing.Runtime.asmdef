@@ -4,6 +4,9 @@
   "references": [
     "FamilyRacing.Core",
     "Unity.InputSystem",
+    "Unity.Netcode.Runtime",
+    "Unity.Networking.Transport",
+    "Unity.Collections",
     "Unity.RenderPipelines.Universal.Runtime",
     "Unity.RenderPipelines.Core.Runtime"
   ],

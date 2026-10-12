@@ -34,6 +34,7 @@ namespace FamilyRacing.EditorTools
             EnsureScene(panel);
             EnsureSceneInBuild();
             DrivingPrototypeSetup.Create();
+            NetworkPrototypeSetup.Create();
             ApplyPlayerSettings();
             EnableInputSystem();
             AssetDatabase.SaveAssets();
