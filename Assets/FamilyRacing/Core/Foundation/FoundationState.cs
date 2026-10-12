@@ -54,6 +54,11 @@ namespace FamilyRacing.Core.Foundation
         public bool validationActive;
         public int backlogSteps;
         public long stepOverloads;
+
+        public PresentationState Copy()
+        {
+            return (PresentationState)MemberwiseClone();
+        }
     }
 
     [Serializable]

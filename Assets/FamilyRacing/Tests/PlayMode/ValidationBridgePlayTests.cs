@@ -216,6 +216,48 @@ namespace FamilyRacing.Tests
             bridge = null;
         }
 
+        // Boundary contract the snapshot-sharing refactor must preserve: a
+        // tick emitted after a presentation refresh carries the refreshed
+        // facts, not the pre-refresh copy.
+        [UnityTest]
+        public IEnumerator TickBoundaryCarriesPostRefreshPresentation()
+        {
+            StartBridge();
+            using (var client = Connect())
+            {
+                Hello(client);
+                client.Read();
+                yield return PumpSeconds(0.3f);
+                client.Read(); // attach snapshot
+
+                // Mimic the app's boundary order: tick advances, snapshot is
+                // taken, presentation is refreshed into the service, then
+                // the refreshed facts are folded into the emitted state.
+                service.AdvanceTick();
+                var state = service.Snapshot();
+                var presentation = new PresentationState
+                {
+                    screenWidth = 1920,
+                    screenHeight = 1080,
+                    inputSource = "agent",
+                    textDirection = "rtl",
+                    hebrewFontAvailable = true,
+                    buildTarget = "test"
+                };
+                service.SetPresentation(presentation);
+                state.presentation = presentation.Copy();
+                bridge.EmitTick(state);
+
+                var pair = client.ReadBoundary();
+                var emitted = pair[1]["presentation"];
+                Assert.That((string)emitted["inputSource"], Is.EqualTo("agent"));
+                Assert.That((string)emitted["textDirection"], Is.EqualTo("rtl"));
+                Assert.That(emitted["screenWidth"].Value<int>(), Is.EqualTo(1920));
+                Assert.That((bool)emitted["hebrewFontAvailable"], Is.True);
+            }
+            yield return PumpSeconds(0.2f);
+        }
+
         [UnityTest]
         public IEnumerator UnauthorizedHelloRejected()
         {

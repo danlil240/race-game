@@ -128,10 +128,14 @@ namespace FamilyRacing
                 // then the observation tick expires leases and publishes.
                 service.StepDriving(drivingWorld != null ? drivingWorld.MotorWorld : null);
                 service.AdvanceTick();
-                // Presentation (input source, geometry, direction) is part of
-                // the captured tick boundary — refresh before emitting.
-                RefreshPresentation(service.Snapshot());
-                bridge?.EmitTick();
+                // One snapshot per tick boundary: the presentation refresh
+                // mutates service state after the snapshot is taken, so the
+                // refreshed facts are folded back before emission — same
+                // record content without a second deep copy.
+                var tickState = service.Snapshot();
+                RefreshPresentation(tickState);
+                tickState.presentation = presentation.Copy();
+                bridge?.EmitTick(tickState);
             }
             presentation.backlogSteps = (int)(accumulator / step);
             if (steps == MaxStepsPerFrame && accumulator >= step)
@@ -156,9 +160,14 @@ namespace FamilyRacing
                 {
                     service.SetDrivingCameraFacts(drivingWorld.CameraFacts);
                 }
-                state = service.Snapshot();
+                // Fold the just-published camera facts into this frame's
+                // snapshot instead of re-snapshotting after SetFacts.
+                if (state.driving != null)
+                    state.driving.camera = (drivingCamera != null
+                        ? drivingCamera.Facts : drivingWorld.CameraFacts).Copy();
             }
             RefreshPresentation(state);
+            state.presentation = presentation.Copy();
             shell?.Refresh(state);
             // Cue announcements and icon demonstrations follow the latest
             // published tutorial state — never the other way around.
@@ -184,8 +193,13 @@ namespace FamilyRacing
             // Presentation must reflect the post-command state (language,
             // geometry, ownership) before the boundary snapshot is emitted,
             // or a record can claim e.g. language=he with direction=ltr.
-            if (result != null) RefreshPresentation(service.Snapshot());
-            bridge?.EmitCommandBoundary(result);
+            if (result != null)
+            {
+                var boundaryState = service.Snapshot();
+                RefreshPresentation(boundaryState);
+                boundaryState.presentation = presentation.Copy();
+                bridge?.EmitCommandBoundary(result, boundaryState);
+            }
             return result;
         }
 

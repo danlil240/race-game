@@ -407,20 +407,7 @@ namespace FamilyRacing.Core.Foundation
 
         private static PresentationState CopyPresentation(PresentationState value)
         {
-            if (value == null) return null;
-            return new PresentationState
-            {
-                screenWidth = value.screenWidth,
-                screenHeight = value.screenHeight,
-                inputSource = value.inputSource,
-                textDirection = value.textDirection,
-                hebrewFontAvailable = value.hebrewFontAvailable,
-                fontWarning = value.fontWarning,
-                buildTarget = value.buildTarget,
-                validationActive = value.validationActive,
-                backlogSteps = value.backlogSteps,
-                stepOverloads = value.stepOverloads
-            };
+            return value?.Copy();
         }
 
         private CommandResult Dispatch(GameCommand command)

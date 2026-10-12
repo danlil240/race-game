@@ -152,17 +152,21 @@ namespace FamilyRacing.Automation
             }
         }
 
-        internal void EmitTick()
+        // Callers that already hold a post-refresh snapshot pass it in so a
+        // boundary costs one deep copy instead of two.
+        internal void EmitTick(FoundationState state = null)
         {
-            if (!finishRequested) stream.EmitDeltaBoundary(service.Snapshot(), null);
+            if (!finishRequested)
+                stream.EmitDeltaBoundary(state ?? service.Snapshot(), null);
         }
 
-        internal void EmitCommandBoundary(CommandResult result)
+        internal void EmitCommandBoundary(CommandResult result,
+            FoundationState state = null)
         {
             if (finishRequested || result == null) return;
             // Action boundary publishes the post-execution state before the
             // result so the result lands on a state boundary.
-            stream.EmitDeltaBoundary(service.Snapshot(), result.commandId);
+            stream.EmitDeltaBoundary(state ?? service.Snapshot(), result.commandId);
             stream.EmitResult(result);
         }
 
