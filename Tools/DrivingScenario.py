@@ -17,6 +17,7 @@ schedule against the identity cache, outgoing queue and trace cap.
 import argparse
 import json
 import math
+import re
 import sys
 import time
 from pathlib import Path
@@ -25,11 +26,22 @@ from AgentScenario import (BOUNDARY_TYPES, Client, inputs, verify_trace,
                            SUPPORTED_STATE_SCHEMAS)
 
 
+def _source_const(name, relative_source):
+    """Read an integer const from the shipped source — one truth, no mirror."""
+    path = Path(__file__).resolve().parent.parent / relative_source
+    match = re.search(r"\b" + name + r"\s*=\s*(\d+)\s*;",
+                      path.read_text(encoding="utf-8"))
+    assert match, name + " const not found in " + str(path)
+    return int(match.group(1))
+
+
 # Mirrored stream/queue bounds so qualification can fail on real pressure.
 IDENTITY_CAPACITY = 10000
 OUTGOING_CAPACITY = 256
 TRACE_CAPACITY_BYTES = 256 * 1024 * 1024
-MAX_STEPS_PER_FRAME = 8          # FoundationApp.MaxStepsPerFrame
+# Derived from FoundationApp.cs — a tuning change there must move this bound.
+MAX_STEPS_PER_FRAME = _source_const(
+    "MaxStepsPerFrame", "Assets/FamilyRacing/Runtime/FoundationApp.cs")
 MAX_PENDING_SCREENSHOTS = 4      # ValidationBridge.MaxPendingScreenshots
 SCHEDULE_SECONDS = 30 * 60       # representative 30-minute input schedule
 
@@ -273,6 +285,11 @@ def drive_lap(client, driver, checks, run_directory, label):
     assert client.events_of("motor.boostStart"), "No motor.boostStart event"
     assert client.state["driving"]["motor"]["speed"] > 0, \
         "Boost leg never accelerated"
+    # Charge starts at 1.0; while boost is held it drains in bursts and can
+    # never refill past boostMinCharge without re-firing — below 1.0 proves
+    # real drain reached the wire.
+    assert client.state["driving"]["motor"]["boostCharge"] < 1.0, \
+        "Held boost never drained boostCharge"
     checks.append(label + "gate-1 crossed in order; boostStart event with charge drain")
 
     # --- drift leg: the hard left off the straight into the west lane ----
@@ -442,6 +459,7 @@ def run(connection, evidence):
             restarted, _ = client.applied("race.restart")
             state = client.action_state(restarted["commandId"])
             assert state["driving"]["raceId"] != driving["raceId"]
+            races.append(state["driving"]["raceId"])
             wait_phase(client, "running", timeout=30)
             checks.append(label + " race.restart produced a new race identity")
 
@@ -469,7 +487,8 @@ def run(connection, evidence):
         # Bounded load probes: pending outgoing records sampled via health.
         client.send({"type": "health"})
         health = client.wait(lambda event: event.get("type") == "health")
-        dropped_events = client.state.get("droppedDrivingEvents", 0)
+        # Strict access: the durable marker must be present, never defaulted.
+        dropped_events = client.state["droppedDrivingEvents"]
         measurement = {
             "measured": stats,
             "scheduleSeconds": SCHEDULE_SECONDS,

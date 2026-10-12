@@ -23,6 +23,11 @@ Tools\Verify.ps1 -Mode PlayMode
 
 # Windows Mono development build -> Builds\Windows\FamilyRacing.exe:
 Tools\Verify.ps1 -Mode Windows
+
+# Dedicated Windows build script with per-run evidence
+# (Logs\windows-build\<flavor>\<run-id>\result.json):
+Tools\Build-Windows.ps1                          # development flavor
+Tools\Build-Windows.ps1 -Configuration Ordinary  # -> Builds\Windows-Ordinary\
 ```
 
 `Verify.ps1` modes write `Logs\verify-unity-<mode>.log` and propagate the
@@ -146,9 +151,26 @@ from genuine driving events (`motor.driftStart`, `motor.boostStart`,
 boundaries). `race.restart` inside a tutorial retries the current stage
 without losing completed lessons; `race.exit` and profile switches end
 the session-local tutorial state. `driving.tutorial` in the state slice
-is `null` unless a tutorial is active; `featureCoverage.tutorial` stays
+is `null` unless a tutorial is active; when active it is a `TutorialState`
+object — `phase` (`lessons`/`trial`/`graduated`), `lessonId`,
+`lessonIndex`/`lessonTotal`, `completedLessons`, the current cue
+(`objective`, `icon`, `cueId`, `cueSequence`) and the bundled clip
+identities `audioEn`/`audioHe` (empty until voice clips ship).
+`featureCoverage.tutorial` stays
 `notImplemented` (the full-release tutorial incl. gadget onboarding is
 deferred) while `featureCoverage.drivingOnboarding` reports this slice.
+`tutorial.exit` inside an active tutorial abandons the session and its
+result detail reports `tutorialExit`; with no tutorial running the same
+command reports `noActiveTutorial`.
+
+`driving.checkpoints` is the ordered gate list for the active event:
+index 0 is the start/finish line and racing gates begin at index 1;
+`driving.nextCheckpoint` names the next un-crossed index.
+Vehicle tuning has a deliberate dual source: `VehicleTuning` presets in
+Core are the authored truth (used by tests and setup); generated
+`VehicleDefinitionAsset` YAML is the runtime mirror, re-serialized from
+the presets on every `Verify.ps1 -Mode Setup` and bound by an
+asset↔preset parity test.
 
 Sequenced server records carry `protocolVersion`, `runId`, `deviceId`
 (random per run), `participantId`, `buildVersion`, `contentVersion`,

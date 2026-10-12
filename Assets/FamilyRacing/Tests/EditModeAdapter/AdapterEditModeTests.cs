@@ -1,8 +1,10 @@
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
 using FamilyRacing.Automation;
+using FamilyRacing.Core.Foundation;
 using FamilyRacing.Core.Profiles;
 using FamilyRacing.EditorTools;
 using Newtonsoft.Json.Linq;
@@ -205,6 +207,33 @@ namespace FamilyRacing.Tests
                 Assert.That(asset.ClipFor(cueId, "he"), Is.Not.Null,
                     cueId + " missing Hebrew clip");
             }
+        }
+
+        // Snapshot→JObject copy happens once per boundary and once per
+        // frame; measure it on a live service so the record carries a real
+        // number instead of a guess. The bound is a tripwire (two orders
+        // under the 33 ms frame), not a performance gate.
+        [Test]
+        public void SnapshotJsonCopyCostMeasured()
+        {
+            var profiles = Path.Combine(Path.GetTempPath(),
+                "fr-profiles-" + Guid.NewGuid().ToString("N"));
+            var service = new FoundationService(
+                new ProfileStore(profiles, new UnityProfileSerializer()),
+                "en", "run-measure");
+            const int iterations = 200;
+            // Warm-up pass so JIT costs stay out of the measurement.
+            JObject.FromObject(service.Snapshot());
+            var watch = Stopwatch.StartNew();
+            for (var i = 0; i < iterations; i++)
+                JObject.FromObject(service.Snapshot());
+            watch.Stop();
+            var perCopyMs = watch.Elapsed.TotalMilliseconds / iterations;
+            UnityEngine.Debug.Log(
+                $"Snapshot→JObject copy cost: {perCopyMs:F3} ms " +
+                $"({iterations} iterations)");
+            Assert.That(perCopyMs, Is.LessThan(1.0),
+                "A boundary copy must stay far under the 33 ms frame budget");
         }
 
         [Test]

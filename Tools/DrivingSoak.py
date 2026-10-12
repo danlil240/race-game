@@ -374,8 +374,8 @@ def run(player_command, evidence, minutes):
         # contract is marked accounting — `droppedDrivingEvents` must be
         # present and monotonic — not zero evictions; boundary history
         # and the capture stay complete either way.
-        result["droppedDrivingEvents"] = client.state.get(
-            "droppedDrivingEvents", 0)
+        # Strict access: the durable marker must be present, never defaulted.
+        result["droppedDrivingEvents"] = client.state["droppedDrivingEvents"]
         result["drivingEventsObserved"] = len(client.driving_events)
         result["drivingEventAccounting"] = {
             "window": "bounded 128-event observation slice",
@@ -383,8 +383,6 @@ def run(player_command, evidence, minutes):
             "disclosure": "evictions are counted on the durable state "
                           "marker; no event leaves state unaccounted",
         }
-        assert "droppedDrivingEvents" in client.state, \
-            "Driving-event eviction is not marked in state"
         result["maxBacklogSteps"] = client.max_backlog_steps
         result["presentation"] = {
             "stepOverloads": overloads(client.state),

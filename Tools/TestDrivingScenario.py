@@ -219,7 +219,12 @@ class TraceFixtureTests(unittest.TestCase):
     def test_missing_duplicate_reordered_and_corrupt_records_fail(self):
         good = self.good_trace()
         cases = {
-            "missing delta": good[:2] + good[3:],
+            # Drop delta seq 4 and renumber: the next delta's base then
+            # names a boundary that never supplied its state.
+            "missing delta": good[:3] + [
+                dict(event, sequence=i + 4)
+                for i, event in enumerate(good[4:])],
+            "missing non-boundary record": good[:2] + good[3:],
             "duplicate record": good[:2] + [good[1]] + [
                 dict(event, sequence=i + 3)
                 for i, event in enumerate(good[2:])],
