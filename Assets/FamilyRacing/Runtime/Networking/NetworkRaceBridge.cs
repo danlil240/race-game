@@ -89,7 +89,6 @@ namespace FamilyRacing.Networking
         // smoother eases (or snaps) what the player sees.
         private readonly CorrectionSmoother smoother =
             new CorrectionSmoother();
-        private MotorState renderBase;
         private MotorState smoothedLocal;
         private double lastSmoothTime = double.NaN;
         private IMotorWorld clientWorld;
@@ -232,16 +231,21 @@ namespace FamilyRacing.Networking
         }
 
         /// <summary>Task 6 render seam: the local racer's pose to draw —
-        /// the predicted motor plus the decaying correction offset. The
+        /// the LIVE predicted motor plus the decaying correction offset.
+        /// Feeding prediction.Predicted (not a reconcile-time pose) is
+        /// the point: between 15 Hz snapshot accepts the rendered car
+        /// keeps advancing with local input, while the banked offset
+        /// alone guarantees visual continuity across corrections. The
         /// pose the Task-9 LAN screen maps onto the local participant's
         /// vehicle view; null until prediction is seeded.</summary>
         public MotorState SmoothedLocalMotor(double nowSeconds)
         {
-            if (renderBase == null) return null;
+            var live = prediction != null ? prediction.Predicted : null;
+            if (live == null) return null;
             var dt = double.IsNaN(lastSmoothTime)
                 ? 0 : nowSeconds - lastSmoothTime;
             lastSmoothTime = nowSeconds;
-            smoothedLocal = smoother.Apply(renderBase, dt);
+            smoothedLocal = smoother.Apply(live, dt);
             return smoothedLocal;
         }
 
@@ -254,14 +258,12 @@ namespace FamilyRacing.Networking
             var corrected = prediction != null ? prediction.Predicted : null;
             if (corrected == null)
             {
-                renderBase = null;
                 smoothedLocal = null;
                 return;
             }
             if (smoothedLocal != null)
                 smoother.Correct(smoothedLocal, corrected,
                     prediction.LastCorrectionSnap);
-            renderBase = corrected;
         }
 
         /// <summary>Queue a one-shot action (e.g. recover) for the local
@@ -717,7 +719,6 @@ namespace FamilyRacing.Networking
         private void ResetPresentation()
         {
             smoother.Reset();
-            renderBase = null;
             smoothedLocal = null;
             lastSmoothTime = double.NaN;
         }

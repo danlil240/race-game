@@ -362,9 +362,12 @@ namespace FamilyRacing.Tests
                 }
                 Assert.That(predicted, Is.Not.Null,
                     "prediction never produced a motor state");
-                // The visual seam renders the predicted pose plus the
-                // decaying correction offset — it must exist and stay
-                // within a correction's reach of the simulated pose.
+                // The visual seam renders the LIVE predicted pose plus
+                // the decaying correction offset — it must exist, stay
+                // within a correction's reach of the simulated pose,
+                // and advance between snapshots: two consecutive local
+                // ticks with no packet pump in between cannot deliver a
+                // reconcile, so any motion here is live prediction.
                 var smoothed = client.Bridge.SmoothedLocalMotor(
                     client.Now);
                 Assert.That(smoothed, Is.Not.Null,
@@ -374,6 +377,17 @@ namespace FamilyRacing.Tests
                 Assert.That(Mathf.Sqrt(sdx * sdx + sdz * sdz),
                     Is.LessThanOrEqualTo(
                         NetworkSettings.CorrectionSnapMeters));
+                client.Bridge.StepTick(steer, World);
+                client.Bridge.StepTick(steer, World);
+                var smoothedAfter = client.Bridge.SmoothedLocalMotor(
+                    client.Now + 0.066);
+                Assert.That(smoothedAfter, Is.Not.Null);
+                var moveX = smoothedAfter.x - smoothed.x;
+                var moveZ = smoothedAfter.z - smoothed.z;
+                Assert.That(Mathf.Sqrt(moveX * moveX + moveZ * moveZ),
+                    Is.GreaterThan(0.0001f),
+                    "smoothed pose froze between snapshot accepts — it "
+                    + "must follow the live prediction every tick");
                 var facts = client.Bridge.Prediction;
                 Assert.That(facts, Is.Not.Null);
                 Assert.That(facts.predictedMotor, Is.Not.Null);
