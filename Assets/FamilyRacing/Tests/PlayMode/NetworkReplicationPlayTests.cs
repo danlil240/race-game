@@ -674,5 +674,77 @@ namespace FamilyRacing.Tests
                 client.Dispose();
             }
         }
+
+        // The negative leg of the one-shot contract — "acknowledge/retry
+        // until applied or cancelled". Six ids in one burst exceed the
+        // session pending queue (capacity 4): the overflow ids must come
+        // back as explicit action.cancelled events, and the client must
+        // retire them instead of retrying forever.
+        [UnityTest]
+        public IEnumerator DeclinedOneShotEmitsCancelledAndClientStopsRetrying()
+        {
+            var host = new Rig("p-host", new StubNetworkAccess());
+            var client = new Rig("p-guest", new StubNetworkAccess());
+            var hostEvents = new List<DrivingEvent>();
+            var clientEvents = new List<DrivingEvent>();
+            try
+            {
+                yield return StartTwoPlayerRace(host, client);
+                var ids = new[]
+                    { "cx-1", "cx-2", "cx-3", "cx-4", "cx-5", "cx-6" };
+                foreach (var id in ids) client.Bridge.SubmitAction(id);
+                for (var i = 0; i < 20; i++)
+                {
+                    Tick(host, client, Neutral, Neutral,
+                        hostEvents, clientEvents);
+                    if (i % 4 == 0) yield return null;
+                }
+                // Every submitted id resolves: latched ones produce
+                // action.queued, the two past the session's pending cap
+                // produce the explicit cancel leg on the same reliable
+                // channel. The predicate drains because PumpUntil only
+                // pumps frames — StepTick boundaries already ran.
+                yield return PumpUntil(() =>
+                {
+                    clientEvents.AddRange(client.Bridge.DrainRaceEvents());
+                    return client.Bridge.PendingOneShotCount == 0
+                        && clientEvents.Exists(
+                            e => e.kind == "action.cancelled");
+                }, host, client);
+                var cancelled = clientEvents.FindAll(
+                    e => e.kind == "action.cancelled");
+                Assert.That(cancelled.Count, Is.GreaterThanOrEqualTo(2),
+                    "overflow ids must be cancelled, not dropped");
+                var resolved = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var ev in clientEvents)
+                    if (ev.commandId != null
+                        && ev.commandId.StartsWith("cx-",
+                            StringComparison.Ordinal))
+                        resolved.Add(ev.commandId);
+                foreach (var id in ids)
+                    Assert.That(resolved.Contains(id), Is.True,
+                        "submitted id never got a terminal event: " + id);
+                // The first four drain in submission order and latch; the
+                // last two overflow the pending queue and are cancelled.
+                Assert.That(clientEvents.Exists(e =>
+                    e.kind == "action.cancelled" && e.commandId == "cx-5"),
+                    Is.True, "cx-5 must be cancelled");
+                Assert.That(clientEvents.Exists(e =>
+                    e.kind == "action.cancelled" && e.commandId == "cx-6"),
+                    Is.True, "cx-6 must be cancelled");
+                // Cancel events carry the racer's identity so consumers
+                // can attribute the rejection.
+                foreach (var ev in cancelled)
+                    if (ev.commandId.StartsWith("cx-",
+                        StringComparison.Ordinal))
+                        Assert.That(ev.participantId,
+                            Is.EqualTo("p-guest"));
+            }
+            finally
+            {
+                host.Dispose();
+                client.Dispose();
+            }
+        }
     }
 }

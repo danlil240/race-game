@@ -50,6 +50,9 @@ namespace FamilyRacing.Networking
         private readonly Dictionary<string, string> appliedControl =
             new Dictionary<string, string>(StringComparer.Ordinal);
         private NetworkSnapshot lastPublished;
+        // Bridge-emitted lifecycle events share a per-race id namespace:
+        // "race.seated" takes e1, explicit one-shot cancellations e2+.
+        private long bridgeEventSequence;
 
         // --- shared -----------------------------------------------------
         private readonly List<DrivingEvent> drainedEvents = new List<DrivingEvent>();
@@ -105,6 +108,9 @@ namespace FamilyRacing.Networking
         /// <summary>Authoritative events dropped by the staged-send cap or
         /// already-seen dedup on the client.</summary>
         public long DroppedEvents { get; private set; }
+        /// <summary>One-shot action ids still awaiting a host apply/cancel
+        /// acknowledgment — diagnostic proving retries terminate.</summary>
+        public int PendingOneShotCount { get { return pendingActions.Count; } }
 
         /// <summary>Latest authoritative race state: the coordinator's own
         /// snapshot on the host, the newest accepted snapshot on a
@@ -266,6 +272,7 @@ namespace FamilyRacing.Networking
             inputs.BeginRace(hostSessionId, raceId);
             snapshotSequence = 0;
             eventBatchSequence = 0;
+            bridgeEventSequence = 0;
             stagedEvents.Clear();
             appliedEpochs.Clear();
             appliedControl.Clear();
@@ -283,7 +290,8 @@ namespace FamilyRacing.Networking
             // publishing on the reliable channel.
             stagedEvents.Add(new DrivingEvent
             {
-                id = raceId + "-bridge-e1",
+                id = raceId + "-bridge-e" + (++bridgeEventSequence).ToString(
+                    System.Globalization.CultureInfo.InvariantCulture),
                 tick = 0,
                 kind = "race.seated",
                 commandId = "",
@@ -397,15 +405,23 @@ namespace FamilyRacing.Networking
             foreach (var participantId in appliedControl.Keys)
                 map[participantId] = inputs.Consume(participantId, hostTick);
             // Accepted one-shot ids route through the racer's own pending
-            // queue — the session consumes at most one per boundary.
+            // queue — the session consumes at most one per boundary. A
+            // declined id (race over, racer finalized, pending queue full)
+            // is acknowledged with an explicit action.cancelled event so
+            // the client's retry loop terminates instead of retransmitting
+            // forever — "acknowledge/retry until applied or cancelled".
             foreach (var participantId in appliedControl.Keys)
             {
                 var actions = inputs.DrainActions(participantId);
                 foreach (var actionId in actions)
                 {
-                    string ignored;
-                    race.QueuePending(participantId, "recover", actionId,
-                        out ignored);
+                    string queueError;
+                    if (race.QueuePending(participantId, "recover", actionId,
+                            out queueError)) continue;
+                    var cancel = CancelledAction(participantId, actionId,
+                        queueError, hostTick);
+                    stagedEvents.Add(cancel);
+                    drainedEvents.Add(cancel);
                 }
             }
 
@@ -472,6 +488,25 @@ namespace FamilyRacing.Networking
                 if (ack != null) snapshot.acks.Add(ack);
             }
             return snapshot;
+        }
+
+        // The host's explicit negative acknowledgment for a dedup'd
+        // one-shot the coordinator declined. Ids share the per-race
+        // bridge namespace so event identity stays unique and stable.
+        private DrivingEvent CancelledAction(string participantId,
+            string actionId, string error, long tick)
+        {
+            return new DrivingEvent
+            {
+                id = raceId + "-bridge-e" + (++bridgeEventSequence).ToString(
+                    System.Globalization.CultureInfo.InvariantCulture),
+                tick = tick,
+                kind = "action.cancelled",
+                commandId = actionId ?? "",
+                detail = error ?? "rejected",
+                participantId = participantId ?? "",
+                attribution = "human"
+            };
         }
 
         /// <summary>Publish a full four-racer snapshot to every
