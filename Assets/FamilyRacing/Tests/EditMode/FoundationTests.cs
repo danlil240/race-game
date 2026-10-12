@@ -833,7 +833,12 @@ namespace FamilyRacing.Tests
                 "settings.update", "settings.save", "input.set", "input.clear",
                 "camera.toggle", "pause.toggle",
                 "race.start", "race.restart", "race.exit",
-                "tutorial.start", "tutorial.replay", "tutorial.exit"
+                "tutorial.start", "tutorial.replay", "tutorial.exit",
+                "lan.host", "lan.discover", "lan.discovery.stop", "lan.join",
+                "lan.configure", "lan.vehicle", "lan.ready", "lan.start",
+                "lan.pause.request", "lan.pause.set", "lan.reconnect",
+                "lan.results.request", "lan.results.retrySave",
+                "lan.rematch", "lan.leave"
             }));
             var create = Descriptor(service.Discover(), "profile.create");
             Assert.That(RequiredNames(create), Is.EquivalentTo(new[] { "slot", "language" }));

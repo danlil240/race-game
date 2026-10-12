@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Linq;
 using FamilyRacing.Core.Automation;
 using FamilyRacing.Core.Driving;
+using FamilyRacing.Core.Networking;
 using FamilyRacing.Core.Profiles;
 using FamilyRacing.Core.Racing;
 using FamilyRacing.Core.Tutorial;
@@ -14,8 +15,9 @@ namespace FamilyRacing.Core.Foundation
     // selection/settings drafts, a bounded input sandbox, navigation, and the
     // command/result/discovery contracts agents drive. No Unity or network
     // dependencies; the observation tick only advances via AdvanceTick and is
-    // not a race clock.
-    public sealed class FoundationService
+    // not a race clock. The LAN session half lives in
+    // FoundationService.Network.cs.
+    public sealed partial class FoundationService
     {
         public const int SupportedProtocolVersion = 1;
         public const string RequiredParticipant = "local";
@@ -131,7 +133,27 @@ namespace FamilyRacing.Core.Foundation
             Schema("race.exit"),
             Schema("tutorial.start", Param("vehicleId", "string", null)),
             Schema("tutorial.replay"),
-            Schema("tutorial.exit")
+            Schema("tutorial.exit"),
+            // LAN session surface (Core/Networking): asynchronous commands
+            // return accepted and complete through DrainNetworkOutcomes +
+            // CompleteNetworkCommand on a later boundary.
+            Schema("lan.host", Param("port", "integer", null)),
+            Schema("lan.discover"),
+            Schema("lan.discovery.stop"),
+            Schema("lan.join",
+                Param("address", "string", null), Param("port", "integer", null)),
+            Schema("lan.configure",
+                Param("eventId", "string", null), Param("classId", "string", null)),
+            Schema("lan.vehicle", Param("vehicleId", "string", null)),
+            Schema("lan.ready", Param("ready", "boolean", Bools)),
+            Schema("lan.start"),
+            Schema("lan.pause.request"),
+            Schema("lan.pause.set", Param("paused", "boolean", Bools)),
+            Schema("lan.reconnect"),
+            Schema("lan.results.request", Param("raceId", "string", null)),
+            Schema("lan.results.retrySave"),
+            Schema("lan.rematch"),
+            Schema("lan.leave")
         };
 
         private static readonly Dictionary<string, ParameterSpec[]> SchemaMap =
@@ -203,6 +225,7 @@ namespace FamilyRacing.Core.Foundation
         public void SetDrivingContent(DrivingContentCatalog catalog)
         {
             drivingContent = catalog;
+            if (lanSession != null) lanSession.SetContent(catalog);
         }
 
         // The validated tutorial definition travels with the run like the
@@ -275,7 +298,7 @@ namespace FamilyRacing.Core.Foundation
         {
             var state = new FoundationState
             {
-                stateSchemaVersion = 2,
+                stateSchemaVersion = NetworkSettings.StateSchemaVersion,
                 contentVersion = ContentVersion,
                 screen = screen,
                 language = language,
@@ -303,7 +326,11 @@ namespace FamilyRacing.Core.Foundation
                 presentation = CopyPresentation(presentation),
                 driving = null,
                 drivingEvents = new List<DrivingEvent>(),
-                droppedDrivingEvents = droppedDrivingEvents
+                droppedDrivingEvents = droppedDrivingEvents,
+                network = NetworkSnapshot(),
+                networkRace = null,
+                prediction = null,
+                remotePresentation = null
             };
             if (driving != null)
             {
@@ -414,6 +441,17 @@ namespace FamilyRacing.Core.Foundation
         {
             try
             {
+                // LAN commands route to the session service; pause.toggle
+                // is a shared toggle on the host and a pause request on a
+                // client while a session is active.
+                if (command.Action.StartsWith("lan.", StringComparison.Ordinal))
+                    return NetworkExecute(command);
+                if (command.Action == "pause.toggle" && LanActive())
+                    return NetworkExecute(command);
+                // Solo-only lifecycle commands are refused inside a LAN
+                // session so they can never tear down the shared state.
+                if (LanActive() && SoloBlockedDuringLan(command.Action))
+                    return Result(command, CommandResult.Rejected, "networkActive");
                 switch (command.Action)
                 {
                     case "profile.create": return CreateProfile(command);
@@ -440,6 +478,26 @@ namespace FamilyRacing.Core.Foundation
                 // Command paths must never leak raw exceptions, save contents,
                 // or filesystem paths into results.
                 return Result(command, CommandResult.Failed, "internalError");
+            }
+        }
+
+        // Commands that only make sense for a solo run; while a LAN
+        // session is active they reject with networkActive instead of
+        // mutating profile/identity or a parallel solo race.
+        private static bool SoloBlockedDuringLan(string action)
+        {
+            switch (action)
+            {
+                case "profile.create":
+                case "profile.select":
+                case "race.start":
+                case "race.restart":
+                case "tutorial.start":
+                case "tutorial.replay":
+                case "tutorial.exit":
+                    return true;
+                default:
+                    return false;
             }
         }
 
@@ -960,6 +1018,28 @@ namespace FamilyRacing.Core.Foundation
         {
             available = true;
             reason = "";
+            if (action.StartsWith("lan.", StringComparison.Ordinal))
+            {
+                if (lanSession == null)
+                {
+                    available = false;
+                    reason = "unavailable";
+                    return;
+                }
+                lanSession.Availability(action, out available, out reason);
+                return;
+            }
+            if (action == "pause.toggle" && LanActive())
+            {
+                lanSession.Availability(action, out available, out reason);
+                return;
+            }
+            if (LanActive() && SoloBlockedDuringLan(action))
+            {
+                available = false;
+                reason = "networkActive";
+                return;
+            }
             switch (action)
             {
                 case "profile.create":

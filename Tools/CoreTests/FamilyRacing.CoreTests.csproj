@@ -20,6 +20,7 @@
     <Compile Include="../../Assets/FamilyRacing/Core/Localization/*.cs" Link="Localization/%(Filename)%(Extension)" />
     <Compile Include="../../Assets/FamilyRacing/Core/Foundation/*.cs" Link="Foundation/%(Filename)%(Extension)" />
     <Compile Include="../../Assets/FamilyRacing/Core/Automation/*.cs" Link="Automation/%(Filename)%(Extension)" />
+    <Compile Include="../../Assets/FamilyRacing/Core/Networking/*.cs" Link="Networking/%(Filename)%(Extension)" />
     <Compile Include="../../Assets/FamilyRacing/Tests/EditMode/*.cs" Link="%(Filename)%(Extension)" />
   </ItemGroup>
 </Project>

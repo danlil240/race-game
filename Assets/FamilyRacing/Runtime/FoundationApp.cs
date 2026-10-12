@@ -22,6 +22,7 @@ namespace FamilyRacing
         private const int MaxStepsPerFrame = 8;
 
         private FoundationService service;
+        private Networking.LanSessionLink lanLink;
         private DrivingWorld drivingWorld;
         private DrivingCamera drivingCamera;
         private TutorialPresenter tutorialPresenter;
@@ -105,6 +106,14 @@ namespace FamilyRacing
                 Debug.LogError("--validation-dir ignored: validation endpoints are disabled in regular builds.");
 #endif
             }
+            // LAN session service stays Unity-free; the runtime link is its
+            // only window onto the real transport and discovery sockets.
+            lanLink = new Networking.LanSessionLink(
+                new Networking.LanTransport(), new Networking.LanDiscovery());
+            var lan = new Core.Networking.LanSessionService(
+                lanLink, lanLink, Application.version);
+            lanLink.Bind(lan);
+            service.SetLanSession(lan);
             driverInput?.Bind(this);
             shell?.Bind(this);
             service.SetPresentation(presentation);
@@ -115,6 +124,12 @@ namespace FamilyRacing
             // Commands publish their action-boundary state+result before the
             // next observation tick is emitted.
             bridge?.Pump();
+            // Transport/discovery callbacks run on this thread and queue
+            // session outcomes; monotonic wall time expires joins and
+            // request round-trips whether or not the app is paused.
+            lanLink?.Pump(DateTime.UtcNow);
+            service.AdvanceNetworkWallTime(Time.realtimeSinceStartupAsDouble);
+            DrainNetworkBoundary();
             driverInput?.Pump(AgentControlsInput, CurrentScreen);
             accumulator += Time.unscaledDeltaTime;
             var step = 1f / TickRate;
@@ -203,6 +218,22 @@ namespace FamilyRacing
             return result;
         }
 
+        // Async network transitions emit the same state+result boundary a
+        // synchronous command does: outcomes land in the identity cache
+        // exactly once, then a schema-3 boundary snapshot is published.
+        private void DrainNetworkBoundary()
+        {
+            var outcomes = service.DrainNetworkOutcomes();
+            foreach (var outcome in outcomes)
+            {
+                service.CompleteNetworkCommand(outcome);
+                var boundaryState = service.Snapshot();
+                RefreshPresentation(boundaryState);
+                boundaryState.presentation = presentation.Copy();
+                bridge?.EmitCommandBoundary(outcome, boundaryState);
+            }
+        }
+
         internal void MarkInputSource(string source)
         {
             lastInputSource = source;
@@ -254,6 +285,7 @@ namespace FamilyRacing
         private void OnApplicationQuit()
         {
             bridge?.Dispose();
+            lanLink?.Dispose();
         }
 
         // A development/editor validation launch may point profiles at a

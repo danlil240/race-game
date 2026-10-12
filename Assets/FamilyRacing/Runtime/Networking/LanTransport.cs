@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Unity.Collections;
 using Unity.Networking.Transport;
+using LanSettings = FamilyRacing.Core.Networking.NetworkSettings;
 
 namespace FamilyRacing.Networking
 {
@@ -35,20 +36,21 @@ namespace FamilyRacing.Networking
     public sealed class LanTransport : IDisposable
     {
         /// <summary>Default gameplay UDP port (configurable per start call
-        /// so multiple processes can share one machine).</summary>
-        public const ushort DefaultGameplayPort = 47777;
+        /// so multiple processes can share one machine). The value's single
+        /// definition lives in Core NetworkSettings.</summary>
+        public const ushort DefaultGameplayPort = LanSettings.DefaultGameplayPort;
 
         // Binding milestone timing budget: a failed join and a silent peer
         // must each resolve within 5 s of monotonic wall time. UTP reports
         // join failure after connectTimeoutMS * maxConnectAttempts and a
         // dead peer after disconnectTimeoutMS; both products stay <= 5 s.
-        // (Task 2's shared Core/Networking/NetworkSettings.cs does not
-        // exist yet; these constants are the single definition for now.)
+        // The values' single definition is Core NetworkSettings.
         /// <summary>Maximum wall time a join may stay pending.</summary>
-        public const int JoinTimeoutMilliseconds = 5000;
+        public const int JoinTimeoutMilliseconds = LanSettings.JoinTimeoutMilliseconds;
         /// <summary>Maximum wall time a silent peer stays connected.</summary>
-        public const int PeerTimeoutMilliseconds = 5000;
-        private const int ConnectAttemptIntervalMilliseconds = 500;
+        public const int PeerTimeoutMilliseconds = LanSettings.PeerTimeoutMilliseconds;
+        private const int ConnectAttemptIntervalMilliseconds =
+            LanSettings.ConnectAttemptIntervalMilliseconds;
         private const int MaxConnectAttempts =
             JoinTimeoutMilliseconds / ConnectAttemptIntervalMilliseconds;
 
@@ -77,6 +79,12 @@ namespace FamilyRacing.Networking
 
         /// <summary>True while a client connect is in flight.</summary>
         public bool IsConnecting => state == LanTransportState.Connecting;
+
+        /// <summary>True while this transport is in the client role —
+        /// connecting to or connected with a host. Clients send through
+        /// the parameterless <see cref="Send(byte[])"/> overload.</summary>
+        public bool IsClient => state == LanTransportState.Connecting
+            || state == LanTransportState.Connected;
 
         /// <summary>
         /// The port this transport is actually bound to — after

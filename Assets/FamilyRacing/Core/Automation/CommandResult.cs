@@ -10,6 +10,10 @@ namespace FamilyRacing.Core.Automation
         public const string Applied = "applied";
         public const string Rejected = "rejected";
         public const string Failed = "failed";
+        // Non-terminal: the request is in flight and completes later via a
+        // terminal outcome (applied/rejected/failed). Accepted results are
+        // cached under their command identity and completed exactly once.
+        public const string Accepted = "accepted";
 
         public string commandId;
         public string action;

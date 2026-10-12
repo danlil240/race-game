@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using FamilyRacing.Core.Networking;
 using FamilyRacing.Core.Profiles;
 using FamilyRacing.Core.Racing;
 
@@ -7,13 +8,12 @@ namespace FamilyRacing.Core.Foundation
 {
     // Serializable full-state DTO. Every Snapshot() call returns an
     // independent deep copy; callers can freely mutate what they receive.
-    // stateSchemaVersion 2 expands the record with the driving session
-    // observation; consumers must negotiate the schema, never silently
-    // reinterpret it.
+    // stateSchemaVersion 3 adds the network session slice; consumers must
+    // negotiate the schema, never silently reinterpret it.
     [Serializable]
     public sealed class FoundationState
     {
-        public int stateSchemaVersion = 2;
+        public int stateSchemaVersion = NetworkSettings.StateSchemaVersion;
         public string contentVersion = "";
         public string screen;
         public string language;
@@ -36,6 +36,17 @@ namespace FamilyRacing.Core.Foundation
         // evicted from drivingEvents by the capacity bound. An observer
         // never sees events disappear without this counter moving.
         public int droppedDrivingEvents;
+        // Schema-3 network slices. `network` is the lobby/session policy
+        // view and is always populated (idle/none without a session);
+        // networkRace (host-confirmed race state), prediction (local
+        // predicted motor/ack/buffer/corrections) and remotePresentation
+        // (interpolation facts) are delivered by Tasks 3/5/6 and stay null
+        // until then — never silently aliased onto the solo `driving`
+        // field.
+        public NetworkSessionState network;
+        public object networkRace;
+        public object prediction;
+        public object remotePresentation;
     }
 
     // Runtime-visible presentation facts (geometry, input ownership, locale,

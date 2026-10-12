@@ -7,6 +7,7 @@ using System.Net.Sockets;
 using System.Threading;
 using FamilyRacing.Core.Automation;
 using FamilyRacing.Core.Foundation;
+using FamilyRacing.Core.Networking;
 using Newtonsoft.Json.Linq;
 
 namespace FamilyRacing.Automation
@@ -113,7 +114,7 @@ namespace FamilyRacing.Automation
             info["token"] = token;
             info["runId"] = runId;
             info["participantId"] = FoundationService.RequiredParticipant;
-            info["stateSchemaVersion"] = 2;
+            info["stateSchemaVersion"] = NetworkSettings.StateSchemaVersion;
             info["contentVersion"] = service.ContentVersion;
             File.WriteAllText(Path.Combine(directory, "connection.json"),
                 ValidationJson.Line(info) + "\n");
@@ -466,7 +467,8 @@ namespace FamilyRacing.Automation
         {
             return "{\"type\":\"hello\",\"protocolVersion\":1,\"runId\":\"" + runId +
                 "\",\"buildVersion\":\"" + BuildVersion + "\",\"contentVersion\":\"" +
-                service.ContentVersion + "\",\"stateSchemaVersion\":2}";
+                service.ContentVersion + "\",\"stateSchemaVersion\":" +
+                NetworkSettings.StateSchemaVersion + "}";
         }
 
         public void Dispose()
