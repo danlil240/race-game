@@ -52,8 +52,9 @@ namespace FamilyRacing.Core.Driving
             state.heading = WrapAngle(state.heading + steer * rate * dt);
 
             // --- boost: hold/release drain against a normalized charge ----
-            // Releasing the boost input rearms the one-shot latch so a
-            // held press cannot machine-gun the meter after emptying.
+            // Held boost auto-fires whenever the charge refills past the
+            // minimum (owner-decided); boostLatched stays truthful as
+            // "a boost fired since the last release" for observers.
             if (!input.Boost) state.boostLatched = false;
             if (DriftBoostRules.CanStartBoost(state, input, tuning))
             {
@@ -70,6 +71,7 @@ namespace FamilyRacing.Core.Driving
                 if (DriftBoostRules.MustEndBoost(state, input))
                 {
                     state.boostActive = false;
+                    state.boostLatched = false;
                     state.boostSecondsRemaining = 0f;
                     result.events.Add(new MotorEvent("boostEnd"));
                 }

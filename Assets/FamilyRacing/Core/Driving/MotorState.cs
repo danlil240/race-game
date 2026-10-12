@@ -26,7 +26,7 @@ namespace FamilyRacing.Core.Driving
         public float boostCharge = 1f;
         public bool boostActive;
         public float boostSecondsRemaining;
-        public bool boostLatched;    // set when a boost fires; cleared by releasing the input
+        public bool boostLatched;    // a boost fired since the last input release
         public bool airWallContact;  // the current airborne episode clipped a barrier
         public float airPeakY;       // highest y of the current airborne episode
         public bool recovering;

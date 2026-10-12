@@ -51,14 +51,15 @@ namespace FamilyRacing.Core.Driving
                 && state.speed >= tuning.driftMinSpeed;
         }
 
-        // A press may start a boost when the latch is rearmed, the charge
-        // clears the tuning minimum and the step is not recovery-flagged.
+        // A held boost input fires whenever the charge clears the tuning
+        // minimum — the decided auto-fire semantics: while held, the
+        // meter drains in bursts as it refills; a release-and-press fires
+        // immediately too. Recovery-flagged steps never fire.
         public static bool CanStartBoost(MotorState state, DriverInput input,
             VehicleTuning tuning)
         {
             return input.Boost
                 && !state.boostActive
-                && !state.boostLatched
                 && !state.recovering
                 && state.boostCharge >= tuning.boostMinCharge;
         }

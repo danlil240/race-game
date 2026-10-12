@@ -243,28 +243,6 @@ namespace FamilyRacing.Tests
         }
 
         [Test]
-        public void BoostReleaseEndsEarlyAndKeepsRemainingCharge()
-        {
-            var world = new TestWorld();
-            var tuning = VehicleTuning.Car01();
-            var state = Cruising(tuning, world);
-            state = StepN(state, Input(0f, false, true), tuning, world, 10);
-            Assert.That(state.boostActive, Is.True);
-            var result = ArcadeMotor.Step(state, Neutral(), tuning, world, Dt);
-            Assert.That(result.state.boostActive, Is.False,
-                "releasing the boost input must end the boost on that step");
-            Assert.That(HasEvent(result, "boostEnd"), Is.True);
-            Assert.That(result.state.boostCharge, Is.GreaterThan(0f)
-                .And.LessThan(1f), "an early release keeps the unspent charge");
-            // A fresh press may boost again with what remains; releasing
-            // must have rearmed the one-shot boost latch.
-            state = result.state;
-            result = ArcadeMotor.Step(state, Input(0f, false, true), tuning, world, Dt);
-            Assert.That(result.state.boostActive, Is.True,
-                "a release-and-press may spend the remaining charge");
-        }
-
-        [Test]
         public void BoostEmptiesChargeAndStops()
         {
             var world = new TestWorld();
@@ -310,28 +288,75 @@ namespace FamilyRacing.Tests
         }
 
         [Test]
-        public void HeldBoostCannotMachineGunAfterEmptying()
+        public void HeldBoostReFiresWhenChargeRecovers()
         {
+            // Owner-decided semantics (2026-10-12): a held boost re-fires
+            // automatically whenever the charge refills past the authored
+            // minimum — "drains continuously in bursts as it refills."
             var world = new TestWorld();
             var tuning = VehicleTuning.Car01();
             var state = Cruising(tuning, world);
-            state.boostCharge = 0.12f;
+            state.boostCharge = tuning.boostMinCharge;
             var starts = 0;
             var lastEnded = -100;
-            for (var i = 0; i < 300; i++)
+            for (var i = 0; i < 600; i++)
             {
-                var result = ArcadeMotor.Step(state, Input(0f, false, true), tuning, world, Dt);
+                var result = ArcadeMotor.Step(state, Input(0f, false, true),
+                    tuning, world, Dt);
                 state = result.state;
                 if (HasEvent(result, "boostStart"))
                 {
                     starts++;
                     Assert.That(i - lastEnded, Is.GreaterThan(1),
-                        "a held boost must not restart every tick after emptying");
+                        "re-fire waits for charge; it cannot restart every tick");
                 }
                 if (HasEvent(result, "boostEnd")) lastEnded = i;
             }
-            Assert.That(starts, Is.EqualTo(1),
-                "one press spends the charge once; rearming needs a release");
+            Assert.That(starts, Is.GreaterThan(1),
+                "a held boost must re-fire once the charge recovers — "
+                + "no release required");
+        }
+
+        [Test]
+        public void HeldBoostNeverFiresWhileRecoveryFlagged()
+        {
+            var world = new TestWorld();
+            var tuning = VehicleTuning.Car01();
+            var state = Cruising(tuning, world);
+            state.boostCharge = 1f;
+            state.recovering = true;
+            for (var i = 0; i < 5; i++)
+            {
+                state.recovering = true; // stays flagged across the boundary
+                var result = ArcadeMotor.Step(state, Input(0f, false, true),
+                    tuning, world, Dt);
+                state = result.state;
+                Assert.That(HasEvent(result, "boostStart"), Is.False,
+                    "a recovery-flagged step must never fire a held boost");
+                Assert.That(state.boostActive, Is.False);
+            }
+        }
+
+        [Test]
+        public void ReleasedBoostStillEndsAndKeepsCharge()
+        {
+            var world = new TestWorld();
+            var tuning = VehicleTuning.Car01();
+            var state = Cruising(tuning, world);
+            state = StepN(state, Input(0f, false, true), tuning, world, 10);
+            Assert.That(state.boostActive, Is.True);
+            var result = ArcadeMotor.Step(state, Neutral(), tuning, world, Dt);
+            Assert.That(result.state.boostActive, Is.False,
+                "releasing the input ends the boost on that step");
+            Assert.That(HasEvent(result, "boostEnd"), Is.True);
+            Assert.That(result.state.boostCharge, Is.GreaterThan(0f)
+                .And.LessThan(1f), "an early release keeps the unspent charge");
+            // After a release the latch is clear, so a fresh press fires
+            // immediately with whatever charge remains.
+            state = result.state;
+            result = ArcadeMotor.Step(state, Input(0f, false, true), tuning, world, Dt);
+            Assert.That(result.state.boostActive, Is.True,
+                "a release-and-press may spend the remaining charge");
         }
 
         [Test]

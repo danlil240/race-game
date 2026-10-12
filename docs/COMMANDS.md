@@ -124,6 +124,10 @@ stage is internal and `race.start` rejects it with `unavailable` — only
 `race.restart`/`race.exit` need an active race and take no parameters.
 `input.set` is available on `sandbox` and `driving` screens only; a
 `gadget` sample is rejected with `unavailable` while a race is active.
+Holding `boost` auto-fires: whenever `boostCharge` refills past
+`boostMinCharge` a new burst begins without a release (the meter drains
+in bursts as it refills); `driving.motor.boostLatched` reports whether
+a boost has fired since the last release.
 While paused `input.set` still applies: a `recover` sample latches into
 `driving.pendingActions` (observable in state). It is consumed at the
 first simulated boundary after resume when resume is an `input.set
