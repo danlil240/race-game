@@ -82,11 +82,50 @@ class IntegrityTests(unittest.TestCase):
             validate_state_schema(record, record["state"])
 
     def test_unsupported_schemas_are_rejected_before_driving_evidence(self):
-        for schema in (0, 3, "2", True):
+        for schema in (0, 4, "2", True):
             record = self.record()
             record["stateSchemaVersion"] = schema
             with self.subTest(schema=schema), self.assertRaises(AssertionError):
                 validate_state_schema(record, record["state"])
+
+    def test_schema_3_requires_the_network_slices(self):
+        record = self.record()
+        record["stateSchemaVersion"] = 3
+        record["state"]["driving"] = None
+        record["state"]["drivingEvents"] = []
+        record["state"]["stateSchemaVersion"] = 3
+        # No network slice: schema 3 must not silently degrade.
+        with self.assertRaises(AssertionError):
+            validate_state_schema(record, record["state"])
+        state = record["state"]
+        state["network"] = {
+            "role": "host", "phase": "lobby", "localParticipantId": "p",
+            "participants": [], "paused": False, "pauseRequests": [],
+            "lastError": "", "pendingOperations": [], "discovered": [],
+            "results": [],
+        }
+        state["networkRace"] = None
+        state["prediction"] = None
+        state["remotePresentation"] = {"racers": []}
+        validate_state_schema(record, state)
+
+    def test_schema_3_rejects_credential_leaks(self):
+        record = self.record()
+        record["stateSchemaVersion"] = 3
+        record["state"].update({
+            "driving": None, "drivingEvents": [], "stateSchemaVersion": 3,
+            "networkRace": None, "prediction": None,
+            "remotePresentation": {"racers": []},
+            "network": {
+                "role": "client", "phase": "lobby",
+                "localParticipantId": "p", "participants": [],
+                "paused": False, "pauseRequests": [], "lastError": "",
+                "pendingOperations": [], "discovered": [], "results": [],
+                "credential": "should-never-appear",
+            },
+        })
+        with self.assertRaises(AssertionError):
+            validate_state_schema(record, record["state"])
 
     def test_schema_1_records_stay_compatible(self):
         record = self.record()

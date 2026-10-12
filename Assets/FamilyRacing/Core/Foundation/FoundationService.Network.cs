@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using FamilyRacing.Core.Automation;
+using FamilyRacing.Core.Driving;
 using FamilyRacing.Core.Networking;
 using FamilyRacing.Core.Profiles;
 using FamilyRacing.Core.Racing;
@@ -58,6 +59,9 @@ namespace FamilyRacing.Core.Foundation
             if (lanSession == null) return NoNetworkOutcomes;
             var drained = lanSession.DrainOutcomes();
             foreach (var outcome in drained) outcome.tick = tick;
+            // A completed join/reconnect lands the user on the lobby on the
+            // same boundary it completes; a failed one returns the browser.
+            SyncLanScreen();
             return drained;
         }
 
@@ -127,7 +131,108 @@ namespace FamilyRacing.Core.Foundation
             // Results are stamped with the service observation tick so the
             // trace correlates them with the boundary that produced them.
             if (result != null) result.tick = tick;
+            // A command that changes phase/role updates the screen on its
+            // own boundary: lan.host lands on the lobby, lan.leave returns
+            // to the browser, a disconnected client lands on recovery.
+            SyncLanScreen();
             return result;
+        }
+
+        // --- LAN screen mapping (Task 9) ----------------------------------
+        // The screen a session phase renders on. "lan-browser" is the only
+        // user-navigable LAN screen; every other screen name is a pure
+        // projection of the session phase so the UI can never show a lobby
+        // for a session that no longer exists.
+
+        public static bool IsLanScreen(string value)
+        {
+            return value == ScreenLanBrowser || value == ScreenLanLobby
+                || value == ScreenLanRace || value == ScreenLanResults
+                || value == ScreenLanRecovery;
+        }
+
+        public static string LanScreenForPhase(string phase)
+        {
+            switch (phase)
+            {
+                case LanSessionService.PhaseLobby: return ScreenLanLobby;
+                case LanSessionService.PhaseCountdown:
+                case LanSessionService.PhaseRacing: return ScreenLanRace;
+                case LanSessionService.PhaseResults: return ScreenLanResults;
+                case LanSessionService.PhaseReconnecting:
+                case LanSessionService.PhaseRecovery: return ScreenLanRecovery;
+                default: return ScreenLanBrowser;
+            }
+        }
+
+        // Screen reconciliation: while a session is active the phase owns
+        // the screen (the UI follows lobby -> countdown -> racing ->
+        // results -> recovery without any navigation command); without a
+        // session only the browser may remain — a stranded phase screen is
+        // walked back to it. Solo screens are never touched.
+        private void SyncLanScreen()
+        {
+            if (!LanActive())
+            {
+                if (IsLanScreen(screen) && screen != ScreenLanBrowser)
+                    screen = ScreenLanBrowser;
+                return;
+            }
+            var target = LanScreenForPhase(lanSession.Phase);
+            if (screen != target) screen = target;
+        }
+
+        // --- lobby pickers -------------------------------------------------
+        // LAN-configurable content exposed to the shell: only events
+        // authored for LAN play (the "lan-" prefix convention) appear, so
+        // the picker never offers a solo-only practice/tutorial event the
+        // session would reject anyway. Ordering is ordinal-deterministic.
+
+        public IReadOnlyList<string> LanEventIds()
+        {
+            var ids = new List<string>();
+            if (drivingContent == null || drivingContent.Events == null)
+                return ids;
+            foreach (var id in drivingContent.Events.Keys)
+                if (id != null && id.StartsWith("lan-", StringComparison.Ordinal))
+                    ids.Add(id);
+            ids.Sort(StringComparer.Ordinal);
+            return ids;
+        }
+
+        public IReadOnlyList<string> LanClassIds(string eventId)
+        {
+            var classes = new List<string>();
+            EventDefinition evt;
+            if (drivingContent == null || drivingContent.Events == null
+                || eventId == null
+                || !drivingContent.Events.TryGetValue(eventId, out evt)
+                || evt == null || evt.vehicleIds == null)
+                return classes;
+            foreach (var vehicleId in evt.vehicleIds)
+            {
+                var classId = VehicleTuning.ClassIdOf(vehicleId);
+                if (!string.IsNullOrEmpty(classId) && !classes.Contains(classId))
+                    classes.Add(classId);
+            }
+            classes.Sort(StringComparer.Ordinal);
+            return classes;
+        }
+
+        public IReadOnlyList<string> LanVehicleIds(string eventId, string classId)
+        {
+            var ids = new List<string>();
+            EventDefinition evt;
+            if (drivingContent == null || drivingContent.Events == null
+                || eventId == null
+                || !drivingContent.Events.TryGetValue(eventId, out evt)
+                || evt == null || evt.vehicleIds == null)
+                return ids;
+            foreach (var vehicleId in evt.vehicleIds)
+                if (VehicleTuning.ClassIdOf(vehicleId) == (classId ?? ""))
+                    ids.Add(vehicleId);
+            ids.Sort(StringComparer.Ordinal);
+            return ids;
         }
 
         private void SyncNetworkContext()

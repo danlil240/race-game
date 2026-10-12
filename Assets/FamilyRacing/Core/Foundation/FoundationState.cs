@@ -51,15 +51,20 @@ namespace FamilyRacing.Core.Foundation
         // Task 6 typed slices (same emitted field names as the object
         // placeholders they replace): the local predicted motor with
         // ack/buffer/correction facts, and per-remote-participant
-        // interpolation facts. Null on the host and outside a LAN race —
-        // predicted data never appears authoritative through `driving`.
+        // interpolation facts. `prediction` is null on the host and
+        // outside a LAN race — predicted data never appears authoritative
+        // through `driving`. `remotePresentation` is a per-device
+        // presentation diagnostic: once a replication bridge exists it is
+        // always non-null; the host's entry list is simply empty because
+        // the host renders remote racers straight from authoritative
+        // state and runs no client-side interpolation.
         public NetworkPredictionState prediction;
         public RemoteInterpolationState remotePresentation;
     }
 
     // Runtime-visible presentation facts (geometry, input ownership, locale,
-    // font qualification) so the stream can reconstruct UI decisions instead
-    // of hiding them in opaque client state.
+    // font qualification, actual camera mode) so the stream can reconstruct
+    // UI decisions instead of hiding them in opaque client state.
     [Serializable]
     public sealed class PresentationState
     {
@@ -73,10 +78,19 @@ namespace FamilyRacing.Core.Foundation
         public bool validationActive;
         public int backlogSteps;
         public long stepOverloads;
+        // The render camera actually applied this frame: mode "none" until
+        // a race (solo or LAN) engages the presentation camera. This is
+        // per-device presentation truth — solo also mirrors the same facts
+        // under driving.camera; LAN racers publish them here because the
+        // networkRace slice is host-confirmed shared state and a local
+        // camera choice is not shared state.
+        public DrivingCameraState camera;
 
         public PresentationState Copy()
         {
-            return (PresentationState)MemberwiseClone();
+            var copy = (PresentationState)MemberwiseClone();
+            copy.camera = camera != null ? camera.Copy() : null;
+            return copy;
         }
     }
 

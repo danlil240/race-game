@@ -26,7 +26,8 @@ BOUNDARY_TYPES = {"snapshot", "state", "delta"}
 # Schemas this consumer can interpret. Records without the field are
 # treated as schema 1 (pre-driving baseline); anything outside the
 # supported set must be rejected before driving evidence is trusted.
-SUPPORTED_STATE_SCHEMAS = {1, 2}
+# Schema 3 adds the LAN session/race/prediction/interpolation slices.
+SUPPORTED_STATE_SCHEMAS = {1, 2, 3}
 
 
 def _remove_path(state, path):
@@ -118,8 +119,36 @@ def validate_state_schema(event, state):
     if schema >= 2:
         assert "driving" in state and "drivingEvents" in state, \
             "Schema-2 state is missing the driving slice"
-        assert state.get("stateSchemaVersion") == 2, \
+        assert state.get("stateSchemaVersion") == schema, \
             "Nested state schema marker disagrees with the record"
+    if schema >= 3:
+        # The network slices are part of the schema-3 contract: the
+        # session view is always populated (idle/none without a session)
+        # and the race/prediction/interpolation keys exist even when
+        # null outside a LAN race.
+        for key in ("network", "networkRace", "prediction",
+                    "remotePresentation"):
+            assert key in state, "Schema-3 state is missing " + key
+        session = state["network"]
+        assert isinstance(session, dict), "network must be an object"
+        for key in ("role", "phase", "localParticipantId", "participants",
+                    "paused", "pauseRequests", "lastError",
+                    "pendingOperations", "discovered", "results"):
+            assert key in session, "network slice is missing " + key
+        # Credentials and transport identities must never be observable:
+        # reject any session field that could carry reconnect material.
+        forbidden = {"credential", "cred", "token", "password",
+                     "storedCredential", "joinSecret"}
+        def scan(node):
+            if isinstance(node, dict):
+                for name, value in node.items():
+                    assert name not in forbidden, \
+                        "Credential material leaked into state: " + name
+                    scan(value)
+            elif isinstance(node, list):
+                for item in node:
+                    scan(item)
+        scan(session)
 
 
 def validate_presentation(state, language):
@@ -320,6 +349,13 @@ def run(connection, evidence):
             "camera.toggle", "pause.toggle",
             "race.start", "race.restart", "race.exit",
             "tutorial.start", "tutorial.replay", "tutorial.exit",
+            # LAN session surface (schema 3): async commands report
+            # accepted now and complete through a terminal outcome.
+            "lan.host", "lan.discover", "lan.discovery.stop", "lan.join",
+            "lan.configure", "lan.vehicle", "lan.ready", "lan.start",
+            "lan.pause.request", "lan.pause.set", "lan.reconnect",
+            "lan.results.request", "lan.results.retrySave",
+            "lan.rematch", "lan.leave",
         }, actions
         # There is deliberately no tutorial.complete or teleport command:
         # onboarding can only advance on genuine driving events.

@@ -1,6 +1,6 @@
 # Feature coverage registry — foundation slice
 
-Registry mapping the ten foundation commands to the actual state
+Registry mapping the foundation and LAN commands to the actual state
 fields they control and the evidence that actually covers them. Proof column
 reads the frozen lead scenario (`Logs/evidence-lead/result.json`, all 9
 checks passed on the wave-3 Windows build, run-validation-lead) plus the
@@ -20,7 +20,19 @@ are explicitly `notImplemented`; additional QA gaps are listed below.
 | `input.set` | changes held input and pulses | `input.*`, `draftProfile.camera`, `pendingSettings`, `paused` | scenario check 7 (controls and camera pulse), check 8 (paused expiry); PlayMode `OpposingTouchInputsComposeNeutral` |
 | `input.clear` | clears held/transient input | `input.*` | scenario check 8 explicitly clears input; separate PlayMode dead-session/disable tests cover cleanup |
 | `camera.toggle` | toggles draft camera | `draftProfile.camera`, `pendingSettings` | Core `CameraToggleRequiresWritableSelectedProfile`; external scenario `agent-evidence/result.json` check "camera toggle command updates selected profile draft" plus the conflicting-identity rejection |
-| `pause.toggle` | toggles sandbox pause, clears input | `paused`, `input` | scenario check 8 |
+| `pause.toggle` | toggles sandbox pause, clears input; inside a LAN session it is the host's shared-pause toggle / the client's pause request | `paused`, `input`, `network.paused`, `network.pauseRequests` | scenario check 8; PlayMode `NetworkLifecyclePlayTests` |
+| `lan.host` | binds host socket, opens the lobby, starts discovery responder | `network.role/phase/descriptor`, `screen` (`lan-lobby`) | `NetworkCommandTests`, `NetworkScreensPlayTests` |
+| `lan.discover` / `lan.discovery.stop` | bounded host search on the discovery port | `network.phase`, `network.discovered` | `NetworkCommandTests`, `NetworkScreensPlayTests` |
+| `lan.join` | async connect+join on a discovered/manual endpoint | `network.phase` (`connecting`→`lobby`), `network.participants`, `pendingOperations` | async accepted→terminal once; `NetworkCommandTests`, `NetworkScreensPlayTests` |
+| `lan.configure` | host-only lobby event/class selection | `network.descriptor.eventId/classId`, roster `vehicleId` legality | `NetworkCommandTests` (`NonHostCannotStartOrConfigure`, `ClassChangeClearsReady`) |
+| `lan.vehicle` | participant's vehicle inside the configured class | `network.participants[].vehicleId` | `NetworkCommandTests`, `NetworkScreensPlayTests` |
+| `lan.ready` | participant readiness (client: async request) | `network.participants[].ready`, `pendingOperations` | `NetworkCommandTests` (`ClientReadyCompletesAfterHostAck`) |
+| `lan.start` | host-only race start once every occupied seat is ready | `network.phase` (`countdown`→`racing`), `networkRace` | `NetworkScreensPlayTests`, `NetworkLifecyclePlayTests` |
+| `lan.pause.request` / `lan.pause.set` | client pause request / host shared pause | `network.pauseRequests`, `network.paused` | `NetworkLifecyclePlayTests` |
+| `lan.reconnect` | credentialed rejoin from recovery using stored material | `network.phase` (`recovery`→`reconnecting`→…), roster `controlSource`/`ownershipEpoch` | `LanSessionTests` credentialed-rejoin coverage; `NetworkScreensPlayTests` |
+| `lan.results.request` / `lan.results.retrySave` | client result re-offer / local persistence retry | `network.results[]` delivery states | `NetworkResultsPlayTests`, `NetworkRewardTests` |
+| `lan.rematch` | host-only return to lobby keeping retained results | `network.phase` (`results`→`lobby`) | `NetworkResultsPlayTests` |
+| `lan.leave` | clean teardown; the only session exit | `network.role`→`none`, `screen`→`lan-browser` | `NetworkScreensPlayTests` |
 
 ## Streamed state (every record carries)
 
@@ -30,8 +42,18 @@ are explicitly `notImplemented`; additional QA gaps are listed below.
 `language`, `activeSlot`, `slots[]`, `savedProfile`, `draftProfile`,
 `pendingSettings`, `input`, `paused`, `persistenceStatus`,
 `captureValid/captureError`, `presentation` (incl. `backlogSteps`,
-`stepOverloads`), `featureCoverage`, `driving`, `drivingEvents`,
-`droppedDrivingEvents`. Boundaries may also arrive as `delta` records
+`stepOverloads`, and the actually-applied `presentation.camera` facts),
+`featureCoverage`, `driving`, `drivingEvents`,
+`droppedDrivingEvents`, and the schema-3 network slices `network`
+(always populated: `role`, `phase`, `localParticipantId`, `descriptor`,
+`participants[]`, `paused`, `pauseRequests`, `lastError`,
+`pendingOperations[]`, `discovered[]`, `results[]`),
+`networkRace` (host-confirmed race state; null outside a LAN race),
+`prediction` (client-side predicted motor/ack/correction facts; null on
+the host and outside a LAN race) and `remotePresentation` (per-remote
+interpolation diagnostics). Reconnect credentials and transport
+identities never appear in observable state.
+Boundaries may also arrive as `delta` records
 (`base` = previous boundary sequence, recursive `changed` merge, dot-path
 `removed` list) — an independent reconstructor rebuilds the full state at
 every boundary; a delta alone is never a complete state. Camera mode
@@ -159,6 +181,25 @@ pointer-downs before the hold handlers, so `AddHoldButton` registrations now
 run in the trickle-down phase (`Logs\qualification-gaps\`; report
 `docs/tasks/foundation-gaps-report.md`).
 
+## Verified (LAN screens and schema-3 stream, Task 9)
+
+`NetworkScreensPlayTests` drives the five LAN screens with synthetic
+pointer events against a real `FoundationService` + `LanSessionService`
+(faked transport seams): host lands on the phase-derived lobby,
+discovery toggles and discovered-host cards join the advertised
+address, lobby configure/vehicle/ready/start round-trip real commands,
+client-side host-only controls render disabled with the honest reason,
+the race HUD exposes shared clock/standings/pause plus LTR-locked
+steering controls, hold buttons produce bounded `input.set`, host loss
+lands on the recovery screen and reconnect reuses the stored endpoint,
+the results screen renders the delivery ledger, and Hebrew renders the
+LAN surface RTL while addresses/participant ids stay LTR.
+`NetworkStreamPlayTests` proves schema-3 record identity (all required
+fields plus `stateSchemaVersion` on boundary, discovery and nested
+state), deep-copy isolation of every emitted network slice under
+producer mutation, and independent snapshot+delta reconstruction where
+each delta names its previous boundary sequence.
+
 ## Verified (external fault + real-store scenarios on real players)
 
 `Tools\FinishDeliveryScenario.py` 6/6 on the post-gap build
@@ -199,8 +240,13 @@ clean finish completes the second capture.
 - Windows IL2CPP module is now installed for the pinned editor
   (`CheckEnvironment` OK) but no IL2CPP build has been produced or qualified
   — preview remains Mono development.
-- Remaining racing gameplay: campaign, rewards/upgrades/cosmetics,
-  LAN multiplayer, richer content — `notImplemented`, later milestones.
+- Remaining racing gameplay: campaign, rewards/upgrades/cosmetics and
+  richer content stay `notImplemented`, later milestones. The LAN
+  slice (`lanScreens`, `lanSession`, `networkRace`, prediction /
+  interpolation observation) is qualified by the EditMode/PlayMode
+  suites plus `Tools\NetworkScenario.py` (two instances on one machine
+  over the real UDP transport); cross-device physical LAN qualification
+  is Task 10 and is NOT claimed.
   The graybox driving slice (`drivingSimulation`, `drivingOnboarding`)
   is qualified by the DrivingScenario run and PlayMode suites above.
 - A real 30-minute soak now exists — see the DrivingSoak section above

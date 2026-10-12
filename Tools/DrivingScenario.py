@@ -3,7 +3,7 @@
 Usage: DrivingScenario.py <run-dir>/connection.json --evidence <new-dir>
 
 Attaches to a live player's validation run (same contract as AgentScenario)
-and proves — through independently reconstructed schema-2 snapshot/delta
+and proves — through independently reconstructed schema-3 snapshot/delta
 boundaries — that an agent using only the shared command path can complete
 the authored graybox lap in both vehicle classes: discovery, profile
 selection, race.start, bounded input holds driven by observed position and
@@ -536,7 +536,8 @@ def run(connection, evidence):
                 "buildVersion": client.hello.get("buildVersion"),
                 "contentVersion": client.hello.get("contentVersion"),
                 "deviceId": client.events[-1].get("deviceId") if client.events else None,
-                "stateSchemaVersion": 2}
+                "stateSchemaVersion": client.hello.get(
+                    "stateSchemaVersion", 1)}
     finally:
         client.close()
 

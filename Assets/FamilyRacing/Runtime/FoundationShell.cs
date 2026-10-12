@@ -103,6 +103,11 @@ namespace FamilyRacing
                 ? LanguageDirection.RTL : LanguageDirection.LTR;
             var key = state.screen + "|" + state.language + "|" + state.activeSlot;
             foreach (var slot in state.slots) key += "|" + slot.status;
+            // LAN screens rebuild on roster/discovery/config/delivery
+            // changes as well — the signature is cheap and covers only the
+            // structure, never per-tick race readouts.
+            if (IsLanScreen(state.screen) && state.network != null)
+                key += "|" + LanRebuildSignature(state);
             if (key != rebuildKey)
             {
                 rebuildKey = key;
@@ -125,14 +130,17 @@ namespace FamilyRacing
             finishVehicleLabel = null;
             tutorialPanel = null;
             tutorialIconLabel = tutorialCueLabel = tutorialProgressLabel = null;
+            lanTimeLabel = lanStandingsLabel = lanPhaseLabel = null;
+            lanActionLabel = lanPauseLabel = null;
             saveButton = null;
             musicSlider = effectsSlider = voiceSlider = null;
             chaseButton = overheadButton = shakeButton = langEnButton = langHeButton = null;
-            // Driving needs a transparent overlay: the graybox world renders
-            // through and only the controls sit on top (Task 4 ships the real
-            // HUD and switchable cameras in its place).
+            // Driving and the LAN race need a transparent overlay: the
+            // graybox world renders through and only the controls sit on
+            // top.
             root.style.backgroundColor =
-                state.screen == "driving" ? new Color(0, 0, 0, 0) : Sand;
+                state.screen == "driving" || state.screen == "lan-race"
+                    ? new Color(0, 0, 0, 0) : Sand;
             root.style.paddingTop = root.style.paddingBottom = 16;
             root.style.paddingLeft = root.style.paddingRight = 16;
             switch (state.screen)
@@ -141,6 +149,11 @@ namespace FamilyRacing
                 case "sandbox": BuildSandbox(state); break;
                 case "practice": BuildPractice(state); break;
                 case "driving": BuildDriving(state); break;
+                case "lan-browser":
+                case "lan-lobby":
+                case "lan-race":
+                case "lan-results":
+                case "lan-recovery": BuildLanScreen(state); break;
                 default: BuildProfiles(state); break;
             }
         }
@@ -297,6 +310,8 @@ namespace FamilyRacing
                 SetLed("recover", state.input.recover);
             }
             UpdateDrivingIndicators(state);
+            if (state.screen == "lan-race")
+                UpdateLanRaceIndicators(state);
             if (pauseOverlay != null)
                 pauseOverlay.style.display = state.paused ? DisplayStyle.Flex : DisplayStyle.None;
             if (state.screen == "settings" && state.draftProfile != null)

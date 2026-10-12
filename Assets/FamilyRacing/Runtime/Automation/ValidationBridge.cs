@@ -281,7 +281,8 @@ namespace FamilyRacing.Automation
             var commands = new JArray();
             foreach (var descriptor in service.Discover())
                 commands.Add(JObject.FromObject(descriptor));
-            stream.EmitDiscovery(commands, JObject.FromObject(state.featureCoverage), state.tick);
+            stream.EmitDiscovery(commands, JObject.FromObject(state.featureCoverage),
+                state.tick, state.stateSchemaVersion);
         }
 
         private void HandleLookup(JObject frame)

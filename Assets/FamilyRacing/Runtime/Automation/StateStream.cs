@@ -247,9 +247,13 @@ namespace FamilyRacing.Automation
             Emit(record);
         }
 
-        internal void EmitDiscovery(JArray commands, JObject coverage, long tick)
+        internal void EmitDiscovery(JArray commands, JObject coverage, long tick,
+            int stateSchemaVersion)
         {
             var record = Record("discovery", tick, null);
+            // Consumers must learn the observation schema at discovery
+            // time — never silently reinterpret an unknown one.
+            record["stateSchemaVersion"] = stateSchemaVersion;
             record["commands"] = commands;
             record["featureCoverage"] = coverage;
             Emit(record);

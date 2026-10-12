@@ -93,7 +93,10 @@ namespace FamilyRacing
                 MarkStale();
                 return;
             }
-            if (screen != "sandbox" && screen != "driving")
+            // The LAN race screen drives the same input path as the solo
+            // race: the sample reaches the host through NetworkRaceBridge,
+            // and a network pause suppresses held input via RequireRearm.
+            if (screen != "sandbox" && screen != "driving" && screen != "lan-race")
             {
                 ResetPhysical();
                 MarkStale();

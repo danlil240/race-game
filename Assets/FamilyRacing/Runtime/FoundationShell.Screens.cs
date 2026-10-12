@@ -198,6 +198,8 @@ namespace FamilyRacing
                 () => app.Dispatch("pause.toggle", emptyParams), "action.pause");
             var practice = AddButton(actions, T("practice.open", state), Seafoam,
                 () => app.Dispatch("ui.navigate", Screen("practice")), "action.practice");
+            var lan = AddButton(actions, T("lan.title", state), Ocean,
+                () => app.Dispatch("ui.navigate", Screen("lan-browser")), "action.lan");
             var back = AddButton(actions, T("action.back", state), Deep,
                 () => app.Dispatch("ui.navigate", Screen("profiles")), "action.back");
             ApplyAvailability(gadget, "input.set");
@@ -205,6 +207,7 @@ namespace FamilyRacing
             ApplyAvailability(camera, "camera.toggle");
             ApplyAvailability(pause, "pause.toggle");
             ApplyAvailability(practice, "race.start");
+            ApplyAvailability(lan, "ui.navigate");
             ApplyAvailability(back, "ui.navigate");
             pauseOverlay = AddLabel(root, T("input.pause", state), 40, Coral);
             pauseOverlay.name = "overlay.pause";

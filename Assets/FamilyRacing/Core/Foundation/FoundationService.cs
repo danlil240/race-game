@@ -29,6 +29,15 @@ namespace FamilyRacing.Core.Foundation
         private const string ScreenSandbox = "sandbox";
         private const string ScreenPractice = "practice";
         private const string ScreenDriving = "driving";
+        // Task 9 LAN screens: the browser is the only navigable entry
+        // point; lobby/race/results/recovery are phase-derived (see
+        // FoundationService.Network.cs SyncLanScreen) so a rendered screen
+        // can never disagree with the session phase.
+        public const string ScreenLanBrowser = "lan-browser";
+        public const string ScreenLanLobby = "lan-lobby";
+        public const string ScreenLanRace = "lan-race";
+        public const string ScreenLanResults = "lan-results";
+        public const string ScreenLanRecovery = "lan-recovery";
         private const int MaxDrivingEvents = 128;
 
         private sealed class ParameterSpec
@@ -102,8 +111,12 @@ namespace FamilyRacing.Core.Foundation
         private static readonly string[] Languages = { "en", "he" };
         private static readonly string[] Cameras = { "chase", "overhead" };
         // "driving" is never a navigation target: race.start enters it and
-        // race.exit is the only way back out.
-        private static readonly string[] Screens = { "profiles", "settings", "sandbox", "practice" };
+        // race.exit is the only way back out. The same rule applies to the
+        // LAN phase screens — "lan-browser" is the only LAN target; the
+        // lobby/race/results/recovery screens are reached by the session
+        // phase, not by navigation.
+        private static readonly string[] Screens =
+            { "profiles", "settings", "sandbox", "practice", "lan-browser" };
         private static readonly string[] Slots = { "0", "1", "2", "3" };
         private static readonly string[] Bools = { "true", "false" };
 
@@ -158,6 +171,8 @@ namespace FamilyRacing.Core.Foundation
 
         private static readonly Dictionary<string, ParameterSpec[]> SchemaMap =
             BuildSchemaMap();
+        private static readonly IReadOnlyDictionary<string, string> EmptyParameters =
+            new Dictionary<string, string>(0);
 
         private readonly ProfileStore store;
         private readonly string runId;
@@ -410,6 +425,10 @@ namespace FamilyRacing.Core.Foundation
                 }
             }
             input = new DriverInput(steering, drift, boost, false, false, false, false);
+            // The session phase owns the LAN screens: connecting lives on
+            // the browser, racing on the race screen, and teardown drops a
+            // stranded phase screen back onto the browser on this boundary.
+            SyncLanScreen();
         }
 
         // Neutralizes held input and cancels queued driving actions (pause,
@@ -448,6 +467,12 @@ namespace FamilyRacing.Core.Foundation
         {
             try
             {
+                // Entering a LAN session while a solo race runs is refused:
+                // hosting/joining/reconnecting would tear down shared state
+                // the running race still claims. Session-internal lan.* and
+                // lan.discover keep their own availability answers.
+                if (driving != null && LanEntryBlockedDuringRace(command.Action))
+                    return Result(command, CommandResult.Rejected, "raceActive");
                 // LAN commands route to the session service; pause.toggle
                 // is a shared toggle on the host and a pause request on a
                 // client while a session is active.
@@ -503,6 +528,23 @@ namespace FamilyRacing.Core.Foundation
                 case "tutorial.start":
                 case "tutorial.replay":
                 case "tutorial.exit":
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        // Session-entry actions that must not fire while a solo race is
+        // live. Browsing (lan.discover) and session operations keep their
+        // own availability answers; only actual session membership is
+        // fenced off a running race.
+        private static bool LanEntryBlockedDuringRace(string action)
+        {
+            switch (action)
+            {
+                case "lan.host":
+                case "lan.join":
+                case "lan.reconnect":
                     return true;
                 default:
                     return false;
@@ -571,6 +613,12 @@ namespace FamilyRacing.Core.Foundation
             // only way off the driving screen.
             if (screen == ScreenDriving)
                 return Result(command, CommandResult.Rejected, "unavailable");
+            // An active LAN session owns its screens: only the LAN browser
+            // target is legal mid-session (the phase sync lands the user on
+            // the phase-appropriate screen); leaving to a solo screen would
+            // abandon the session silently. lan.leave is the way out.
+            if (LanActive() && target != ScreenLanBrowser)
+                return Result(command, CommandResult.Rejected, "networkActive");
             if (target != ScreenProfiles && activeSlot < 0)
                 return Result(command, CommandResult.Rejected, "unavailable");
             if (target != screen)
@@ -651,7 +699,8 @@ namespace FamilyRacing.Core.Foundation
         private CommandResult SetInput(GameCommand command)
         {
             var drivingActive = screen == ScreenDriving && driving != null;
-            if (screen != ScreenSandbox && !drivingActive)
+            var lanRaceScreen = screen == ScreenLanRace && LanActive();
+            if (screen != ScreenSandbox && !drivingActive && !lanRaceScreen)
                 return Result(command, CommandResult.Rejected, "unavailable");
             var steering = ParseDecimal(command.Parameters["steering"]);
             if (float.IsNaN(steering) || float.IsInfinity(steering) || steering < -1f || steering > 1f)
@@ -668,7 +717,7 @@ namespace FamilyRacing.Core.Foundation
             // Gadget actions are explicitly unavailable while driving
             // (gadget gameplay is deferred); the whole sample is refused
             // before any input state is touched.
-            if (drivingActive && gadget)
+            if ((drivingActive || lanRaceScreen) && gadget)
                 return Result(command, CommandResult.Rejected, "unavailable");
             // A recovery press is latched with its command identity until a
             // simulation boundary consumes it; overflow refuses before the
@@ -679,6 +728,34 @@ namespace FamilyRacing.Core.Foundation
                 if (!driving.QueuePending("recover", command.CommandId, out queueError))
                     return Result(command, CommandResult.Rejected, queueError);
                 DrainDrivingEvents();
+            }
+            // LAN race input: the recover flag rides the input frame to the
+            // host (which queues and acknowledges the action); a pause pulse
+            // submits the shared pause request/toggle through the session
+            // path — the solo paused flag is never touched mid-session.
+            if (lanRaceScreen)
+            {
+                if (pausePulse && lanSession != null)
+                {
+                    lanSession.Execute(new GameCommand(
+                        command.ProtocolVersion, command.RunId,
+                        command.CommandId + "/pause", command.ParticipantId,
+                        "pause.toggle", EmptyParameters));
+                }
+                // The recover flag does NOT ride the input frame on LAN:
+                // the frame's edge-latched recover would queue an anonymous
+                // second one-shot beside the deduplicated action. The app
+                // submits recover as a one-shot action carrying this
+                // command's identity (see FoundationApp.ExecuteAndEmit).
+                input = new DriverInput(steering, drift, boost, false,
+                    false, changeCamera, pausePulse);
+                holdTicksRemaining = duration;
+                if (changeCamera && WritableSelected())
+                {
+                    draftProfile.camera = OtherCamera(draftProfile.camera);
+                    pendingSettings = true;
+                }
+                return Result(command, CommandResult.Applied, "");
             }
             input = new DriverInput(steering, drift, boost, gadget, recover, changeCamera, pausePulse);
             holdTicksRemaining = duration;
@@ -1034,6 +1111,15 @@ namespace FamilyRacing.Core.Foundation
                     reason = "unavailable";
                     return;
                 }
+                // Profile-dependent availability answers (host/join) must
+                // see the live context, not just the last command's.
+                SyncNetworkContext();
+                if (driving != null && LanEntryBlockedDuringRace(action))
+                {
+                    available = false;
+                    reason = "raceActive";
+                    return;
+                }
                 lanSession.Availability(action, out available, out reason);
                 return;
             }
@@ -1087,7 +1173,8 @@ namespace FamilyRacing.Core.Foundation
                     break;
                 case "input.set":
                 case "pause.toggle":
-                    if (screen != ScreenSandbox && screen != ScreenDriving)
+                    if (screen != ScreenSandbox && screen != ScreenDriving
+                        && screen != ScreenLanRace)
                     {
                         available = false;
                         reason = "drivingOrSandboxOnly";

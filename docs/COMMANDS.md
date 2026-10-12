@@ -93,6 +93,8 @@ python Tools\DrivingScenario.py <dir>\connection.json --evidence <new-evidence-d
 python Tools\FinishDeliveryScenario.py <player.exe> --evidence <new-dir>
 # Real profile store + graceful exit (WM_CLOSE) + restart:
 python Tools\NormalProfileScenario.py <player.exe> --evidence <new-dir>
+# Two-instance LAN lifecycle over the real UDP transport (schema 3):
+python Tools\NetworkScenario.py <player.exe> --evidence <new-dir>
 ```
 
 Proven recipe (wave-3 build, 2026-10-11): preview at
@@ -120,7 +122,12 @@ no duplicate keys, no trailing content, strict UTF-8:
 Actions: `profile.create`, `profile.select`, `ui.navigate`, `ui.language`,
 `settings.update`, `settings.save`, `input.set`, `input.clear`,
 `camera.toggle`, `pause.toggle`, `race.start`, `race.restart`,
-`race.exit`, `tutorial.start`, `tutorial.replay`, `tutorial.exit`.
+`race.exit`, `tutorial.start`, `tutorial.replay`, `tutorial.exit`, and the
+LAN surface `lan.host`, `lan.discover`, `lan.discovery.stop`, `lan.join`,
+`lan.configure`, `lan.vehicle`, `lan.ready`, `lan.start`,
+`lan.pause.request`, `lan.pause.set`, `lan.reconnect`,
+`lan.results.request`, `lan.results.retrySave`, `lan.rematch`,
+`lan.leave`.
 
 `race.start` takes `vehicleId` + `eventId` (catalog: `car-01`,
 `motorcycle-01`, `practice-02`, `intro-01`; the `tutorial-01` free-drive
@@ -181,10 +188,16 @@ contiguous `sequence`, `monotonicMs`, `tick`: `snapshot`, `state`,
 `delta`, `result`, `discovery`, `lookup`, `health`, `screenshot`,
 `finished`.
 `snapshot`/`state` records carry a complete `state` payload and
-`stateSchemaVersion` (currently `2`: the state adds the `driving` session
-slice, `drivingEvents`, and `driving.simulationTick` alongside the
-observation `tick`); consumers must reject unsupported schemas before
-trusting driving evidence.
+`stateSchemaVersion` (currently `3`: on top of the schema-2 `driving`
+slice the state adds `network` (session role/phase, roster, shared pause,
+pending operations, discovered hosts, result deliveries — always
+populated, idle/none without a session), `networkRace` (host-confirmed
+shared race facts; null outside a LAN race), `prediction` (client-side
+local prediction facts; null on the host and outside a LAN race) and
+`remotePresentation` (per-remote interpolation diagnostics)); consumers
+must reject unsupported schemas before trusting driving evidence. The
+`hello` frame, `connection.json` and `discovery` records all advertise
+the same `stateSchemaVersion`.
 Tick and command boundaries emit as `delta` records: `base` names the
 previous boundary's `sequence`, `changed` is a recursive object merge
 (scalars/arrays/nulls replace wholesale), and `removed` lists dot-paths
@@ -211,3 +224,47 @@ limit (256 MiB) or sink failure invalidate the capture and clear agent
 input; after `finish` the run is closed (`captureClosed` rejects new
 controllers/commands); `capture-status.json` reports `captureComplete`
 only after the trace is flushed and the final status stamped.
+
+## LAN commands and screens (schema 3)
+
+The five LAN screens are `lan-browser` (the only user-navigable LAN
+screen — a `ui.navigate` target), plus the phase-derived `lan-lobby`,
+`lan-race`, `lan-results` and `lan-recovery`, which the session phase
+selects automatically. Solo-only actions (`profile.create`,
+`profile.select`, `race.*`, `tutorial.*`) reject with `networkActive`
+inside a session; LAN entry (`lan.host`/`lan.join`/`lan.reconnect`)
+rejects with `raceActive` during a solo race; navigating away from a
+session other than to `lan-browser` rejects `networkActive` — leave with
+`lan.leave`.
+
+Async commands (`lan.join`, `lan.reconnect`, and every client-side
+request: `lan.ready`, `lan.vehicle`, `lan.pause.request`,
+`lan.results.request`, `lan.results.retrySave`) return `accepted`
+immediately and complete exactly once as a terminal `result` record
+(`applied`/`rejected`/`failed`) on a later boundary; `pendingOperations`
+in the `network` slice exposes each in-flight command id. Host-side
+commands (`lan.configure`, `lan.start`, `lan.pause.set`, `lan.rematch`)
+apply synchronously; on a client they reject `hostOnly`.
+
+Parameters: `lan.host {port?}` (0 = ephemeral; the bound port is
+observable on `network.descriptor.hostPort`), `lan.join
+{address, port}`, `lan.configure {eventId, classId}` (LAN events are the
+`lan-*` catalog ids), `lan.vehicle {vehicleId}`, `lan.ready {ready}`,
+`lan.pause.set {paused}`, `lan.results.request {raceId?}`.
+`pause.toggle` inside a session is a host pause toggle / client pause
+request (observed via `network.paused` and `network.pauseRequests`).
+On `lan-race`, `input.set` carries the bounded held sample; a `recover`
+sample becomes a deduplicated one-shot action on the replication bridge
+whose action id is the command's identity — `action.queued` /
+`action.consumed` / `action.cancelled` events acknowledge it on
+`drivingEvents`, and pause/disconnect/finalization cancel it honestly.
+
+Availability reason codes surfaced to disabled controls include
+`inSession`, `requiresSelectedProfile`, `hostOnly`, `notReady`,
+`notConfigured`, `noSession`, `joinPending`, `pendingFull`,
+`lobbyFull`, `incompatible`, `alreadyDiscovering`, `notDiscovering`,
+`requestTimeout`, `sessionFull`, `hostClosed`, `hostLost`,
+`invalidVehicle`, `invalidClass`, `connectFailed`, `joinTimeout`,
+`duplicatePending`, `missingParameter`, `invalidParameter`,
+`sendFailed`, `raceActive`, `networkActive`. Reconnect credentials and
+transport identities never appear in observable state.
