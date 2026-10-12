@@ -171,7 +171,7 @@ steady-state criteria and re-run.
 | 6 | EN/HE onboarding, icons, offline spoken cues, child completes intro | **Partially evidenced** — tutorial traversal + fail-closed validation proven; **licensed audio absent, Hebrew review, child playtest (all open)** |
 | 7 | Every action has command access, semantic state/event coverage, real-player evidence | **Evidenced** — discovery + scenario + stream coverage |
 | 8 | State reconstructs every captured boundary; invalid captures can't pass | **Evidenced** — independent reconstruction in all scenarios; fault scenarios keep captures invalid; **note**: `drivingEvents` evictions are bounded/marked, not history loss |
-| 9 | Fresh same-revision builds + measured single-racer performance | **Evidenced for Windows dev player** — measured soak above; **Android perf unmeasured (device gate)**; ordinary-build perf unmeasured |
+| 9 | Fresh same-revision builds + measured single-racer performance | **Evidenced for Windows dev player** — measured soak above; **Android perf unmeasured (device gate)**; ordinary-build perf unmeasurable by the command-driven harness (endpoint compiled out — see open gates) |
 | 10 | M1/M2 reviewed, no later milestone falsely marked complete | **Held** — M1 stays open (device/human gates), M2 stays open here; `featureCoverage.tutorial`/`gadget` remain `notImplemented` |
 
 ## Open gates (human/device — recorded, not closed)
@@ -192,7 +192,14 @@ steady-state criteria and re-run.
   (`PhysicalSteerMatchesCommandSteerInActualMotorOutcome`); OS-level
   keyboard/touch and touch-UI remain unverified.
 - **Ordinary/IL2CPP build performance and device perf** are not inferred
-  from the development player.
+  from the development player. Comparing ordinary vs instrumented builds
+  is structurally impossible for `DrivingSoak`/`DrivingScenario`: they
+  are command-driven over `--validation-dir`, and that argument is
+  compiled *out* of ordinary builds (`FoundationApp.cs`
+  `ValidationDirectory()`/`SelectProfilesDirectory` are
+  `UNITY_EDITOR || DEVELOPMENT_BUILD`-only), so no agent can attach to
+  an ordinary player. A real comparison would need in-build scripted
+  driving or manual play under the Unity Profiler/on-device tooling.
 - **Render frame-time distribution**: the soak measures socket-observed
   sim-step cadence; GPU/render timing needs on-device tooling.
 - This **single-racer** soak does not qualify the later four-racer /

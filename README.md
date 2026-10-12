@@ -143,10 +143,12 @@ tests are discovered.
 - Windows IL2CPP module is now installed for the pinned editor
   (`Tools\Verify.ps1 -Mode CheckEnvironment` OK since 2026-10-11,
   owner-approved). No IL2CPP build has been produced or qualified yet —
-  Windows still ships the Mono development build, and M1 acceptance does
-  not require a particular Windows scripting backend. Kept as a separate
-  build-hardening item. Android Build Support incl. SDK/NDK/OpenJDK is
-  present and exercised by the offline build path.
+  at the time of this entry Windows shipped only the Mono development
+  build (superseded: `-Mode WindowsOrdinary` and the M2 review gate are
+  recorded above), and M1 acceptance does not require a particular
+  Windows scripting backend. Kept as a separate build-hardening item.
+  Android Build Support incl. SDK/NDK/OpenJDK is present and exercised
+  by the offline build path.
 - Android APK (`Builds\Android\FamilyRacing.apk`, ~47 MB) is built by the
   offline path (`Tools\Verify.ps1 -Mode Android`, Unity export + bundled
   Gradle `--offline`; `Logs\android-offline\<runId>\result.json` records

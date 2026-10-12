@@ -39,7 +39,6 @@ from RestartScenario import wait_connection, file_hash
 
 SAMPLE_SECONDS = 5.0
 CAMERA_TOGGLE_EVERY_LAP = True
-INCIDENT_RESTART_THRESHOLD = 4   # per race: beyond this the race is restarted
 
 
 class PROCESS_MEMORY_COUNTERS_EX(ctypes.Structure):
@@ -473,8 +472,14 @@ def run(player_command, evidence, minutes):
             "render frame times — cadence is the socket-observed sim-step "
             "pacing proxy; GPU/render timing needs on-device tooling",
             "Android/A7 Lite device behavior — Windows development player only",
-            "ordinary (non-development) build performance — this measures the "
-            "instrumented development player",
+            "ordinary (non-development) build performance — structurally "
+            "impossible for this harness: the soak is command-driven over "
+            "--validation-dir, which is compiled OUT of ordinary builds "
+            "(FoundationApp.cs validation arg parsing is UNITY_EDITOR/"
+            "DEVELOPMENT_BUILD-only), so no agent can attach; comparing "
+            "ordinary vs instrumented builds would need in-build scripted "
+            "driving or manual play under the Unity profiler — this "
+            "measures the instrumented development player only",
             "physical input, visual/Hebrew/audio quality, four-racer/tablet-host",
         ]
         try:

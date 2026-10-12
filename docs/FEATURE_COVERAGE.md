@@ -121,8 +121,11 @@ identities, 59,409 boundaries, empty outgoing queue, capture valid
 end-to-end. The bounded 128-event `drivingEvents` window evicted 835
 events — every eviction durably marked via `droppedDrivingEvents`; the
 window is diagnostic feed, not required boundary history. Scope: Windows
-Mono development player only — ordinary-build and on-device performance
-are not inferred from it.
+Mono development player only — ordinary-build performance is
+structurally unmeasurable for this harness (the `--validation-dir`
+endpoint is compiled out of non-development builds, so no agent can
+attach; a comparison would need in-build scripting or manual profiling)
+and on-device performance is not inferred from it.
 
 ## Verified (synthetic UI Toolkit PlayMode callbacks)
 
