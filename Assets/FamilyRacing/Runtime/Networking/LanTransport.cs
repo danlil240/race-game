@@ -350,9 +350,14 @@ namespace FamilyRacing.Networking
         {
             if (!peer.Connection.IsCreated) return;
             NetworkEvent.Type command;
-            while ((command = driver.PopEventForConnection(peer.Connection,
-                       out DataStreamReader reader, out NetworkPipeline pipeline))
-                   != NetworkEvent.Type.Empty)
+            // Re-check the handles on every pop: a message handler may
+            // stop the transport mid-drain (a session.closed or supersede
+            // notice tears the client down inside the callback), and a
+            // dead driver must never be asked for another event.
+            while (driver.IsCreated && peer.Connection.IsCreated
+                && (command = driver.PopEventForConnection(peer.Connection,
+                        out DataStreamReader reader, out NetworkPipeline pipeline))
+                    != NetworkEvent.Type.Empty)
             {
                 switch (command)
                 {

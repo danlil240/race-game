@@ -43,6 +43,9 @@ namespace FamilyRacing.Networking
         private int raceOrdinal;
         private long snapshotSequence;
         private long eventBatchSequence;
+        // A client's upstream resend request (N5RS) forces the next host
+        // tick to publish rather than waiting for the snapshot cadence.
+        private bool snapshotRequested;
         private readonly List<DrivingEvent> stagedEvents = new List<DrivingEvent>();
         // participantId -> applied session facts; diffed every Pump so a
         // control transfer or epoch bump is applied at a host boundary.
@@ -51,6 +54,10 @@ namespace FamilyRacing.Networking
         private readonly Dictionary<string, string> appliedControl =
             new Dictionary<string, string>(StringComparer.Ordinal);
         private NetworkSnapshot lastPublished;
+        // The pause flag as last applied — a transition forces an
+        // immediate snapshot so clients see the freeze without waiting on
+        // a (frozen) race-clock cadence.
+        private bool appliedPaused;
         // Bridge-emitted lifecycle events share a per-race id namespace:
         // "race.seated" takes e1, explicit one-shot cancellations e2+.
         private long bridgeEventSequence;
@@ -132,6 +139,14 @@ namespace FamilyRacing.Networking
         /// <summary>Authoritative events dropped by the staged-send cap or
         /// already-seen dedup on the client.</summary>
         public long DroppedEvents { get; private set; }
+        /// <summary>Diagnostic: gameplay datagrams seen at the transport
+        /// demux, and the last connection id they arrived on.</summary>
+        public long GameplayPacketsSeen { get; private set; }
+        /// <summary>Diagnostic: host-side conn id of the most recent
+        /// inbound gameplay datagram.</summary>
+        public ulong LastGameplayConnection { get; private set; }
+        /// <summary>Diagnostic: host-side snapshot datagrams pushed.</summary>
+        public long SnapshotsPublished { get; private set; }
         /// <summary>One-shot action ids still awaiting a host apply/cancel
         /// acknowledgment — diagnostic proving retries terminate.</summary>
         public int PendingOneShotCount { get { return pendingActions.Count; } }
@@ -444,13 +459,24 @@ namespace FamilyRacing.Networking
             lastPublished = null;
         }
 
-        // Pause plus control/epoch diffs apply at a host boundary: a
-        // confirmed disconnect seats the AI, a credentialed rejoin hands
-        // the slot back under a bumped epoch — old-epoch input can never
+        // Pause plus control/epoch diffs apply at a host boundary: the
+        // shared pause freezes validated input alongside the race clock,
+        // a confirmed disconnect seats the AI and releases everything the
+        // dead driver held or queued, and a credentialed rejoin hands the
+        // slot back under a bumped epoch — old-epoch input can never
         // steer the reclaimed racer.
         private void SyncHostControl(NetworkSessionState snap)
         {
             race.SetPaused(snap.paused);
+            inputs.SetPaused(snap.paused);
+            if (snap.paused != appliedPaused)
+            {
+                appliedPaused = snap.paused;
+                // The race clock freezes while paused, so the cadence
+                // publish can stall on an odd tick — force the next tick
+                // to deliver the paused fact.
+                snapshotRequested = true;
+            }
             foreach (var participant in snap.participants)
             {
                 if (!participant.occupied) continue;
@@ -459,9 +485,22 @@ namespace FamilyRacing.Networking
                         out previousControl)
                     && previousControl != participant.controlSource)
                 {
+                    var lostHumanControl =
+                        (previousControl == "local" || previousControl == "remote")
+                        && participant.controlSource == "ai";
+                    // Ownership/control transitions always publish a full
+                    // state — a rejoined participant needs it immediately.
+                    snapshotRequested = true;
                     race.SetControlSource(participant.participantId,
                         participant.controlSource);
-                    if (participant.controlSource == "local"
+                    if (lostHumanControl)
+                    {
+                        // Control loss clears held input and queued
+                        // one-shots; the released ids are acknowledged as
+                        // cancelled so client retry loops terminate.
+                        ReleaseParticipantInput(participant.participantId);
+                    }
+                    else if (participant.controlSource == "local"
                         || participant.controlSource == "remote")
                         inputs.SeatParticipant(participant.participantId,
                             participant.ownershipEpoch);
@@ -475,12 +514,40 @@ namespace FamilyRacing.Networking
                     {
                         // Same control source, new epoch (rejoin that
                         // superseded the old connection): fence the lane.
+                        // One-shots the superseded connection queued die
+                        // with it — acknowledged as cancelled so the old
+                        // owner's retries terminate.
                         inputs.SetOwnershipEpoch(participant.participantId,
                             participant.ownershipEpoch);
+                        snapshotRequested = true;
+                        foreach (var actionId in inputs.DrainActions(
+                                participant.participantId))
+                        {
+                            var cancel = CancelledAction(
+                                participant.participantId, actionId,
+                                "superseded", race != null ? race.HostTick : 0);
+                            stagedEvents.Add(cancel);
+                            drainedEvents.Add(cancel);
+                        }
                     }
                 }
                 appliedControl[participant.participantId] = participant.controlSource;
                 appliedEpochs[participant.participantId] = participant.ownershipEpoch;
+            }
+        }
+
+        // Everything the lost driver held or had queued is dropped; its
+        // pending one-shots come back as explicit cancellations.
+        private void ReleaseParticipantInput(string participantId)
+        {
+            var released = inputs.ReleaseLane(participantId);
+            var hostTick = race != null ? race.HostTick : 0;
+            foreach (var actionId in released)
+            {
+                var cancel = CancelledAction(participantId, actionId,
+                    "controlLost", hostTick);
+                stagedEvents.Add(cancel);
+                drainedEvents.Add(cancel);
             }
         }
 
@@ -529,6 +596,17 @@ namespace FamilyRacing.Networking
                 var actions = inputs.DrainActions(participantId);
                 foreach (var actionId in actions)
                 {
+                    // A one-shot that arrived during the shared pause can
+                    // never apply — cancel it explicitly instead of letting
+                    // it sit latched to fire on resume.
+                    if (race.Paused)
+                    {
+                        var pauseCancel = CancelledAction(participantId,
+                            actionId, "paused", hostTick);
+                        stagedEvents.Add(pauseCancel);
+                        drainedEvents.Add(pauseCancel);
+                        continue;
+                    }
                     string queueError;
                     if (race.QueuePending(participantId, "recover", actionId,
                             out queueError)) continue;
@@ -549,8 +627,13 @@ namespace FamilyRacing.Networking
                 drainedEvents.AddRange(state.events);
                 state.events.Clear();
             }
-            if (race.HostTick % NetworkSettings.SnapshotEveryTicks == 0)
+            // A client's resend request publishes immediately instead of
+            // waiting for the every-other-tick cadence.
+            if (snapshotRequested || race.HostTick % NetworkSettings.SnapshotEveryTicks == 0)
+            {
+                snapshotRequested = false;
                 Publish(BuildSnapshot(state));
+            }
             // The coordinator owns the session phase transitions the
             // session service exposes: countdown -> racing once the shared
             // clock runs, racing -> results once the outcome finalizes.
@@ -643,6 +726,7 @@ namespace FamilyRacing.Networking
                 return false;
             }
             lastPublished = snapshot;
+            SnapshotsPublished++;
             var sent = false;
             foreach (var connectionId in session.HostConnections())
             {
@@ -760,6 +844,20 @@ namespace FamilyRacing.Networking
             if (!NetworkWireCodec.TryEncodeInputBatch(recentOut, out packet, out error))
             { LastError = error; return; }
             transport.SendGameplay(packet);
+            // The prediction backlog resynchronized: ask the host for an
+            // immediate authoritative snapshot instead of waiting for the
+            // cadence. The latch clears only once the request actually
+            // left this process.
+            if (prediction != null && prediction.ResyncRequested)
+            {
+                byte[] request;
+                string requestError;
+                if (NetworkWireCodec.TryEncodeResyncRequest(SessionId(snap),
+                        appliedRaceId, snap.localParticipantId, epoch,
+                        out request, out requestError)
+                    && transport.SendGameplay(request))
+                    prediction.ClearResyncRequest();
+            }
         }
 
         private string SessionId(NetworkSessionState snap)
@@ -908,6 +1006,8 @@ namespace FamilyRacing.Networking
 
         private void OnGameplayMessage(ulong connectionId, byte[] packet)
         {
+            GameplayPacketsSeen++;
+            LastGameplayConnection = connectionId;
             if (!NetworkWireCodec.IsGameplayPacket(packet))
             {
                 DroppedPackets++;
@@ -919,6 +1019,10 @@ namespace FamilyRacing.Networking
                 case NetworkWireCodec.TagInputBatch:
                     if (role != LanSessionService.RoleHost) { DroppedPackets++; return; }
                     HostInputBatch(connectionId, packet);
+                    return;
+                case NetworkWireCodec.TagResyncRequest:
+                    if (role != LanSessionService.RoleHost) { DroppedPackets++; return; }
+                    HostResyncRequest(connectionId, packet);
                     return;
                 case NetworkWireCodec.TagSnapshot:
                     if (role != LanSessionService.RoleClient) { DroppedPackets++; return; }
@@ -960,6 +1064,47 @@ namespace FamilyRacing.Networking
                     LastInputError = frameError;
                 }
             }
+        }
+
+        // The prediction-resync wire: only a currently authenticated
+        // participant in the live session/race may ask for a snapshot —
+        // anything else is fenced like stale input.
+        private void HostResyncRequest(ulong connectionId, byte[] packet)
+        {
+            NetworkWireCodec.ResyncBody body;
+            string error;
+            if (!NetworkWireCodec.TryDecodeResyncRequest(packet, out body,
+                    out error))
+            {
+                DroppedPackets++;
+                LastError = error;
+                return;
+            }
+            var participantId = session.ParticipantIdFor(connectionId);
+            if (string.IsNullOrEmpty(participantId)
+                || body.participantId != participantId
+                || body.sessionId != hostSessionId
+                || body.raceId != raceId)
+            {
+                DroppedPackets++;
+                return;
+            }
+            // The claimed ownership epoch must match the live roster — a
+            // resync sent by the superseded side of a reconnect carries
+            // the retired epoch and must not force a publish.
+            var roster = session.Snapshot();
+            foreach (var participant in roster.participants)
+            {
+                if (!participant.occupied
+                    || participant.participantId != participantId) continue;
+                if (participant.ownershipEpoch != body.ownershipEpoch)
+                {
+                    DroppedPackets++;
+                    return;
+                }
+                break;
+            }
+            snapshotRequested = true;
         }
 
         private void OnReliableMessage(ulong connectionId, byte[] payload)

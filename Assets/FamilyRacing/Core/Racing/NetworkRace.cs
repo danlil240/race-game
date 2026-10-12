@@ -261,6 +261,10 @@ namespace FamilyRacing.Core.Racing
         {
             if (value == paused) return;
             paused = value;
+            // Terminal races have no live clock to freeze and must never
+            // mint lifecycle events — a teardown pause/resume flip is a
+            // presentation no-op.
+            if (phase == PhaseFinished || phase == PhaseAborted) return;
             if (paused)
                 foreach (var racer in racers)
                 {

@@ -36,6 +36,9 @@ namespace FamilyRacing
         private string runId;
         private string lastInputSource = "";
         private string lastLanguage = "";
+        // Shared-pause edge detector: entering a network pause clears held
+        // input exactly like a focus loss — resume requires fresh input.
+        private bool lastNetworkPaused;
         private float accumulator;
         private ulong commandCounter;
 
@@ -120,6 +123,13 @@ namespace FamilyRacing
             lanLink = new Networking.LanSessionLink(lanTransport, lanDiscovery);
             var lan = new Core.Networking.LanSessionService(
                 lanLink, lanLink, Application.version);
+            // Task 7: the private credential store lives inside the
+            // profile-private directory — it is what survives a
+            // client-process restart so a reserved slot can be reclaimed.
+            // Its content is scoped to the local profile's participant id
+            // and never enters observation state, streams, or logs.
+            lan.SetReconnectStore(new Networking.ReconnectCredentialStore(
+                Path.Combine(profilesDir, "lan-reconnect.json")));
             lanLink.Bind(lan);
             service.SetLanSession(lan);
             raceBridge = new Networking.NetworkRaceBridge(lanTransport, lan);
@@ -213,6 +223,12 @@ namespace FamilyRacing
                     state.driving.camera = (drivingCamera != null
                         ? drivingCamera.Facts : drivingWorld.CameraFacts).Copy();
             }
+            // Entering the shared network pause neutralizes held local
+            // input and requires re-arm, the same cleanup focus loss runs:
+            // held steering must not seep through the resume boundary.
+            var networkPaused = state.network != null && state.network.paused;
+            if (networkPaused && !lastNetworkPaused) ObserveInputCleanup();
+            lastNetworkPaused = networkPaused;
             RefreshPresentation(state);
             state.presentation = presentation.Copy();
             shell?.Refresh(state);

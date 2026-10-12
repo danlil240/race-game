@@ -48,6 +48,7 @@ namespace FamilyRacing.Core.Networking
         private string sessionId = "";
         private string raceId = "";
         private bool active;
+        private bool paused;
         private int overflowCount;
 
         // Number of times a lane overflowed the replay bound and resynced.
@@ -113,11 +114,57 @@ namespace FamilyRacing.Core.Networking
             lane.staleTicks = 0;
             lane.seeded = false;
             lane.lastEnqueued = 0;
+            // The consumed baseline resets with the fence: a rejoined
+            // (possibly restarted) process restarts its stream at
+            // sequence 1 and must not be eaten by the defensive
+            // consumed-sequence dequeue.
+            lane.lastConsumed = 0;
+            lane.lastConsumedClientTick = 0;
+            lane.lastConsumedHostTick = 0;
         }
 
         public void UnseatParticipant(string participantId)
         {
             if (participantId != null) lanes.Remove(participantId);
+        }
+
+        // Shared pause: the host freezes the race clock, so consumption
+        // stops producing usable samples entirely. Held input neutralizes
+        // at pause entry; frames arriving during the pause still advance
+        // their stream acknowledgement but can never become held input.
+        // Resume therefore requires a genuinely fresh sample — nothing
+        // buffered before or during the pause survives into it.
+        public void SetPaused(bool value)
+        {
+            if (paused == value) return;
+            paused = value;
+            if (value)
+                foreach (var lane in lanes.Values)
+                {
+                    lane.held = default(DriverInput);
+                    lane.staleTicks = 0;
+                }
+        }
+
+        // Control loss (disconnect, host loss): clears everything queued
+        // or held for the participant and returns the pending one-shot
+        // ids so the caller can emit explicit cancellations — a queued
+        // action must never fire for a racer whose controls were just
+        // lost. The sequence baseline and the action dedup set survive:
+        // a late-arriving old-epoch packet is still fenced by the epoch
+        // gate, and a retried action id still deduplicates.
+        public List<string> ReleaseLane(string participantId)
+        {
+            var released = new List<string>();
+            Lane lane;
+            if (participantId == null || !lanes.TryGetValue(participantId, out lane))
+                return released;
+            lane.queue.Clear();
+            lane.held = default(DriverInput);
+            lane.staleTicks = 0;
+            while (lane.pendingActions.Count > 0)
+                released.Add(lane.pendingActions.Dequeue());
+            return released;
         }
 
         public bool TryEnqueue(NetworkInputFrame frame, string connectionParticipantId,
@@ -192,6 +239,21 @@ namespace FamilyRacing.Core.Networking
             while (lane.queue.Count > 0
                 && lane.queue.Peek().inputSequence <= lane.lastConsumed)
                 lane.queue.Dequeue(); // defensive: never replay a consumed sample
+            if (paused)
+            {
+                // Frozen clock: samples still acknowledge their stream but
+                // can never become held input while the race is paused.
+                lane.held = default(DriverInput);
+                if (lane.queue.Count > 0)
+                {
+                    var frame = lane.queue.Dequeue();
+                    lane.lastConsumed = frame.inputSequence;
+                    lane.lastConsumedClientTick = frame.clientTick;
+                    lane.lastConsumedHostTick = hostTick;
+                    lane.staleTicks = 0;
+                }
+                return lane.held;
+            }
             if (lane.queue.Count > 0)
             {
                 var frame = lane.queue.Dequeue();

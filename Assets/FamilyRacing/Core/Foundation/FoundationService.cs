@@ -499,6 +499,7 @@ namespace FamilyRacing.Core.Foundation
                 case "profile.select":
                 case "race.start":
                 case "race.restart":
+                case "race.exit":
                 case "tutorial.start":
                 case "tutorial.replay":
                 case "tutorial.exit":

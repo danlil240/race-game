@@ -19,6 +19,11 @@ namespace FamilyRacing.Networking
     ///   N5EB  host→client, reliable-ordered channel: one
     ///         NetworkEventBatch of transient authoritative events with
     ///         stable event identities.
+    ///   N5RS  client→host, sequenced-unreliable channel: an explicit
+    ///         resend request — the client's prediction backlog
+    ///         resynchronized and it asks the host to publish the next
+    ///         authoritative snapshot immediately rather than waiting
+    ///         for the every-other-tick cadence.
     ///
     /// Decode applies the same strict per-type limits before parsing, so
     /// an oversized packet is dropped before any field is read; semantic
@@ -30,6 +35,7 @@ namespace FamilyRacing.Networking
         public const string TagInputBatch = "N5IB";
         public const string TagSnapshot = "N5SS";
         public const string TagEventBatch = "N5EB";
+        public const string TagResyncRequest = "N5RS";
 
         public const int HeaderBytes = 4;
 
@@ -39,9 +45,22 @@ namespace FamilyRacing.Networking
             public List<NetworkInputFrame> frames = new List<NetworkInputFrame>();
         }
 
+        // The resync request carries session/race identity so the host can
+        // fence requests from stale races, plus the claimed epoch so a
+        // superseded connection's request is ignored.
+        [Serializable]
+        public sealed class ResyncBody
+        {
+            public string sessionId = "";
+            public string raceId = "";
+            public string participantId = "";
+            public long ownershipEpoch;
+        }
+
         private static readonly byte[] InputTag = Encoding.ASCII.GetBytes(TagInputBatch);
         private static readonly byte[] SnapshotTag = Encoding.ASCII.GetBytes(TagSnapshot);
         private static readonly byte[] EventTag = Encoding.ASCII.GetBytes(TagEventBatch);
+        private static readonly byte[] ResyncTag = Encoding.ASCII.GetBytes(TagResyncRequest);
 
         /// <summary>True when the packet carries a Task-5 gameplay tag —
         /// used to split shared-channel traffic without parsing.</summary>
@@ -94,6 +113,38 @@ namespace FamilyRacing.Networking
                 || body.frames.Count > NetworkSettings.InputPacketSampleCapacity)
             { error = "badBatch"; return false; }
             frames = body.frames;
+            return true;
+        }
+
+        // --- resync request (client -> host) --------------------------------
+
+        public static bool TryEncodeResyncRequest(string sessionId,
+            string raceId, string participantId, long ownershipEpoch,
+            out byte[] packet, out string error)
+        {
+            error = null;
+            var json = JsonUtility.ToJson(new ResyncBody
+            {
+                sessionId = sessionId ?? "",
+                raceId = raceId ?? "",
+                participantId = participantId ?? "",
+                ownershipEpoch = ownershipEpoch
+            });
+            packet = Wrap(ResyncTag, json);
+            if (packet.Length > NetworkSettings.MaxInputPacketBytes)
+            { packet = null; error = "oversizedPacket"; return false; }
+            return true;
+        }
+
+        public static bool TryDecodeResyncRequest(byte[] packet,
+            out ResyncBody body, out string error)
+        {
+            body = null;
+            string json;
+            if (!Unwrap(packet, ResyncTag, NetworkSettings.MaxInputPacketBytes,
+                    out json, out error)) return false;
+            body = Parse<ResyncBody>(json, out error);
+            if (body == null) { if (error == null) error = "malformed"; return false; }
             return true;
         }
 

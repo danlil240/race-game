@@ -215,6 +215,14 @@ namespace FamilyRacing.Core.Networking
             SuppressedOneShots = 0;
         }
 
+        // The resync latch is a one-shot signal, not a state: the wire
+        // layer clears it once the resend request has actually been sent
+        // upstream, so a cleared backlog never re-requests forever.
+        public void ClearResyncRequest()
+        {
+            ResyncRequested = false;
+        }
+
         // The observable prediction facts for the validation stream.
         public NetworkPredictionState State()
         {

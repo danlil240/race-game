@@ -88,10 +88,16 @@ namespace FamilyRacing.Core.Networking
         private readonly Dictionary<ulong, string> connections =
             new Dictionary<ulong, string>();
         private readonly HashSet<ulong> openConnections = new HashSet<ulong>();
-        // Host side: per-participant reconnect secrets. These never enter
-        // the descriptor, the roster, or any observation DTO.
-        private readonly Dictionary<string, string> credentials =
-            new Dictionary<string, string>(StringComparer.Ordinal);
+        // Host side: participant -> owning connection, for fencing the
+        // superseded link when a credentialed rejoin lands before the old
+        // socket times out.
+        private readonly Dictionary<string, ulong> connectionIdFor =
+            new Dictionary<string, ulong>(StringComparer.Ordinal);
+        // Host side: credentialed slot reservations live in the registry.
+        // They never enter the descriptor, the roster, or any observation
+        // DTO — only join.request/join.accept carry them on the wire.
+        private readonly ReconnectRegistry reconnectRegistry =
+            new ReconnectRegistry();
         private readonly List<string> pauseRequests = new List<string>();
 
         private DrivingContentCatalog content;
@@ -109,11 +115,15 @@ namespace FamilyRacing.Core.Networking
         private ulong serverConnection;
         private bool paused;
         // Private client reconnect material (stored credential + endpoint);
-        // held in memory only and removed by an explicit lan.leave.
+        // held in memory and mirrored into the profile-scoped credential
+        // store so a client-process restart can reclaim its slot. An
+        // explicit lan.leave removes both copies.
         private string storedSessionId;
         private string storedJoinAddress;
         private int storedJoinPort;
         private string storedCredential;
+        private IReconnectCredentialStore reconnectStore;
+        private bool reconnectStoreChecked;
         private string joinAddress = "";
         private int joinPort;
 
@@ -139,12 +149,23 @@ namespace FamilyRacing.Core.Networking
             content = catalog;
         }
 
+        // Composition seam for private reconnect-credential persistence —
+        // the runtime wires a file-backed, profile-scoped store; tests
+        // substitute memory. Credential bytes never leave this seam into
+        // observation state, streams, or logs.
+        public void SetReconnectStore(IReconnectCredentialStore store)
+        {
+            reconnectStore = store;
+        }
+
         // Identity of the local human: stable participant id plus cosmetic
         // identity and profile readiness. The caller refreshes this at each
         // command boundary so a profile change is seen by the next check.
         public void SetLocalContext(string participantId, string avatar,
             int colorIndex, bool selected, bool writable)
         {
+            if ((participantId ?? "") != localParticipantId)
+                reconnectStoreChecked = false;
             localParticipantId = participantId ?? "";
             localAvatar = avatar ?? "";
             localColorIndex = colorIndex;
@@ -294,6 +315,7 @@ namespace FamilyRacing.Core.Networking
                     else if (!profileSelected) { Deny(out available, out reason, "requiresSelectedProfile"); }
                     break;
                 case "lan.reconnect":
+                    EnsureReconnectMaterial();
                     if (storedCredential == null) { Deny(out available, out reason, "noSession"); }
                     break;
                 case "lan.configure":
@@ -427,26 +449,10 @@ namespace FamilyRacing.Core.Networking
                 string participantId;
                 if (!connections.TryGetValue(connectionId, out participantId)) return;
                 connections.Remove(connectionId);
+                connectionIdFor.Remove(participantId);
                 var participant = FindParticipant(participantId);
                 if (participant == null) return;
-                if (phase == PhaseLobby)
-                {
-                    // Lobby membership is not protected: a leaver frees
-                    // the slot and the credential reservation with it.
-                    ClearParticipant(participant);
-                    credentials.Remove(participantId);
-                }
-                else
-                {
-                    // Mid-race the slot is retained for the remainder of
-                    // the race and control passes to AI (Task 4 owns the
-                    // driver itself).
-                    participant.connected = false;
-                    participant.ready = false;
-                    participant.controlSource = ControlAi;
-                }
-                pauseRequests.Remove(participantId);
-                BroadcastSessionState();
+                HostParticipantDisconnected(participant, participantId);
                 return;
             }
             if (role != RoleClient || connectionId != serverConnection) return;
@@ -468,6 +474,49 @@ namespace FamilyRacing.Core.Networking
                 if (descriptor != null) descriptor.joinable = false;
                 FailPending("hostLost");
             }
+        }
+
+        // Participant-keyed disconnect policy for the host — the call a
+        // heartbeat or peer-timeout monitor makes when it knows which
+        // participant went silent rather than which socket died. Any link
+        // still mapped to the participant is severed alongside, so the
+        // slot can never be double-owned.
+        public void OnDisconnected(string participantId, string reason)
+        {
+            if (role != RoleHost || string.IsNullOrEmpty(participantId)) return;
+            ulong connectionId;
+            if (connectionIdFor.TryGetValue(participantId, out connectionId))
+            {
+                connections.Remove(connectionId);
+                openConnections.Remove(connectionId);
+                connectionIdFor.Remove(participantId);
+            }
+            var participant = FindParticipant(participantId);
+            if (participant == null) return;
+            HostParticipantDisconnected(participant, participantId);
+        }
+
+        // The shared disconnect tail: lobby membership is unprotected and
+        // frees slot + credentials; anywhere past it the slot is reserved
+        // for the remainder of the race and control passes to AI until a
+        // credentialed rejoin takes it back.
+        private void HostParticipantDisconnected(ParticipantState participant,
+            string participantId)
+        {
+            if (phase == PhaseLobby)
+            {
+                ClearParticipant(participant);
+                reconnectRegistry.Revoke(participantId);
+            }
+            else
+            {
+                participant.connected = false;
+                participant.ready = false;
+                participant.controlSource = ControlAi;
+                reconnectRegistry.MarkReserved(participantId, true);
+            }
+            pauseRequests.Remove(participantId);
+            BroadcastSessionState();
         }
 
         // --- host command handlers ----------------------------------------
@@ -492,6 +541,7 @@ namespace FamilyRacing.Core.Networking
             role = RoleHost;
             phase = PhaseLobby;
             sessionId = "lan-" + Guid.NewGuid().ToString("N");
+            reconnectRegistry.BeginSession(sessionId);
             descriptor = new SessionDescriptor
             {
                 sessionId = sessionId,
@@ -626,6 +676,17 @@ namespace FamilyRacing.Core.Networking
             phase = PhaseLobby;
             paused = false;
             pauseRequests.Clear();
+            // A race-slot reservation dies with the race lifecycle: the
+            // rematch back to lobby frees slots held for disconnected
+            // players. Their issued credentials stay authenticatable in
+            // the registry so result retrieval rights survive the rematch.
+            foreach (var slot in slots)
+            {
+                if (!slot.occupied || slot.connected) continue;
+                reconnectRegistry.Release(slot.participantId);
+                connectionIdFor.Remove(slot.participantId);
+                ClearParticipant(slot);
+            }
             ClearReady();
             AssignDefaultVehicles();
             BroadcastSessionState();
@@ -724,6 +785,9 @@ namespace FamilyRacing.Core.Networking
 
         private CommandResult Reconnect(GameCommand command)
         {
+            // A restarted process has no in-memory material — the private
+            // credential store is what survives the restart.
+            EnsureReconnectMaterial();
             if (storedCredential == null || storedJoinAddress == null)
                 return Result(command, CommandResult.Rejected, "noSession");
             if (role == RoleHost)
@@ -846,22 +910,44 @@ namespace FamilyRacing.Core.Networking
                 SendJoinReject(connectionId, "incompatible", commandId);
                 return;
             }
-            // Authenticated rejoin: a stored credential reclaims its slot
-            // even when the session is full or mid-race.
-            string stored;
+            // Credentialed rejoin: the registry binds a reservation to this
+            // session, so a reconnect reclaims its slot even when the lobby
+            // is full or the race is live — and a display name / profile id
+            // alone can never steal the reservation. A successful reclaim
+            // bumps the ownership epoch and fences the old connection.
             if (!string.IsNullOrEmpty(credential)
-                && credentials.TryGetValue(participantId, out stored)
-                && stored == credential)
+                && FindParticipant(participantId) != null)
             {
-                var reclaim = FindParticipant(participantId);
-                if (reclaim != null)
+                string owner;
+                long epoch;
+                if (reconnectRegistry.TryReclaim(credential, sessionId,
+                        out owner, out epoch) && owner == participantId)
                 {
+                    var reclaim = FindParticipant(participantId);
+                    ulong previous;
+                    var hadPrevious =
+                        connectionIdFor.TryGetValue(participantId, out previous)
+                        && previous != connectionId;
                     openConnections.Remove(connectionId);
                     connections[connectionId] = participantId;
+                    connectionIdFor[participantId] = connectionId;
+                    if (hadPrevious)
+                    {
+                        // The superseded socket is fenced: it loses its
+                        // participant mapping and is told its session ended.
+                        connections.Remove(previous);
+                        link.Send(previous, NetworkProtocol.Encode(
+                            NetworkProtocol.MsgSessionClosed,
+                            "rsn", "superseded"));
+                    }
                     reclaim.connected = true;
                     reclaim.controlSource = ControlRemote;
-                    reclaim.ownershipEpoch++;
-                    SendJoinAccept(connectionId, reclaim, commandId, stored);
+                    reclaim.ownershipEpoch = epoch;
+                    // The presented credential is retired the moment it is
+                    // honored; accept carries the rotated replacement.
+                    var rotated = reconnectRegistry.Rotate(participantId);
+                    SendJoinAccept(connectionId, reclaim, commandId,
+                        rotated ?? credential);
                     BroadcastSessionState();
                     return;
                 }
@@ -898,10 +984,10 @@ namespace FamilyRacing.Core.Networking
             participant.ready = false;
             participant.controlSource = ControlRemote;
             participant.ownershipEpoch = 1;
-            credential = Guid.NewGuid().ToString("N");
-            credentials[participantId] = credential;
+            credential = reconnectRegistry.Issue(participantId);
             openConnections.Remove(connectionId);
             connections[connectionId] = participantId;
+            connectionIdFor[participantId] = connectionId;
             SendJoinAccept(connectionId, participant, commandId, credential);
             BroadcastSessionState();
         }
@@ -964,18 +1050,21 @@ namespace FamilyRacing.Core.Networking
             string participantId;
             if (!connections.TryGetValue(connectionId, out participantId)) return;
             connections.Remove(connectionId);
+            connectionIdFor.Remove(participantId);
             var participant = FindParticipant(participantId);
             if (participant == null) return;
             if (phase == PhaseLobby)
             {
+                // An explicit leave in the lobby ends all credential rights.
                 ClearParticipant(participant);
-                credentials.Remove(participantId);
+                reconnectRegistry.Revoke(participantId);
             }
             else
             {
                 participant.connected = false;
                 participant.ready = false;
                 participant.controlSource = ControlAi;
+                reconnectRegistry.MarkReserved(participantId, true);
             }
             pauseRequests.Remove(participantId);
             BroadcastSessionState();
@@ -1008,6 +1097,7 @@ namespace FamilyRacing.Core.Networking
             storedJoinPort = joinPort;
             var credential = Field(fields, "cred");
             if (credential.Length > 0) storedCredential = credential;
+            PersistReconnectMaterial();
             var participant = slots[slot];
             participant.participantId = localParticipantId;
             participant.occupied = true;
@@ -1340,12 +1430,48 @@ namespace FamilyRacing.Core.Networking
             slot.ownershipEpoch = 0;
         }
 
+        // Loads the persisted credential once per profile identity — this
+        // is what lets a restarted client process present its reservation.
+        private void EnsureReconnectMaterial()
+        {
+            if (storedCredential != null || reconnectStoreChecked
+                || reconnectStore == null || localParticipantId == "")
+                return;
+            reconnectStoreChecked = true;
+            ReconnectMaterial material;
+            if (!reconnectStore.TryLoad(localParticipantId, out material)
+                || material == null)
+                return;
+            storedSessionId = material.sessionId;
+            storedJoinAddress = material.hostAddress;
+            storedJoinPort = material.hostPort;
+            storedCredential = material.credential;
+        }
+
+        // Mirrors the in-memory credential into the private store so a
+        // process restart can reclaim. Rotated credentials overwrite the
+        // previous record — only the newest is ever usable for reclaim.
+        private void PersistReconnectMaterial()
+        {
+            if (reconnectStore == null || storedCredential == null
+                || localParticipantId == "") return;
+            reconnectStore.Save(new ReconnectMaterial
+            {
+                participantId = localParticipantId,
+                sessionId = storedSessionId,
+                hostAddress = storedJoinAddress,
+                hostPort = storedJoinPort,
+                credential = storedCredential
+            });
+        }
+
         private void ClearReconnectMaterial()
         {
             storedSessionId = null;
             storedJoinAddress = null;
             storedJoinPort = 0;
             storedCredential = null;
+            if (reconnectStore != null) reconnectStore.Clear();
         }
 
         private void StopDiscovery()
@@ -1360,7 +1486,8 @@ namespace FamilyRacing.Core.Networking
             if (discovery != null) discovery.StopResponder();
             openConnections.Clear();
             connections.Clear();
-            credentials.Clear();
+            connectionIdFor.Clear();
+            reconnectRegistry.BeginSession("");
             foreach (var slot in slots) ClearParticipant(slot);
             pauseRequests.Clear();
             paused = false;
