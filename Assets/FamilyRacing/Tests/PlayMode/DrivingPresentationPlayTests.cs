@@ -804,10 +804,10 @@ namespace FamilyRacing.Tests
             Frame(0.1f);
             var overlay = Widget<VisualElement>("overlay.pause");
             yield return WaitFor(() =>
-                overlay.Q<Button>("driving.retry") != null
-                && overlay.Q<Button>("driving.retry").worldBound.width > 0f,
+                overlay.Q<Button>("driving.pauseRetry") != null
+                && overlay.Q<Button>("driving.pauseRetry").worldBound.width > 0f,
                 "retry widget");
-            Press(overlay.Q<Button>("driving.retry"));
+            Press(overlay.Q<Button>("driving.pauseRetry"));
             var state = Snapshot();
             Assert.That(state.driving.raceId, Is.Not.EqualTo(raceId),
                 "retry creates a new race identity");
@@ -826,6 +826,108 @@ namespace FamilyRacing.Tests
             var state = Snapshot();
             Assert.That(state.input.recover || state.driving.pendingActions.Count > 0,
                 Is.True, "the recover button must reach the same input.set path as R");
+        }
+
+        [UnityTest]
+        public IEnumerator DisengageRestoresMenuPoseEveryTime()
+        {
+            // The saved menu pose must survive every disengage — a second
+            // race leaving must put the camera back just like the first.
+            world.BindPresentationCamera();
+            var menuPos = renderCamera.transform.position;
+            var menuRot = renderCamera.transform.rotation;
+            var created = app.Dispatch("profile.create", Params(
+                ("slot", "0"), ("language", "en")));
+            Assert.That(created.status, Is.EqualTo("applied"),
+                "profile.create: " + created.code);
+            for (var cycle = 0; cycle < 2; cycle++)
+            {
+                var started = app.Dispatch("race.start", Params(
+                    ("vehicleId", "car-01"), ("eventId", "practice-02")));
+                Assert.That(started.status, Is.EqualTo("applied"),
+                    "race.start: " + started.code);
+                Step(90);
+                Assert.That(Snapshot().driving.phase, Is.EqualTo("running"));
+                for (var i = 0; i < 12; i++) Frame(0.1f);
+                Assert.That(Vector3.Distance(
+                        renderCamera.transform.position, menuPos),
+                    Is.GreaterThan(0.5f),
+                    "cycle " + cycle + ": engaged chase framing must leave "
+                    + "the menu pose");
+                app.Dispatch("race.exit", new Dictionary<string, string>(0));
+                Frame(0.1f);
+                Assert.That(Vector3.Distance(
+                        renderCamera.transform.position, menuPos),
+                    Is.LessThan(0.001f),
+                    "cycle " + cycle + ": disengage must restore the saved "
+                    + "menu pose every time");
+                Assert.That(Quaternion.Angle(
+                        renderCamera.transform.rotation, menuRot),
+                    Is.LessThan(0.5f));
+            }
+            yield break;
+        }
+
+        [UnityTest]
+        public IEnumerator NoneModeFactsCarryNoPose()
+        {
+            yield return ToRunning();
+            Frame(0.1f);
+            Assert.That(drivingCamera.Facts.mode, Is.EqualTo("chase"),
+                "setup: an engaged camera reports its live mode");
+            app.Dispatch("race.exit", new Dictionary<string, string>(0));
+            Frame(0.1f);
+            var facts = drivingCamera.Facts;
+            Assert.That(facts.mode, Is.EqualTo("none"));
+            Assert.That(facts.px, Is.EqualTo(0f));
+            Assert.That(facts.py, Is.EqualTo(0f));
+            Assert.That(facts.pz, Is.EqualTo(0f));
+            Assert.That(facts.tx, Is.EqualTo(0f));
+            Assert.That(facts.ty, Is.EqualTo(0f));
+            Assert.That(facts.tz, Is.EqualTo(0f));
+        }
+
+        [UnityTest]
+        public IEnumerator UnknownVehicleIdShowsFallbackSilhouette()
+        {
+            yield return ToRunning();
+            Frame(0.1f);
+            var presentation = world.transform.Find("DrivingVehicle")
+                .GetComponent<VehiclePresentation>();
+            Assert.That(presentation.ShownKey, Does.Contain("car-01"),
+                "setup: the known vehicle shows its real silhouette");
+            // Session vehicleIds always validate against the catalog, so
+            // exercise the world's asset lookup directly: a missing id
+            // must swap to the generic fallback, never keep the old shape.
+            var applyVisual = typeof(DrivingWorld).GetMethod(
+                "ApplyVehicleVisual",
+                BindingFlags.NonPublic | BindingFlags.Instance);
+            Assert.That(applyVisual, Is.Not.Null);
+            applyVisual.Invoke(world, new object[]
+                { "ghost-01", Snapshot().driving.motor, 0f, 1f });
+            Assert.That(presentation.ShownKey, Is.EqualTo("|ghost-01"),
+                "an unknown vehicle id must fall back to the generic cube");
+            Assert.That(
+                world.transform.Find("DrivingVehicle/LeanPivot/Cabin"),
+                Is.Null, "the previous car silhouette must not linger");
+            Assert.That(
+                world.transform.Find("DrivingVehicle/LeanPivot/Body"),
+                Is.Not.Null, "the fallback body part must exist");
+            yield break;
+        }
+
+        [UnityTest]
+        public IEnumerator DrivingButtonsHaveUniqueSemanticNames()
+        {
+            yield return ToRunning();
+            var names = new HashSet<string>();
+            var duplicates = new List<string>();
+            foreach (var button in document.rootVisualElement
+                .Query<Button>().ToList())
+                if (!names.Add(button.name)) duplicates.Add(button.name);
+            Assert.That(duplicates, Is.Empty,
+                "every driving button needs a unique semantic name: "
+                + string.Join(", ", duplicates));
         }
 
         // --- generated-course camera coverage -------------------------------

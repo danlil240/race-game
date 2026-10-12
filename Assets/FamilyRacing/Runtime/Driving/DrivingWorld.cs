@@ -205,11 +205,37 @@ namespace FamilyRacing
             if (vehicleId != shownVehicleId)
             {
                 VehicleDefinitionAsset asset;
-                if (vehicleAssets.TryGetValue(vehicleId ?? "", out asset) && asset != null)
-                    presentation.SetVehicle(asset);
+                if (!vehicleAssets.TryGetValue(vehicleId ?? "", out asset)
+                    || asset == null)
+                {
+                    // An unresolvable id must not leave the previous
+                    // vehicle's silhouette on screen — fall back to the
+                    // generic body and say so once per id.
+                    asset = FallbackVehicle(vehicleId);
+                }
+                presentation.SetVehicle(asset);
                 shownVehicleId = vehicleId;
             }
             presentation.ApplyPose(motor, steering, visualAlpha);
+        }
+
+        private readonly Dictionary<string, VehicleDefinitionAsset> fallbackAssets =
+            new Dictionary<string, VehicleDefinitionAsset>();
+
+        private VehicleDefinitionAsset FallbackVehicle(string vehicleId)
+        {
+            var key = vehicleId ?? "";
+            VehicleDefinitionAsset fallback;
+            if (!fallbackAssets.TryGetValue(key, out fallback) || fallback == null)
+            {
+                Debug.LogWarning("DrivingWorld: no definition asset for vehicle '"
+                    + key + "' — showing the generic fallback silhouette.");
+                fallback = ScriptableObject.CreateInstance<VehicleDefinitionAsset>();
+                fallback.vehicleId = key;
+                fallback.silhouette = ""; // the generic-cube rebuild path
+                fallbackAssets[key] = fallback;
+            }
+            return fallback;
         }
 
         private void ApplyOverviewCamera(MotorState motor)
@@ -262,6 +288,9 @@ namespace FamilyRacing
         private void OnDestroy()
         {
             // VehiclePresentation owns its generated materials.
+            foreach (var fallback in fallbackAssets.Values)
+                if (fallback != null) Destroy(fallback);
+            fallbackAssets.Clear();
         }
     }
 }

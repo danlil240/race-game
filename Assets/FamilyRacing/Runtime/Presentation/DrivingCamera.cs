@@ -209,9 +209,10 @@ namespace FamilyRacing
             engaged = false;
             hasTarget = false;
             pullDistance = -1f;
+            // The Awake-captured menu pose survives every disengage:
+            // each race leaving restores it, not just the first.
             if (cam != null && savedPose)
                 cam.transform.SetPositionAndRotation(savedPosition, savedRotation);
-            savedPose = false;
         }
 
         // mode:"none" carries no pose: consumers keying on coordinates

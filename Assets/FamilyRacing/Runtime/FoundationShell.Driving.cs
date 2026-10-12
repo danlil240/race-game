@@ -195,7 +195,7 @@ namespace FamilyRacing
             var resume = AddButton(pauseRow, T("hud.resume", state), Seafoam,
                 () => app.Dispatch("pause.toggle", emptyParams), "driving.resume");
             var pauseRetry = AddButton(pauseRow, T("hud.retry", state), Coral,
-                () => app.Dispatch("race.restart", emptyParams), "driving.retry");
+                () => app.Dispatch("race.restart", emptyParams), "driving.pauseRetry");
             ApplyAvailability(resume, "pause.toggle");
             ApplyAvailability(pauseRetry, "race.restart");
 
@@ -210,9 +210,9 @@ namespace FamilyRacing
             finishVehicleLabel.name = "hud.finishVehicle";
             var finishRow = Row(finishOverlay);
             var retry = AddButton(finishRow, T("hud.retry", state), Seafoam,
-                () => app.Dispatch("race.restart", emptyParams), "driving.retry");
+                () => app.Dispatch("race.restart", emptyParams), "driving.finishRetry");
             var finishExit = AddButton(finishRow, T("driving.exit", state), Deep,
-                () => app.Dispatch("race.exit", emptyParams), "driving.exit");
+                () => app.Dispatch("race.exit", emptyParams), "driving.finishExit");
             ApplyAvailability(retry, "race.restart");
             ApplyAvailability(finishExit, "race.exit");
 
