@@ -48,8 +48,13 @@ namespace FamilyRacing.Core.Foundation
         // name as the object placeholder it replaces; null until a network
         // race exists.
         public NetworkRaceState networkRace;
-        public object prediction;
-        public object remotePresentation;
+        // Task 6 typed slices (same emitted field names as the object
+        // placeholders they replace): the local predicted motor with
+        // ack/buffer/correction facts, and per-remote-participant
+        // interpolation facts. Null on the host and outside a LAN race —
+        // predicted data never appears authoritative through `driving`.
+        public NetworkPredictionState prediction;
+        public RemoteInterpolationState remotePresentation;
     }
 
     // Runtime-visible presentation facts (geometry, input ownership, locale,

@@ -334,8 +334,10 @@ namespace FamilyRacing.Core.Foundation
                 droppedDrivingEvents = droppedDrivingEvents,
                 network = NetworkSnapshot(),
                 networkRace = networkRaceState != null ? networkRaceState.Copy() : null,
-                prediction = null,
-                remotePresentation = null
+                prediction = networkPrediction != null
+                    ? networkPrediction.Copy() : null,
+                remotePresentation = networkRemotePresentation != null
+                    ? networkRemotePresentation.Copy() : null
             };
             if (driving != null)
             {

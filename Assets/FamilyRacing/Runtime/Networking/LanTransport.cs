@@ -8,6 +8,30 @@ using LanSettings = FamilyRacing.Core.Networking.NetworkSettings;
 namespace FamilyRacing.Networking
 {
     /// <summary>
+    /// Controlled link-impairment profile (Task 6 test/diagnostics seam):
+    /// when attached to a <see cref="LanTransport"/>, the UTP simulator
+    /// stage is appended last on both pipelines so packets see real
+    /// delay/jitter/loss at the wire — the reliable lane resends drops,
+    /// the sequenced gameplay lane loses them. <see cref="Mode"/> selects
+    /// which direction(s) a peer impairs; <see cref="RandomSeed"/> makes
+    /// jitter/drop selection deterministic so runs are repeatable.
+    /// Production callers pass no impairment and get unimpaired sockets.
+    /// </summary>
+    public sealed class LanImpairment
+    {
+        /// <summary>Fixed one-way delay applied to each packet.</summary>
+        public int DelayMilliseconds;
+        /// <summary>Random variance added around the delay.</summary>
+        public int JitterMilliseconds;
+        /// <summary>Percentage of packets dropped (0–100).</summary>
+        public int DropPercentage;
+        /// <summary>RNG seed for deterministic jitter/drop sequences.</summary>
+        public uint RandomSeed = 1;
+        /// <summary>Direction the impairment applies to.</summary>
+        public ApplyMode Mode = ApplyMode.SentPacketsOnly;
+    }
+
+    /// <summary>
     /// Lifecycle of a <see cref="LanTransport"/>. Connecting is the only
     /// transient state: a denied or failed start returns to Idle, it never
     /// lingers as a pending join.
@@ -65,6 +89,7 @@ namespace FamilyRacing.Networking
         }
 
         private readonly ILanNetworkAccess access;
+        private readonly LanImpairment impairment;
         private NetworkDriver driver;
         // Task 5: two typed lanes share each connection. reliablePipeline
         // carries session/lobby/lifecycle/ownership/results traffic plus
@@ -82,8 +107,12 @@ namespace FamilyRacing.Networking
         public LanTransport() : this(LanNetworkAccess.Create()) { }
 
         public LanTransport(ILanNetworkAccess access)
+            : this(access, null) { }
+
+        public LanTransport(ILanNetworkAccess access, LanImpairment impairment)
         {
             this.access = access ?? throw new ArgumentNullException(nameof(access));
+            this.impairment = impairment;
         }
 
         /// <summary>Current lifecycle state.</summary>
@@ -433,7 +462,7 @@ namespace FamilyRacing.Networking
             }
         }
 
-        private static NetworkDriver CreateDriver()
+        private NetworkDriver CreateDriver()
         {
             var settings = new NetworkSettings();
             settings.WithNetworkConfigParameters(
@@ -449,6 +478,24 @@ namespace FamilyRacing.Networking
             settings.WithFragmentationStageParameters(
                 payloadCapacity: LanSettings.SnapshotCeilingBytes
                     + LanSettings.MaxInputPacketBytes);
+            if (impairment != null)
+            {
+                // Controlled link impairment (test/diagnostics only): the
+                // simulator stage delays/jitters/drops at the wire with a
+                // deterministic seeded RNG. maxPacketCount bounds packets
+                // held in flight by the delay; oversized packets would
+                // silently bypass the stage so the bound stays above the
+                // snapshot ceiling.
+                settings.WithSimulatorStageParameters(
+                    maxPacketCount: 512,
+                    maxPacketSize: LanSettings.SnapshotCeilingBytes
+                        + LanSettings.MaxInputPacketBytes,
+                    mode: impairment.Mode,
+                    packetDelayMs: impairment.DelayMilliseconds,
+                    packetJitterMs: impairment.JitterMilliseconds,
+                    packetDropPercentage: impairment.DropPercentage,
+                    randomSeed: impairment.RandomSeed);
+            }
             return NetworkDriver.Create(settings);
         }
 
@@ -456,15 +503,28 @@ namespace FamilyRacing.Networking
         // order matters: fragmentation runs first so a large payload is
         // split before sequencing/reliability wrap the fragments (UTP
         // pipelines doc). Reliable+fragmented carries control traffic;
-        // unreliable-sequenced+fragmented carries gameplay streams.
+        // unreliable-sequenced+fragmented carries gameplay streams. The
+        // simulator stage, when present, runs last so drops land on real
+        // wire packets — the reliable lane retransmits them, the sequenced
+        // gameplay lane loses them for real.
         private void CreatePipelines()
         {
-            reliablePipeline = driver.CreatePipeline(
-                typeof(FragmentationPipelineStage),
-                typeof(ReliableSequencedPipelineStage));
-            gameplayPipeline = driver.CreatePipeline(
-                typeof(FragmentationPipelineStage),
-                typeof(UnreliableSequencedPipelineStage));
+            reliablePipeline = impairment != null
+                ? driver.CreatePipeline(
+                    typeof(FragmentationPipelineStage),
+                    typeof(ReliableSequencedPipelineStage),
+                    typeof(SimulatorPipelineStage))
+                : driver.CreatePipeline(
+                    typeof(FragmentationPipelineStage),
+                    typeof(ReliableSequencedPipelineStage));
+            gameplayPipeline = impairment != null
+                ? driver.CreatePipeline(
+                    typeof(FragmentationPipelineStage),
+                    typeof(UnreliableSequencedPipelineStage),
+                    typeof(SimulatorPipelineStage))
+                : driver.CreatePipeline(
+                    typeof(FragmentationPipelineStage),
+                    typeof(UnreliableSequencedPipelineStage));
         }
 
         private void DisposeDriver()

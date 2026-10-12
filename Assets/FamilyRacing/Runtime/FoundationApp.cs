@@ -166,6 +166,14 @@ namespace FamilyRacing
                     service.PublishNetworkRaceEvents(raceEvents);
                 service.SetNetworkRaceState(
                     raceBridge != null ? raceBridge.LatestState : null);
+                // Task 6: predicted-motor/correction facts and remote
+                // interpolation facts ride their own typed slices —
+                // predicted data never aliases onto `driving`.
+                service.SetPredictionState(
+                    raceBridge != null ? raceBridge.Prediction : null);
+                service.SetRemotePresentationState(
+                    raceBridge != null ? raceBridge.RemotePresentation
+                        : null);
                 service.AdvanceTick();
                 // One snapshot per tick boundary: the presentation refresh
                 // mutates service state after the snapshot is taken, so the

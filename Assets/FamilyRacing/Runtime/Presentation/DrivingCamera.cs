@@ -89,16 +89,37 @@ namespace FamilyRacing
                 ClearFacts();
                 return;
             }
+            ApplyMotor(motor,
+                state.draftProfile != null
+                    && state.draftProfile.camera == "overhead",
+                state.draftProfile != null
+                    && state.draftProfile.reducedCameraShake,
+                deltaSeconds);
+        }
+
+        // Task 6 seam: frame any committed motor pose — the LAN race
+        // screen follows the locally owned racer's *predicted* (visually
+        // blended) pose, not a raw snapshot pose, so corrections ease in
+        // the same way solo driving does. Callers pass the same camera
+        // preference facts the solo path reads from the draft profile.
+        internal void ApplyMotor(MotorState motor, bool overhead,
+            bool reducedShake, float deltaSeconds)
+        {
+            if (cam == null) cam = Camera.main;
+            if (motor == null || cam == null)
+            {
+                if (engaged) Disengage();
+                ClearFacts();
+                return;
+            }
             if (!engaged)
             {
                 engaged = true;
                 hasTarget = false; // engagement snaps into framing, no swoop
             }
 
-            var mode = state.draftProfile != null
-                && state.draftProfile.camera == "overhead" ? "overhead" : "chase";
-            var reduced = state.draftProfile != null
-                && state.draftProfile.reducedCameraShake;
+            var mode = overhead ? "overhead" : "chase";
+            var reduced = reducedShake;
             var rate = reduced ? reducedFollowRate : followRate;
             var dt = Mathf.Max(0f, deltaSeconds);
             var blend = 1f - Mathf.Exp(-rate * dt);

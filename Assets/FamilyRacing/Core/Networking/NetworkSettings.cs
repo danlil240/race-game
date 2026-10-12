@@ -137,5 +137,30 @@ namespace FamilyRacing.Core.Networking
         public const int EventBatchCapacity = 64;
         // Bounded exactly-once event consumption on the receiving side.
         public const int SeenEventIdCapacity = 512;
+
+        // --- Task 6: client prediction + remote presentation -----------
+        // Replay bound for the local predicted motor: pending sent-but-
+        // unacknowledged input samples never exceed this; overflow
+        // explicitly resynchronizes (clears the backlog and requests full
+        // state) instead of replaying a stale burst. Matches the host
+        // input-queue bound — the two ends bound the same stream.
+        public const int PredictionInputCapacity = InputQueueCapacity;
+        // Remote pose buffer: ~4.3 s of 15 Hz snapshot cadence retained
+        // per remote racer for interpolation.
+        public const int InterpolationBufferCapacity = 64;
+        // Remote racers render this far behind the newest host tick.
+        public const double InterpolationDelaySeconds = 0.1;
+        // Past the newest buffered pose, extrapolation runs at most this
+        // far, then the last pose holds and reports stale.
+        public const double ExtrapolationLimitSeconds = 0.1;
+        // Correction policy: the simulated pose corrects immediately on
+        // every reconcile; the *visual* blends ordinary errors over
+        // CorrectionBlendSeconds, while ownership change, recovery, or an
+        // error past CorrectionSnapMeters snaps instantly. Errors under
+        // CorrectionEpsilonMeters are noise — reconciliation is not
+        // assumed bit-identical across Android/Windows physics.
+        public const float CorrectionSnapMeters = 3f;
+        public const double CorrectionBlendSeconds = 0.1;
+        public const float CorrectionEpsilonMeters = 0.01f;
     }
 }

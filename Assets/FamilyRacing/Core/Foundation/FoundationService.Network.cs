@@ -20,6 +20,12 @@ namespace FamilyRacing.Core.Foundation
         // snapshot on the host, the last delivered snapshot on a client.
         // Null until a network race exists; never aliased onto `driving`.
         private NetworkRaceState networkRaceState;
+        // Task 6: local prediction facts (predicted motor, ack horizon,
+        // pending buffer, corrections) and remote interpolation facts.
+        // Stored by reference; Snapshot() deep-copies so emitted states
+        // stay independent.
+        private NetworkPredictionState networkPrediction;
+        private RemoteInterpolationState networkRemotePresentation;
 
         // The session service Tasks 3+ drive (race coordinator hooks,
         // transport callbacks); null until the runtime attaches one.
@@ -94,6 +100,21 @@ namespace FamilyRacing.Core.Foundation
         {
             if (events == null) return;
             AppendDrivingEvents(events);
+        }
+
+        // Task 6: publish the local prediction facts the replication
+        // bridge maintains — null outside a LAN race or on the host,
+        // where the local racer is already authoritative.
+        public void SetPredictionState(NetworkPredictionState state)
+        {
+            networkPrediction = state;
+        }
+
+        // Task 6: publish the remote-racer interpolation facts the
+        // replication bridge maintains.
+        public void SetRemotePresentationState(RemoteInterpolationState state)
+        {
+            networkRemotePresentation = state;
         }
 
         private CommandResult NetworkExecute(GameCommand command)

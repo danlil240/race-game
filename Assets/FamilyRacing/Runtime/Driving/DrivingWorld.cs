@@ -227,6 +227,18 @@ namespace FamilyRacing
 
         public void ApplyRaceFrame(NetworkRaceState race, float visualAlpha)
         {
+            ApplyRaceFrame(race, visualAlpha, null);
+        }
+
+        // `poseOverrides` is the Task-6 presentation seam: when supplied,
+        // a participant's vehicle renders the given motor pose (locally
+        // predicted or remotely interpolated) instead of the raw
+        // authoritative snapshot pose. Roster/view lifecycle still keys
+        // off the authoritative racers list — overrides only ever
+        // replace the *pose*, never identity or authority facts.
+        public void ApplyRaceFrame(NetworkRaceState race, float visualAlpha,
+            IReadOnlyDictionary<string, MotorState> poseOverrides)
+        {
             var racers = race != null ? race.racers : null;
             var active = racers != null && racers.Count > 0;
             if (courseInstance != null && courseInstance.activeSelf != active)
@@ -251,7 +263,11 @@ namespace FamilyRacing
                     continue;
                 seen.Add(racer.participantId);
                 var view = EnsureRacerView(racer.participantId);
-                ApplyRacerVisual(view, racer, visualAlpha);
+                MotorState overrideMotor = null;
+                if (poseOverrides != null)
+                    poseOverrides.TryGetValue(racer.participantId,
+                        out overrideMotor);
+                ApplyRacerVisual(view, racer, visualAlpha, overrideMotor);
             }
             // Deterministic cleanup in ordinal key order.
             var stale = new List<string>();
@@ -285,7 +301,7 @@ namespace FamilyRacing
         }
 
         private void ApplyRacerVisual(RacerView view, NetworkRacerState racer,
-            float visualAlpha)
+            float visualAlpha, MotorState poseOverride)
         {
             if (view == null || view.presentation == null) return;
             if (racer.vehicleId != view.vehicleId)
@@ -299,7 +315,8 @@ namespace FamilyRacing
             }
             var steering = racer.session.input != null
                 ? racer.session.input.steering : 0f;
-            view.presentation.ApplyPose(racer.session.motor, steering, visualAlpha);
+            view.presentation.ApplyPose(
+                poseOverride ?? racer.session.motor, steering, visualAlpha);
         }
 
         // DestroyImmediate: a deferred Destroy would leave the stale view

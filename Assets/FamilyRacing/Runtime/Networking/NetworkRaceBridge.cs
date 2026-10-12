@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using FamilyRacing.Core.Driving;
 using FamilyRacing.Core.Networking;
 using FamilyRacing.Core.Racing;
+using UnityEngine;
 
 namespace FamilyRacing.Networking
 {
@@ -75,6 +76,30 @@ namespace FamilyRacing.Networking
         private readonly HashSet<string> seenEventIds =
             new HashSet<string>(StringComparer.Ordinal);
         private readonly Queue<string> seenEventOrder = new Queue<string>();
+        // Task 6: local prediction + remote interpolation. The local
+        // racer's sent-but-unacknowledged samples replay through the same
+        // ArcadeMotor the host runs; remote racers render from the
+        // interpolation buffer behind the newest host tick. Both are
+        // client-only — the host's local racer is already authoritative.
+        private ClientPrediction prediction;
+        private readonly RemoteInterpolation interpolation =
+            new RemoteInterpolation();
+        // Visual smoothing is deliberately separate from sim correction:
+        // Reconcile corrects the predicted motor immediately while the
+        // smoother eases (or snaps) what the player sees.
+        private readonly CorrectionSmoother smoother =
+            new CorrectionSmoother();
+        private MotorState renderBase;
+        private MotorState smoothedLocal;
+        private double lastSmoothTime = double.NaN;
+        private IMotorWorld clientWorld;
+        private long lastSentEpoch = -1;
+        private long lastSnapshotHostTick;
+        private double lastSnapshotReceivedAt = double.NaN;
+        // Render-time clock, injectable so tests can drive deterministic
+        // host-time estimates; defaults to unscaled real time.
+        internal Func<double> NowSeconds =
+            () => Time.realtimeSinceStartupAsDouble;
 
         public NetworkRaceBridge(LanTransport transport, LanSessionService session)
         {
@@ -153,6 +178,92 @@ namespace FamilyRacing.Networking
             return drained;
         }
 
+        /// <summary>Task 6: the local racer's predicted motor state —
+        /// null on the host (authoritative), before the first snapshot
+        /// seeds a spawn pose, or while prediction is not running.</summary>
+        public MotorState PredictedMotor
+        {
+            get { return prediction != null ? prediction.Predicted : null; }
+        }
+
+        /// <summary>Task 6: local prediction facts for the validation
+        /// stream's `prediction` slice — predicted and authoritative
+        /// motors, ack horizon, pending buffer, corrections. Null where
+        /// no prediction is running.</summary>
+        public NetworkPredictionState Prediction
+        {
+            get { return prediction != null ? prediction.State() : null; }
+        }
+
+        /// <summary>Task 6: per-remote-participant interpolation facts
+        /// for the validation stream's `remotePresentation` slice.</summary>
+        public RemoteInterpolationState RemotePresentation
+        {
+            get { return interpolation.State(); }
+        }
+
+        /// <summary>Estimated host time in seconds (hostTick /
+        /// SimulationTicksPerSecond extrapolated by local elapsed time
+        /// since the last accepted snapshot).</summary>
+        public double EstimatedHostSeconds(double nowSeconds)
+        {
+            if (double.IsNaN(lastSnapshotReceivedAt)) return 0;
+            return lastSnapshotHostTick
+                / (double)NetworkSettings.SimulationTicksPerSecond
+                + (nowSeconds - lastSnapshotReceivedAt);
+        }
+
+        /// <summary>The host-time coordinate remote racers render at:
+        /// estimated host time minus the interpolation delay.</summary>
+        public double RenderHostTime(double nowSeconds)
+        {
+            return EstimatedHostSeconds(nowSeconds)
+                - NetworkSettings.InterpolationDelaySeconds;
+        }
+
+        /// <summary>The interpolated (or held-stale) presentation pose
+        /// for a remote participant at the delayed render coordinate;
+        /// null before its first buffered snapshot.</summary>
+        public MotorState SampleRemotePose(string participantId,
+            double nowSeconds)
+        {
+            return interpolation.Sample(participantId,
+                RenderHostTime(nowSeconds));
+        }
+
+        /// <summary>Task 6 render seam: the local racer's pose to draw —
+        /// the predicted motor plus the decaying correction offset. The
+        /// pose the Task-9 LAN screen maps onto the local participant's
+        /// vehicle view; null until prediction is seeded.</summary>
+        public MotorState SmoothedLocalMotor(double nowSeconds)
+        {
+            if (renderBase == null) return null;
+            var dt = double.IsNaN(lastSmoothTime)
+                ? 0 : nowSeconds - lastSmoothTime;
+            lastSmoothTime = nowSeconds;
+            smoothedLocal = smoother.Apply(renderBase, dt);
+            return smoothedLocal;
+        }
+
+        // Every reconcile: the simulated pose corrects immediately; the
+        // rendered pose keeps the offset the player was seeing so the
+        // correction eases over CorrectionBlendSeconds — or snaps on
+        // race boundary/recovery/>3 m errors.
+        private void BlendCorrection()
+        {
+            var corrected = prediction != null ? prediction.Predicted : null;
+            if (corrected == null)
+            {
+                renderBase = null;
+                smoothedLocal = null;
+                return;
+            }
+            if (smoothedLocal != null)
+                smoother.Correct(smoothedLocal, corrected,
+                    prediction.LastCorrectionSnap);
+            renderBase = corrected;
+        }
+
         /// <summary>Queue a one-shot action (e.g. recover) for the local
         /// racer. The id rides every outbound frame until the host's
         /// action.queued/consumed/cancelled event acknowledges it —
@@ -195,6 +306,7 @@ namespace FamilyRacing.Networking
         public void StepTick(DriverInput localInput, IMotorWorld world)
         {
             var snap = session.Snapshot();
+            clientWorld = world;
             if (snap.role == LanSessionService.RoleHost && race != null)
                 HostTick(localInput, world, snap);
             else if (snap.role == LanSessionService.RoleClient)
@@ -596,13 +708,45 @@ namespace FamilyRacing.Networking
                 latestSnapshotSeq = -1;
                 latestSnapshot = null;
                 recentOut.Clear();
+                if (prediction != null) prediction.Reset();
+                interpolation.Reset();
+                ResetPresentation();
             }
+        }
+
+        private void ResetPresentation()
+        {
+            smoother.Reset();
+            renderBase = null;
+            smoothedLocal = null;
+            lastSmoothTime = double.NaN;
         }
 
         private void ClientTick(DriverInput localInput, NetworkSessionState snap)
         {
+            var epoch = LocalEpoch(snap);
+            if (prediction == null
+                || prediction.ParticipantId != snap.localParticipantId)
+                prediction = new ClientPrediction(snap.localParticipantId);
+            // An ownership-epoch bump (rejoin supersedes this client)
+            // fences the whole pending history: the host will reject
+            // old-epoch samples as staleEpoch, so replaying them is dead
+            // work — clear and resync under the new epoch.
+            if (lastSentEpoch >= 0 && epoch != lastSentEpoch)
+            {
+                prediction.Reset();
+                ResetPresentation();
+            }
             var frame = BuildLocalFrame(SessionId(snap), appliedRaceId,
-                snap.localParticipantId, LocalEpoch(snap), localInput);
+                snap.localParticipantId, epoch, localInput);
+            lastSentEpoch = epoch;
+            // Predict the fresh sample immediately — the local player
+            // feels it this tick, not a round trip later. Only while the
+            // authoritative picture says the local racer is live and
+            // unpaused: countdown/paused/finished racers are frozen and
+            // predicting them would manufacture false corrections.
+            if (LocalRacerPredictable(snap))
+                prediction.Predict(frame, LocalTuning(), clientWorld);
             recentOut.Add(frame);
             while (recentOut.Count > NetworkSettings.InputPacketSampleCapacity)
                 recentOut.RemoveAt(0);
@@ -631,6 +775,49 @@ namespace FamilyRacing.Networking
             return 0;
         }
 
+        // The local racer's normalized tuning, resolved the same way the
+        // host does — catalog baseline for the vehicle the snapshot
+        // reports, never a claimed profile upgrade.
+        private VehicleTuning LocalTuning()
+        {
+            var state = latestSnapshot != null ? latestSnapshot.state : null;
+            var localId = session.Snapshot().localParticipantId;
+            if (state == null || state.racers == null
+                || string.IsNullOrEmpty(localId) || content == null)
+                return null;
+            foreach (var racer in state.racers)
+            {
+                if (racer == null || racer.participantId != localId)
+                    continue;
+                VehicleTuning tuning;
+                if (content.Vehicles.TryGetValue(racer.vehicleId ?? "",
+                        out tuning))
+                    return tuning;
+                return null;
+            }
+            return null;
+        }
+
+        // Prediction runs only while the authoritative picture shows the
+        // local racer live: race running, unpaused, not finished/DNF.
+        private bool LocalRacerPredictable(NetworkSessionState snap)
+        {
+            var state = latestSnapshot != null ? latestSnapshot.state : null;
+            if (state == null || state.paused || state.racers == null
+                || state.phase != NetworkRace.PhaseRunning)
+                return false;
+            foreach (var racer in state.racers)
+            {
+                if (racer == null
+                    || racer.participantId != snap.localParticipantId)
+                    continue;
+                if (racer.finished || racer.dnf) return false;
+                return racer.session != null
+                    && racer.session.phase == "running";
+            }
+            return false;
+        }
+
         private void ApplySnapshot(NetworkSnapshot snapshot)
         {
             var snap = session.Snapshot();
@@ -654,6 +841,18 @@ namespace FamilyRacing.Networking
             }
             latestSnapshotSeq = snapshot.snapshotSequence;
             latestSnapshot = snapshot;
+            // Task 6: every accepted snapshot feeds remote interpolation
+            // and reconciles the local prediction against the ack it
+            // carries — restore authoritative, replay unacknowledged.
+            lastSnapshotHostTick = snapshot.state != null
+                ? snapshot.state.hostTick : 0;
+            lastSnapshotReceivedAt = NowSeconds();
+            interpolation.Push(snapshot);
+            if (prediction != null)
+            {
+                prediction.Reconcile(snapshot, LocalTuning(), clientWorld);
+                BlendCorrection();
+            }
         }
 
         private void AdoptRace(string newRaceId, int ordinal)
@@ -665,6 +864,11 @@ namespace FamilyRacing.Networking
             // new race must not replay them.
             pendingActions.Clear();
             pendingActionOrder.Clear();
+            // Prediction/interpolation history is per-race: the new race
+            // reseeds from its own snapshots.
+            if (prediction != null) prediction.Reset();
+            interpolation.Reset();
+            ResetPresentation();
         }
 
         private void ApplyEventBatch(NetworkEventBatch batch)
@@ -789,6 +993,12 @@ namespace FamilyRacing.Networking
             pendingActionOrder.Clear();
             seenEventIds.Clear();
             seenEventOrder.Clear();
+            if (prediction != null) prediction.Reset();
+            interpolation.Reset();
+            ResetPresentation();
+            lastSentEpoch = -1;
+            lastSnapshotHostTick = 0;
+            lastSnapshotReceivedAt = double.NaN;
             inputSequence = 0;
         }
 
