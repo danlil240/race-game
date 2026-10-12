@@ -315,6 +315,11 @@ def drive_lap(client, driver, checks, run_directory, label):
                      until=lambda state: bool(client.events_of("motor.landed")),
                      note="ramp crest")
     assert client.events_of("motor.becameAirborne"), "Vehicle never left the ground"
+    # An 18 m/s crest launch can still be mid-flight when the positional
+    # target is reached; the held throttle keeps driving, so wait the
+    # landing out on live boundaries before asserting the event.
+    client.boundary(
+        lambda state: bool(client.events_of("motor.landed")), timeout=15)
     assert client.events_of("motor.landed"), "No motor.landed event after the ramp"
     client.boundary(
         lambda state: state["driving"]["motor"].get("grounded") is True,

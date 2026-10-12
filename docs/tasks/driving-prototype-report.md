@@ -210,28 +210,28 @@ steady-state criteria and re-run.
 | Source | Item | Disposition |
 |---|---|---|
 | T1 | drivingEvents eviction unmarked | **Fixed in T6** (`droppedDrivingEvents`; exercised for real by this soak's 835 marked evictions) |
-| T1 | two sources of motorcycle tuning (preset vs generated) | **Open minor** — both read paths verified equivalent; consolidation deferred |
-| T1 | `input.set` during pause | **Open minor (known behaviour)** — post-pause `input.set` queues actions consumed at resume (observable via `pendingActions`): a `recover` sample latches into `driving.pendingActions` while the sim is frozen and is consumed at the first post-resume boundary (resume via `input.set pause=true`; `pause.toggle` resume cancels the queue instead — `action.cancelled`). Controller-ruled defensible; documented in `docs/COMMANDS.md` |
+| T1 | two sources of motorcycle tuning (preset vs generated) | **Closed as decided in M2 closeout** — `VehicleTuning` presets are the authored source; the generated `VehicleDefinitionAsset` is the runtime mirror re-serialized by setup and bound by a parity test; documented in `docs/COMMANDS.md` |
+| T1 | `input.set` during pause | **Closed (known behaviour)** — post-pause `input.set` queues actions consumed at resume (observable via `pendingActions`): a `recover` sample latches into `driving.pendingActions` while the sim is frozen and is consumed at the first post-resume boundary (resume via `input.set pause=true`; `pause.toggle` resume cancels the queue instead — `action.cancelled`). Controller-ruled defensible; documented in `docs/COMMANDS.md` |
 | T1 | screenshot rejections untraced | **Fixed in T6** (sequenced rejection records) |
-| T1 | double `Snapshot()` per frame | **Open minor** — copy-cost unmeasured; no measured impact in soak |
-| T1 | `countdownTicks=0` physics-sync edge | **Open minor** |
+| T1 | double `Snapshot()` per frame | **Fixed in M2 closeout** — one deep copy per tick boundary, frame, and command boundary; measured 0.047 ms per snapshot→JObject copy (tripwire test) |
+| T1 | `countdownTicks=0` physics-sync edge | **Fixed in M2 closeout** — `race.running` emitted immediately |
 | T1 | overload telemetry had no consumer | **Closed by this task** — soak samples `backlogSteps`/`stepOverloads` continuously |
-| T2 | stuck detection needs `lastContact=="wall"` (flat beaching never auto-recovers) | **Open minor** — manual recovery works; agents recovered fine in soak (0 incidents) |
-| T2 | gate[0] start/finish convention implicit | **Open doc minor** — convention documented in DrivingScenario comments |
-| T3 | drift steering threshold is code constant, not tuning | **Open minor** |
-| T3 | ≥8-tick probe outage could mint `cleanLanding` | **Open minor** — implausible per review |
-| T3 | held boost auto-fires crossing min charge | **Open design decision** — arm semantics, flagged for owner |
-| T3 | stale silhouette on unknown vehicleId | **Open minor** |
-| T3 | lifted-cast partial clearance can skip wall/air mark | **Open minor** — narrow corner |
+| T2 | stuck detection needs `lastContact=="wall"` (flat beaching never auto-recovers) | **Fixed in M2 closeout** — `beachedSeconds` auto-recovery on flat ground (`race.recovered`) |
+| T2 | gate[0] start/finish convention implicit | **Closed in M2 closeout** — documented in `docs/COMMANDS.md` (index 0 = start/finish) |
+| T3 | drift steering threshold is code constant, not tuning | **Fixed in M2 closeout** — `VehicleTuning.driftSteeringThreshold` |
+| T3 | ≥8-tick probe outage could mint `cleanLanding` | **Fixed in M2 closeout** — `airPeakY − landingY ≥ landingMinDrop` guard; real jumps still credited |
+| T3 | held boost auto-fires crossing min charge | **Owner decision (2026-10-12): keep auto-fire** — implemented as re-fire on charge recovery while held |
+| T3 | stale silhouette on unknown vehicleId | **Fixed in M2 closeout** — fallback silhouette |
+| T3 | lifted-cast partial clearance can skip wall/air mark | **Fixed in M2 closeout** — partial clearance keeps contact bookkeeping + velocity removal |
 | T4 | report count/attribution inaccuracies, linecast-vs-spherecast wording, "3× slower" overstatement | **Doc minors** — noted; task report wording only |
-| T4 | `Disengage` clears savedPose permanently | **Open minor** — masked by `DrivingWorld.RestoreCamera` |
-| T4 | stale pose in "none"-mode facts | **Open minor** |
-| T4 | duplicate `driving.retry`/`driving.exit` element names | **Open UI minor** |
+| T4 | `Disengage` clears savedPose permanently | **Fixed in M2 closeout** — menu pose survives repeated engage/disengage |
+| T4 | stale pose in "none"-mode facts | **Fixed in M2 closeout** — zeroed facts |
+| T4 | duplicate `driving.retry`/`driving.exit` element names | **Fixed in M2 closeout** — unique `driving.pauseRetry/pauseExit/finishRetry/finishExit` |
 | T5 | audio README wrong asset filename | **Fixed this task** — slots are on `tutorial-def-01.asset` |
-| T5 | tutorial state field type change unflagged in COMMANDS.md | **Open doc minor** |
-| T5 | `tutorial.exited` reason passthrough; `PlayingCue` set before clip lookup; null lessons silently skipped | **Open minors** |
+| T5 | tutorial state field type change unflagged in COMMANDS.md | **Closed in M2 closeout** — `driving.tutorial` shape documented |
+| T5 | `tutorial.exited` reason passthrough; `PlayingCue` set before clip lookup; null lessons silently skipped | **Fixed in M2 closeout** — `tutorialExit` reason token; `PlayingCue` only while audio plays; null lessons fail closed (`lesson:null`) |
 | T5 | HE glyph coverage for cue icons unverified | **Open** — human Hebrew review gate |
-| T6 | mislabeled "missing delta" case; `boostCharge` drain unasserted; recover-pose heading unchecked; races-set only initial ids; `MAX_STEPS_PER_FRAME` literal mirror; no `JObject` copy-cost; `.get` default on `droppedDrivingEvents` | **Open test/perf minors** — none block acceptance; heading check is now covered implicitly by authored-pose distance + ordered gates |
+| T6 | mislabeled "missing delta" case; `boostCharge` drain unasserted; recover-pose heading unchecked; races-set only initial ids; `MAX_STEPS_PER_FRAME` literal mirror; no `JObject` copy-cost; `.get` default on `droppedDrivingEvents` | **Fixed in M2 closeout** — real missing-delta fixture + non-boundary case kept; drain asserted in scenario; races-set covers restarts; bound derived from `FoundationApp` source; strict marker access; copy cost measured (0.047 ms); heading check covered implicitly by authored-pose distance + ordered gates |
 | T6 | real 30-min soak | **Closed by this task** — measured, both runs disclosed |
 
 ## Tooling changes this task
