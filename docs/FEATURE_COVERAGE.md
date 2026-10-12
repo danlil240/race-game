@@ -244,8 +244,11 @@ clean finish completes the second capture.
   richer content stay `notImplemented`, later milestones. The LAN
   slice (`lanScreens`, `lanSession`, `networkRace`, prediction /
   interpolation observation) is qualified by the EditMode/PlayMode
-  suites plus `Tools\NetworkScenario.py` (two instances on one machine
-  over the real UDP transport); cross-device physical LAN qualification
+  suites plus `Tools\NetworkScenario.py`, which attaches to 2-4
+  independently launched players via their connection files (`--connections`,
+  ADB-forwarded loopback included) or self-launches locally (`--launch`,
+  adding the labeled fault-injection segment for AI takeover, credentialed
+  rejoin, and host loss); cross-device physical LAN qualification
   is Task 10 and is NOT claimed.
   The graybox driving slice (`drivingSimulation`, `drivingOnboarding`)
   is qualified by the DrivingScenario run and PlayMode suites above.

@@ -204,6 +204,92 @@ class AsyncOutcomeTests(unittest.TestCase):
             validate_async_outcomes(collect_command_results(events), "t"),
             [])
 
+    def test_duplicate_replay_is_not_a_second_completion(self):
+        # An identity-cache replay re-states the outcome; it must not be
+        # counted as the command completing twice.
+        events = [
+            {"type": "result", "commandId": "c1", "status": "accepted",
+             "tick": 1, "action": "lan.join"},
+            {"type": "result", "commandId": "c1", "status": "applied",
+             "tick": 2, "action": "lan.join"},
+            {"type": "result", "commandId": "c1", "status": "applied",
+             "tick": 3, "action": "lan.join", "duplicate": True},
+        ]
+        results = collect_command_results(events)
+        self.assertEqual(validate_async_outcomes(results, "t"), [])
+
+
+class SeparationValidationTests(unittest.TestCase):
+    """Predicted-vs-authoritative separation: the slices must never let
+    LAN/predicted state pose as local authoritative solo state."""
+
+    def race(self):
+        return {"sessionId": "s-1", "raceId": "race-1",
+                "phase": "running", "hostTick": 30, "paused": False,
+                "countdownTicksRemaining": 0, "elapsedTicks": 30,
+                "firstFinishElapsedTicks": 0,
+                "finishDeadlineElapsedTicks": 0,
+                "racers": [], "standings": [], "events": [],
+                "result": None}
+
+    def test_lan_race_with_solo_driving_state_is_rejected(self):
+        state = lan_state()
+        state["network"]["phase"] = "racing"
+        state["networkRace"] = self.race()
+        state["driving"] = {"phase": "racing"}  # mislabeled authoritative
+        with self.assertRaises(AssertionError):
+            validate_lan_state(state)
+
+    def test_prediction_on_the_host_is_rejected(self):
+        state = lan_state()
+        state["network"]["phase"] = "racing"
+        state["networkRace"] = self.race()
+        state["prediction"] = {"motor": {}, "ackedSeq": 1}
+        with self.assertRaises(AssertionError):
+            validate_lan_state(state)
+
+    def test_prediction_without_a_race_is_rejected(self):
+        state = lan_state()
+        state["network"]["role"] = "client"
+        state["prediction"] = {"motor": {}, "ackedSeq": 1}
+        with self.assertRaises(AssertionError):
+            validate_lan_state(state)
+
+    def test_client_prediction_during_race_passes(self):
+        state = lan_state()
+        state["network"]["role"] = "client"
+        state["network"]["phase"] = "racing"
+        state["networkRace"] = self.race()
+        state["prediction"] = {"motor": {}, "ackedSeq": 1}
+        validate_lan_state(state)
+
+    def test_duplicated_reward_delivery_row_is_rejected(self):
+        state = lan_state()
+        row = {"resultId": "res-1", "raceId": "race-1",
+               "participantId": "p-host", "state": "persisted"}
+        state["network"]["results"] = [row, dict(row)]
+        with self.assertRaises(AssertionError):
+            validate_lan_state(state)
+
+    def test_duplicated_result_racer_is_rejected(self):
+        state = lan_state()
+        state["network"]["phase"] = "racing"
+        race = self.race()
+        entry = {"position": 1, "slot": 0, "participantId": "p-host",
+                 "vehicleId": "car-01", "attribution": "human",
+                 "outcome": "finished", "finishTicks": 900,
+                 "lapsCompleted": 1, "coinsAwarded": 20}
+        race["result"] = {"resultId": "res-1", "sessionId": "s-1",
+                          "raceId": "race-1", "eventId": "lan-car-01",
+                          "contentVersion": "c", "finalized": True,
+                          "finalizedHostTick": 900,
+                          "finalizedElapsedTicks": 900,
+                          "completionCoins": 20,
+                          "racers": [entry, dict(entry)]}
+        state["networkRace"] = race
+        with self.assertRaises(AssertionError):
+            validate_lan_state(state)
+
 
 class Schema3ConsumerTests(unittest.TestCase):
     def record(self, sequence=1, kind="state", state=None):
@@ -342,6 +428,54 @@ class TraceIntegrityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             records = self.base_records()
             records[0]["state"]["note"] = "sekrit-token"
+            self.write_trace(directory, records)
+            with self.assertRaises(AssertionError):
+                verify_lan_trace(Path(directory), self.info())
+
+    def delta(self, sequence, base, tick):
+        return {
+            "type": "delta", "protocolVersion": 1, "runId": "lan-trace",
+            "deviceId": "d", "participantId": "local", "buildVersion": "b",
+            "contentVersion": "c", "stateSchemaVersion": 3,
+            "sequence": sequence, "monotonicMs": sequence * 10,
+            "tick": tick, "base": base,
+            "changed": {"tick": tick}, "removed": [],
+        }
+
+    def finished_record(self, sequence, tick):
+        return {
+            "type": "finished", "protocolVersion": 1, "runId": "lan-trace",
+            "deviceId": "d", "participantId": "local", "buildVersion": "b",
+            "contentVersion": "c", "sequence": sequence,
+            "monotonicMs": sequence * 10, "tick": tick,
+            "captureValid": True, "captureError": "",
+        }
+
+    def test_reordered_delta_is_caught(self):
+        # Swap two deltas while keeping the written sequence contiguous:
+        # the moved delta's base names a boundary that has not applied.
+        with tempfile.TemporaryDirectory() as directory:
+            snapshot = self.base_records(1)[0]
+            moved = self.delta(2, 2, 3)      # base names seq 2 — itself
+            moved["tick"] = 2
+            moved["changed"] = {"tick": 2}
+            trailing = self.delta(3, 1, 2)   # belongs at seq 2
+            trailing["tick"] = 3
+            trailing["changed"] = {"tick": 3}
+            records = [snapshot, moved, trailing,
+                       self.finished_record(4, 3)]
+            self.write_trace(directory, records)
+            with self.assertRaises(AssertionError):
+                verify_lan_trace(Path(directory), self.info())
+
+    def test_removed_delta_breaks_the_chain_and_is_caught(self):
+        # With the middle delta dropped and the tail renumbered to stay
+        # contiguous, the surviving delta's base names the boundary that
+        # was removed — reconstruction must refuse instead of guessing.
+        with tempfile.TemporaryDirectory() as directory:
+            snapshot = self.base_records(1)[0]
+            orphaned = self.delta(2, 2, 3)
+            records = [snapshot, orphaned, self.finished_record(3, 3)]
             self.write_trace(directory, records)
             with self.assertRaises(AssertionError):
                 verify_lan_trace(Path(directory), self.info())

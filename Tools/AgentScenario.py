@@ -149,6 +149,16 @@ def validate_state_schema(event, state):
                 for item in node:
                     scan(item)
         scan(session)
+        # Predicted-vs-authoritative separation: a live LAN race never
+        # writes the solo `driving` slice, and `prediction` is client-only
+        # (the host's copy of the race is already authoritative).
+        if state.get("networkRace") is not None:
+            assert state.get("driving") is None, \
+                "LAN race state must not masquerade as solo driving state"
+        if state.get("prediction") is not None:
+            assert session.get("role") == "client" \
+                and state.get("networkRace") is not None, \
+                "prediction exists only on a client inside a LAN race"
 
 
 def validate_presentation(state, language):

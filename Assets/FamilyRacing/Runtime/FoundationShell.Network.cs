@@ -99,6 +99,23 @@ namespace FamilyRacing
             return p;
         }
 
+        // lan.results.request names the immutable race it asks about. The
+        // live race slice is the primary source; the delivery ledger is
+        // the fallback for a client whose race state already retired.
+        private static Dictionary<string, string> ResultParams(
+            FoundationState state)
+        {
+            var raceId = state.networkRace != null
+                ? state.networkRace.raceId : null;
+            if (string.IsNullOrEmpty(raceId) && state.network != null
+                && state.network.results != null
+                && state.network.results.Count > 0)
+                raceId = state.network.results[0].raceId;
+            var p = new Dictionary<string, string>();
+            p["raceId"] = raceId ?? "";
+            return p;
+        }
+
         // --- lan-browser ---------------------------------------------------
         // Host, discover, discovered-host rows, manual address join, and
         // cancel during connecting — the only user-navigable LAN screen.
@@ -605,8 +622,11 @@ namespace FamilyRacing
                 () => app.Dispatch("lan.results.retrySave", emptyParams),
                 "lan.results.retrySave");
             ApplyAvailability(retrySave, "lan.results.retrySave");
+            // lan.results.request requires the race identity: take it from
+            // the live race slice first, then the delivery ledger so a
+            // client that missed the race state can still ask the host.
             var ask = AddButton(actions, T("lan.results.title", state), Ocean,
-                () => app.Dispatch("lan.results.request", emptyParams),
+                () => app.Dispatch("lan.results.request", ResultParams(state)),
                 "lan.results.request");
             ApplyAvailability(ask, "lan.results.request");
             var rematch = AddButton(actions, T("lan.rematch", state), Seafoam,

@@ -93,8 +93,17 @@ python Tools\DrivingScenario.py <dir>\connection.json --evidence <new-evidence-d
 python Tools\FinishDeliveryScenario.py <player.exe> --evidence <new-dir>
 # Real profile store + graceful exit (WM_CLOSE) + restart:
 python Tools\NormalProfileScenario.py <player.exe> --evidence <new-dir>
-# Two-instance LAN lifecycle over the real UDP transport (schema 3):
-python Tools\NetworkScenario.py <player.exe> --evidence <new-dir>
+# Multi-instance LAN lifecycle over the real UDP transport (schema 3).
+# The mandated interface attaches to 2-4 independently launched players —
+# the first connection is driven as the host; Android descriptors are
+# per-device ADB-forwarded loopback endpoints:
+python Tools\NetworkScenario.py --connections <host-run>\connection.json <client-run>\connection.json --evidence <new-dir>
+# Optional --host-address <lan-ip> is the direct-join fallback when
+# broadcast discovery cannot reach the host's subnet.
+# Dev convenience: self-launch local players (adds the labeled
+# process-kill fault-injection segment — real AI takeover, credentialed
+# rejoin, host loss):
+python Tools\NetworkScenario.py --launch <player.exe> [--players 2-4] [--no-fault-injection] --evidence <new-dir>
 ```
 
 Proven recipe (wave-3 build, 2026-10-11): preview at

@@ -324,9 +324,20 @@ namespace FamilyRacing.Tests
                 countdownTicks = 8,
                 vehicleIds = new List<string> { "car-01" }
             };
+            // A solo-only event: race.start needs real solo content so the
+            // raceActive LAN-entry gate is exercised by a live race, not
+            // by a start that could never apply.
+            var solo = new EventDefinition
+            {
+                id = "intro-01",
+                courseId = "course-lan",
+                laps = 1,
+                countdownTicks = 8,
+                vehicleIds = new List<string> { "car-01" }
+            };
             return DrivingContentCatalog.Create("lan-content-1",
                 new[] { VehicleTuning.Car01(), VehicleTuning.Motorcycle01() },
-                new[] { course }, new[] { mixed, extra });
+                new[] { course }, new[] { mixed, extra, solo });
         }
 
         // Async join/reconnect completions land on the next boundary the
@@ -688,6 +699,175 @@ namespace FamilyRacing.Tests
             Assert.That(Snapshot().screen, Is.EqualTo("lan-browser"));
         }
 
+        private int CountSent(string type)
+        {
+            var count = 0;
+            foreach (var payload in link.Sent)
+                if (payload.Contains("|" + type + "|")
+                    || payload.EndsWith("|" + type, StringComparison.Ordinal))
+                    count++;
+            return count;
+        }
+
+        [UnityTest]
+        public IEnumerator LanRacePauseAndCameraButtonsDriveCommands()
+        {
+            yield return HostRacing();
+            // Host pause: pause.toggle is the shared toggle — it pauses
+            // everyone and resumes everyone.
+            Press(Widget<Button>("lan.race.pause"));
+            Assert.That(Snapshot().network.paused, Is.True,
+                "lan.race.pause must dispatch pause.toggle");
+            Press(Widget<Button>("lan.race.pause"));
+            Assert.That(Snapshot().network.paused, Is.False);
+
+            // Camera: the draft preference toggles so the LAN camera
+            // applies the new choice on the next frame.
+            var camera = Widget<Button>("lan.race.camera");
+            Assert.That(Snapshot().draftProfile.camera, Is.EqualTo("chase"));
+            Press(camera);
+            Assert.That(Snapshot().draftProfile.camera,
+                Is.EqualTo("overhead"), "lan.race.camera must dispatch camera.toggle");
+            Press(Widget<Button>("lan.race.camera"));
+            Assert.That(Snapshot().draftProfile.camera, Is.EqualTo("chase"));
+
+            // Race leave tears the session down from the HUD too.
+            Press(Widget<Button>("lan.race.leave"));
+            Assert.That(Snapshot().network.role, Is.EqualTo("none"));
+            Assert.That(Snapshot().screen, Is.EqualTo("lan-browser"));
+        }
+
+        [UnityTest]
+        public IEnumerator ClientRacePauseSendsAHostRequest()
+        {
+            yield return JoinAsClient();
+            // Move the fake session into racing so pause requests are legal.
+            lan.OnLinkMessage(3, SessionStateMessage("s-test", "racing",
+                Snapshot().savedProfile.id));
+            DrainOutcomes();
+            Assert.That(Snapshot().screen, Is.EqualTo("lan-race"));
+            Refresh();
+            yield return WaitForWidget<Button>("lan.race.pause");
+            Press(Widget<Button>("lan.race.pause"));
+            var state = Snapshot();
+            Assert.That(state.network.pendingOperations.Count,
+                Is.GreaterThan(0),
+                "client pause is an async pause.request to the host");
+            Assert.That(CountSent(NetworkProtocol.MsgPauseRequest),
+                Is.EqualTo(1));
+        }
+
+        private RaceResult MakeResult(string resultId, string raceId,
+            string participantId, string outcome, int coins)
+        {
+            return new RaceResult
+            {
+                resultId = resultId,
+                sessionId = "s-test",
+                raceId = raceId,
+                eventId = "lan-cars",
+                contentVersion = "lan-content-1",
+                finalized = true,
+                finalizedHostTick = 100,
+                finalizedElapsedTicks = 900,
+                completionCoins = 20,
+                racers = new List<RaceResultEntry>
+                {
+                    new RaceResultEntry
+                    {
+                        position = 1, slot = 0,
+                        participantId = participantId,
+                        vehicleId = "car-01", attribution = "human",
+                        outcome = outcome, finishTicks = outcome == "dnf" ? 0 : 900,
+                        lapsCompleted = outcome == "dnf" ? 0 : 1,
+                        coinsAwarded = coins
+                    }
+                }
+            };
+        }
+
+        [UnityTest]
+        public IEnumerator ResultsButtonsDriveRequestAndRematch()
+        {
+            yield return HostRacing();
+            // Drive the coordinator seam the bridge uses: countdown ->
+            // racing -> results, then publish the immutable result.
+            Assert.That(lan.BeginRace(), Is.True);
+            Assert.That(lan.FinishRace(), Is.True);
+            var hostId = Snapshot().savedProfile.id;
+            Assert.That(lan.PublishResult(
+                MakeResult("res-1", "race-1", hostId, "finished", 20)),
+                Is.True);
+            DrainOutcomes();
+            var state = Snapshot();
+            Assert.That(state.network.phase, Is.EqualTo("results"));
+            Assert.That(state.screen, Is.EqualTo("lan-results"));
+            Assert.That(state.network.results.Count, Is.GreaterThan(0));
+            Refresh();
+            yield return WaitForWidget<Button>("lan.results.request");
+
+            // Result request on the host is the local retrieval path —
+            // applied, and the ledger stays put.
+            Press(Widget<Button>("lan.results.request"));
+            Assert.That(Snapshot().network.results.Count,
+                Is.EqualTo(state.network.results.Count));
+            Assert.That(Snapshot().network.lastError, Is.EqualTo(""));
+
+            // Host rematch returns everyone to the lobby surface.
+            Press(Widget<Button>("lan.rematch"));
+            var after = Snapshot();
+            Assert.That(after.network.phase, Is.EqualTo("lobby"));
+            Assert.That(after.screen, Is.EqualTo("lan-lobby"));
+        }
+
+        [UnityTest]
+        public IEnumerator ClientResultsRequestAndRetrySaveDriveCommands()
+        {
+            yield return JoinAsClient();
+            var clientId = Snapshot().savedProfile.id;
+            lan.OnLinkMessage(3, SessionStateMessage("s-test", "results",
+                clientId));
+            DrainOutcomes();
+            // A failed local delivery: the offer names the client as a
+            // DNF so the reward applier answers ineligible — persisted
+            // status fails honestly and the retry affordance enables.
+            lan.OnLinkMessage(3, NetworkProtocol.EncodeResultOffer(
+                MakeResult("res-1", "race-1", clientId, "dnf", 0)));
+            DrainOutcomes();
+            var state = Snapshot();
+            Assert.That(state.screen, Is.EqualTo("lan-results"));
+            Assert.That(state.network.results.Count, Is.EqualTo(1));
+            Assert.That(state.network.results[0].state, Is.EqualTo("failed"));
+            var acks = CountSent(NetworkProtocol.MsgResultAck);
+            Assert.That(acks, Is.GreaterThan(0), "the offer must be acked");
+            Refresh();
+            yield return WaitForWidget<Button>("lan.results.retrySave");
+            var retry = Widget<Button>("lan.results.retrySave");
+            Assert.That(retry.enabledSelf, Is.True,
+                "a failed delivery must offer retry");
+
+            // Result request is an async client op: pending until the
+            // host's answer; the wire carries the immutable raceId.
+            Press(Widget<Button>("lan.results.request"));
+            var pending = Snapshot().network.pendingOperations;
+            Assert.That(pending.Count, Is.GreaterThan(0),
+                "lan.results.request must be an accepted async op");
+            Assert.That(CountSent(NetworkProtocol.MsgResultRequest),
+                Is.EqualTo(1));
+            string lastSent = null;
+            foreach (var payload in link.Sent) lastSent = payload;
+            Assert.That(lastSent, Does.Contain("race=race-1"),
+                "the request must name the retained race identity");
+
+            // Retry re-applies the same immutable facts and acks again —
+            // the outcome stays a failed delivery, honestly surfaced.
+            Press(Widget<Button>("lan.results.retrySave"));
+            Assert.That(CountSent(NetworkProtocol.MsgResultAck),
+                Is.EqualTo(acks + 1), "retry must re-ack the delivery");
+            Assert.That(Snapshot().network.results[0].state,
+                Is.EqualTo("failed"));
+        }
+
         // --- bilingual/RTL ---------------------------------------------------
 
         [UnityTest]
@@ -727,33 +907,38 @@ namespace FamilyRacing.Tests
             CreateProfileAndNavigate("practice");
             var started = app.Dispatch("race.start",
                 Params(("vehicleId", "car-01"), ("eventId", "intro-01")));
-            // The fixture catalog has no solo events; assert the honest
-            // gate fires regardless of whether a race could start.
+            // The fixture now carries real solo content: the race must
+            // actually start so the raceActive gate is proven live.
+            Assert.That(started.status, Is.EqualTo("applied"),
+                "race.start must succeed for the raceActive gate to be tested");
+            Assert.That(Snapshot().driving, Is.Not.Null);
+
             var host = app.Dispatch("lan.host", Params(("port", "47777")));
-            if (started.status == "applied")
-            {
-                Assert.That(host.status, Is.EqualTo("rejected"));
-                Assert.That(host.code, Is.EqualTo("raceActive"),
-                    "A live solo race must refuse LAN session entry");
-                var join = app.Dispatch("lan.join",
-                    Params(("address", "10.0.0.1"), ("port", "47777")));
-                Assert.That(join.code, Is.EqualTo("raceActive"));
-                app.Dispatch("race.exit", Params());
-            }
-            else
-            {
-                Assert.That(host.status, Is.EqualTo("applied"));
-                app.Dispatch("lan.leave", Params());
-            }
-            // Solo-only commands refuse inside a session.
+            Assert.That(host.status, Is.EqualTo("rejected"));
+            Assert.That(host.code, Is.EqualTo("raceActive"),
+                "A live solo race must refuse LAN session entry");
+            var join = app.Dispatch("lan.join",
+                Params(("address", "10.0.0.1"), ("port", "47777")));
+            Assert.That(join.status, Is.EqualTo("rejected"));
+            Assert.That(join.code, Is.EqualTo("raceActive"));
+            var reconnect = app.Dispatch("lan.reconnect", Params());
+            Assert.That(reconnect.code, Is.EqualTo("raceActive"));
+            // The session never formed: still a solo race, no network role.
+            Assert.That(Snapshot().network.role, Is.EqualTo("none"));
+            Assert.That(link.StartHostCalls, Is.EqualTo(0));
+
+            // Leaving the solo race reopens LAN entry.
+            var exited = app.Dispatch("race.exit", Params());
+            Assert.That(exited.status, Is.EqualTo("applied"));
             var hosted = app.Dispatch("lan.host", Params(("port", "47777")));
-            if (hosted.status == "applied")
-            {
-                var raceStart = app.Dispatch("race.start",
-                    Params(("vehicleId", "car-01"), ("eventId", "intro-01")));
-                Assert.That(raceStart.status, Is.EqualTo("rejected"));
-                Assert.That(raceStart.code, Is.EqualTo("networkActive"));
-            }
+            Assert.That(hosted.status, Is.EqualTo("applied"));
+
+            // And inside the session, solo lifecycle refuses honestly.
+            var raceStart = app.Dispatch("race.start",
+                Params(("vehicleId", "car-01"), ("eventId", "intro-01")));
+            Assert.That(raceStart.status, Is.EqualTo("rejected"));
+            Assert.That(raceStart.code, Is.EqualTo("networkActive"));
+            app.Dispatch("lan.leave", Params());
             yield break;
         }
     }
