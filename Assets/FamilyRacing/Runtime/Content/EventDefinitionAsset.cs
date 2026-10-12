@@ -21,6 +21,7 @@ namespace FamilyRacing
         public float minCourseY = -5f;
         public float stuckSpeed = 0.75f;
         public float stuckSeconds = 3f;
+        public float beachedSeconds = 8f;
 
         public EventDefinition ToEvent(out string error)
         {
@@ -41,7 +42,8 @@ namespace FamilyRacing
                     offCourseSeconds = offCourseSeconds,
                     minCourseY = minCourseY,
                     stuckSpeed = stuckSpeed,
-                    stuckSeconds = stuckSeconds
+                    stuckSeconds = stuckSeconds,
+                    beachedSeconds = beachedSeconds
                 }
             };
             if (!evt.Validate(out error))

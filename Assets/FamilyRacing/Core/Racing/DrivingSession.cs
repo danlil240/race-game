@@ -157,6 +157,9 @@ namespace FamilyRacing.Core.Racing
                 heading = course.spawnHeading
             };
             Emit("race.started", startCommandId ?? "", evt.id);
+            // A countdown-free event goes straight to running: emit the
+            // transition here or consumers waiting on race.running hang.
+            if (countdownRemaining <= 0) Emit("race.running", "", "");
         }
 
         public string RaceId { get { return raceId; } }

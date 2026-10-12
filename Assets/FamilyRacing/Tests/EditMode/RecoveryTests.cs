@@ -381,6 +381,92 @@ namespace FamilyRacing.Tests
             Assert.That(motor.z, Is.EqualTo(-50f).Within(0.01f));
         }
 
+        // A vehicle stopped on open ground (pinned by something the sweep
+        // never reports as a wall — e.g. a shallow obstacle) is beached:
+        // lastContact stays "ground", so the wall-pinned "stuck" path can
+        // never fire. The beached rule is the fallback for that signature.
+        private static MotorState BeachedMotor()
+        {
+            return new MotorState
+            {
+                grounded = true,
+                speed = 0.1f,
+                lastContact = "ground"
+            };
+        }
+
+        [Test]
+        public void BeachedVehicleOnFlatGroundAutoRecovers()
+        {
+            var rules = new RecoveryRules();
+            var settings = new RecoverySettings
+            {
+                stuckSpeed = 0.75f,
+                stuckSeconds = 30f,
+                offCourseSeconds = 30f,
+                minCourseY = -20f
+            };
+            var motor = BeachedMotor();
+            string reason = null;
+            for (var i = 0; i < 300 && reason == null; i++)
+                reason = rules.Evaluate(motor, settings, Dt);
+            Assert.That(reason, Is.EqualTo("beached"),
+                "a stopped vehicle with ground (not wall) contact must still auto-recover");
+            var field = typeof(RecoverySettings).GetField("beachedSeconds");
+            Assert.That(field, Is.Not.Null,
+                "the beached window is editable content, not a code literal");
+            Assert.That(field.GetValue(settings), Is.EqualTo(8f));
+        }
+
+        [Test]
+        public void BeachedDoesNotAccumulateDuringRecovery()
+        {
+            // A fresh respawn is grounded/stopped/ground-contact — exactly
+            // the beached signature; the recovery-flagged boundary must
+            // never feed the counter or a respawn chain could re-trigger.
+            var rules = new RecoveryRules();
+            var settings = new RecoverySettings
+            {
+                stuckSpeed = 0.75f,
+                stuckSeconds = 30f,
+                offCourseSeconds = 30f,
+                minCourseY = -20f
+            };
+            var motor = BeachedMotor();
+            motor.recovering = true;
+            for (var i = 0; i < 300; i++)
+                Assert.That(rules.Evaluate(motor, settings, Dt), Is.Null,
+                    "a recovery-flagged boundary must not accumulate beached time");
+        }
+
+        [Test]
+        public void BeachedCounterResetsOnMovement()
+        {
+            var rules = new RecoveryRules();
+            var settings = new RecoverySettings
+            {
+                stuckSpeed = 0.75f,
+                stuckSeconds = 30f,
+                offCourseSeconds = 30f,
+                minCourseY = -20f
+            };
+            var motor = BeachedMotor();
+            var beachedTicks = (int)Math.Ceiling(8.0 / Dt); // default window
+            for (var i = 0; i < beachedTicks / 2; i++)
+                Assert.That(rules.Evaluate(motor, settings, Dt), Is.Null);
+            motor.speed = 5f; // moving again — the window must restart
+            Assert.That(rules.Evaluate(motor, settings, Dt), Is.Null);
+            motor.speed = 0.1f;
+            for (var i = 0; i < beachedTicks / 2; i++)
+                Assert.That(rules.Evaluate(motor, settings, Dt), Is.Null,
+                    "half a window after movement must not be enough to trigger");
+            string reason = null;
+            for (var i = 0; i < beachedTicks && reason == null; i++)
+                reason = rules.Evaluate(motor, settings, Dt);
+            Assert.That(reason, Is.EqualTo("beached"),
+                "a full uninterrupted window after the reset still recovers");
+        }
+
         [Test]
         public void InvalidPoseAutoRecovers()
         {

@@ -71,7 +71,7 @@ namespace FamilyRacing.Tests
 
         // --- fixture helpers -------------------------------------------------
 
-        private static DrivingContentCatalog TestCatalog()
+        private static DrivingContentCatalog TestCatalog(int countdownTicks = 3)
         {
             var course = new CourseDefinition
             {
@@ -97,7 +97,7 @@ namespace FamilyRacing.Tests
                 id = "intro-test",
                 courseId = "course-test",
                 laps = 1,
-                countdownTicks = 3,
+                countdownTicks = countdownTicks,
                 vehicleIds = new List<string> { "car-01" }
             };
             return DrivingContentCatalog.Create("test-content-1",
@@ -201,6 +201,35 @@ namespace FamilyRacing.Tests
             state = service.Snapshot().driving;
             Assert.That(state.elapsedTicks, Is.EqualTo(2));
             Assert.That(state.simulationTick, Is.EqualTo(5));
+        }
+
+        [Test]
+        public void ZeroCountdownEmitsRaceRunningAndStepsImmediately()
+        {
+            // An event authored countdownTicks:0 never enters the countdown
+            // branch, so race.running must be emitted at start — consumers
+            // waiting for that event would otherwise hang forever.
+            service.SetDrivingContent(TestCatalog(0));
+            var started = StartRace();
+            Assert.That(started.status, Is.EqualTo(CommandResult.Applied));
+            var state = service.Snapshot().driving;
+            Assert.That(state.phase, Is.EqualTo("running"));
+            Assert.That(state.countdownTicksRemaining, Is.EqualTo(0));
+            Assert.That(state.elapsedTicks, Is.EqualTo(0),
+                "the start boundary itself never charges race elapsed time");
+            var kinds = new List<string>();
+            foreach (var ev in service.Snapshot().drivingEvents)
+                kinds.Add(ev.kind);
+            var startedAt = kinds.IndexOf("race.started");
+            var runningAt = kinds.IndexOf("race.running");
+            Assert.That(startedAt, Is.GreaterThanOrEqualTo(0), "race.started emitted");
+            Assert.That(runningAt, Is.GreaterThan(startedAt),
+                "race.running must follow race.started even with no countdown");
+
+            Boundary(1);
+            state = service.Snapshot().driving;
+            Assert.That(state.elapsedTicks, Is.EqualTo(1),
+                "the first boundary steps the running race, not a phantom countdown");
         }
 
         // --- pending-action queue contract -------------------------------------
