@@ -149,7 +149,19 @@ namespace FamilyRacing.Core.Driving
                         state.x += dx * liftedAllowed;
                         state.z += dz * liftedAllowed;
                         state.y += tuning.groundProbe;
-                        contacted = false; // a slope or step, not a barrier
+                        if (lifted.hit)
+                        {
+                            // Partial clearance: the raised body still
+                            // clips the obstacle's lip — that remainder
+                            // is real contact, not a clean climb, so the
+                            // wall mark and velocity removal still run.
+                            nx = lifted.normalX;
+                            nz = lifted.normalZ;
+                        }
+                        else
+                        {
+                            contacted = false; // a slope or step, not a barrier
+                        }
                         stepped = true;
                     }
                 }
@@ -175,18 +187,21 @@ namespace FamilyRacing.Core.Driving
                     state.x += slideX * slideAllowed;
                     state.z += slideZ * slideAllowed;
                 }
-                // Remove the into-wall component of velocity (keep retention).
-                var vx = fx * state.speed + rx * state.lateralSpeed;
-                var vz = fz * state.speed + rz * state.lateralSpeed;
-                var intoWall = vx * nx + vz * nz;
-                if (intoWall > 0f)
-                {
-                    vx -= nx * intoWall * (1f - tuning.wallSpeedRetention);
-                    vz -= nz * intoWall * (1f - tuning.wallSpeedRetention);
-                    state.speed = vx * fx + vz * fz;
-                    state.lateralSpeed = vx * rx + vz * rz;
-                    result.events.Add(new MotorEvent("wallHit", intoWall));
                 }
+                // Remove the into-wall component of velocity (keep retention).
+                if (contacted)
+                {
+                    var vx = fx * state.speed + rx * state.lateralSpeed;
+                    var vz = fz * state.speed + rz * state.lateralSpeed;
+                    var intoWall = vx * nx + vz * nz;
+                    if (intoWall > 0f)
+                    {
+                        vx -= nx * intoWall * (1f - tuning.wallSpeedRetention);
+                        vz -= nz * intoWall * (1f - tuning.wallSpeedRetention);
+                        state.speed = vx * fx + vz * fz;
+                        state.lateralSpeed = vx * rx + vz * rz;
+                        result.events.Add(new MotorEvent("wallHit", intoWall));
+                    }
                 }
             }
             else
@@ -246,6 +261,7 @@ namespace FamilyRacing.Core.Driving
                     state.grounded = false;
                     state.airSeconds = 0f;
                     state.airWallContact = contacted;
+                    state.airPeakY = state.y;
                     result.events.Add(new MotorEvent("becameAirborne"));
                 }
             }
@@ -254,14 +270,17 @@ namespace FamilyRacing.Core.Driving
                 // A barrier clipped during flight invalidates the
                 // episode's landing credit.
                 if (contacted) state.airWallContact = true;
+                if (state.y > state.airPeakY) state.airPeakY = state.y;
                 state.verticalSpeed = Math.Max(state.verticalSpeed - tuning.gravity * dt,
                     -tuning.terminalFallSpeed);
                 var newY = state.y + state.verticalSpeed * dt;
+                if (newY > state.airPeakY) state.airPeakY = newY;
                 state.airSeconds += dt;
                 if (ground.hit && newY <= ground.y)
                 {
                     var episodeWallContact = state.airWallContact || contacted;
-                    if (DriftBoostRules.LandingIsClean(state, episodeWallContact, tuning))
+                    if (DriftBoostRules.LandingIsClean(state, episodeWallContact,
+                        tuning, ground.y))
                     {
                         state.boostCharge = Clamp01(
                             state.boostCharge + tuning.cleanLandingCredit);
@@ -273,6 +292,7 @@ namespace FamilyRacing.Core.Driving
                     state.verticalSpeed = 0f;
                     state.airSeconds = 0f;
                     state.airWallContact = false;
+                    state.airPeakY = 0f;
                     result.events.Add(new MotorEvent("landed"));
                     state.lastContact = contacted ? "wall" : "ground";
                 }

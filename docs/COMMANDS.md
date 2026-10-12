@@ -166,6 +166,10 @@ non-contiguous sequence fails reconstruction. Complete snapshots are still
 emitted for attach and explicit `snapshot` resynchronization.
 `droppedDrivingEvents` in the state counts events evicted by the bounded
 `drivingEvents` slice — eviction is never silent.
+`driving.motor` serializes the full `MotorState`, including `airPeakY`
+(the highest y of the current airborne episode; `0` while grounded) —
+it backs the `landingMinDrop` clean-landing check and lets observers
+distinguish a real jump from a probe outage.
 `contentVersion` now travels independently of `buildVersion` and names the
 driving content catalog (`driving-0.1`). The trace opens with
 a `snapshot` at sequence 1; an authenticated controller's first live frame

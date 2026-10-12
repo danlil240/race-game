@@ -25,6 +25,9 @@ namespace FamilyRacing.Tests
             internal float RampToeZ = float.NaN;
             internal float RampCrestZ;
             internal float RampSlope = 0.25f;
+            // When true the ground probe reports a miss — the sustained
+            // contact-outage case (distinct from alternating jitter).
+            internal bool ProbeMiss;
 
             internal struct Wall
             {
@@ -43,7 +46,7 @@ namespace FamilyRacing.Tests
             public GroundHit ProbeGround(MotorPose pose, float probeDistance)
             {
                 var surface = SurfaceAt(pose.z);
-                var hit = pose.y - surface <= probeDistance;
+                var hit = !ProbeMiss && pose.y - surface <= probeDistance;
                 return new GroundHit
                 {
                     hit = hit,
@@ -127,6 +130,60 @@ namespace FamilyRacing.Tests
                     }
                 }
                 return best;
+            }
+        }
+
+        // A stub wall: the ground-level sweep reports a zero-fraction
+        // wedge, while the lifted cast still clips the obstacle's upper
+        // lip at fraction 0.4 — a partial clearance, not a clean climb.
+        private sealed class PartialLiftWorld : IMotorWorld
+        {
+            public GroundHit ProbeGround(MotorPose pose, float probeDistance)
+            {
+                return new GroundHit
+                {
+                    hit = pose.y <= probeDistance,
+                    x = pose.x,
+                    y = 0f,
+                    z = pose.z,
+                    normalX = 0f,
+                    normalY = 1f,
+                    normalZ = 0f,
+                    distance = pose.y,
+                    surfaceId = "ground"
+                };
+            }
+
+            public SweepHit SweepBody(MotorPose pose, float dx, float dy, float dz,
+                float halfWidth, float halfLength, float height)
+            {
+                if (pose.y < 0.5f)
+                {
+                    return new SweepHit
+                    {
+                        hit = true,
+                        fraction = 0f,
+                        normalX = 0f,
+                        normalY = 0f,
+                        normalZ = 1f,
+                        pointX = pose.x,
+                        pointY = pose.y,
+                        pointZ = pose.z,
+                        surfaceId = "stub"
+                    };
+                }
+                return new SweepHit
+                {
+                    hit = true,
+                    fraction = 0.4f,
+                    normalX = 0f,
+                    normalY = 0f,
+                    normalZ = 1f,
+                    pointX = pose.x + dx * 0.4f,
+                    pointY = pose.y,
+                    pointZ = pose.z + dz * 0.4f,
+                    surfaceId = "stub-lip"
+                };
             }
         }
 
@@ -377,6 +434,87 @@ namespace FamilyRacing.Tests
                 "a wall still blocks: step-climb must not vault it");
             Assert.That(state.y, Is.LessThan(0.5f),
                 "the pose must never be lifted over a real wall");
+        }
+
+        [Test]
+        public void LiftedCastPartialClearanceMarksWallContact()
+        {
+            var world = new PartialLiftWorld();
+            var tuning = VehicleTuning.Car01();
+            var state = StepN(Spawn(), Neutral(), tuning, world, 10);
+            var dzBefore = state.z;
+            var sawWallHit = false;
+            for (var i = 0; i < 5 && !sawWallHit; i++)
+            {
+                var result = ArcadeMotor.Step(state, Neutral(), tuning, world, Dt);
+                state = result.state;
+                foreach (var ev in result.events)
+                    if (ev.kind == "wallHit") sawWallHit = true;
+            }
+            Assert.That(state.z, Is.GreaterThan(dzBefore),
+                "a partially cleared lifted cast still applies its motion");
+            Assert.That(sawWallHit, Is.True,
+                "a lifted cast that still clips the obstacle is real contact, "
+                + "not a clean climb");
+            Assert.That(state.lastContact, Is.EqualTo("wall"));
+        }
+
+        [Test]
+        public void ProbeOutageEpisodeDoesNotMintCleanLanding()
+        {
+            var world = new FlatWorld();
+            var tuning = VehicleTuning.Car01();
+            var state = StepN(Spawn(), Neutral(), tuning, world, 30);
+            world.ProbeMiss = true;
+            state = StepN(state, Neutral(), tuning, world, 10);
+            Assert.That(state.grounded, Is.False,
+                "setup: the sustained outage must read as airborne");
+            world.ProbeMiss = false;
+            var landed = false;
+            var clean = false;
+            for (var i = 0; i < 60 && !landed; i++)
+            {
+                var result = ArcadeMotor.Step(state, Neutral(), tuning, world, Dt);
+                state = result.state;
+                foreach (var ev in result.events)
+                {
+                    if (ev.kind == "landed") landed = true;
+                    if (ev.kind == "cleanLanding") clean = true;
+                }
+            }
+            Assert.That(landed, Is.True,
+                "the probe recovering must resolve the episode as a landing");
+            Assert.That(clean, Is.False,
+                "a probe outage must not mint a clean-landing credit — "
+                + "nothing was jumped");
+        }
+
+        [Test]
+        public void RealJumpStillCreditsAfterDropCheck()
+        {
+            var world = new FlatWorld
+            {
+                RampToeZ = 10f,
+                RampCrestZ = 24f,
+                RampSlope = 0.25f
+            };
+            var tuning = VehicleTuning.Car01();
+            var state = Spawn();
+            var landed = false;
+            var clean = false;
+            for (var i = 0; i < 900 && !landed; i++)
+            {
+                var result = ArcadeMotor.Step(state, Neutral(), tuning, world, Dt);
+                state = result.state;
+                foreach (var ev in result.events)
+                {
+                    if (ev.kind == "landed") landed = true;
+                    if (ev.kind == "cleanLanding") clean = true;
+                }
+            }
+            Assert.That(landed, Is.True);
+            Assert.That(clean, Is.True,
+                "a real crest drop well past landingMinDrop keeps its credit");
         }
 
         [Test]

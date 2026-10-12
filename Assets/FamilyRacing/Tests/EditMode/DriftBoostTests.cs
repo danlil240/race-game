@@ -347,6 +347,21 @@ namespace FamilyRacing.Tests
             Assert.That(state.speed, Is.LessThanOrEqualTo(tuning.boostMaxSpeed + 0.001f));
         }
 
+        [Test]
+        public void DriftThresholdComesFromTuning()
+        {
+            var world = new TestWorld();
+            var tuning = VehicleTuning.Car01();
+            tuning.driftSteeringThreshold = 0.5f;
+            var state = Cruising(tuning, world);
+            state = StepN(state, Input(0.3f, true, false), tuning, world, 30);
+            Assert.That(state.drifting, Is.False,
+                "steering below the authored threshold must not drift");
+            state = StepN(state, Input(0.6f, true, false), tuning, world, 30);
+            Assert.That(state.drifting, Is.True,
+                "steering past the authored threshold must drift");
+        }
+
         // --- landings ---------------------------------------------------------
 
         [Test]
@@ -891,6 +906,8 @@ namespace FamilyRacing.Tests
             AssertField(fields, tuning, "boostChargeSeconds", tuning.boostChargeSeconds);
             AssertField(fields, tuning, "cleanLandingCredit", tuning.cleanLandingCredit);
             AssertField(fields, tuning, "landingMinAirSeconds", tuning.landingMinAirSeconds);
+            AssertField(fields, tuning, "driftSteeringThreshold", tuning.driftSteeringThreshold);
+            AssertField(fields, tuning, "landingMinDrop", tuning.landingMinDrop);
             AssertField(fields, tuning, "gravity", tuning.gravity);
             AssertField(fields, tuning, "terminalFallSpeed", tuning.terminalFallSpeed);
             AssertField(fields, tuning, "groundProbe", tuning.groundProbe);

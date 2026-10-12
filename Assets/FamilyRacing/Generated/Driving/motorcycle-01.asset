@@ -30,6 +30,8 @@ MonoBehaviour:
   boostChargeSeconds: 5.5
   cleanLandingCredit: 0.25
   landingMinAirSeconds: 0.25
+  landingMinDrop: 0.4
+  driftSteeringThreshold: 0.15
   gravity: 24
   terminalFallSpeed: 34
   groundProbe: 0.8

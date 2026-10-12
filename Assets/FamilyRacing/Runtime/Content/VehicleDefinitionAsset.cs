@@ -31,6 +31,8 @@ namespace FamilyRacing
         public float boostChargeSeconds = 6f;
         public float cleanLandingCredit = 0.2f;
         public float landingMinAirSeconds = 0.25f;
+        public float landingMinDrop = 0.4f;
+        public float driftSteeringThreshold = 0.15f;
         public float gravity = 22f;
         public float terminalFallSpeed = 30f;
         public float groundProbe = 0.8f;
@@ -71,6 +73,8 @@ namespace FamilyRacing
             boostChargeSeconds = preset.boostChargeSeconds;
             cleanLandingCredit = preset.cleanLandingCredit;
             landingMinAirSeconds = preset.landingMinAirSeconds;
+            landingMinDrop = preset.landingMinDrop;
+            driftSteeringThreshold = preset.driftSteeringThreshold;
             gravity = preset.gravity;
             terminalFallSpeed = preset.terminalFallSpeed;
             groundProbe = preset.groundProbe;
@@ -103,6 +107,8 @@ namespace FamilyRacing
                 boostChargeSeconds = boostChargeSeconds,
                 cleanLandingCredit = cleanLandingCredit,
                 landingMinAirSeconds = landingMinAirSeconds,
+                landingMinDrop = landingMinDrop,
+                driftSteeringThreshold = driftSteeringThreshold,
                 gravity = gravity,
                 terminalFallSpeed = terminalFallSpeed,
                 groundProbe = groundProbe,

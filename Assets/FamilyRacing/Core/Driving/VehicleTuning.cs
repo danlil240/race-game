@@ -25,6 +25,8 @@ namespace FamilyRacing.Core.Driving
         public float boostChargeSeconds = 6f;   // time to refill one boost
         public float cleanLandingCredit = 0.2f; // charge granted per clean landing
         public float landingMinAirSeconds = 0.25f; // min air time for a creditable jump
+        public float landingMinDrop = 0.4f;     // metres the flight must descend to credit
+        public float driftSteeringThreshold = 0.15f; // steering past this engages drift
         public float gravity = 22f;             // downward acceleration while airborne
         public float terminalFallSpeed = 30f;
         public float groundProbe = 0.8f;        // probe reach below the body origin
@@ -62,6 +64,12 @@ namespace FamilyRacing.Core.Driving
                 || cleanLandingCredit < 0f || cleanLandingCredit > 1f)
             { error = "cleanLandingCredit"; return false; }
             if (!Positive(landingMinAirSeconds)) { error = "landingMinAirSeconds"; return false; }
+            if (float.IsNaN(landingMinDrop) || float.IsInfinity(landingMinDrop)
+                || landingMinDrop < 0f) { error = "landingMinDrop"; return false; }
+            if (float.IsNaN(driftSteeringThreshold)
+                || float.IsInfinity(driftSteeringThreshold)
+                || driftSteeringThreshold <= 0f || driftSteeringThreshold > 1f)
+            { error = "driftSteeringThreshold"; return false; }
             if (!Positive(gravity)) { error = "gravity"; return false; }
             if (!Positive(terminalFallSpeed)) { error = "terminalFallSpeed"; return false; }
             if (!Positive(groundProbe)) { error = "groundProbe"; return false; }

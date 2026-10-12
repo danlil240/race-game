@@ -33,23 +33,21 @@ namespace FamilyRacing.Core.Driving
     // state copy it is already building for the step.
     public static class DriftBoostRules
     {
-        // Steering deflection required before the drift input counts —
-        // tapping drift with neutral steering must not engage.
-        public const float DriftSteeringThreshold = 0.15f;
-
         // Per-step cap on the applied racer-nudge speed change (m/s).
         public const float NudgeMaxDeltaSpeed = 4f;
 
         // Drift engagement: held input, steering intent, grounded and at
         // least the tuning minimum speed — and not recovery-flagged, so
-        // a respawn boundary can never emit a phantom driftStart.
+        // a respawn boundary can never emit a phantom driftStart. The
+        // steering deflection required is authored in tuning so tapping
+        // drift with neutral steering never engages.
         public static bool DriftEligible(DriverInput input, MotorState state,
             VehicleTuning tuning)
         {
             return input.Drift
                 && state.grounded
                 && !state.recovering
-                && Math.Abs(input.Steering) > DriftSteeringThreshold
+                && Math.Abs(input.Steering) > tuning.driftSteeringThreshold
                 && state.speed >= tuning.driftMinSpeed;
         }
 
@@ -86,16 +84,18 @@ namespace FamilyRacing.Core.Driving
             return gain;
         }
 
-        // A landing is creditable when the airborne episode was real
-        // (longer than the tuning minimum so ground-contact jitter never
-        // counts), touched no barrier in flight, and is not part of
-        // recovery-flagged movement.
+        // A landing is creditable when the airborne episode was real:
+        // longer than the tuning minimum so ground-contact jitter never
+        // counts, it actually descended past the authored drop so a
+        // sustained probe outage reads as no jump at all, it touched no
+        // barrier in flight, and it is not recovery-flagged movement.
         public static bool LandingIsClean(MotorState state, bool episodeWallContact,
-            VehicleTuning tuning)
+            VehicleTuning tuning, float landingGroundY)
         {
             return !state.recovering
                 && !episodeWallContact
-                && state.airSeconds >= tuning.landingMinAirSeconds;
+                && state.airSeconds >= tuning.landingMinAirSeconds
+                && state.airPeakY - landingGroundY >= tuning.landingMinDrop;
         }
     }
 }
