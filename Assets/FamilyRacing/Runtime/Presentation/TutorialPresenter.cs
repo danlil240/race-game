@@ -67,10 +67,13 @@ namespace FamilyRacing
 
         private void PlayCue(string cueId, string language)
         {
-            PlayingCue = cueId;
             var clip = definition != null ? definition.ClipFor(cueId, language) : null;
             if (clip == null)
             {
+                // Nothing plays without a bundled clip: PlayingCue stays
+                // honest rather than claiming an announcement that never
+                // happened — the miss is still recorded and logged once.
+                PlayingCue = null;
                 var miss = cueId + ":" + language;
                 LastMissingCue = miss;
                 if (missingLogged.Add(miss))
@@ -80,6 +83,7 @@ namespace FamilyRacing
                 if (source != null) source.Stop();
                 return;
             }
+            PlayingCue = cueId;
             EnsureSource();
             source.clip = clip;
             source.Play();

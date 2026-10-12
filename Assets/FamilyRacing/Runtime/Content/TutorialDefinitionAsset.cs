@@ -66,7 +66,14 @@ namespace FamilyRacing
             if (lessons != null)
                 foreach (var lesson in lessons)
                 {
-                    if (lesson == null) continue;
+                    // Null entries flow through to Validate, which fails
+                    // closed on "lesson:null" — a malformed list can never
+                    // silently shrink the authored onboarding.
+                    if (lesson == null)
+                    {
+                        definition.lessons.Add(null);
+                        continue;
+                    }
                     definition.lessons.Add(new TutorialLesson
                     {
                         lessonId = lesson.lessonId,

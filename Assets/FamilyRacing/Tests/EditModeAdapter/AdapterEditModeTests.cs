@@ -113,6 +113,48 @@ namespace FamilyRacing.Tests
         }
 
         [Test]
+        public void NullTutorialLessonEntryFailsValidation()
+        {
+            // The tutorial definition asset is a ScriptableObject, so the
+            // check lives in the Unity-side adapter suite: a null lesson
+            // element must fail closed — never silently shrink the list.
+            var asset = ScriptableObject.CreateInstance<TutorialDefinitionAsset>();
+            try
+            {
+                asset.tutorialId = "tutorial-null";
+                asset.freeDriveEventId = "tutorial-test";
+                asset.trialEventId = "intro-test";
+                asset.lessons = new TutorialDefinitionAsset.Lesson[]
+                {
+                    new TutorialDefinitionAsset.Lesson
+                    {
+                        lessonId = "steering",
+                        rule = "steerTicks",
+                        requiredSteerTicks = 20,
+                        minSteering = 0.25f,
+                        cue = new TutorialDefinitionAsset.Cue
+                        {
+                            textKey = "tutorial.cue.steering",
+                            icon = "<>"
+                        }
+                    },
+                    null
+                };
+                asset.trialCue = new TutorialDefinitionAsset.Cue
+                    { textKey = "tutorial.cue.trial", icon = "*" };
+                asset.finishedCue = new TutorialDefinitionAsset.Cue
+                    { textKey = "tutorial.done", icon = "*" };
+                string error;
+                Assert.That(asset.ToDefinition(out error), Is.Null);
+                Assert.That(error, Does.Contain("lesson"));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(asset);
+            }
+        }
+
+        [Test]
         public void FoundationProjectSetupEnforcesUrpRenderScale()
         {
             FoundationProjectSetup.Create();

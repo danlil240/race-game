@@ -824,7 +824,7 @@ namespace FamilyRacing.Core.Foundation
         {
             if (tutorial == null)
                 return Result(command, CommandResult.Rejected, "unavailable");
-            EndRace("raceExit", command);
+            EndRace("tutorialExit", command);
             screen = ScreenPractice;
             return Result(command, CommandResult.Applied, "");
         }
@@ -909,7 +909,9 @@ namespace FamilyRacing.Core.Foundation
                     command != null ? command.CommandId : "", reason);
                 tutorial = null;
             }
-            session.EmitLifecycle(reason == "raceExit" ? "race.exited" : "race.ended",
+            session.EmitLifecycle(
+                reason == "raceExit" || reason == "tutorialExit"
+                    ? "race.exited" : "race.ended",
                 command != null ? command.CommandId : "", reason);
             driving = null;
             DrainSessionEvents(session);

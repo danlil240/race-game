@@ -381,18 +381,21 @@ namespace FamilyRacing.Tests
                 LogAssert.Expect(LogType.Warning,
                     new System.Text.RegularExpressions.Regex("no en recording"));
                 presenter.ApplyFrame(TutorialStateFrame("steering", 1, "en"), null);
-                Assert.That(presenter.PlayingCue, Is.EqualTo("steering"));
+                Assert.That(presenter.PlayingCue, Is.Null,
+                    "a missing clip plays nothing — PlayingCue stays honest");
                 Assert.That(presenter.LastMissingCue, Is.EqualTo("steering:en"));
 
                 // Replay re-announces the same cue (and does not re-warn).
                 presenter.ApplyFrame(TutorialStateFrame("steering", 2, "en"), null);
-                Assert.That(presenter.PlayingCue, Is.EqualTo("steering"));
+                Assert.That(presenter.PlayingCue, Is.Null);
 
                 // A bundled clip plays through the presenter's source.
                 var clip = AudioClip.Create("cue-steering-en", 4410, 1, 44100, false);
                 assets.Add(clip);
                 tutorialAsset.FindCue("steering").english = clip;
                 presenter.ApplyFrame(TutorialStateFrame("steering", 3, "en"), null);
+                Assert.That(presenter.PlayingCue, Is.EqualTo("steering"),
+                    "a resolved clip reports itself as playing");
                 Assert.That(presenter.LastMissingCue, Is.EqualTo("steering:en"),
                     "the earlier miss is remembered, not replayed");
 

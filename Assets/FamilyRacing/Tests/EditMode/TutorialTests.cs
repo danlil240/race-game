@@ -618,6 +618,36 @@ namespace FamilyRacing.Tests
         }
 
         [Test]
+        public void TutorialExitEmitsDistinctReason()
+        {
+            CreateProfile();
+            StartTutorialRunning();
+            var exited = service.Execute(Cmd("tutorial.exit", null));
+            Assert.That(exited.status, Is.EqualTo(CommandResult.Applied));
+            var state = service.Snapshot();
+            var tutorialExited = false;
+            var raceExited = false;
+            var raceEnded = false;
+            foreach (var ev in state.drivingEvents)
+            {
+                if (ev.kind == "tutorial.exited")
+                {
+                    tutorialExited = true;
+                    Assert.That(ev.detail, Is.EqualTo("tutorialExit"),
+                        "an operator tutorial.exit must carry its own "
+                        + "reason token, not the generic raceExit");
+                }
+                if (ev.kind == "race.exited") raceExited = true;
+                if (ev.kind == "race.ended") raceEnded = true;
+            }
+            Assert.That(tutorialExited, Is.True);
+            Assert.That(raceExited, Is.True,
+                "the operator exit still ends the session as race.exited");
+            Assert.That(raceEnded, Is.False,
+                "an operator exit is not a lifecycle race.ended");
+        }
+
+        [Test]
         public void TutorialExitAndRaceExitEndTheSession()
         {
             CreateProfile();
