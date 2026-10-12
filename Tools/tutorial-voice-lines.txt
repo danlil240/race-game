@@ -1,0 +1,35 @@
+# Family Racing — tutorial voice lines (14 files)
+#
+# Generate one WAV per line below and save it as the given filename under
+# Assets/FamilyRacing/Audio/Tutorial/ (24 kHz mono WAV preferred; any
+# standard WAV/OGG also plays).
+#
+# Format:  <output filename> :: <spoken line>
+#
+# Voice direction: warm, friendly, energetic — a child's racing coach.
+# English: young/friendly female voice. Hebrew: warm female voice.
+#
+# Once the WAVs exist, run `Tools\Verify.ps1 -Mode Setup` to wire them
+# onto the tutorial asset, then remove the [Ignore] on
+# EveryCueHasWiredClipForBothLocales in
+# Assets/FamilyRacing/Tests/EditModeAdapter/AdapterEditModeTests.cs.
+
+== ENGLISH ==
+
+cue-steering-en.wav :: Hold left or right to steer!
+cue-drift-en.wav :: Hold drift while turning to slide!
+cue-boost-en.wav :: Press boost to zoom super fast!
+cue-jump-en.wav :: Drive up the ramp and jump into the air!
+cue-recovery-en.wav :: Stuck? Press recovery to get back on track!
+cue-trial-en.wav :: Great job! Now drive one whole lap to finish!
+cue-finished-en.wav :: You did it! You are ready to race!
+
+== HEBREW ==
+
+cue-steering-he.wav :: החזיקו שמאלה או ימינה כדי לפנות!
+cue-drift-he.wav :: החזיקו דריפט בזמן הפניה כדי להחליק!
+cue-boost-he.wav :: לחצו על האצה כדי לנסוע ממש מהר!
+cue-jump-he.wav :: נסעו על הרמפה וקפצו באוויר!
+cue-recovery-he.wav :: נתקעתם? לחצו על חזרה למסלול!
+cue-trial-he.wav :: כל הכבוד! עכשיו השלימו הקפה שלמה כדי לסיים!
+cue-finished-he.wav :: עשיתם את זה! אתם מוכנים למירוץ!
