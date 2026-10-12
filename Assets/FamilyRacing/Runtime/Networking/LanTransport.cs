@@ -38,6 +38,20 @@ namespace FamilyRacing.Networking
         /// so multiple processes can share one machine).</summary>
         public const ushort DefaultGameplayPort = 47777;
 
+        // Binding milestone timing budget: a failed join and a silent peer
+        // must each resolve within 5 s of monotonic wall time. UTP reports
+        // join failure after connectTimeoutMS * maxConnectAttempts and a
+        // dead peer after disconnectTimeoutMS; both products stay <= 5 s.
+        // (Task 2's shared Core/Networking/NetworkSettings.cs does not
+        // exist yet; these constants are the single definition for now.)
+        /// <summary>Maximum wall time a join may stay pending.</summary>
+        public const int JoinTimeoutMilliseconds = 5000;
+        /// <summary>Maximum wall time a silent peer stays connected.</summary>
+        public const int PeerTimeoutMilliseconds = 5000;
+        private const int ConnectAttemptIntervalMilliseconds = 500;
+        private const int MaxConnectAttempts =
+            JoinTimeoutMilliseconds / ConnectAttemptIntervalMilliseconds;
+
         private struct Peer
         {
             public ulong Id;
@@ -97,7 +111,8 @@ namespace FamilyRacing.Networking
             }
             try
             {
-                driver = NetworkDriver.Create();
+                DisposeDriver();
+                driver = CreateDriver();
                 var endpoint = NetworkEndpoint.AnyIpv4.WithPort(port);
                 int bindResult = driver.Bind(endpoint);
                 if (bindResult != 0)
@@ -144,7 +159,8 @@ namespace FamilyRacing.Networking
             }
             try
             {
-                driver = NetworkDriver.Create();
+                DisposeDriver();
+                driver = CreateDriver();
                 var connection = driver.Connect(endpoint);
                 clientPeer = new Peer { Id = nextPeerId++, Connection = connection };
                 state = LanTransportState.Connecting;
@@ -277,8 +293,12 @@ namespace FamilyRacing.Networking
             }
             else
             {
+                // Client side: a dead connection owns a bound driver. Free
+                // it now — leaving it alive would leak the socket on the
+                // next StartClient, which overwrites the struct handle.
                 clientPeer = default;
                 state = LanTransportState.Idle;
+                DisposeDriver();
             }
             Disconnected?.Invoke(peer.Id);
         }
@@ -336,6 +356,16 @@ namespace FamilyRacing.Networking
                     LastError = "LAN access denied (" + access.Detail + ")";
                     return false;
             }
+        }
+
+        private static NetworkDriver CreateDriver()
+        {
+            var settings = new NetworkSettings();
+            settings.WithNetworkConfigParameters(
+                connectTimeoutMS: ConnectAttemptIntervalMilliseconds,
+                maxConnectAttempts: MaxConnectAttempts,
+                disconnectTimeoutMS: PeerTimeoutMilliseconds);
+            return NetworkDriver.Create(settings);
         }
 
         private void DisposeDriver()

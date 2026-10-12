@@ -44,7 +44,13 @@ namespace FamilyRacing.Tests
         private static IEnumerator PumpUntil(Func<bool> done,
             params LanTransport[] transports)
         {
-            var until = Time.unscaledTime + TimeoutSeconds;
+            return PumpUntil(done, TimeoutSeconds, transports);
+        }
+
+        private static IEnumerator PumpUntil(Func<bool> done, float timeout,
+            params LanTransport[] transports)
+        {
+            var until = Time.unscaledTime + timeout;
             while (Time.unscaledTime < until && !done())
             {
                 foreach (var transport in transports)
@@ -127,6 +133,95 @@ namespace FamilyRacing.Tests
             finally
             {
                 host.Dispose();
+                client.Dispose();
+            }
+        }
+
+        // The binding milestone timing budget is 5 s of monotonic wall
+        // time for a failed join; UTP's default would hang ~60 s. The test
+        // waits at most 8 s — far below the old default — so it only
+        // passes when the configured timeout actually fires near 5 s.
+        [UnityTest]
+        public IEnumerator JoinDeadHostTimesOutWithinJoinBudget()
+        {
+            var access = new StubNetworkAccess(LanNetworkAccessState.Available);
+            ushort deadPort;
+            using (var probe = new LanTransport(access))
+            {
+                Assert.That(probe.StartHost(0), Is.True);
+                deadPort = probe.BoundPort;
+            }
+            var client = new LanTransport(access);
+            try
+            {
+                Assert.That(client.StartClient("127.0.0.1", deadPort), Is.True);
+                Assert.That(client.State, Is.EqualTo(LanTransportState.Connecting));
+
+                var disconnected = false;
+                client.Disconnected += _ => disconnected = true;
+                var start = Time.unscaledTime;
+                var deadline = start + 8f;
+                while (Time.unscaledTime < deadline && client.IsConnecting)
+                {
+                    client.Pump();
+                    yield return null;
+                }
+                var elapsed = Time.unscaledTime - start;
+                Assert.That(client.IsConnecting, Is.False,
+                    "Join still pending after 8 s — join timeout not bounded to 5 s (elapsed "
+                    + elapsed + " s)");
+                Assert.That(disconnected, Is.True,
+                    "Join timeout must surface as a Disconnect event, not silence");
+                Assert.That(client.State, Is.EqualTo(LanTransportState.Idle));
+            }
+            finally
+            {
+                client.Dispose();
+            }
+        }
+
+        // A remote disconnect used to leave the client driver bound; the
+        // next StartClient would overwrite the live struct and leak the
+        // socket. This exercises that exact rejoin path.
+        [UnityTest]
+        public IEnumerator ReconnectAfterRemoteDisconnectSucceeds()
+        {
+            var access = new StubNetworkAccess(LanNetworkAccessState.Available);
+            var hostA = new LanTransport(access);
+            var hostB = new LanTransport(access);
+            var client = new LanTransport(access);
+            try
+            {
+                Assert.That(hostA.StartHost(0), Is.True);
+                Assert.That(client.StartClient("127.0.0.1", hostA.BoundPort), Is.True);
+                var connected = false;
+                client.Connected += _ => connected = true;
+                yield return PumpUntil(() => connected, hostA, client);
+
+                hostA.Stop();
+                var dropped = false;
+                client.Disconnected += _ => dropped = true;
+                // Peer-loss detection fires at the 5 s peer timeout;
+                // allow margin above it.
+                yield return PumpUntil(() => dropped, 10f, client);
+                Assert.That(client.State, Is.EqualTo(LanTransportState.Idle));
+
+                Assert.That(hostB.StartHost(0), Is.True);
+                Assert.That(client.StartClient("127.0.0.1", hostB.BoundPort), Is.True,
+                    "Rejoin after remote disconnect failed: " + client.LastError);
+                var reconnected = false;
+                client.Connected += _ => reconnected = true;
+                yield return PumpUntil(() => reconnected, hostB, client);
+
+                byte[] received = null;
+                hostB.Message += (id, payload) => received = payload;
+                Assert.That(client.Send(Encoding.UTF8.GetBytes("rejoin")), Is.True);
+                yield return PumpUntil(() => received != null, hostB, client);
+            }
+            finally
+            {
+                hostA.Dispose();
+                hostB.Dispose();
                 client.Dispose();
             }
         }
