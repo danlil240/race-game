@@ -656,6 +656,41 @@ namespace FamilyRacing.Tests
             Assert.That(state.draftProfile.camera, Is.EqualTo("chase"));
         }
 
+        // Pause is a sandbox/driving affordance: navigating off the
+        // sandbox onto a screen that offers no pause.toggle must not
+        // strand paused=true there (the hazard EndRace already clears).
+        [Test]
+        public void NavigateAwayFromSandboxClearsPause()
+        {
+            var service = Service();
+            CreateLoaded(service, 0, "en");
+            EnterSandbox(service);
+            Assert.That(service.Execute(Cmd("pause.toggle", null)).status,
+                Is.EqualTo(CommandResult.Applied));
+            Assert.That(service.Snapshot().paused, Is.True, "setup: paused on sandbox");
+            var result = service.Execute(Cmd("ui.navigate", P("screen", "practice")));
+            Assert.That(result.status, Is.EqualTo(CommandResult.Applied));
+            var state = service.Snapshot();
+            Assert.That(state.screen, Is.EqualTo("practice"));
+            Assert.That(state.paused, Is.False,
+                "ui.navigate off the sandbox must clear the stranded pause");
+            Assert.That(service.Execute(Cmd("pause.toggle", null)).status,
+                Is.EqualTo(CommandResult.Rejected),
+                "pause.toggle stays unavailable on practice");
+
+            // The same-class sibling: profile.create lands on settings and
+            // must likewise not carry a stranded pause.
+            EnterSandbox(service);
+            service.Execute(Cmd("pause.toggle", null));
+            Assert.That(service.Snapshot().paused, Is.True);
+            var created = service.Execute(Cmd("profile.create", CreateParams(1, "en")));
+            Assert.That(created.status, Is.EqualTo(CommandResult.Applied));
+            var afterCreate = service.Snapshot();
+            Assert.That(afterCreate.screen, Is.EqualTo("settings"));
+            Assert.That(afterCreate.paused, Is.False,
+                "profile.create must clear a stranded sandbox pause");
+        }
+
         [Test]
         public void InputClearNeutralizesEverywhereEvenPaused()
         {

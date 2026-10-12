@@ -188,6 +188,10 @@ namespace FamilyRacing
             finished.name = "hud.finishTitle";
             finishTimeLabel = AddLabel(finishOverlay, "", 30, Deep);
             finishTimeLabel.name = "hud.finishTime";
+            // The plan's finish scope: elapsed time AND the vehicle that ran,
+            // named in the player's language.
+            finishVehicleLabel = AddLabel(finishOverlay, "", 26, Deep);
+            finishVehicleLabel.name = "hud.finishVehicle";
             var finishRow = Row(finishOverlay);
             var retry = AddButton(finishRow, T("hud.retry", state), Seafoam,
                 () => app.Dispatch("race.restart", emptyParams), "driving.retry");
@@ -287,7 +291,20 @@ namespace FamilyRacing
                         FormatRaceTime(session.finishTicks > 0
                             ? session.finishTicks
                             : session.elapsedTicks);
+                if (done && finishVehicleLabel != null)
+                    finishVehicleLabel.text = VehicleName(session.vehicleId, state);
             }
+        }
+
+        // Friendly vehicle name for the finish overlay: localized via
+        // vehicle.* keys for catalog ids, falling back to the raw id so an
+        // unknown vehicle still displays honestly (and never throws on an
+        // unkeyed string).
+        private string VehicleName(string vehicleId, FoundationState state)
+        {
+            return vehicleId == "car-01" || vehicleId == "motorcycle-01"
+                ? T("vehicle." + vehicleId, state)
+                : (vehicleId ?? "");
         }
 
         private static string FormatRaceTime(long ticks)

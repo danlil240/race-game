@@ -7,10 +7,12 @@ using UnityEngine;
 namespace FamilyRacing
 {
     // Owns the graybox course instance, the visible vehicle and the
-    // temporary fixed overview camera framing (Task 4 replaces it with the
-    // real prototype cameras). Builds the validated Core content catalog
-    // from the generated definition assets and applies committed motor
-    // state to visuals each frame — simulation lives entirely in Core.
+    // temporary fixed overview camera framing — a test-only fallback that
+    // stays off once FoundationApp binds a real DrivingCamera (the Task-4
+    // presentation camera then owns Camera.main alone). Builds the
+    // validated Core content catalog from the generated definition assets
+    // and applies committed motor state to visuals each frame —
+    // simulation lives entirely in Core.
     public sealed class DrivingWorld : MonoBehaviour
     {
         [SerializeField] private VehicleDefinitionAsset[] vehicles;
@@ -35,6 +37,12 @@ namespace FamilyRacing
         private Quaternion savedCameraRotation;
         private bool cameraSaved;
         private bool overviewActive;
+        // Bound by FoundationApp when a real DrivingCamera component owns
+        // Camera.main: the temporary overview fallback then stays off
+        // (test-only path), so two systems never write the camera pose in
+        // the same frame and no stale overview pose can leak if the
+        // presentation camera disengages.
+        private bool presentationCameraBound;
         private readonly DrivingCameraState cameraFacts = new DrivingCameraState();
 
         public DrivingContentCatalog Catalog { get { return catalog; } }
@@ -46,6 +54,13 @@ namespace FamilyRacing
         public Core.Tutorial.TutorialDefinition Tutorial { get; private set; }
         public TutorialDefinitionAsset TutorialAsset { get { return tutorial; } }
         public DrivingCameraState CameraFacts { get { return cameraFacts; } }
+
+        // FoundationApp calls this once a DrivingCamera is bound/active;
+        // the world's own ApplyFrame stops driving Camera.main from then on.
+        public void BindPresentationCamera()
+        {
+            presentationCameraBound = true;
+        }
 
         // Build + validate the catalog once. Returns null (fail-closed:
         // race.start reports contentUnavailable) when any definition fails
@@ -159,12 +174,18 @@ namespace FamilyRacing
                 var motor = session.motor;
                 ApplyVehicleVisual(session.vehicleId, motor,
                     session.input != null ? session.input.steering : 0f);
-                ApplyOverviewCamera(motor);
+                if (presentationCameraBound)
+                    // The bound presentation camera publishes its own
+                    // facts; the fallback reports nothing rather than a
+                    // phantom pose.
+                    ClearCameraFacts();
+                else
+                    ApplyOverviewCamera(motor);
             }
             else if (overviewActive)
             {
                 RestoreCamera();
-                cameraFacts.mode = "none";
+                ClearCameraFacts();
             }
         }
 
@@ -211,12 +232,21 @@ namespace FamilyRacing
                 mainCamera.transform.SetPositionAndRotation(savedCameraPosition, savedCameraRotation);
         }
 
+        // mode:"none" must carry no pose: consumers keying on coordinates
+        // would otherwise read a phantom framing from the last live mode.
+        private void ClearCameraFacts()
+        {
+            cameraFacts.mode = "none";
+            cameraFacts.px = cameraFacts.py = cameraFacts.pz = 0f;
+            cameraFacts.tx = cameraFacts.ty = cameraFacts.tz = 0f;
+        }
+
         private void OnDisable()
         {
             if (overviewActive) RestoreCamera();
             if (courseInstance != null) courseInstance.SetActive(false);
             if (vehicleView != null) vehicleView.SetActive(false);
-            cameraFacts.mode = "none";
+            ClearCameraFacts();
         }
 
         private void OnDestroy()

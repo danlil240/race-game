@@ -82,6 +82,14 @@ namespace FamilyRacing
             // temporary overview fallback.
             drivingCamera = GetComponent<DrivingCamera>();
             if (drivingCamera == null) drivingCamera = gameObject.AddComponent<DrivingCamera>();
+            // With a live presentation camera the world's temporary overview
+            // fallback stays off — exactly one system owns Camera.main each
+            // frame, and a disengaged presentation camera cannot expose a
+            // stale overview pose. ApplyFrame is driven from Update on this
+            // reference regardless of the enabled flag, so the bind follows
+            // the reference, not the flag.
+            if (drivingWorld != null && drivingCamera != null)
+                drivingWorld.BindPresentationCamera();
             document = GetComponent<UIDocument>();
             presentation.buildTarget = Application.platform.ToString();
             if (validationDir != null)

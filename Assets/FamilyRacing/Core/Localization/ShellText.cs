@@ -40,6 +40,8 @@ namespace FamilyRacing.Core.Localization
             ["practice.car"] = new[] { "Rally car", "מכונית ראלי" },
             ["practice.motorcycle"] = new[] { "Motorcycle", "אופנוע" },
             ["practice.tutorial"] = new[] { "Learn to drive", "לומדים לנהוג" },
+            ["vehicle.car-01"] = new[] { "Rally car", "מכונית ראלי" },
+            ["vehicle.motorcycle-01"] = new[] { "Motorcycle", "אופנוע" },
             ["tutorial.lesson"] = new[] { "Lesson", "שיעור" },
             ["tutorial.replay"] = new[] { "Hear it again", "שמעו שוב" },
             ["tutorial.exit"] = new[] { "Exit lesson", "יציאה מהשיעור" },

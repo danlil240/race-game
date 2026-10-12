@@ -499,5 +499,98 @@ namespace FamilyRacing.Tests
             Assert.That(service.Snapshot().driving.simulationTick,
                 Is.GreaterThan(0L), "the restarted race must not be frozen");
         }
+
+        // Known behaviour (documented in COMMANDS.md): input.set still
+        // applies during pause — a recover sample latches into
+        // pendingActions while the sim is frozen and is consumed at the
+        // first post-resume boundary, never silently dropped. Resume via
+        // an input.set pause pulse (which does not neutralize the queue)
+        // is the consume path; pause.toggle resume cancels instead.
+        [Test]
+        public void InputSetDuringPauseQueuesAndConsumesAtResume()
+        {
+            CreateProfile();
+            StartRunning();
+            service.Execute(Cmd("pause.toggle", null));
+            Assert.That(service.Snapshot().paused, Is.True, "setup: paused mid-race");
+
+            var set = service.Execute(Cmd("input.set",
+                P("steering", "0", "drift", "false", "boost", "false",
+                  "gadget", "false", "recover", "true", "changeCamera", "false",
+                  "pause", "false", "durationTicks", "1"), "pause-recover-1"));
+            Assert.That(set.status, Is.EqualTo(CommandResult.Applied),
+                "input.set applies during pause");
+            var paused = service.Snapshot();
+            Assert.That(paused.driving.pendingActions.Count, Is.EqualTo(1),
+                "the recover press latches into pendingActions");
+            Assert.That(paused.driving.pendingActions[0].kind, Is.EqualTo("recover"));
+            Assert.That(paused.driving.pendingActions[0].commandId,
+                Is.EqualTo("pause-recover-1"));
+            var simBefore = paused.driving.simulationTick;
+
+            Boundary(2);
+            var still = service.Snapshot();
+            Assert.That(still.paused, Is.True);
+            Assert.That(still.driving.simulationTick, Is.EqualTo(simBefore),
+                "the sim stays frozen while paused");
+            Assert.That(still.driving.pendingActions.Count, Is.EqualTo(1),
+                "the latch survives unconsumed while paused");
+
+            // Resume with an input.set pause pulse: it toggles paused off
+            // without running ClearInput, so the latch is consumed, not
+            // cancelled, at the next simulated boundary.
+            var resume = service.Execute(Cmd("input.set",
+                P("steering", "0", "drift", "false", "boost", "false",
+                  "gadget", "false", "recover", "false", "changeCamera", "false",
+                  "pause", "true", "durationTicks", "1")));
+            Assert.That(resume.status, Is.EqualTo(CommandResult.Applied));
+            Assert.That(service.Snapshot().paused, Is.False);
+            Boundary(1);
+            var after = service.Snapshot();
+            Assert.That(after.driving.pendingActions.Count, Is.EqualTo(0),
+                "the first post-resume boundary consumes the queued action");
+            var recovered = false;
+            foreach (var ev in after.drivingEvents)
+                if (ev.kind == "race.recovered" && ev.commandId == "pause-recover-1")
+                    recovered = true;
+            Assert.That(recovered, Is.True,
+                "the consumed recover emits a correlated race.recovered event");
+        }
+
+        // The sibling resume path: pause.toggle ends with ClearInput,
+        // which cancels queued actions (observable as action.cancelled)
+        // rather than consuming them — the queue never drives a hidden
+        // recovery after a toggle resume.
+        [Test]
+        public void PauseToggleResumeCancelsQueuedActions()
+        {
+            CreateProfile();
+            StartRunning();
+            service.Execute(Cmd("pause.toggle", null));
+            service.Execute(Cmd("input.set",
+                P("steering", "0", "drift", "false", "boost", "false",
+                  "gadget", "false", "recover", "true", "changeCamera", "false",
+                  "pause", "false", "durationTicks", "1"), "pause-recover-2"));
+            Assert.That(service.Snapshot().driving.pendingActions.Count, Is.EqualTo(1));
+
+            service.Execute(Cmd("pause.toggle", null));
+            var after = service.Snapshot();
+            Assert.That(after.paused, Is.False);
+            Assert.That(after.driving.pendingActions.Count, Is.EqualTo(0),
+                "toggle resume cancels the queued action");
+            var cancelled = false;
+            var recovered = false;
+            foreach (var ev in after.drivingEvents)
+            {
+                if (ev.kind == "action.cancelled" && ev.commandId == "pause-recover-2")
+                    cancelled = true;
+                if (ev.kind == "race.recovered" && ev.commandId == "pause-recover-2")
+                    recovered = true;
+            }
+            Assert.That(cancelled, Is.True,
+                "the cancelled latch emits a correlated action.cancelled event");
+            Assert.That(recovered, Is.False,
+                "a cancelled queue must never recover on resume");
+        }
     }
 }

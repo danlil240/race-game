@@ -80,7 +80,7 @@ namespace FamilyRacing
             if (motor == null || cam == null)
             {
                 if (engaged) Disengage();
-                facts.mode = "none";
+                ClearFacts();
                 return;
             }
             if (!engaged)
@@ -188,10 +188,19 @@ namespace FamilyRacing
             savedPose = false;
         }
 
+        // mode:"none" carries no pose: consumers keying on coordinates
+        // must never read a phantom framing from the last live mode.
+        private void ClearFacts()
+        {
+            facts.mode = "none";
+            facts.px = facts.py = facts.pz = 0f;
+            facts.tx = facts.ty = facts.tz = 0f;
+        }
+
         private void OnDisable()
         {
             if (engaged) Disengage();
-            facts.mode = "none";
+            ClearFacts();
         }
     }
 }

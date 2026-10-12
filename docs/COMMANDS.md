@@ -124,6 +124,11 @@ stage is internal and `race.start` rejects it with `unavailable` — only
 `race.restart`/`race.exit` need an active race and take no parameters.
 `input.set` is available on `sandbox` and `driving` screens only; a
 `gadget` sample is rejected with `unavailable` while a race is active.
+While paused `input.set` still applies: a `recover` sample latches into
+`driving.pendingActions` (observable in state). It is consumed at the
+first simulated boundary after resume when resume is an `input.set
+pause=true` sample; `pause.toggle` resume cancels queued actions instead
+(observable via `action.cancelled`).
 
 `tutorial.start` takes `vehicleId` and needs a selected profile plus
 validated tutorial content; it opens the ordered onboarding (steering →

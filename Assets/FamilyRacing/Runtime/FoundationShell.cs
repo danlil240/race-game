@@ -43,6 +43,7 @@ namespace FamilyRacing
         private Label lapLabel;
         private Label gateLabel;
         private Label finishTimeLabel;
+        private Label finishVehicleLabel;
         private VisualElement boostFill;
         private VisualElement tutorialPanel;
         private Label tutorialIconLabel;
@@ -119,6 +120,7 @@ namespace FamilyRacing
             pauseOverlay = finishOverlay = boostFill = null;
             elapsedLabel = phaseLabel = speedLabel = null;
             lapLabel = gateLabel = finishTimeLabel = null;
+            finishVehicleLabel = null;
             tutorialPanel = null;
             tutorialIconLabel = tutorialCueLabel = tutorialProgressLabel = null;
             saveButton = null;

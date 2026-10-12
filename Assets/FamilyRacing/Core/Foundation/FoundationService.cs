@@ -484,6 +484,10 @@ namespace FamilyRacing.Core.Foundation
             screen = ScreenSettings;
             pendingSettings = false;
             persistenceStatus = "saved";
+            // Same stranded-pause hazard as ui.navigate: the settings
+            // screen offers no pause.toggle, so a paused sandbox must not
+            // carry the flag across profile creation.
+            paused = false;
             ClearInput();
             return Result(command, CommandResult.Applied, "");
         }
@@ -520,6 +524,13 @@ namespace FamilyRacing.Core.Foundation
             {
                 // Leaving the sandbox clears input; entering it starts neutral.
                 if (screen == ScreenSandbox || target == ScreenSandbox) ClearInput();
+                // Pause is a sandbox/driving affordance: landing on any
+                // other screen with paused=true would strand it where
+                // pause.toggle is unavailable (the same hazard EndRace
+                // clears for). "driving" is unreachable here, but the
+                // predicate is written for the invariant, not the schema.
+                if (target != ScreenSandbox && target != ScreenDriving)
+                    paused = false;
                 screen = target;
             }
             return Result(command, CommandResult.Applied, "");

@@ -211,7 +211,7 @@ steady-state criteria and re-run.
 |---|---|---|
 | T1 | drivingEvents eviction unmarked | **Fixed in T6** (`droppedDrivingEvents`; exercised for real by this soak's 835 marked evictions) |
 | T1 | two sources of motorcycle tuning (preset vs generated) | **Open minor** — both read paths verified equivalent; consolidation deferred |
-| T1 | unguarded `input.set` during pause | **Fixed in T1 fix round** |
+| T1 | `input.set` during pause | **Open minor (known behaviour)** — post-pause `input.set` queues actions consumed at resume (observable via `pendingActions`): a `recover` sample latches into `driving.pendingActions` while the sim is frozen and is consumed at the first post-resume boundary (resume via `input.set pause=true`; `pause.toggle` resume cancels the queue instead — `action.cancelled`). Controller-ruled defensible; documented in `docs/COMMANDS.md` |
 | T1 | screenshot rejections untraced | **Fixed in T6** (sequenced rejection records) |
 | T1 | double `Snapshot()` per frame | **Open minor** — copy-cost unmeasured; no measured impact in soak |
 | T1 | `countdownTicks=0` physics-sync edge | **Open minor** |
