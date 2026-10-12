@@ -44,6 +44,31 @@ namespace FamilyRacing.Core.Racing
         }
     }
 
+    // One authored AI racing-line point. The Task-4 waypoint follower
+    // accepts the waypoint inside `radius` metres on the ground plane;
+    // radius <= 0 falls back to NetworkSettings.AiWaypointReachMeters.
+    // The route is an ordered loop: after the last point the follower
+    // resumes at index 0, which must sit just past the start/finish line.
+    [Serializable]
+    public sealed class RouteWaypoint
+    {
+        public float x;
+        public float y;
+        public float z;
+        public float radius;
+
+        public RouteWaypoint Copy()
+        {
+            return new RouteWaypoint
+            {
+                x = x,
+                y = y,
+                z = z,
+                radius = radius
+            };
+        }
+    }
+
     // Unity-free course data: the shared graybox definition both vehicles
     // drive. Geometry lives in the generated prefab; this record carries
     // the sim-facing facts (spawn, ordered checkpoints).
@@ -52,6 +77,11 @@ namespace FamilyRacing.Core.Racing
     // keeps using spawnX/Y/Z/Heading and never reads them. When present
     // every slot must be finite and pairwise non-overlapping on the
     // ground plane.
+    // `route` optionally authors the AI racing line: an ordered loop of
+    // waypoints compatible with the gate order — each leg crosses its
+    // mandatory gate plane inside the authored half-width, including the
+    // ramp approach. It is data, not an advantage: the AI still drives
+    // the same physics, checkpoint and recovery rules as humans.
     public sealed class CourseDefinition
     {
         public const float MinSpawnSeparationMeters = 3.5f;
@@ -63,6 +93,7 @@ namespace FamilyRacing.Core.Racing
         public float spawnHeading;
         public List<CheckpointGate> checkpoints = new List<CheckpointGate>();
         public List<MotorPose> spawnSlots = new List<MotorPose>();
+        public List<RouteWaypoint> route = new List<RouteWaypoint>();
 
         public bool Validate(out string error)
         {
@@ -109,6 +140,15 @@ namespace FamilyRacing.Core.Racing
                     }
                 }
             }
+            if (route != null)
+                foreach (var waypoint in route)
+                {
+                    if (waypoint == null || !Finite(waypoint.x)
+                        || !Finite(waypoint.y) || !Finite(waypoint.z))
+                    { error = "route"; return false; }
+                    if (!Finite(waypoint.radius) || waypoint.radius < 0f)
+                    { error = "route.radius"; return false; }
+                }
             return true;
         }
 
@@ -137,6 +177,12 @@ namespace FamilyRacing.Core.Racing
                         z = slot.z,
                         heading = slot.heading
                     });
+            }
+            if (route != null)
+            {
+                copy.route = new List<RouteWaypoint>();
+                foreach (var waypoint in route)
+                    copy.route.Add(waypoint == null ? null : waypoint.Copy());
             }
             return copy;
         }

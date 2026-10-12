@@ -70,11 +70,78 @@ namespace FamilyRacing.EditorTools
                 return;
             }
             EnsureSpawnGrid(track);
+            EnsureRoute(track);
             // Separate class-pure event configurations per vehicle class;
             // the authored coin fact rides on the event so a finalized
             // race can award finishers (Task 8 applies it).
             EnsureLanEvent("lan-car-01", track, "car-01");
             EnsureLanEvent("lan-motorcycle-01", track, "motorcycle-01");
+        }
+
+        // The AI racing line for the graybox course, compatible with the
+        // gate order: north to gate-1, west onto the landmark ramp (the
+        // AI climbs and jumps it under the normal airborne/landing rules),
+        // north around IslandNorthEast to gate-2, down the east edge to
+        // gate-3, under IslandSouthEast to gate-4, then a swing south of
+        // the line and back across start/finish. Every leg crosses its
+        // mandatory gate plane inside the authored half-width; the route
+        // is a loop, so the index after the last point resumes at 0 just
+        // past the line.
+        private static readonly Vector2[] LanRoutePoints =
+        {
+            new Vector2(0f, -30f),
+            new Vector2(0f, 10f),
+            new Vector2(0f, 30f),
+            new Vector2(-30f, 24f),
+            new Vector2(-54f, 14f),
+            new Vector2(-60f, 30f),
+            new Vector2(-60f, 46f),
+            new Vector2(-40f, 58f),
+            new Vector2(-10f, 62f),
+            new Vector2(20f, 62f),
+            new Vector2(48f, 60f),
+            new Vector2(62f, 55f),
+            new Vector2(82f, 42f),
+            new Vector2(95f, 18f),
+            new Vector2(95f, -14f),
+            new Vector2(99f, -34f),
+            new Vector2(92f, -48f),
+            new Vector2(68f, -60f),
+            new Vector2(38f, -56f),
+            new Vector2(10f, -62f),
+            new Vector2(0f, -66f),
+            new Vector2(0f, -48f)
+        };
+
+        private static void EnsureRoute(TrackDefinitionAsset track)
+        {
+            var dirty = track.aiRoute == null
+                || track.aiRoute.Length != LanRoutePoints.Length;
+            if (!dirty)
+            {
+                for (var i = 0; i < LanRoutePoints.Length; i++)
+                {
+                    var point = track.aiRoute[i];
+                    if (point == null || point.x != LanRoutePoints[i].x
+                        || point.z != LanRoutePoints[i].y
+                        || point.radius != 0f)
+                    {
+                        dirty = true;
+                        break;
+                    }
+                }
+            }
+            if (!dirty) return;
+            track.aiRoute =
+                new TrackDefinitionAsset.RoutePoint[LanRoutePoints.Length];
+            for (var i = 0; i < LanRoutePoints.Length; i++)
+                track.aiRoute[i] = new TrackDefinitionAsset.RoutePoint
+                {
+                    x = LanRoutePoints[i].x,
+                    z = LanRoutePoints[i].y,
+                    radius = 0f
+                };
+            EditorUtility.SetDirty(track);
         }
 
         private static void EnsureSpawnGrid(TrackDefinitionAsset track)

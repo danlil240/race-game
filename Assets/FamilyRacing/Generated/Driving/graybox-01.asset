@@ -55,3 +55,70 @@ MonoBehaviour:
     headingDegrees: 0
   - position: {x: 5, y: 0, z: -62}
     headingDegrees: 0
+  aiRoute:
+  - x: 0
+    z: -30
+    radius: 0
+  - x: 0
+    z: 10
+    radius: 0
+  - x: 0
+    z: 30
+    radius: 0
+  - x: -30
+    z: 24
+    radius: 0
+  - x: -54
+    z: 14
+    radius: 0
+  - x: -60
+    z: 30
+    radius: 0
+  - x: -60
+    z: 46
+    radius: 0
+  - x: -40
+    z: 58
+    radius: 0
+  - x: -10
+    z: 62
+    radius: 0
+  - x: 20
+    z: 62
+    radius: 0
+  - x: 48
+    z: 60
+    radius: 0
+  - x: 62
+    z: 55
+    radius: 0
+  - x: 82
+    z: 42
+    radius: 0
+  - x: 95
+    z: 18
+    radius: 0
+  - x: 95
+    z: -14
+    radius: 0
+  - x: 99
+    z: -34
+    radius: 0
+  - x: 92
+    z: -48
+    radius: 0
+  - x: 68
+    z: -60
+    radius: 0
+  - x: 38
+    z: -56
+    radius: 0
+  - x: 10
+    z: -62
+    radius: 0
+  - x: 0
+    z: -66
+    radius: 0
+  - x: 0
+    z: -48
+    radius: 0

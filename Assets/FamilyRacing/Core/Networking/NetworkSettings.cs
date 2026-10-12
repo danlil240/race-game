@@ -40,6 +40,44 @@ namespace FamilyRacing.Core.Networking
         // without mutation.
         public const int PendingOperationCapacity = 128;
 
+        // --- Task 4: honest AI driver + bounded racer contact -----------
+        // The AI emits the same bounded DriverInput humans produce on the
+        // same normalized tuning — no hidden catch-up multiplier and no
+        // teleports. These values are shared policy constants, not secret
+        // tuning; tests pin them alongside the rules that consume them.
+        //
+        // Waypoint following: a route waypoint counts as reached inside
+        // this radius; a waypoint left behind the travel direction inside
+        // PassedFactor times that radius is skipped instead of orbited.
+        public const float AiWaypointReachMeters = 5f;
+        public const float AiWaypointPassedFactor = 3f;
+        // Heading error -> steering proportional gain (input stays ±1).
+        public const float AiSteeringGain = 3f;
+        // Hold drift only through real steering demand and real speed;
+        // hold boost only on straights with a nearly full meter.
+        public const float AiDriftSteerThreshold = 0.55f;
+        public const float AiDriftMinSpeed = 5f;
+        public const float AiBoostMinCharge = 0.9f;
+        public const float AiBoostMaxSteer = 0.2f;
+        // A grounded near-stopped streak this long requests the ordinary
+        // recover input — the same one-shot a human presses.
+        public const float AiRecoverStuckSpeed = 0.75f;
+        public const int AiRecoverStuckTicks = 45; // 1.5 s at 30 Hz
+        // Per-slot lateral lane spread (metres between lanes): slots aim
+        // at (slot - centre) * spacing off the route line so four AI
+        // racers fan out instead of tailgating.
+        public const float AiLaneSpacingMeters = 2f;
+        //
+        // Racer contact: bodies inside this ground-plane radius push
+        // apart, capped by DriftBoostRules.NudgeMaxDeltaSpeed per applied
+        // step. The radius stays below CourseDefinition's
+        // MinSpawnSeparationMeters (3.5) so a legal grid never self-nudges
+        // on the line; vertically separated bodies (e.g. mid-ramp jump)
+        // never contact.
+        public const float ContactRadiusMeters = 3f;
+        public const float ContactVerticalRangeMeters = 1.25f;
+        public const float ContactNudgeImpulsePerMeter = 4f;
+
         // Binding milestone timing budget: a failed join and a silent peer
         // must each resolve within 5 s of monotonic wall time. The Runtime
         // transport derives its connect-attempt and disconnect budgets

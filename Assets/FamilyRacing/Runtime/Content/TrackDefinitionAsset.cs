@@ -36,11 +36,24 @@ namespace FamilyRacing
             public float headingDegrees;
         }
 
+        // One authored AI racing-line point on the ground plane (x,z).
+        // radius <= 0 falls back to the shared default reach. The route
+        // is an ordered loop compatible with the gate order — the AI
+        // still plays by the same physics/checkpoint/recovery rules.
+        [Serializable]
+        public sealed class RoutePoint
+        {
+            public float x;
+            public float z;
+            public float radius;
+        }
+
         public string courseId = "graybox-01";
         public Vector3 spawnPosition = new Vector3(0f, 0f, -60f);
         public float spawnHeadingDegrees;
         public Gate[] gates = new Gate[0];
         public SpawnSlot[] spawnSlots = new SpawnSlot[0];
+        public RoutePoint[] aiRoute = new RoutePoint[0];
 
         public CourseDefinition ToCourse(out string error)
         {
@@ -82,6 +95,17 @@ namespace FamilyRacing
                         y = slot.position.y,
                         z = slot.position.z,
                         heading = slot.headingDegrees * Mathf.Deg2Rad
+                    });
+                }
+            if (aiRoute != null)
+                foreach (var point in aiRoute)
+                {
+                    if (point == null) continue;
+                    course.route.Add(new RouteWaypoint
+                    {
+                        x = point.x,
+                        z = point.z,
+                        radius = point.radius
                     });
                 }
             if (!course.Validate(out error))

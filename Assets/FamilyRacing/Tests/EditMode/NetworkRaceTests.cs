@@ -155,6 +155,21 @@ namespace FamilyRacing.Tests
             };
         }
 
+        // All-human variant: tests that need slots to hold neutral input
+        // (single finisher, DNF ordering, identical-input lockstep) seat
+        // humans everywhere — AI-attributed slots genuinely drive since
+        // Task 4, so they cannot play the inert role here.
+        private static List<NetworkRacerSpec> HumanRoster(string vehicleId = "car-01")
+        {
+            return new List<NetworkRacerSpec>
+            {
+                Spec(0, "p-host", vehicleId, "local"),
+                Spec(1, "p-guest", vehicleId, "remote"),
+                Spec(2, "p-2", vehicleId, "remote"),
+                Spec(3, "p-3", vehicleId, "local")
+            };
+        }
+
         private static NetworkRace CreateRace(DrivingContentCatalog catalog,
             string eventId = "lan-car-01", string classId = "car",
             List<NetworkRacerSpec> roster = null)
@@ -395,7 +410,7 @@ namespace FamilyRacing.Tests
         public void NormalizationIgnoresProfileUpgrades()
         {
             var catalog = TestCatalog();
-            var roster = Roster();
+            var roster = HumanRoster();
             // A profile-supplied "upgraded" tune must never reach the sim:
             // within a class every racer runs the identical catalog baseline.
             var boosted = VehicleTuning.Car01();
@@ -548,7 +563,7 @@ namespace FamilyRacing.Tests
         [Test]
         public void FirstFinishDoesNotEndOtherRacers()
         {
-            var race = CreateRace(TestCatalog());
+            var race = CreateRace(TestCatalog(), roster: HumanRoster());
             var world = new FlatWorld();
             var events = new List<DrivingEvent>();
 
@@ -591,7 +606,7 @@ namespace FamilyRacing.Tests
         [Test]
         public void FinishGraceProducesStableDnfOrder()
         {
-            var race = CreateRace(TestCatalog());
+            var race = CreateRace(TestCatalog(), roster: HumanRoster());
             var world = new FlatWorld();
             var events = new List<DrivingEvent>();
 
@@ -630,9 +645,7 @@ namespace FamilyRacing.Tests
                     "equal progress breaks ties by stable slot index");
                 Assert.That(result.racers[i].position, Is.EqualTo(i + 1));
                 Assert.That(result.racers[i].coinsAwarded, Is.EqualTo(0));
-                Assert.That(result.racers[i].attribution,
-                    Is.EqualTo(result.racers[i].participantId == "p-guest"
-                        ? "human" : "ai"));
+                Assert.That(result.racers[i].attribution, Is.EqualTo("human"));
             }
             Assert.That(EventsOfKind(events, "race.finalized"), Is.EqualTo(1));
 

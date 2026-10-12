@@ -31,6 +31,8 @@ namespace FamilyRacing.Core.Racing
             internal string vehicleId;
             internal string attribution;   // "human" | "ai"
             internal DrivingSession session;
+            internal AiDriver ai;          // non-null while attribution is "ai"
+            internal bool recoverHeld;     // one-shot recover edge latch
             internal bool finished;
             internal bool dnf;
             internal long finishTicks;
@@ -40,6 +42,7 @@ namespace FamilyRacing.Core.Racing
         private readonly string raceId;
         private readonly DrivingContentCatalog content;
         private readonly EventDefinition evt;
+        private readonly CourseDefinition course;
         private readonly Racer[] racers =
             new Racer[NetworkSettings.ParticipantCapacity];
         private readonly List<DrivingEvent> staged = new List<DrivingEvent>();
@@ -62,6 +65,7 @@ namespace FamilyRacing.Core.Racing
             this.raceId = raceId;
             this.content = content;
             this.evt = evt;
+            this.course = course;
             countdownRemaining = evt.countdownTicks;
             phase = countdownRemaining > 0 ? PhaseCountdown : PhaseRunning;
             for (var slot = 0; slot < specs.Length; slot++)
@@ -76,12 +80,14 @@ namespace FamilyRacing.Core.Racing
                     raceId + "-r" + slot.ToString(CultureInfo.InvariantCulture),
                     content.Vehicles[spec.vehicleId], course, evt,
                     content.Version, "", spawn);
+                var attribution = AttributionFor(spec.controlSource);
                 racers[slot] = new Racer
                 {
                     participantId = spec.participantId,
                     slot = slot,
                     vehicleId = spec.vehicleId,
-                    attribution = AttributionFor(spec.controlSource),
+                    attribution = attribution,
+                    ai = attribution == "ai" ? new AiDriver(LaneFor(slot)) : null,
                     session = session
                 };
             }
@@ -155,16 +161,16 @@ namespace FamilyRacing.Core.Racing
         public long HostTick { get { return hostTick; } }
         public RaceResult Result { get { return result; } }
 
-        // Task 4 supplies per-participant racer-contact sources here;
-        // with no provider every session steps with racers:null exactly
-        // like solo play.
-        public Func<string, IRacerContactSource> ContactSourceProvider { get; set; }
-
         // Advances every unfinalized racer exactly one 30 Hz boundary under
         // the shared clock. Inputs are keyed by participantId; absent racers
-        // take the zero input (auto-acceleration still drives). Returns the
-        // state plus the events produced by this step; while paused, or once
-        // the race is finished/aborted, the state is republished unchanged.
+        // take the zero input (auto-acceleration still drives). Racers
+        // attributed "ai" are driven by the Task-4 waypoint follower on the
+        // course's authored route — submitted inputs for an ai-owned slot
+        // never steer it. Every contact query and every AI sample reads
+        // the same pre-step snapshot, so slot iteration order cannot
+        // change outcomes. Returns the state plus the events produced by
+        // this step; while paused, or once the race is finished/aborted,
+        // the state is republished unchanged.
         public NetworkRaceState Step(
             IReadOnlyDictionary<string, DriverInput> inputs, IMotorWorld world)
         {
@@ -188,17 +194,41 @@ namespace FamilyRacing.Core.Racing
                 elapsedTicks++;
             }
 
+            // The single pre-step view every contact query and AI sample
+            // reads this tick.
+            var preStep = SnapshotAll();
+            var contacts = BuildContacts(preStep);
+
             for (var slot = 0; slot < racers.Length; slot++)
             {
                 var racer = racers[slot];
                 if (racer.finished || racer.dnf) continue;
                 DriverInput input;
-                if (inputs == null
+                if (racer.attribution == "ai")
+                {
+                    input = racer.ai != null
+                        ? racer.ai.Sample(preStep[slot], course)
+                        : default(DriverInput);
+                }
+                else if (inputs == null
                     || !inputs.TryGetValue(racer.participantId, out input))
+                {
                     input = default;
-                var contact = ContactSourceProvider == null
-                    ? null
-                    : ContactSourceProvider(racer.participantId);
+                }
+                // The recover one-shot latches on the press edge exactly
+                // like the solo command path: holding it never stacks
+                // recoveries; the queued action is consumed on a later
+                // simulated boundary.
+                if (input.Recover && !racer.recoverHeld)
+                {
+                    string recoverError;
+                    racer.session.QueuePending("recover",
+                        raceId + "-r" + slot + "-rc"
+                            + hostTick.ToString(CultureInfo.InvariantCulture),
+                        out recoverError);
+                }
+                racer.recoverHeld = input.Recover;
+                var contact = contacts.ForParticipant(racer.participantId);
                 var step = racer.session.Step(input, world, contact);
                 Stamp(racer, step.events, emitted);
                 if (!racer.finished && step.state.finished)
@@ -254,6 +284,29 @@ namespace FamilyRacing.Core.Racing
             staged.Add(CoordinatorEvent("race.aborted", reason ?? ""));
         }
 
+        // Ownership transfer used by the lifecycle policy: a confirmed
+        // disconnect seats the Task-4 AI on the reserved slot, and an
+        // authenticated rejoin hands it back to a human. The change
+        // applies from this host tick on — events already emitted keep
+        // the control source recorded at their tick, so absence driving
+        // never earns human credit retroactively.
+        public bool SetControlSource(string participantId, string controlSource)
+        {
+            var racer = FindRacer(participantId);
+            var attribution = AttributionFor(controlSource);
+            if (racer == null || attribution == null) return false;
+            if (attribution == racer.attribution) return true;
+            racer.attribution = attribution;
+            // A fresh driver on every human->ai takeover re-anchors the
+            // follower onto the nearest route point at the slot's lane;
+            // handing the slot back drops the driver entirely.
+            racer.ai = attribution == "ai"
+                ? new AiDriver(LaneFor(racer.slot)) : null;
+            staged.Add(CoordinatorEvent("race.control",
+                (racer.participantId ?? "") + "=" + attribution));
+            return true;
+        }
+
         // Routes a one-shot action (e.g. "recover") to a racer's own
         // pending queue — the same latching semantics solo callers get.
         public bool QueuePending(string participantId, string kind,
@@ -275,6 +328,14 @@ namespace FamilyRacing.Core.Racing
                 if (racer != null && racer.participantId == participantId)
                     return racer;
             return null;
+        }
+
+        // The slot's lateral lane for AI driving: symmetric spread around
+        // the route line (-3, -1, +1, +3 m for the four slots).
+        private static float LaneFor(int slot)
+        {
+            return (slot - (NetworkSettings.ParticipantCapacity - 1) * 0.5f)
+                * NetworkSettings.AiLaneSpacingMeters;
         }
 
         private static string AttributionFor(string controlSource)
@@ -359,6 +420,26 @@ namespace FamilyRacing.Core.Racing
             for (var i = 0; i < racers.Length; i++)
                 snaps[i] = racers[i].session.Snapshot();
             return snaps;
+        }
+
+        // The bounded contact fabric for one step: every participant's
+        // queries read the same pre-step bodies. Finalized racers
+        // (finished or DNF) ghost out of the contact set — they no
+        // longer simulate, so their parked poses must not wall off the
+        // racing line for the racers still driving.
+        private RacerContacts BuildContacts(DrivingSessionState[] preStep)
+        {
+            var entries = new List<RacerContacts.Entry>(racers.Length);
+            for (var i = 0; i < racers.Length; i++)
+            {
+                if (racers[i].finished || racers[i].dnf) continue;
+                entries.Add(new RacerContacts.Entry
+                {
+                    participantId = racers[i].participantId,
+                    motor = preStep[i] != null ? preStep[i].motor : null
+                });
+            }
+            return new RacerContacts(entries);
         }
 
         // Standings order: finishers rank ahead of non-finishers and sort

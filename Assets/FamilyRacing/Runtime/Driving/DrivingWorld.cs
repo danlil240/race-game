@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using FamilyRacing.Core.Driving;
 using FamilyRacing.Core.Foundation;
+using FamilyRacing.Core.Networking;
 using FamilyRacing.Core.Racing;
 using UnityEngine;
 
@@ -32,6 +33,19 @@ namespace FamilyRacing
         private GameObject vehicleView;
         private VehiclePresentation presentation;
         private string shownVehicleId = "";
+
+        // One participant-keyed vehicle view for a network race: same
+        // construction as the solo visual (a VehiclePresentation on a
+        // child object, no colliders), plus the vehicle id it currently
+        // shows so a change of mount rebuilds the silhouette once.
+        private sealed class RacerView
+        {
+            internal GameObject root;
+            internal VehiclePresentation presentation;
+            internal string vehicleId = "";
+        }
+        private readonly Dictionary<string, RacerView> racerViews =
+            new Dictionary<string, RacerView>(System.StringComparer.Ordinal);
         private Camera mainCamera;
         private Vector3 savedCameraPosition;
         private Quaternion savedCameraRotation;
@@ -198,6 +212,118 @@ namespace FamilyRacing
             }
         }
 
+        // Called once per frame with the latest host race state (LAN
+        // play): shows the course and one vehicle view per participant,
+        // keyed by participantId and capped at the shared participant
+        // capacity. Ids absent from the frame lose their view
+        // deterministically — stale views are destroyed immediately in
+        // ordinal order, so a shrinking or cleared roster never leaves
+        // a phantom car on course. The solo ApplyFrame path is
+        // untouched and still owns the single DrivingVehicle visual.
+        public void ApplyRaceFrame(NetworkRaceState race)
+        {
+            ApplyRaceFrame(race, 1f);
+        }
+
+        public void ApplyRaceFrame(NetworkRaceState race, float visualAlpha)
+        {
+            var racers = race != null ? race.racers : null;
+            var active = racers != null && racers.Count > 0;
+            if (courseInstance != null && courseInstance.activeSelf != active)
+                courseInstance.SetActive(active);
+            if (!active)
+            {
+                ClearRacerViews();
+                return;
+            }
+            var seen = new HashSet<string>(System.StringComparer.Ordinal);
+            for (var i = 0; i < racers.Count; i++)
+            {
+                var racer = racers[i];
+                if (racer == null || racer.session == null
+                    || racer.session.motor == null
+                    || string.IsNullOrEmpty(racer.participantId))
+                    continue;
+                // Hard capacity: extra participants never manufacture
+                // views beyond the shared four-slot bound.
+                if (!racerViews.ContainsKey(racer.participantId)
+                    && racerViews.Count >= NetworkSettings.ParticipantCapacity)
+                    continue;
+                seen.Add(racer.participantId);
+                var view = EnsureRacerView(racer.participantId);
+                ApplyRacerVisual(view, racer, visualAlpha);
+            }
+            // Deterministic cleanup in ordinal key order.
+            var stale = new List<string>();
+            foreach (var key in racerViews.Keys)
+                if (!seen.Contains(key)) stale.Add(key);
+            stale.Sort(System.StringComparer.Ordinal);
+            foreach (var key in stale) DestroyRacerView(key);
+        }
+
+        private RacerView EnsureRacerView(string participantId)
+        {
+            RacerView view;
+            if (racerViews.TryGetValue(participantId, out view)
+                && view != null && view.root != null)
+            {
+                // OnDisable hides every root; re-show on the next frame.
+                if (!view.root.activeSelf) view.root.SetActive(true);
+                return view;
+            }
+            var root = new GameObject("RacerVehicle-" + participantId);
+            root.transform.SetParent(transform, false);
+            // Visual only: collision stays in the Core swept motor, so
+            // this hierarchy carries no colliders.
+            view = new RacerView
+            {
+                root = root,
+                presentation = root.AddComponent<VehiclePresentation>()
+            };
+            racerViews[participantId] = view;
+            return view;
+        }
+
+        private void ApplyRacerVisual(RacerView view, NetworkRacerState racer,
+            float visualAlpha)
+        {
+            if (view == null || view.presentation == null) return;
+            if (racer.vehicleId != view.vehicleId)
+            {
+                VehicleDefinitionAsset asset;
+                if (!vehicleAssets.TryGetValue(racer.vehicleId ?? "", out asset)
+                    || asset == null)
+                    asset = FallbackVehicle(racer.vehicleId);
+                view.presentation.SetVehicle(asset);
+                view.vehicleId = racer.vehicleId;
+            }
+            var steering = racer.session.input != null
+                ? racer.session.input.steering : 0f;
+            view.presentation.ApplyPose(racer.session.motor, steering, visualAlpha);
+        }
+
+        // DestroyImmediate: a deferred Destroy would leave the stale view
+        // alive in the scene for a frame — visible to same-frame queries
+        // and captures. Teardown order is the caller's sorted key list,
+        // so cleanup is deterministic.
+        private void DestroyRacerView(string participantId)
+        {
+            RacerView view;
+            if (racerViews.TryGetValue(participantId, out view))
+            {
+                racerViews.Remove(participantId);
+                if (view != null && view.root != null)
+                    DestroyImmediate(view.root);
+            }
+        }
+
+        private void ClearRacerViews()
+        {
+            var keys = new List<string>(racerViews.Keys);
+            keys.Sort(System.StringComparer.Ordinal);
+            foreach (var key in keys) DestroyRacerView(key);
+        }
+
         private void ApplyVehicleVisual(string vehicleId, MotorState motor,
             float steering, float visualAlpha)
         {
@@ -282,6 +408,9 @@ namespace FamilyRacing
             if (overviewActive) RestoreCamera();
             if (courseInstance != null) courseInstance.SetActive(false);
             if (vehicleView != null) vehicleView.SetActive(false);
+            foreach (var view in racerViews.Values)
+                if (view != null && view.root != null)
+                    view.root.SetActive(false);
             ClearCameraFacts();
         }
 
