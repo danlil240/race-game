@@ -7,26 +7,58 @@ announces each lesson cue through the `AudioClip` slots on
 Bundle one clip
 per cue per locale into this folder and wire it into the asset:
 
-- `cue-<lesson>-en.wav` -> `TutorialDefinitionAsset.Cue.english`
-- `cue-<lesson>-he.wav` -> `TutorialDefinitionAsset.Cue.hebrew`
+- `cue-<id>-en.wav` -> `TutorialDefinitionAsset.Cue.english`
+- `cue-<id>-he.wav` -> `TutorialDefinitionAsset.Cue.hebrew`
 
 Cues today: `steering`, `drift`, `boost`, `jump`, `recovery`, `trial`,
-`done` (cue IDs match `TutorialLesson.lessonId`; `trial`/`done` are the
-trial-unlock and graduation cues).
+`finished` (cue IDs match `TutorialLesson.lessonId`; `trial`/`finished`
+are the trial-unlock and graduation cues resolved by `FindCue`).
+
+## How the clips are produced
+
+Spoken prompts are synthesized **offline at authoring time** with Azure
+Speech (GAME_PLAN §3 — AI-generated voice allowed within the asset
+budget; free tier F0 is sufficient, $0 spend) and committed as plain WAV
+assets. Nothing network-related enters the player: no runtime service,
+no credentials, no downloads.
+
+- Spoken lines and voices live in `Tools/tutorial-cues.json` — that
+  manifest is the single source for cue IDs, EN/HE lines, and voices.
+- `Tools/Generate-TutorialCues.py` (standard library only) POSTs SSML to
+  the Azure Speech REST endpoint and writes `cue-<id>-<locale>.wav`
+  here.
+- The editor setup pass `DrivingPrototypeSetup.WireTutorialCueClips`
+  assigns each clip onto `tutorial-def-01.asset`, so a regenerated
+  project stays wired.
+
+### Regeneration runbook
+
+```powershell
+$env:AZURE_SPEECH_KEY    = "<speech resource key>"    # free tier F0
+$env:AZURE_SPEECH_REGION = "<region, e.g. eastus>"
+python Tools\Generate-TutorialCues.py
+Tools\Verify.ps1 -Mode Setup   # re-wires clips onto the tutorial asset
+```
+
+Edit lines/voices in `Tools/tutorial-cues.json`, re-run the generator,
+then run setup. Commit the WAVs and the updated asset. Credentials are
+never written to the repository or the shipped game.
 
 Rules:
 
-- Only licensed, locally produced recordings may be committed here. No
-  TTS services, no credential use, no downloaded voice assets.
+- Only clips produced by this pipeline (or other licensed recordings)
+  may be committed here.
 - Keep the recordings short (one sentence), normalized, and WAV/OGG so
   `AudioSource` plays them directly.
 - When no clip is wired for the active locale the presenter falls back
   to the on-screen text cue and logs a warning; it reports the miss via
   `LastMissingCue` instead of pretending audio played.
 
-## Acceptance gap (as of task 5)
+## Acceptance gap
 
-No licensed EN/HE recordings exist yet, so the voice slots on
-`tutorial-def-01.asset` are intentionally empty. Text and icon cues are
-complete; spoken prompts remain an open acceptance item tracked in the
-task-5 report until a licensed voice production lands.
+Spoken prompts require the owner's Azure Speech credentials at
+generation time (see the runbook above). Until clips are generated and
+committed, the voice slots on `tutorial-def-01.asset` remain
+intentionally empty and `EveryCueHasWiredClipForBothLocales` stays
+explicitly Ignored as the tracking gate. Text and icon cues are
+complete.

@@ -42,6 +42,10 @@ namespace FamilyRacing.EditorTools
             // unbounded so a lap finish can never freeze the lesson sim.
             var free = EnsureEvent("tutorial-01", track, laps: 99);
             var tutorial = EnsureTutorial();
+            // EnsureTutorial rebuilds the cue slots every run, so the
+            // bundled recordings must be re-wired after it. Missing WAVs
+            // leave honest null slots — the presenter reports the miss.
+            WireTutorialCueClips(tutorial);
             var course = EnsureCoursePrefab(groundMat, wallMat, gateMat, driftMat);
 
             WireScene(car, moto, track, practice, intro, free, tutorial, course);
@@ -208,6 +212,28 @@ namespace FamilyRacing.EditorTools
                 textKey = textKey,
                 icon = icon
             };
+        }
+
+        // Bundled recordings follow cue-<id>-<locale>.wav under
+        // Assets/FamilyRacing/Audio/Tutorial — produced offline by
+        // Tools/Generate-TutorialCues.py (Azure Speech, authoring time
+        // only; see the audio README for the regeneration runbook).
+        private static void WireTutorialCueClips(TutorialDefinitionAsset asset)
+        {
+            if (asset.lessons != null)
+                foreach (var lesson in asset.lessons)
+                    if (lesson != null) WireCue(lesson.cue, lesson.lessonId);
+            WireCue(asset.trialCue, "trial");
+            WireCue(asset.finishedCue, "finished");
+        }
+
+        private static void WireCue(TutorialDefinitionAsset.Cue cue, string cueId)
+        {
+            if (cue == null) return;
+            cue.english = AssetDatabase.LoadAssetAtPath<AudioClip>(
+                "Assets/FamilyRacing/Audio/Tutorial/cue-" + cueId + "-en.wav");
+            cue.hebrew = AssetDatabase.LoadAssetAtPath<AudioClip>(
+                "Assets/FamilyRacing/Audio/Tutorial/cue-" + cueId + "-he.wav");
         }
 
         // The course prefab is pure graybox: one ground slab, perimeter

@@ -1,0 +1,42 @@
+{
+  "description": "Tutorial voice-cue manifest consumed by Generate-TutorialCues.py. One short child-friendly spoken line per cue id per locale; cue ids must match TutorialDefinitionAsset lesson ids plus 'trial' and 'finished'.",
+  "outputFormat": "riff-24khz-16bit-mono-pcm",
+  "voices": {
+    "en": "en-US-AnaNeural",
+    "he": "he-IL-HilaNeural"
+  },
+  "locales": {
+    "en": "en-US",
+    "he": "he-IL"
+  },
+  "cues": {
+    "steering": {
+      "en": "Steer left and right to move!",
+      "he": "פנה ימינה ושמאלה!"
+    },
+    "drift": {
+      "en": "Hold drift to slide around the corner!",
+      "he": "החזק החלקה כדי להחליק בפניה!"
+    },
+    "boost": {
+      "en": "Hold boost to go super fast!",
+      "he": "החזק בוסט כדי לטוס מהר!"
+    },
+    "jump": {
+      "en": "Race over the ramp and jump!",
+      "he": "סע על המקפצה וקפוץ באוויר!"
+    },
+    "recovery": {
+      "en": "Stuck? Hold recover to pop back onto the track!",
+      "he": "נתקעת? החזק שחזור כדי לחזור למסלול!"
+    },
+    "trial": {
+      "en": "Great job! Now drive one full lap!",
+      "he": "כל הכבוד! עכשיו סע הקפה אחת שלמה!"
+    },
+    "finished": {
+      "en": "You did it! You are ready to race!",
+      "he": "עשית את זה! אתה מוכן למרוץ!"
+    }
+  }
+}

@@ -1,4 +1,6 @@
 using System;
+using System.IO;
+using System.Linq;
 using System.Text;
 using FamilyRacing.Automation;
 using FamilyRacing.Core.Profiles;
@@ -151,6 +153,57 @@ namespace FamilyRacing.Tests
             finally
             {
                 UnityEngine.Object.DestroyImmediate(asset);
+            }
+        }
+
+        private static TutorialDefinitionAsset LoadTutorialAsset()
+        {
+            var asset = AssetDatabase.LoadAssetAtPath<TutorialDefinitionAsset>(
+                "Assets/FamilyRacing/Generated/Driving/tutorial-def-01.asset");
+            Assert.That(asset, Is.Not.Null, "Generated tutorial definition must exist.");
+            return asset;
+        }
+
+        private static string[] ExpectedCueIds(TutorialDefinitionAsset asset)
+        {
+            return asset.lessons.Select(l => l.lessonId)
+                .Concat(new[] { "trial", "finished" })
+                .OrderBy(id => id, StringComparer.Ordinal)
+                .ToArray();
+        }
+
+        // The TTS manifest is the single source for cue ids; a renamed or
+        // dropped lesson must fail here instead of silently losing a voice.
+        [Test]
+        public void TutorialCueIdsMatchManifest()
+        {
+            var asset = LoadTutorialAsset();
+            var manifest = JObject.Parse(File.ReadAllText(
+                Path.Combine(Directory.GetCurrentDirectory(),
+                    "Tools", "tutorial-cues.json")));
+            var manifestIds = ((JObject)manifest["cues"]).Properties()
+                .Select(p => p.Name)
+                .OrderBy(id => id, StringComparer.Ordinal)
+                .ToArray();
+            Assert.That(manifestIds, Is.EqualTo(ExpectedCueIds(asset)),
+                "Tools/tutorial-cues.json cue ids must cover every lesson " +
+                "plus 'trial' and 'finished'.");
+        }
+
+        // Open acceptance gate: clips require the owner's Azure Speech
+        // credentials at generation time (see Assets/FamilyRacing/Audio/
+        // Tutorial/README.md runbook). Un-ignore once WAVs are committed.
+        [Test]
+        [Ignore("voice clips pending AZURE_SPEECH_KEY credential — open gate")]
+        public void EveryCueHasWiredClipForBothLocales()
+        {
+            var asset = LoadTutorialAsset();
+            foreach (var cueId in ExpectedCueIds(asset))
+            {
+                Assert.That(asset.ClipFor(cueId, "en"), Is.Not.Null,
+                    cueId + " missing English clip");
+                Assert.That(asset.ClipFor(cueId, "he"), Is.Not.Null,
+                    cueId + " missing Hebrew clip");
             }
         }
 
