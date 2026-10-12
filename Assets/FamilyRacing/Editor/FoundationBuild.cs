@@ -28,6 +28,17 @@ namespace FamilyRacing.EditorTools
             Report(report, "Windows Mono development build");
         }
 
+        // Ordinary family build: same content and backend, no development
+        // flag — validation endpoints are compiled out (DEVELOPMENT_BUILD
+        // undefined), so --validation-dir is ignored and no socket opens.
+        public static void WindowsOrdinary()
+        {
+            FoundationProjectSetup.Create();
+            var report = Build("Builds/Windows-Ordinary/FamilyRacing.exe",
+                BuildTarget.StandaloneWindows64, BuildOptions.None);
+            Report(report, "Windows Mono ordinary build (no validation)");
+        }
+
         public static void Android()
         {
             // Retain the old entry point, but never implicitly invoke online

@@ -2,7 +2,9 @@
 
 The tutorial presenter (`Runtime/Presentation/TutorialPresenter.cs`)
 announces each lesson cue through the `AudioClip` slots on
-`Assets/FamilyRacing/Generated/Driving/tutorial-01.asset`. Bundle one clip
+`Assets/FamilyRacing/Generated/Driving/tutorial-def-01.asset` (the
+`TutorialDefinitionAsset`; `tutorial-01.asset` is the free-drive event).
+Bundle one clip
 per cue per locale into this folder and wire it into the asset:
 
 - `cue-<lesson>-en.wav` -> `TutorialDefinitionAsset.Cue.english`
@@ -25,6 +27,6 @@ Rules:
 ## Acceptance gap (as of task 5)
 
 No licensed EN/HE recordings exist yet, so the voice slots on
-`tutorial-01.asset` are intentionally empty. Text and icon cues are
+`tutorial-def-01.asset` are intentionally empty. Text and icon cues are
 complete; spoken prompts remain an open acceptance item tracked in the
 task-5 report until a licensed voice production lands.

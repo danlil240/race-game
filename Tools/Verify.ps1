@@ -13,6 +13,9 @@
 #   -Mode PlayMode         Run Unity PlayMode tests; results XML + log under
 #                          Logs\.
 #   -Mode Windows          Build the Windows Mono development player.
+#   -Mode WindowsOrdinary  Build the Windows Mono ordinary player: same
+#                          content and backend without the development flag,
+#                          so validation endpoints are compiled out.
 #   -Mode Android          Export Android, then build with bundled Gradle
 #                          --offline. Missing dependencies fail without download.
 #
@@ -21,7 +24,7 @@
 # and a result.json under Logs\android-offline\<run-id>.
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet("CoreOffline", "Core", "CheckEnvironment", "Setup", "EditMode", "PlayMode", "Windows", "Android")]
+    [ValidateSet("CoreOffline", "Core", "CheckEnvironment", "Setup", "EditMode", "PlayMode", "Windows", "WindowsOrdinary", "Android")]
     [string]$Mode,
 
     [string]$EditorRoot = "C:\Program Files\Unity\Hub\Editor",
@@ -60,7 +63,7 @@ switch ($Mode) {
         exit $LASTEXITCODE
     }
 
-    { $_ -in "Setup", "EditMode", "PlayMode", "Windows" } {
+    { $_ -in "Setup", "EditMode", "PlayMode", "Windows", "WindowsOrdinary" } {
         $editorExe = Join-Path $EditorRoot "$PinnedEditorVersion\Editor\Unity.exe"
         if (-not (Test-Path $editorExe)) {
             Write-Error "Pinned editor $PinnedEditorVersion not found at $editorExe."
@@ -76,6 +79,9 @@ switch ($Mode) {
             }
             "Windows" {
                 $unityArgs += "-executeMethod", "FamilyRacing.EditorTools.FoundationBuild.Windows", "-quit"
+            }
+            "WindowsOrdinary" {
+                $unityArgs += "-executeMethod", "FamilyRacing.EditorTools.FoundationBuild.WindowsOrdinary", "-quit"
             }
             "EditMode" {
                 $unityArgs += "-runTests", "-testPlatform", "EditMode",
