@@ -257,6 +257,41 @@ namespace FamilyRacing.Tests
             }
         }
 
+        [Test]
+        public void RampClimbNeverFlickersAirborne()
+        {
+            // The step-climb lifts the pose one probe step so a lip clears
+            // the cast — but the ground probe must still reach the surface
+            // at the lifted pose, or every climbed tick flaps the motor
+            // airborne and the climb reads as violent hopping (the
+            // reported vibration). Grounded must hold for the whole climb
+            // up to the crest launch zone.
+            Box("Ramp", new Vector3(-60f, 1.2f, 30f),
+                new Vector3(12f, 0.6f, 16f), Quaternion.Euler(-14f, 0f, 0f));
+            var tuning = VehicleTuning.Car01();
+            var state = new MotorState
+            {
+                x = -60f, y = 0f, z = 10f, heading = 0f,
+                speed = 10f, grounded = true
+            };
+            var input = new DriverInput(0f, false, false, false, false, false, false);
+            for (var i = 0; i < 400; i++)
+            {
+                var result = ArcadeMotor.Step(state, input, tuning, world, Dt);
+                state = result.state;
+                if (state.z < 36f)
+                {
+                    Assert.That(state.grounded, Is.True,
+                        "the climb must stay grounded — no airborne flicker "
+                        + "(z=" + state.z.ToString("F1")
+                        + " y=" + state.y.ToString("F2") + " tick=" + i + ")");
+                }
+            }
+            Assert.That(state.z, Is.GreaterThan(36f),
+                "the climb must still crest the ramp (z="
+                + state.z.ToString("F1") + ")");
+        }
+
         // --- sanity: the contact fix must not wedge normal driving ----------
 
         [Test]

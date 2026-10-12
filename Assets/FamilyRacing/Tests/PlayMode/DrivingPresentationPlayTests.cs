@@ -1091,5 +1091,40 @@ namespace FamilyRacing.Tests
             Assert.That(drivingCamera.Facts.ty, Is.EqualTo(1.2f).Within(0.6f),
                 "the smoothed target re-converges to the landed vehicle");
         }
+
+        [Test]
+        public void VehicleVisualInterpolatesBetweenCommittedTicks()
+        {
+            // The sim commits at 30 Hz but ApplyPose runs per rendered
+            // frame: the visual must interpolate between the last two
+            // commits (alpha = elapsed fraction of the current tick), not
+            // snap — stepping is the reported constant vibration.
+            var go = new GameObject("interp-car");
+            loose.Add(go);
+            var presentation = go.AddComponent<VehiclePresentation>();
+            var car = Asset<VehicleDefinitionAsset>(a =>
+            {
+                a.vehicleId = "car-01";
+                a.silhouette = "car";
+                a.leanDegrees = 4f;
+                a.bodyScale = new Vector3(1.8f, 1.1f, 3.2f);
+                a.bodyColor = Color.white;
+            });
+            presentation.SetVehicle(car);
+            var first = new MotorState { x = 0f, y = 0f, z = 0f, heading = 0f, tick = 10 };
+            var second = new MotorState { x = 0f, y = 0f, z = 0.6f, heading = 0f, tick = 11 };
+            presentation.ApplyPose(first, 0f, 1f);
+            presentation.ApplyPose(second, 0f, 0.5f);
+            Assert.That(go.transform.position.z, Is.EqualTo(0.3f).Within(0.001f),
+                "mid-tick the visual sits halfway between commits");
+            presentation.ApplyPose(second, 0f, 1f);
+            Assert.That(go.transform.position.z, Is.EqualTo(0.6f).Within(0.001f),
+                "alpha 1 lands exactly on the latest committed pose");
+            // Recovery-scale jump: snap, never sweep across the course.
+            var respawn = new MotorState { x = 40f, y = 0f, z = 40f, heading = 0f, tick = 12 };
+            presentation.ApplyPose(respawn, 0f, 0f);
+            Assert.That(go.transform.position.x, Is.EqualTo(40f).Within(0.001f),
+                "a respawn-scale jump must snap instead of sweeping");
+        }
     }
 }

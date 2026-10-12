@@ -139,7 +139,11 @@ namespace FamilyRacing
             var state = service.Snapshot();
             if (drivingWorld != null)
             {
-                drivingWorld.ApplyFrame(state);
+                // Fraction of the current sim tick already elapsed — the
+                // vehicle visual interpolates between committed poses by
+                // this alpha instead of stepping at the 30 Hz tick rate.
+                drivingWorld.ApplyFrame(state,
+                    Mathf.Clamp01(accumulator / step));
                 if (drivingCamera != null)
                 {
                     // Applied after the world visuals so its transform wins;

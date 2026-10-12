@@ -18,13 +18,19 @@ namespace FamilyRacing
         private const float ProbeOriginLift = 0.1f;
         private const float ContactSkin = 0.05f;
         private const float SkinDrop = 0.05f;
+        // The grounded snap gate is `state.y - ground.y <= probeDistance`,
+        // so the ray must reach strictly past that gate: the step-climb
+        // lifts exactly one probe step, and a ray that ends exactly at the
+        // gate borderline-misses — the car would flicker airborne every
+        // climbed tick.
+        private const float ProbeReachMargin = 0.25f;
 
         public GroundHit ProbeGround(MotorPose pose, float probeDistance)
         {
             var origin = new Vector3(pose.x, pose.y + ProbeOriginLift, pose.z);
             RaycastHit hit;
             if (Physics.Raycast(origin, Vector3.down, out hit,
-                    probeDistance + ProbeOriginLift,
+                    probeDistance + ProbeOriginLift + ProbeReachMargin,
                     Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore))
             {
                 return new GroundHit

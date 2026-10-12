@@ -40,17 +40,59 @@ namespace FamilyRacing
         // Committed motor pose → root transform; steering hold → cosmetic
         // roll on the lean pivot. The root itself only yaws: roll can
         // never leak into the collision body's orientation.
+        //
+        // The sim commits at a fixed 30 Hz tick while this runs per
+        // rendered frame — snapping straight to the committed pose makes
+        // the vehicle visibly step/judder against the smoothly-smoothed
+        // camera. Instead the pose interpolates between the last two
+        // commits by the render-time alpha (fraction of the current tick
+        // elapsed), at the cost of at most one tick of visual lag.
         public void ApplyPose(MotorState motor, float steering)
         {
+            ApplyPose(motor, steering, 1f);
+        }
+
+        public void ApplyPose(MotorState motor, float steering, float alpha)
+        {
             if (leanPivot == null || motor == null) return;
+            var pos = new Vector3(motor.x, motor.y, motor.z);
+            if (motor.tick != interpTick)
+            {
+                interpPrevPos = interpCurPos;
+                interpPrevYaw = interpCurYaw;
+                interpCurPos = pos;
+                interpCurYaw = motor.heading;
+                interpTick = motor.tick;
+                // A respawn or any teleport-scale jump must snap, never
+                // sweep the body across the course for a frame.
+                if ((interpCurPos - interpPrevPos).sqrMagnitude
+                        > TeleportSnapDistance * TeleportSnapDistance)
+                {
+                    interpPrevPos = interpCurPos;
+                    interpPrevYaw = interpCurYaw;
+                }
+            }
+            var a = Mathf.Clamp01(alpha);
+            var prevDeg = interpPrevYaw * Mathf.Rad2Deg;
+            var yaw = prevDeg
+                + Mathf.DeltaAngle(prevDeg, interpCurYaw * Mathf.Rad2Deg) * a;
             transform.SetPositionAndRotation(
-                new Vector3(motor.x, motor.y, motor.z),
-                Quaternion.Euler(0f, motor.heading * Mathf.Rad2Deg, 0f));
+                Vector3.LerpUnclamped(interpPrevPos, interpCurPos, a),
+                Quaternion.Euler(0f, yaw, 0f));
             var target = -Mathf.Clamp(steering, -1f, 1f) * leanMaxDegrees;
             leanRoll = Mathf.Lerp(leanRoll, target,
                 1f - Mathf.Exp(-LeanSmoothing * Time.deltaTime));
             leanPivot.localRotation = Quaternion.Euler(0f, 0f, leanRoll);
         }
+
+        // Committed poses the visual interpolates between, plus the last
+        // tick applied. TeleportSnapDistance exceeds the largest legal
+        // per-tick move (boost top speed ~28 m/s ≈ 0.94 m a tick), so
+        // anything bigger is a respawn, not motion.
+        private const float TeleportSnapDistance = 2f;
+        private Vector3 interpPrevPos, interpCurPos;
+        private float interpPrevYaw, interpCurYaw;
+        private long interpTick = -1;
 
         public float LeanRoll { get { return leanRoll; } }
         public string ShownKey { get { return shownKey; } }

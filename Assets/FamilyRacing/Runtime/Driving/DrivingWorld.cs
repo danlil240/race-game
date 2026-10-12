@@ -161,7 +161,15 @@ namespace FamilyRacing
         // and vehicle only while a race session exists, applies committed
         // motor state to the visual, and drives the temporary overview
         // camera. Camera facts are published back for observation.
+        // `visualAlpha` is the render-time fraction of the current sim
+        // tick already elapsed — the visual interpolates between the last
+        // two committed poses instead of stepping at 30 Hz.
         public void ApplyFrame(FoundationState state)
+        {
+            ApplyFrame(state, 1f);
+        }
+
+        public void ApplyFrame(FoundationState state, float visualAlpha)
         {
             var session = state != null ? state.driving : null;
             var active = session != null && session.motor != null;
@@ -173,7 +181,8 @@ namespace FamilyRacing
             {
                 var motor = session.motor;
                 ApplyVehicleVisual(session.vehicleId, motor,
-                    session.input != null ? session.input.steering : 0f);
+                    session.input != null ? session.input.steering : 0f,
+                    visualAlpha);
                 if (presentationCameraBound)
                     // The bound presentation camera publishes its own
                     // facts; the fallback reports nothing rather than a
@@ -189,7 +198,8 @@ namespace FamilyRacing
             }
         }
 
-        private void ApplyVehicleVisual(string vehicleId, MotorState motor, float steering)
+        private void ApplyVehicleVisual(string vehicleId, MotorState motor,
+            float steering, float visualAlpha)
         {
             if (vehicleView == null || presentation == null) return;
             if (vehicleId != shownVehicleId)
@@ -199,7 +209,7 @@ namespace FamilyRacing
                     presentation.SetVehicle(asset);
                 shownVehicleId = vehicleId;
             }
-            presentation.ApplyPose(motor, steering);
+            presentation.ApplyPose(motor, steering, visualAlpha);
         }
 
         private void ApplyOverviewCamera(MotorState motor)
