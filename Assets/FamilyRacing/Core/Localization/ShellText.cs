@@ -63,6 +63,11 @@ namespace FamilyRacing.Core.Localization
             ["hud.finished"] = new[] { "Finished!", "הסתיים!" },
             ["hud.gadget.soon"] = new[] { "Gadget (soon)", "גאדג'ט (בקרוב)" },
             ["hud.gadget.unavailable"] = new[] { "Gadgets are not in this practice yet.", "גאדג'טים עוד לא באימון הזה." },
+            // Keyboard legend: key names stay Latin in both locales — they
+            // name the physical key caps, not words to translate.
+            ["hud.keys"] = new[] {
+                "Keys: ◀▶ steer · Space drift · Shift boost · R recover · C camera · Esc pause",
+                "מקשים: ◀▶ היגוי · Space דריפט · Shift האצה · R חזרה · C מצלמה · Esc השהיה" },
             ["action.back"] = new[] { "Back", "חזרה" },
             ["action.save"] = new[] { "Save", "שמירה" },
             ["status.saved"] = new[] { "Settings saved.", "ההגדרות נשמרו." },

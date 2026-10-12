@@ -486,10 +486,13 @@ namespace FamilyRacing.Tests
             // z~38 airborne — real sweep + ground probes, no teleport.
             WireRealCourse();
             LoadAndStart(vehicleId, "practice-02", countdownTicks: 90);
+            // Final waypoint sits past the landing zone so the pursuit
+            // cannot finish mid-jump: at speed the box leaves the crest
+            // airborne around z≈40 and needs room to land and settle.
             Pursue(new List<Vector2>
                 {
                     new Vector2(-60f, 10f),
-                    new Vector2(-60f, 50f)
+                    new Vector2(-60f, 60f)
                 },
                 maxTicks: 6000);
             var state = service.Snapshot();

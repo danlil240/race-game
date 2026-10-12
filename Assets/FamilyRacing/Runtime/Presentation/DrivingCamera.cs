@@ -33,6 +33,11 @@ namespace FamilyRacing
         [SerializeField] private float reducedFollowRate = 4f;
         [SerializeField] private float snapDistance = 18f;
         [SerializeField] private float obstacleMargin = 0.4f;
+        // Pull-in converges fast so a blocker never hides the vehicle;
+        // release eases back slowly so a corner's on/off occlusion can
+        // never pump the framing between two depths.
+        [SerializeField] private float pullInRate = 14f;
+        [SerializeField] private float releaseRate = 3.5f;
 
         private Camera cam;
         private bool engaged;
@@ -41,6 +46,7 @@ namespace FamilyRacing
         private Quaternion savedRotation;
         private Vector3 smoothTarget;
         private bool hasTarget;
+        private float pullDistance = -1f;
         private readonly DrivingCameraState facts = new DrivingCameraState();
 
         public DrivingCameraState Facts { get { return facts; } }
@@ -108,6 +114,8 @@ namespace FamilyRacing
             var desired = mode == "overhead"
                 ? OverheadDesired(smoothTarget)
                 : ChaseDesired(motor, smoothTarget);
+            desired = ClearOfObstacles(smoothTarget, desired, dt,
+                firstFrame || teleported);
             var lookDir = smoothTarget - desired;
             // An occluder flush against the vehicle can pull the camera
             // nearly onto the target; keep the previous heading then.
@@ -138,30 +146,38 @@ namespace FamilyRacing
         {
             var forward = new Vector3(
                 Mathf.Sin(motor.heading), 0f, Mathf.Cos(motor.heading));
-            return ClearOfObstacles(target,
-                target - forward * chaseBack + Vector3.up * chaseUp);
+            return target - forward * chaseBack + Vector3.up * chaseUp;
         }
 
         private Vector3 OverheadDesired(Vector3 target)
         {
-            return ClearOfObstacles(target,
-                target + new Vector3(0f, overheadUp, -overheadBack));
+            return target + new Vector3(0f, overheadUp, -overheadBack);
         }
 
-        // Pull the desired camera spot in front of the first solid occluder
-        // on the target→camera ray so the vehicle stays visible. Trigger
-        // volumes (checkpoint gates, the drift pad) are not view obstacles,
-        // and neither is the vehicle's own silhouette — the ray can exit
+        // Pull the camera along the target→ideal ray to the first solid
+        // occluder so the vehicle stays visible. Trigger volumes
+        // (checkpoint gates, the drift pad) are not view obstacles, and
+        // neither is the vehicle's own silhouette — the ray can exit
         // through the Cabin/Rider parts the presentation builds. Shared by
         // both modes: chase yields side/behind blockers, overhead yields
         // canopies and tall blocks over the vehicle.
-        private Vector3 ClearOfObstacles(Vector3 target, Vector3 desired)
+        //
+        // The pull *distance* is smoothed, not the position: near corners
+        // the occluder flickers on and off the ray every other frame, and
+        // an instantaneous pulled/ideal flip used to pump the framing.
+        // Pull-in converges fast (the blocker must not hide the vehicle);
+        // release eases slowly so alternating occlusion reads as a steady
+        // held depth, not a jump.
+        private Vector3 ClearOfObstacles(Vector3 target, Vector3 ideal,
+            float deltaSeconds, bool snap)
         {
             LastObstacleName = null;
-            var delta = desired - target;
+            var delta = ideal - target;
             var distance = delta.magnitude;
-            if (distance < 1e-6f) return desired;
-            var hits = Physics.RaycastAll(target, delta / distance, distance,
+            if (distance < 1e-6f) return ideal;
+            var dir = delta / distance;
+            var clear = distance;
+            var hits = Physics.RaycastAll(target, dir, distance,
                 ~0, QueryTriggerInteraction.Ignore);
             System.Array.Sort(hits,
                 (a, b) => a.distance.CompareTo(b.distance));
@@ -171,18 +187,28 @@ namespace FamilyRacing
                 if (hit.collider.GetComponentInParent<VehiclePresentation>()
                         != null)
                     continue; // the vehicle itself never occludes itself
-                var towardTarget = target - hit.point;
-                if (towardTarget.sqrMagnitude <= 1e-6f) continue;
+                clear = Mathf.Clamp(hit.distance - obstacleMargin, 0.25f, distance);
                 LastObstacleName = hit.collider.name;
-                return hit.point + towardTarget.normalized * obstacleMargin;
+                break;
             }
-            return desired;
+            if (snap || pullDistance < 0f)
+            {
+                pullDistance = clear;
+            }
+            else
+            {
+                var rate = clear < pullDistance ? pullInRate : releaseRate;
+                pullDistance = Mathf.Lerp(pullDistance, clear,
+                    1f - Mathf.Exp(-rate * deltaSeconds));
+            }
+            return target + dir * pullDistance;
         }
 
         private void Disengage()
         {
             engaged = false;
             hasTarget = false;
+            pullDistance = -1f;
             if (cam != null && savedPose)
                 cam.transform.SetPositionAndRotation(savedPosition, savedRotation);
             savedPose = false;

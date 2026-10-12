@@ -35,6 +35,11 @@ namespace FamilyRacing
                 () => StartTutorial("motorcycle-01"), "tutorial.motorcycle");
             ApplyAvailability(learnCar, "tutorial.start");
             ApplyAvailability(learnMoto, "tutorial.start");
+            // Same keyboard legend the race HUD carries, shown before the
+            // child picks a vehicle so the keys are never a surprise.
+            var keys = AddLabel(root, T("hud.keys", state), 15, Deep);
+            keys.name = "practice.keys";
+            keys.style.opacity = 0.75f;
             var actions = Row(root);
             var back = AddButton(actions, T("action.back", state), Deep,
                 () => app.Dispatch("ui.navigate", Screen("sandbox")), "action.back");
@@ -80,6 +85,11 @@ namespace FamilyRacing
             speedLabel.name = "hud.speed";
             phaseLabel = AddLabel(top, "", 32, Coral);
             phaseLabel.name = "hud.phase";
+            // Live drift feedback: invisible until the motor actually
+            // engages a drift, so the Space/touch input gets a visible
+            // answer instead of looking like it did nothing.
+            driftLabel = AddLabel(top, "", 22, Seafoam);
+            driftLabel.name = "hud.drift";
 
             var boostRow = Row(root);
             var boostCaption = AddLabel(boostRow, T("input.boost", state), 20, Deep);
@@ -149,6 +159,12 @@ namespace FamilyRacing
             AddHoldButton(controls, T("input.boost", state), Coral,
                 held => app.Input.TouchBoost(held), "driving.boost");
             foreach (var held in controls.Children()) ApplyAvailability(held, "input.set");
+
+            // Keyboard legend next to the touch controls — small, so it
+            // helps without competing with the big child-facing buttons.
+            var keys = AddLabel(root, T("hud.keys", state), 15, Deep);
+            keys.name = "hud.keys";
+            keys.style.opacity = 0.75f;
 
             var actions = Row(root);
             var recover = AddButton(actions, T("input.recovery", state), Deep,
@@ -264,6 +280,9 @@ namespace FamilyRacing
             if (speedLabel != null && session.motor != null)
                 speedLabel.text = T("hud.speed", state) + " " +
                     ((int)(session.motor.speed * 3.6f)).ToString();
+            if (driftLabel != null)
+                driftLabel.text = session.motor != null && session.motor.drifting
+                    ? T("input.drift", state) + "!" : "";
             if (tutorialPanel != null)
             {
                 var tutorial = session.tutorial;

@@ -490,6 +490,59 @@ namespace FamilyRacing.Tests
             Assert.That(drivingCamera.Facts.pz, Is.EqualTo(camZ).Within(0.001f));
         }
 
+        // Corner occlusion flickers on/off the target→camera ray every
+        // other frame; an instantaneous pulled/ideal flip pumped the
+        // framing (the reported "camera jumps near corners"). The pull
+        // depth is smoothed instead: pull-in stays quick, release eases.
+        [Test]
+        public void CameraPullDepthIsSmoothUnderFlickeringOcclusion()
+        {
+            var wall = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            loose.Add(wall);
+            wall.transform.SetPositionAndRotation(
+                new Vector3(0f, 4f, -6f), Quaternion.identity);
+            wall.transform.localScale = new Vector3(20f, 8f, 1f);
+            Physics.SyncTransforms();
+
+            var state = FakeDriving(0f, 0f, 0f, 0f);
+            var minZ = float.MaxValue;
+            var maxZ = float.MinValue;
+            for (var i = 0; i < 16; i++)
+            {
+                // An occluder flapping on/off the ray — what a wall corner
+                // does to a frame-by-frame raycast while driving past it.
+                wall.SetActive(i % 2 == 0);
+                Physics.SyncTransforms();
+                drivingCamera.ApplyFrame(state, 0.033f);
+                var z = renderCamera.transform.position.z;
+                minZ = Mathf.Min(minZ, z);
+                maxZ = Mathf.Max(maxZ, z);
+            }
+            Assert.That(maxZ - minZ, Is.LessThan(1.2f),
+                "flickering occlusion must hold a steady depth, not pump "
+                + "between pulled and ideal framing (swing="
+                + (maxZ - minZ).ToString("F2") + "m)");
+
+            // With the occluder gone for good the pull releases gradually
+            // and still converges on the chase standoff.
+            wall.SetActive(false);
+            Physics.SyncTransforms();
+            var worstStep = 0f;
+            var prev = renderCamera.transform.position.z;
+            for (var i = 0; i < 90; i++)
+            {
+                drivingCamera.ApplyFrame(state, 0.033f);
+                var step = Mathf.Abs(renderCamera.transform.position.z - prev);
+                prev = renderCamera.transform.position.z;
+                worstStep = Mathf.Max(worstStep, step);
+            }
+            Assert.That(worstStep, Is.LessThan(0.9f),
+                "release eases out — no single-frame jump back to ideal "
+                + "(worstStep=" + worstStep.ToString("F2") + "m)");
+            Assert.That(renderCamera.transform.position.z, Is.LessThan(-6.5f),
+                "and it does converge back to the chase standoff");
+        }
+
         [Test]
         public void TeleportSnapsCameraAndReducedShakeSmoothsSlower()
         {
@@ -567,6 +620,36 @@ namespace FamilyRacing.Tests
             Assert.That(document.rootVisualElement.style.backgroundColor.value.a,
                 Is.EqualTo(0f).Within(0.001f),
                 "the driving HUD must not paint an opaque root over the course");
+        }
+
+        [UnityTest]
+        public IEnumerator DrivingHudShowsKeyboardLegendAndDriftFeedback()
+        {
+            yield return ToRunning();
+            var keys = Widget<Label>("hud.keys");
+            Assert.That(keys, Is.Not.Null,
+                "the driving HUD must carry a keyboard legend");
+            Assert.That(keys.text, Does.Contain("Space"));
+            Assert.That(keys.text, Does.Contain("Shift"));
+            var drift = Widget<Label>("hud.drift");
+            Assert.That(drift, Is.Not.Null, "drift engagement feedback exists");
+            Assert.That(drift.text, Is.EqualTo(""),
+                "no drift feedback before a real drift");
+
+            // Engage a real drift through the shared command path: speed,
+            // steering, held drift — then the HUD answers visibly.
+            var held = app.Dispatch("input.set", Params(
+                ("steering", "0.7"), ("drift", "true"), ("boost", "false"),
+                ("gadget", "false"), ("recover", "false"),
+                ("changeCamera", "false"), ("pause", "false"),
+                ("durationTicks", "90")));
+            Assert.That(held.status, Is.EqualTo("applied"));
+            Step(90);
+            Assert.That(Snapshot().driving.motor.drifting, Is.True,
+                "setup: the held drift input must engage a real drift");
+            Frame(0.1f);
+            Assert.That(Widget<Label>("hud.drift").text, Does.Contain("Drift"),
+                "an engaged drift shows visible feedback");
         }
 
         [UnityTest]
@@ -907,6 +990,10 @@ namespace FamilyRacing.Tests
                 new Vector2(0f, -30f),
                 new Vector2(-50f, -5f),
                 new Vector2(-70f, 20f),   // skirt the ramp's west flank
+                new Vector2(-72f, 46f),   // stay wide: the slab's west
+                                          // face (x≈-66, z 22-38) is
+                                          // solid — a straight cut to the
+                                          // apron clips its NW corner
                 new Vector2(-62f, 52f),   // ramp landing apron, north side
                 new Vector2(-30f, 55f),
                 new Vector2(30f, 28f),    // inside shortcut south of IslandNE
