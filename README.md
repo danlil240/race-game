@@ -7,7 +7,18 @@ progress is tracked in `IMPLEMENTATION_STATUS.md` and
 
 ## What exists today
 
-**Foundation shell, no gameplay yet.** `Assets/FamilyRacing/Core` is a
+**Graybox driving prototype (M2, under review).** On top of the
+foundation below, the repo now ships a command-driven driving trial:
+profile select → practice screen → `race.start` on `intro-01` (or the
+`tutorial-01` onboarding) with `car-01`/`motorcycle-01`, ordered
+checkpoints and laps, drift/boost, the landmark-ramp jump, wall impacts,
+latched recovery to authored safe poses, chase/overhead cameras,
+pause/retry/exit — every action through the same command path agents
+use, streamed as schema-2 snapshot+delta boundaries and proven by the
+real-player scenarios in `Tools\` (`DrivingScenario`, `DrivingSoak`).
+Milestone acceptance is **open**: see `docs\tasks\driving-prototype-report.md`.
+
+**Foundation shell.** `Assets/FamilyRacing/Core` is a
 Unity-free, C# 9, .NET Standard 2.1-compatible assembly:
 
 | Area | Files | Contract |
@@ -62,6 +73,8 @@ Tools\Verify.ps1 -Mode Setup      # FoundationProjectSetup
 Tools\Verify.ps1 -Mode EditMode   # Logs\verify-editmode-results.xml
 Tools\Verify.ps1 -Mode PlayMode   # Logs\verify-playmode-results.xml
 Tools\Verify.ps1 -Mode Windows    # Builds\Windows\FamilyRacing.exe (Mono dev)
+Tools\Verify.ps1 -Mode WindowsOrdinary  # Builds\Windows-Ordinary\ (Mono, no dev flag,
+                                  #  validation endpoints compiled out)
 
 # Repeatable offline Android build — Unity export, then bundled Gradle with
 # --offline (no downloads; missing cache entries fail with diagnostics):
@@ -87,6 +100,12 @@ $player = Start-Process $exe -ArgumentList "--validation-dir",$run -PassThru
 $player.WaitForExit()
 # From the second terminal, using the same run directory:
 python Tools\AgentScenario.py <dir>\connection.json --evidence <new-evidence-dir>
+python Tools\DrivingScenario.py <dir>\connection.json --evidence <new-evidence-dir>
+
+# Sustained soak — owns its own validation player, drives both vehicles /
+# cameras with repeated restarts for N minutes, sampling memory, cadence,
+# trace growth and queue/backlog health:
+python Tools\DrivingSoak.py Builds\Windows\FamilyRacing.exe --evidence <new-dir> [--minutes 30]
 ```
 
 Full command/wire-protocol reference: `docs/COMMANDS.md`; command →
@@ -96,7 +115,30 @@ state-field coverage registry: `docs/FEATURE_COVERAGE.md`.
 `[Test]`, `[TestCase]`, `[SetUp]`, `[TearDown]`; it exits nonzero when zero
 tests are discovered.
 
-## Remaining gates (Task 3 qualification)
+## Remaining gates
+
+- **M2 review gate (2026-10-12, task 7)**: Core 349/349, EditMode 377/377,
+  PlayMode 105/105, Python tooling 71/71, verify-tooling 12/12; Windows
+  Mono dev + Android IL2CPP debug APK (47,688,467 B, SHA-256 `E332C362…`)
+  built from the same revision; real-player Driving 27 / Agent 21 /
+  Restart / StreamRobustness 18 / FinishDelivery 6 / NormalProfile 6
+  checks all pass (`Logs\evidence-t7-*`); a real 30-minute soak measured
+  55 laps / 23 restarts / both cameras, ~30 Hz steady cadence, 45.8 MB
+  trace, no steady-state overload, 835 bounded+marked event evictions
+  (`Logs\evidence-t7-soak3\`; report
+  `docs\tasks\driving-prototype-report.md`). Open: every device/human
+  gate below — **neither M1 nor M2 is marked complete**.
+- Windows IL2CPP module is now installed for the pinned editor
+  (`Tools\Verify.ps1 -Mode CheckEnvironment` OK since 2026-10-11,
+  owner-approved). No IL2CPP build has been produced or qualified yet —
+  Windows still ships the Mono development build (plus the new Mono
+  ordinary build via `-Mode WindowsOrdinary`, which compiles the
+  validation endpoint out), and M1 acceptance does not require a
+  particular Windows scripting backend. Kept as a separate
+  build-hardening item. Android Build Support incl. SDK/NDK/OpenJDK is
+  present and exercised by the offline build path.
+
+### Earlier gate history (foundation waves)
 
 - Windows IL2CPP module is now installed for the pinned editor
   (`Tools\Verify.ps1 -Mode CheckEnvironment` OK since 2026-10-11,
@@ -109,9 +151,9 @@ tests are discovered.
   offline path (`Tools\Verify.ps1 -Mode Android`, Unity export + bundled
   Gradle `--offline`; `Logs\android-offline\<runId>\result.json` records
   status/hash). Latest run rebuilt the APK from current source
-  (`Logs\android-offline\20261011-193051-31b4d38aaa6f49fa9d4791f5fe422f76\result.json`,
-  SHA-256 `DD8EF19C…70CB0B`). Still not device-qualified — `adb devices`
-  (bundled platform-tools) found no attached device on 2026-10-11; no
+  (`Logs\android-offline\20261011-234621-67c0086c90654c0383c539db54c2f6c8\result.json`,
+  SHA-256 `E332C362…8ECA`). Still not device-qualified — `adb devices`
+  (bundled platform-tools) found no attached device on 2026-10-12; no
   ADB/on-device run exists. Report:
   `docs\tasks\foundation-device-qualification-report.md`.
 - Saved-profile restart evidence now exists: `Tools\RestartScenario.py`
@@ -190,7 +232,9 @@ tests are discovered.
   gate: EditMode 253/253, PlayMode 53/53** (`Logs\verify-editmode-results.xml`,
   `Logs\verify-playmode-results.xml`), Core `dotnet test` 225/225,
   AgentScenario 11/11, Restart 6/6, StreamRobustness 18/18 — the earlier
-  249/25 and 249/30 counts cited above are historical per-pass records.
+  249/25 and 249/30 counts cited above are historical per-pass records,
+  superseded by the task-7 M2 gate at the top of this section.
   Still open: OS-level physical keyboard/touch coverage, human Hebrew
   reading/quality review, Android on-device/ADB behavior, IL2CPP build
-  qualification, and all racing features (`notImplemented`).
+  qualification, licensed EN/HE voice cues, owner feel review, child
+  playtest, and all later-milestone features (`notImplemented`).

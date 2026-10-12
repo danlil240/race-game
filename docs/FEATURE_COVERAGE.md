@@ -41,9 +41,10 @@ they must not be mistaken for sequenced state records.
 
 ## Verified (external `Tools/AgentScenario.py` runs on real players)
 
-Latest run on the schema-2 driving build: 21/21 checks
-(`Logs\evidence-agent6\result.json`) — adds tutorial onboarding and
-command-driven driving checks over the delta stream. Previous run on the
+Latest run on the schema-2 driving build (task-7 review pass): 21/21
+checks (`Logs\evidence-t7-agent\result.json`) — adds tutorial onboarding
+and command-driven driving checks over the delta stream. Prior run on
+the same schema (`Logs\evidence-agent6\result.json`). Previous run on the
 final packaged-font build: 11/11 checks
 (`Logs\qualification-fonts\agent-evidence\result.json`) — isolated fresh
 profiles; command discovery; packaged bilingual fonts and locale command
@@ -80,8 +81,9 @@ faults were correctly detected — no capture is certified by this run.
 
 ## Verified (external `Tools/DrivingScenario.py` driving observation run)
 
-Accepted run on the schema-2 build (`Logs\evidence-driving\result.json`,
-27 checks, run `Logs\validation-driving2\`): both `car-01` and
+Latest run on the task-7 review build (`Logs\evidence-t7-driving\result.json`,
+27 checks, run `Logs\validation-t7-driving\`; earlier accepted run
+`Logs\evidence-driving\result.json` / `Logs\validation-driving2\`): both `car-01` and
 `motorcycle-01` completed the authored `intro-01` lap through the shared
 command path only — bounded `input.set` holds re-evaluated from observed
 motor state (never teleports, never sleeps-as-proof): ordered gates
@@ -102,6 +104,25 @@ over 76 s and projected to ~37 MiB / ~4965 identities over the
 representative 30-minute schedule — under the 256 MiB trace cap and the
 10,000-identity bound, with zero backlog steps, zero overloads and zero
 dropped driving events.
+
+## Verified (external `Tools/DrivingSoak.py` sustained-session run)
+
+Task-7 review pass (`Logs\evidence-t7-soak3\result.json`, plus the two
+disclosed prior runs `evidence-t7-soak`/`evidence-t7-soak2` whose
+measurements are equivalent): a fresh validation player drove the
+authored course for a **real** 1800 s — 55 completed laps (28 `car-01` /
+27 `motorcycle-01`), 23 `race.restart` identities, 55 camera toggles
+covering both modes, 0 driving incidents. Measured, not projected:
+~30.0 Hz steady tick cadence (p50 31 ms / p95–p99 47 ms boundary gaps,
+1 gap >100 ms, max 344 ms), zero step-overload growth and zero sampled
+backlog after a disclosed ~2.5 s startup warm-up, process working set
+375→541 MB (private peak ~967 MB), 45.8 MB trace, 5,316 command
+identities, 59,409 boundaries, empty outgoing queue, capture valid
+end-to-end. The bounded 128-event `drivingEvents` window evicted 835
+events — every eviction durably marked via `droppedDrivingEvents`; the
+window is diagnostic feed, not required boundary history. Scope: Windows
+Mono development player only — ordinary-build and on-device performance
+are not inferred from it.
 
 ## Verified (synthetic UI Toolkit PlayMode callbacks)
 
@@ -167,9 +188,9 @@ clean finish completes the second capture.
   en/he window captures exist (`Logs\qualification-fonts\player-evidence-2\screenshot-*.png`).
   Human Hebrew review is still not claimed.
 - Android device behavior (APK is built by the enforced-offline path —
-  latest run `Logs\android-offline\20261011-193051-31b4d38aaa6f49fa9d4791f5fe422f76\result.json`
+  latest run `Logs\android-offline\20261011-234621-67c0086c90654c0383c539db54c2f6c8\result.json`
   rebuilt from current source — but no ADB/on-device run exists; the
-  bundled platform-tools `adb devices` check on 2026-10-11 found no
+  bundled platform-tools `adb devices` check on 2026-10-12 found no
   attached device).
 - Windows IL2CPP module is now installed for the pinned editor
   (`CheckEnvironment` OK) but no IL2CPP build has been produced or qualified
@@ -178,5 +199,7 @@ clean finish completes the second capture.
   LAN multiplayer, richer content — `notImplemented`, later milestones.
   The graybox driving slice (`drivingSimulation`, `drivingOnboarding`)
   is qualified by the DrivingScenario run and PlayMode suites above.
-- A real 30-minute soak is projected, not run — the DrivingScenario
-  capacity measurement extrapolates observed stream load honestly.
+- A real 30-minute soak now exists — see the DrivingSoak section above
+  (Windows dev player). On-device soak, ordinary-build performance,
+  render frame times, and the later four-racer/tablet-host target remain
+  unmeasured.
