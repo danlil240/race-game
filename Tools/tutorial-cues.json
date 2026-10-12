@@ -1,5 +1,5 @@
 {
-  "description": "Tutorial voice-cue manifest consumed by Generate-TutorialCues.py. One short child-friendly spoken line per cue id per locale; cue ids must match TutorialDefinitionAsset lesson ids plus 'trial' and 'finished'.",
+  "description": "Tutorial voice-cue manifest consumed by Generate-TutorialCues.py. One short child-friendly spoken line per cue id per locale; cue ids must match TutorialDefinitionAsset lesson ids plus 'trial' and 'finished'. Lines mirror the ShellText on-screen prompts (minus glyphs) so the spoken prompt matches what the child reads.",
   "outputFormat": "riff-24khz-16bit-mono-pcm",
   "voices": {
     "en": "en-US-AnaNeural",
@@ -11,32 +11,32 @@
   },
   "cues": {
     "steering": {
-      "en": "Steer left and right to move!",
-      "he": "פנה ימינה ושמאלה!"
+      "en": "Hold left or right to steer!",
+      "he": "החזיקו שמאלה או ימינה כדי לפנות!"
     },
     "drift": {
-      "en": "Hold drift to slide around the corner!",
-      "he": "החזק החלקה כדי להחליק בפניה!"
+      "en": "Hold drift while turning to slide!",
+      "he": "החזיקו דריפט בזמן הפניה כדי להחליק!"
     },
     "boost": {
-      "en": "Hold boost to go super fast!",
-      "he": "החזק בוסט כדי לטוס מהר!"
+      "en": "Press boost to zoom super fast!",
+      "he": "לחצו על האצה כדי לנסוע ממש מהר!"
     },
     "jump": {
-      "en": "Race over the ramp and jump!",
-      "he": "סע על המקפצה וקפוץ באוויר!"
+      "en": "Drive up the ramp and jump into the air!",
+      "he": "נסעו על הרמפה וקפצו באוויר!"
     },
     "recovery": {
-      "en": "Stuck? Hold recover to pop back onto the track!",
-      "he": "נתקעת? החזק שחזור כדי לחזור למסלול!"
+      "en": "Stuck? Press recovery to get back on track!",
+      "he": "נתקעתם? לחצו על חזרה למסלול!"
     },
     "trial": {
-      "en": "Great job! Now drive one full lap!",
-      "he": "כל הכבוד! עכשיו סע הקפה אחת שלמה!"
+      "en": "Great job! Now drive one whole lap to finish!",
+      "he": "כל הכבוד! עכשיו השלימו הקפה שלמה כדי לסיים!"
     },
     "finished": {
       "en": "You did it! You are ready to race!",
-      "he": "עשית את זה! אתה מוכן למרוץ!"
+      "he": "עשיתם את זה! אתם מוכנים למירוץ!"
     }
   }
 }

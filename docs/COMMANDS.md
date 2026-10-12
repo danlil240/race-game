@@ -127,6 +127,9 @@ Actions: `profile.create`, `profile.select`, `ui.navigate`, `ui.language`,
 stage is internal and `race.start` rejects it with `unavailable` — only
 `tutorial.start` may open it) and needs a selected profile;
 `race.restart`/`race.exit` need an active race and take no parameters.
+A vehicle stopped on valid flat ground for `beachedSeconds` (default 8 s)
+auto-recovers — `race.recovered` detail reports `"beached"` versus the
+wall-pin `"stuck"` and the input-initiated `"manual"`.
 `input.set` is available on `sandbox` and `driving` screens only; a
 `gadget` sample is rejected with `unavailable` while a race is active.
 Holding `boost` auto-fires: whenever `boostCharge` refills past

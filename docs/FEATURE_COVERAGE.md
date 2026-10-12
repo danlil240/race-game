@@ -41,9 +41,9 @@ they must not be mistaken for sequenced state records.
 
 ## Verified (external `Tools/AgentScenario.py` runs on real players)
 
-Latest run on the schema-2 driving build (task-7 review pass): 21/21
-checks (`Logs\evidence-t7-agent\result.json`) — adds tutorial onboarding
-and command-driven driving checks over the delta stream. Prior run on
+Latest run on the schema-2 driving build (M2 closeout): 21/21 checks
+(`Logs\evidence-m2c-agent\result.json`) — tutorial onboarding and
+command-driven driving checks over the delta stream. Prior run on
 the same schema (`Logs\evidence-agent6\result.json`). Previous run on the
 final packaged-font build: 11/11 checks
 (`Logs\qualification-fonts\agent-evidence\result.json`) — isolated fresh
@@ -81,8 +81,9 @@ faults were correctly detected — no capture is certified by this run.
 
 ## Verified (external `Tools/DrivingScenario.py` driving observation run)
 
-Latest run on the task-7 review build (`Logs\evidence-t7-driving\result.json`,
-27 checks, run `Logs\validation-t7-driving\`; earlier accepted run
+Latest run on the M2-closeout build (`Logs\evidence-m2c-driving\result.json`,
+28 checks, run `Logs\run-m2c3\`; prior run `Logs\evidence-t7-driving\result.json`,
+27 checks; earlier accepted run
 `Logs\evidence-driving\result.json` / `Logs\validation-driving2\`): both `car-01` and
 `motorcycle-01` completed the authored `intro-01` lap through the shared
 command path only — bounded `input.set` holds re-evaluated from observed
@@ -99,8 +100,8 @@ a new race identity, `race.exit` returning to practice, and durable
 screenshots inside the run directory. The full `state.ndjson` was
 independently reconstructed (snapshot/delta chain, contiguous sequence,
 boundary-per-tick including unchanged ticks, schema-2 validation);
-capacity was measured at 1.6 MiB trace / 210 commands / 2497 boundaries
-over 76 s and projected to ~37 MiB / ~4965 identities over the
+capacity was measured at ~1.7 MiB trace / 205 commands / 2537 boundaries
+over ~78 s and projected to ~39 MiB / ~4756 identities over the
 representative 30-minute schedule — under the 256 MiB trace cap and the
 10,000-identity bound, with zero backlog steps, zero overloads and zero
 dropped driving events.
