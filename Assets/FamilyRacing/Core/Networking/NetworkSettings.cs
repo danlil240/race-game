@@ -36,6 +36,14 @@ namespace FamilyRacing.Core.Networking
         // DNFs and aborted races award nothing (Task 8 applies them).
         public const int LanCompletionCoins = 20;
 
+        // Task 8: immutable result retention and redelivery. Results are
+        // retained for the whole host session — across rematches — up to
+        // this many races; at the cap another start is refused with a
+        // session-full diagnostic rather than silently evicting history.
+        // An unacknowledged offer is re-sent no more often than this.
+        public const int ResultRetentionCapacity = 128;
+        public const double ResultRedeliverySeconds = 2.0;
+
         // In-flight asynchronous commands are bounded; excess is refused
         // without mutation.
         public const int PendingOperationCapacity = 128;

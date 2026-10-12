@@ -642,7 +642,15 @@ namespace FamilyRacing.Networking
                 session.BeginRace();
             else if (race.Phase == NetworkRace.PhaseFinished
                 && snap.phase == LanSessionService.PhaseRacing)
+            {
+                // Task 8: the immutable result is retained and offered to
+                // every participant before the phase flips — delivery and
+                // its persistence acks are the session service's job from
+                // here on.
+                if (race.Result != null)
+                    session.PublishResult(race.Result);
                 session.FinishRace();
+            }
         }
 
         private NetworkInputFrame BuildLocalFrame(string sessionId,

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using FamilyRacing.Core.Automation;
 using FamilyRacing.Core.Networking;
+using FamilyRacing.Core.Profiles;
 using FamilyRacing.Core.Racing;
 
 namespace FamilyRacing.Core.Foundation
@@ -138,6 +139,36 @@ namespace FamilyRacing.Core.Foundation
                 savedProfile != null ? savedProfile.colorIndex : 0,
                 activeSlot >= 0,
                 WritableSelected());
+            // Task 8: finalized results apply their authored completion
+            // reward to the selected profile through the atomic store —
+            // exactly once per immutable result, provable by receipt.
+            lanSession.SetRewardApplier(ApplyNetworkResult);
+        }
+
+        // The session service hands each finalized result here. Coins and
+        // the receipt persist together inside one atomic save; the slot
+        // caches and the settings draft are refreshed only after the
+        // write lands, and the draft's reward fields track the live
+        // profile so a pending settings save can never roll coins or
+        // receipts back.
+        private RewardApplyResult ApplyNetworkResult(RaceResult result)
+        {
+            if (savedProfile == null)
+                return RewardApplyResult.Ineligible("noProfile");
+            var applied = RaceRewardService.Apply(
+                result, savedProfile.id, savedProfile, store);
+            if (applied.status != RaceRewardService.StatusApplied
+                && applied.status != RaceRewardService.StatusAlreadyApplied)
+                return applied;
+            if (activeSlot >= 0)
+                slots[activeSlot].Profile = CopyProfile(savedProfile);
+            if (draftProfile != null)
+            {
+                draftProfile.coins = savedProfile.coins;
+                draftProfile.appliedResults =
+                    CopyReceipts(savedProfile.appliedResults);
+            }
+            return applied;
         }
 
         private NetworkSessionState NetworkSnapshot()

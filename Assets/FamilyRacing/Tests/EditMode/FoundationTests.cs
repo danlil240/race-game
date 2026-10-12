@@ -1041,7 +1041,7 @@ namespace FamilyRacing.Tests
         {
             return new ProfileSave
             {
-                schemaVersion = 1,
+                schemaVersion = 2,
                 id = "11111111-1111-4111-8111-111111111111",
                 slot = slot,
                 avatar = "fox",
@@ -1052,7 +1052,8 @@ namespace FamilyRacing.Tests
                 effectsVolume = 0.85f,
                 voiceVolume = 1f,
                 coins = 0,
-                unlockedVehicles = new List<string> { "car-01", "motorcycle-01" }
+                unlockedVehicles = new List<string> { "car-01", "motorcycle-01" },
+                appliedResults = new List<AppliedResultReceipt>()
             };
         }
 

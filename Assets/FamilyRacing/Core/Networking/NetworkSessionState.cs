@@ -60,6 +60,24 @@ namespace FamilyRacing.Core.Networking
         }
     }
 
+    // One result-delivery row exposed to observers. On the host it is one
+    // participant's delivery state inside a retained result; on a client
+    // it is one locally retained result's persistence state. `state` is
+    // pending | failed | persisted.
+    [Serializable]
+    public sealed class ResultDeliveryState
+    {
+        public string resultId = "";
+        public string raceId = "";
+        public string participantId = "";
+        public string state = "";
+
+        public ResultDeliveryState Copy()
+        {
+            return (ResultDeliveryState)MemberwiseClone();
+        }
+    }
+
     // Observable network-session slice of FoundationState. Every Snapshot
     // is an independent deep copy; reconnect credentials and transport
     // identities never appear here.
@@ -80,5 +98,9 @@ namespace FamilyRacing.Core.Networking
         public List<PendingOperationState> pendingOperations =
             new List<PendingOperationState>();
         public List<LanDiscoveredHost> discovered = new List<LanDiscoveredHost>();
+        // Task 8: result delivery/persistence rows — the host's retained
+        // ledger on a host, the locally retained results on a client.
+        public List<ResultDeliveryState> results =
+            new List<ResultDeliveryState>();
     }
 }

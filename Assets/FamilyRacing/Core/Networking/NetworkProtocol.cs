@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
+using FamilyRacing.Core.Racing;
 
 namespace FamilyRacing.Core.Networking
 {
@@ -28,12 +29,16 @@ namespace FamilyRacing.Core.Networking
         public const string MsgVehicleSet = "vehicle.set";
         public const string MsgPauseRequest = "pause.request";
         public const string MsgLeave = "leave";
+        // Client -> host, Task 8 result flow.
+        public const string MsgResultRequest = "result.request";
+        public const string MsgResultAck = "result.ack";
         // Host -> client.
         public const string MsgJoinAccept = "join.accept";
         public const string MsgJoinReject = "join.reject";
         public const string MsgSessionState = "session.state";
         public const string MsgSessionClosed = "session.closed";
         public const string MsgOpResult = "op.result";
+        public const string MsgResultOffer = "result.offer";
 
         // --- field keys -----------------------------------------------------
         // join.request: v, gv, cv, pid, av, ci, cid, cred
@@ -46,6 +51,12 @@ namespace FamilyRacing.Core.Networking
         // session.closed: rsn
         // ready.set: cid, rdy | vehicle.set: cid, veh | pause.request: cid
         // op.result: cid, st, code | leave: pid
+        // result.request: cid, race
+        // result.offer:  rid, sid, race, ev, cv, fin, fht, fet, cc, rc, r0..rN
+        //   (each rN is the comma-joined racer tuple
+        //    pos,slot,pid,veh,attr,out,ft,laps,coins — immutable facts only;
+        //    delivery metadata never crosses the wire)
+        // result.ack: rid, st, code
 
         public static string Encode(string type, params string[] keyValues)
         {
@@ -99,6 +110,134 @@ namespace FamilyRacing.Core.Networking
         public static string VehicleClass(string vehicleId)
         {
             return FamilyRacing.Core.Driving.VehicleTuning.ClassIdOf(vehicleId);
+        }
+
+        // --- Task 8: immutable result offer codec ---------------------------
+        // The wire form carries only immutable result facts — the same
+        // facts the canonical fingerprint covers — so a redelivered offer
+        // always encodes byte-identical payloads. Delivery metadata is
+        // stripped by construction. Bounded by MaxWireMessageChars like
+        // every other session message.
+        public static string EncodeResultOffer(RaceResult result)
+        {
+            if (result == null) throw new ArgumentNullException("result");
+            var racers = result.racers != null
+                ? result.racers.Count : 0;
+            var fields = new List<string>
+            {
+                "rid", result.resultId,
+                "sid", result.sessionId,
+                "race", result.raceId,
+                "ev", result.eventId,
+                "cv", result.contentVersion,
+                "fin", result.finalized ? "1" : "0",
+                "fht", result.finalizedHostTick.ToString(
+                    CultureInfo.InvariantCulture),
+                "fet", result.finalizedElapsedTicks.ToString(
+                    CultureInfo.InvariantCulture),
+                "cc", result.completionCoins.ToString(
+                    CultureInfo.InvariantCulture),
+                "rc", racers.ToString(CultureInfo.InvariantCulture)
+            };
+            for (var i = 0; i < racers; i++)
+            {
+                var racer = result.racers[i];
+                fields.Add("r" + i.ToString(CultureInfo.InvariantCulture));
+                fields.Add(racer == null ? "" : string.Join(",", new[]
+                {
+                    racer.position.ToString(CultureInfo.InvariantCulture),
+                    racer.slot.ToString(CultureInfo.InvariantCulture),
+                    racer.participantId ?? "",
+                    racer.vehicleId ?? "",
+                    racer.attribution ?? "",
+                    racer.outcome ?? "",
+                    racer.finishTicks.ToString(CultureInfo.InvariantCulture),
+                    racer.lapsCompleted.ToString(CultureInfo.InvariantCulture),
+                    racer.coinsAwarded.ToString(CultureInfo.InvariantCulture)
+                }));
+            }
+            return Encode(MsgResultOffer, fields.ToArray());
+        }
+
+        // Decodes the immutable facts of a result.offer. Delivery state
+        // and the fingerprint are never parsed from the wire — the client
+        // recomputes the fingerprint locally so a forged fingerprint can
+        // never launder a tampered result.
+        public static bool TryDecodeResultOffer(
+            IReadOnlyDictionary<string, string> fields, out RaceResult result)
+        {
+            result = null;
+            if (fields == null) return false;
+            string resultId, sessionId, raceId, eventId, contentVersion, fin;
+            if (!fields.TryGetValue("rid", out resultId)
+                || !fields.TryGetValue("sid", out sessionId)
+                || !fields.TryGetValue("race", out raceId)
+                || !fields.TryGetValue("ev", out eventId)
+                || !fields.TryGetValue("cv", out contentVersion)
+                || !fields.TryGetValue("fin", out fin)) return false;
+            long hostTick, elapsed;
+            int completionCoins, count;
+            if (!long.TryParse(Value(fields, "fht"), NumberStyles.Integer,
+                    CultureInfo.InvariantCulture, out hostTick)
+                || !long.TryParse(Value(fields, "fet"), NumberStyles.Integer,
+                    CultureInfo.InvariantCulture, out elapsed)
+                || !IntField(fields, "cc", out completionCoins)
+                || !IntField(fields, "rc", out count)
+                || count < 0
+                || count > NetworkSettings.ParticipantCapacity) return false;
+            var decoded = new RaceResult
+            {
+                resultId = resultId ?? "",
+                sessionId = sessionId ?? "",
+                raceId = raceId ?? "",
+                eventId = eventId ?? "",
+                contentVersion = contentVersion ?? "",
+                finalized = fin == "1",
+                finalizedHostTick = hostTick,
+                finalizedElapsedTicks = elapsed,
+                completionCoins = completionCoins
+            };
+            for (var i = 0; i < count; i++)
+            {
+                var raw = Value(fields,
+                    "r" + i.ToString(CultureInfo.InvariantCulture));
+                var parts = raw.Split(',');
+                if (parts.Length != 9) return false;
+                int position, slot, laps, coins;
+                long finishTicks;
+                if (!int.TryParse(parts[0], NumberStyles.Integer,
+                        CultureInfo.InvariantCulture, out position)
+                    || !int.TryParse(parts[1], NumberStyles.Integer,
+                        CultureInfo.InvariantCulture, out slot)
+                    || !long.TryParse(parts[6], NumberStyles.Integer,
+                        CultureInfo.InvariantCulture, out finishTicks)
+                    || !int.TryParse(parts[7], NumberStyles.Integer,
+                        CultureInfo.InvariantCulture, out laps)
+                    || !int.TryParse(parts[8], NumberStyles.Integer,
+                        CultureInfo.InvariantCulture, out coins)) return false;
+                decoded.racers.Add(new RaceResultEntry
+                {
+                    position = position,
+                    slot = slot,
+                    participantId = parts[2],
+                    vehicleId = parts[3],
+                    attribution = parts[4],
+                    outcome = parts[5],
+                    finishTicks = finishTicks,
+                    lapsCompleted = laps,
+                    coinsAwarded = coins
+                });
+            }
+            result = decoded;
+            return true;
+        }
+
+        private static string Value(IReadOnlyDictionary<string, string> fields,
+            string key)
+        {
+            string value;
+            return fields != null && fields.TryGetValue(key, out value)
+                && value != null ? value : "";
         }
 
         public static bool IntField(IReadOnlyDictionary<string, string> fields,

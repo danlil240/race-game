@@ -41,7 +41,7 @@ namespace FamilyRacing.Tests
             Assert.That(profile.slot, Is.EqualTo(slot));
             Assert.That(profile.avatar, Is.EqualTo(avatar));
             Assert.That(profile.colorIndex, Is.EqualTo(slot));
-            Assert.That(profile.schemaVersion, Is.EqualTo(1));
+            Assert.That(profile.schemaVersion, Is.EqualTo(2));
             Assert.That(Guid.TryParseExact(profile.id, "D", out _), Is.True);
             Assert.That(profile.language, Is.EqualTo("he"));
             Assert.That(profile.camera, Is.EqualTo("chase"));
@@ -51,6 +51,8 @@ namespace FamilyRacing.Tests
             Assert.That(profile.voiceVolume, Is.EqualTo(1f));
             Assert.That(profile.coins, Is.Zero);
             Assert.That(profile.unlockedVehicles, Is.EquivalentTo(new[] { "car-01", "motorcycle-01" }));
+            Assert.That(profile.appliedResults, Is.Not.Null);
+            Assert.That(profile.appliedResults.Count, Is.Zero);
         }
 
         [Test]
@@ -217,7 +219,7 @@ namespace FamilyRacing.Tests
         public void FuturePrimaryBlocksEvenWithValidOlderBackup()
         {
             var future = ValidProfile(0);
-            future.schemaVersion = 2;
+            future.schemaVersion = 3;
             File.WriteAllText(Primary(0), serializer.Serialize(future));
             File.WriteAllText(Backup(0), serializer.Serialize(ValidProfile(0)));
             var before = File.ReadAllText(Primary(0));
@@ -233,7 +235,7 @@ namespace FamilyRacing.Tests
         {
             File.WriteAllText(Primary(0), serializer.Serialize(ValidProfile(0)));
             var future = ValidProfile(0);
-            future.schemaVersion = 2;
+            future.schemaVersion = 3;
             File.WriteAllText(Backup(0), serializer.Serialize(future));
             Assert.That(Store().Load(0).Status, Is.EqualTo(ProfileLoadStatus.Loaded));
         }
@@ -244,7 +246,7 @@ namespace FamilyRacing.Tests
         public void SaveRefusesDestructiveOverwriteOfBlockedPrimary(string kind)
         {
             var blocked = ValidProfile(0);
-            if (kind == "future") blocked.schemaVersion = 2;
+            if (kind == "future") blocked.schemaVersion = 3;
             if (kind == "invalid") blocked.coins = -1;
             var original = kind == "corrupt" ? "private corrupt content" : serializer.Serialize(blocked);
             File.WriteAllText(Primary(0), original);
@@ -263,7 +265,7 @@ namespace FamilyRacing.Tests
         {
             File.WriteAllText(Primary(0), serializer.Serialize(ValidProfile(0)));
             var profile = ValidProfile(0);
-            profile.schemaVersion = 2;
+            profile.schemaVersion = 3;
             var backup = future ? serializer.Serialize(profile) : "corrupt backup";
             File.WriteAllText(Backup(0), backup);
             var original = File.ReadAllText(Primary(0));
@@ -374,6 +376,14 @@ namespace FamilyRacing.Tests
         [TestCase("whitespaceVehicle")]
         [TestCase("newlineVehicle")]
         [TestCase("pathVehicle")]
+        [TestCase("legacySchema")]
+        [TestCase("nullReceipts")]
+        [TestCase("nullReceipt")]
+        [TestCase("emptyReceiptId")]
+        [TestCase("foreignReceipt")]
+        [TestCase("negativeReceiptCoins")]
+        [TestCase("badReceiptFingerprint")]
+        [TestCase("duplicateReceipt")]
         public void InvalidProfileCannotOverwritePreviousGoodSave(string invariant)
         {
             Store().Save(ValidProfile(0));
@@ -404,6 +414,13 @@ namespace FamilyRacing.Tests
         [TestCase("whitespaceVehicle")]
         [TestCase("newlineVehicle")]
         [TestCase("pathVehicle")]
+        [TestCase("nullReceipts")]
+        [TestCase("nullReceipt")]
+        [TestCase("emptyReceiptId")]
+        [TestCase("foreignReceipt")]
+        [TestCase("negativeReceiptCoins")]
+        [TestCase("badReceiptFingerprint")]
+        [TestCase("duplicateReceipt")]
         public void InvalidSerializedProfileBlocksLoading(string invariant)
         {
             File.WriteAllText(Primary(0), InvalidPayload(invariant));
@@ -464,7 +481,7 @@ namespace FamilyRacing.Tests
         }
 
         // JsonUtility cannot serialize a null List field (it emits []), so the
-        // null-vehicles stored-file invariant writes its literal JSON payload.
+        // null-collection stored-file invariants write literal JSON payloads.
         private string InvalidPayload(string invariant)
         {
             if (invariant == "nullVehicles")
@@ -473,6 +490,13 @@ namespace FamilyRacing.Tests
                     "\"camera\":\"chase\",\"reducedCameraShake\":false,\"musicVolume\":0.65," +
                     "\"effectsVolume\":0.85,\"voiceVolume\":1.0,\"coins\":0," +
                     "\"unlockedVehicles\":null}";
+            if (invariant == "nullReceipts")
+                return "{\"schemaVersion\":2,\"id\":\"11111111-1111-4111-8111-111111111111\"," +
+                    "\"slot\":0,\"avatar\":\"fox\",\"colorIndex\":0,\"language\":\"en\"," +
+                    "\"camera\":\"chase\",\"reducedCameraShake\":false,\"musicVolume\":0.65," +
+                    "\"effectsVolume\":0.85,\"voiceVolume\":1.0,\"coins\":0," +
+                    "\"unlockedVehicles\":[\"car-01\",\"motorcycle-01\"]," +
+                    "\"appliedResults\":null}";
             return serializer.Serialize(InvalidProfile(invariant));
         }
 
@@ -484,7 +508,7 @@ namespace FamilyRacing.Tests
         {
             return new ProfileSave
             {
-                schemaVersion = 1,
+                schemaVersion = 2,
                 id = "11111111-1111-4111-8111-111111111111",
                 slot = slot,
                 avatar = "fox",
@@ -495,7 +519,8 @@ namespace FamilyRacing.Tests
                 effectsVolume = 0.85f,
                 voiceVolume = 1f,
                 coins = 0,
-                unlockedVehicles = new List<string> { "car-01", "motorcycle-01" }
+                unlockedVehicles = new List<string> { "car-01", "motorcycle-01" },
+                appliedResults = new List<AppliedResultReceipt>()
             };
         }
 
@@ -505,7 +530,53 @@ namespace FamilyRacing.Tests
             switch (invariant)
             {
                 case "schema": profile.schemaVersion = 0; break;
-                case "futureSchema": profile.schemaVersion = 2; break;
+                case "futureSchema": profile.schemaVersion = 3; break;
+                case "legacySchema": profile.schemaVersion = 1; break;
+                case "nullReceipts": profile.appliedResults = null; break;
+                case "nullReceipt":
+                    profile.appliedResults.Add(null); break;
+                case "emptyReceiptId":
+                    profile.appliedResults.Add(new AppliedResultReceipt
+                    {
+                        resultId = "", participantId = profile.id,
+                        awardedCoins = 20,
+                        fingerprint = new string('a', 64)
+                    }); break;
+                case "foreignReceipt":
+                    profile.appliedResults.Add(new AppliedResultReceipt
+                    {
+                        resultId = "r1/result",
+                        participantId = "22222222-2222-4222-8222-222222222222",
+                        awardedCoins = 20,
+                        fingerprint = new string('a', 64)
+                    }); break;
+                case "negativeReceiptCoins":
+                    profile.appliedResults.Add(new AppliedResultReceipt
+                    {
+                        resultId = "r1/result", participantId = profile.id,
+                        awardedCoins = -1,
+                        fingerprint = new string('a', 64)
+                    }); break;
+                case "badReceiptFingerprint":
+                    profile.appliedResults.Add(new AppliedResultReceipt
+                    {
+                        resultId = "r1/result", participantId = profile.id,
+                        awardedCoins = 20, fingerprint = "not-a-sha"
+                    }); break;
+                case "duplicateReceipt":
+                    var receipt = new AppliedResultReceipt
+                    {
+                        resultId = "r1/result", participantId = profile.id,
+                        awardedCoins = 20,
+                        fingerprint = new string('a', 64)
+                    };
+                    profile.appliedResults.Add(receipt);
+                    profile.appliedResults.Add(new AppliedResultReceipt
+                    {
+                        resultId = "r1/result", participantId = profile.id,
+                        awardedCoins = 20,
+                        fingerprint = new string('b', 64)
+                    }); break;
                 case "nullId": profile.id = null; break;
                 case "emptyId": profile.id = ""; break;
                 case "malformedId": profile.id = "../escape"; break;

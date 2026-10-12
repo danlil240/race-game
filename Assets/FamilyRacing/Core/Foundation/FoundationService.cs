@@ -1278,8 +1278,22 @@ namespace FamilyRacing.Core.Foundation
                 coins = profile.coins,
                 unlockedVehicles = profile.unlockedVehicles == null
                     ? null
-                    : new List<string>(profile.unlockedVehicles)
+                    : new List<string>(profile.unlockedVehicles),
+                appliedResults = CopyReceipts(profile.appliedResults)
             };
+        }
+
+        // The receipt ledger deep-copies with the profile so no snapshot
+        // or draft can ever share — or silently drop — applied-result
+        // state. Receipts are never silently evicted.
+        private static List<AppliedResultReceipt> CopyReceipts(
+            List<AppliedResultReceipt> receipts)
+        {
+            if (receipts == null) return null;
+            var copy = new List<AppliedResultReceipt>(receipts.Count);
+            foreach (var receipt in receipts)
+                copy.Add(receipt != null ? receipt.Copy() : null);
+            return copy;
         }
 
         private static KeyValuePair<string, ParameterSpec[]> Schema(string action, params ParameterSpec[] parameters)

@@ -24,7 +24,8 @@ namespace FamilyRacing.Core.Profiles
                 effectsVolume = 0.85f,
                 voiceVolume = 1f,
                 coins = 0,
-                unlockedVehicles = new List<string> { "car-01", "motorcycle-01" }
+                unlockedVehicles = new List<string> { "car-01", "motorcycle-01" },
+                appliedResults = new List<AppliedResultReceipt>()
             };
         }
     }

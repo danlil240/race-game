@@ -91,6 +91,11 @@ namespace FamilyRacing.Core.Profiles
             {
                 var profile = serializer.Deserialize(File.ReadAllText(path));
                 var check = ProfileValidation.Check(profile, slot);
+                // Schema upgrades happen in memory only: an older valid
+                // file migrates forward on read and keeps its on-disk
+                // bytes until an explicit successful save rewrites it.
+                if (check == ProfileCheck.Valid && ProfileMigration.Migrate(profile))
+                    check = ProfileValidation.Check(profile, slot);
                 return new ProfileRead(check, check == ProfileCheck.Valid ? profile : null);
             }
             catch
@@ -122,7 +127,8 @@ namespace FamilyRacing.Core.Profiles
                 throw new InvalidOperationException("The serialized data could not be verified.", e);
             }
             if (ProfileValidation.Check(written, profile.slot) != ProfileCheck.Valid
-                || written.id != profile.id)
+                || written.id != profile.id
+                || written.schemaVersion != profile.schemaVersion)
                 throw new InvalidOperationException("The serialized data did not verify; nothing was written.");
             return json;
         }

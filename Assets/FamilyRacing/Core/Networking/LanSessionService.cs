@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using FamilyRacing.Core.Automation;
+using FamilyRacing.Core.Profiles;
 using FamilyRacing.Core.Racing;
 
 namespace FamilyRacing.Core.Networking
@@ -99,6 +100,20 @@ namespace FamilyRacing.Core.Networking
         private readonly ReconnectRegistry reconnectRegistry =
             new ReconnectRegistry();
         private readonly List<string> pauseRequests = new List<string>();
+        // Task 8: immutable finalized results retained for the whole host
+        // session — across rematches and restarts of clients — each with
+        // a per-participant delivery ledger. Results are never silently
+        // evicted; a full ledger refuses new starts instead.
+        private readonly List<RaceResult> retainedResults =
+            new List<RaceResult>();
+        // Client side: results already offered by the host, retained so
+        // redelivery and retries replay the receipt instead of re-awarding.
+        private readonly List<RaceResult> deliveredResults =
+            new List<RaceResult>();
+        // Composition seam: applies a finalized result to the selected
+        // profile through the atomic store write. FoundationService wires
+        // it at runtime; tests substitute the same service directly.
+        private Func<RaceResult, RewardApplyResult> rewardApplier;
 
         private DrivingContentCatalog content;
         private string role = RoleNone;
@@ -173,6 +188,16 @@ namespace FamilyRacing.Core.Networking
             profileWritable = writable;
         }
 
+        // Composition seam for Task 8: applies an immutable finalized
+        // result to the local profile (coins + receipt, atomically). Null
+        // means this process cannot persist rewards — deliveries then
+        // stay honest pending/failed instead of pretending to persist.
+        public void SetRewardApplier(
+            Func<RaceResult, RewardApplyResult> applier)
+        {
+            rewardApplier = applier;
+        }
+
         public CommandResult Execute(GameCommand command)
         {
             if (command == null || string.IsNullOrEmpty(command.Action))
@@ -229,6 +254,10 @@ namespace FamilyRacing.Core.Networking
                     CompletePending(op, CommandResult.Failed, "requestTimeout");
                 }
             }
+            // Unacknowledged result offers are retransmitted on a slow
+            // cadence: the offer is immutable, so a resend is byte-for-byte
+            // identical and the client's receipt dedup makes it safe.
+            if (role == RoleHost) OfferPending(now);
         }
 
         public NetworkSessionState Snapshot()
@@ -257,6 +286,31 @@ namespace FamilyRacing.Core.Networking
             if (discovery != null && discovery.Entries != null)
                 foreach (var entry in discovery.Entries)
                     if (entry != null) state.discovered.Add(entry.Copy());
+            // Task 8: expose the delivery ledger honestly — pending,
+            // failed, and persisted are observable, never implied.
+            if (role == RoleHost)
+            {
+                foreach (var result in retainedResults)
+                    foreach (var delivery in result.deliveries)
+                        state.results.Add(new ResultDeliveryState
+                        {
+                            resultId = result.resultId,
+                            raceId = result.raceId,
+                            participantId = delivery.participantId,
+                            state = delivery.state
+                        });
+            }
+            else if (role == RoleClient)
+            {
+                foreach (var result in deliveredResults)
+                    state.results.Add(new ResultDeliveryState
+                    {
+                        resultId = result.resultId,
+                        raceId = result.raceId,
+                        participantId = localParticipantId,
+                        state = result.deliveryStatus
+                    });
+            }
             return state;
         }
 
@@ -328,6 +382,9 @@ namespace FamilyRacing.Core.Networking
                     { Deny(out available, out reason, "invalidPhase"); }
                     else if (action != "lan.rematch" && phase != PhaseLobby)
                     { Deny(out available, out reason, "invalidPhase"); }
+                    else if (action == "lan.start"
+                        && retainedResults.Count >= NetworkSettings.ResultRetentionCapacity)
+                    { Deny(out available, out reason, "sessionFull"); }
                     break;
                 case "lan.vehicle":
                 case "lan.ready":
@@ -341,10 +398,15 @@ namespace FamilyRacing.Core.Networking
                     break;
                 case "lan.results.request":
                     if (role == RoleNone) { Deny(out available, out reason, "noSession"); }
-                    else { Deny(out available, out reason, "noResult"); }
+                    else if (role == RoleHost && retainedResults.Count == 0)
+                    { Deny(out available, out reason, "noResult"); }
+                    else if (role == RoleClient && !ResultPhase(phase))
+                    { Deny(out available, out reason, "invalidPhase"); }
                     break;
                 case "lan.results.retrySave":
-                    Deny(out available, out reason, "noPendingResult");
+                    if (role == RoleNone) { Deny(out available, out reason, "noSession"); }
+                    else if (!HasFailedLocalDelivery())
+                    { Deny(out available, out reason, "noPendingResult"); }
                     break;
                 case "lan.leave":
                     if (role == RoleNone) { Deny(out available, out reason, "noSession"); }
@@ -412,6 +474,12 @@ namespace FamilyRacing.Core.Networking
                     case NetworkProtocol.MsgLeave:
                         HandleClientLeave(connectionId);
                         return;
+                    case NetworkProtocol.MsgResultRequest:
+                        HandleResultRequest(connectionId, fields);
+                        return;
+                    case NetworkProtocol.MsgResultAck:
+                        HandleResultAck(connectionId, fields);
+                        return;
                     default:
                         return;
                 }
@@ -431,6 +499,9 @@ namespace FamilyRacing.Core.Networking
                         return;
                     case NetworkProtocol.MsgOpResult:
                         HandleOpResult(fields);
+                        return;
+                    case NetworkProtocol.MsgResultOffer:
+                        HandleResultOffer(fields);
                         return;
                     case NetworkProtocol.MsgSessionClosed:
                         HandleSessionClosed(fields);
@@ -609,6 +680,12 @@ namespace FamilyRacing.Core.Networking
                 return Result(command, CommandResult.Rejected, "invalidPhase");
             if (descriptor == null || descriptor.eventId == "")
                 return Result(command, CommandResult.Rejected, "notConfigured");
+            // The retained-result ledger is bounded: at the cap a new
+            // race could never publish its result, so the start itself
+            // is refused with a clear session-full diagnostic — history
+            // is never silently evicted to make room.
+            if (retainedResults.Count >= NetworkSettings.ResultRetentionCapacity)
+                return Result(command, CommandResult.Rejected, "sessionFull");
             foreach (var participant in slots)
             {
                 if (participant.occupied && participant.connected
@@ -872,14 +949,432 @@ namespace FamilyRacing.Core.Networking
         {
             if (role == RoleNone)
                 return Result(command, CommandResult.Rejected, "noSession");
-            // Result storage/delivery lands in Task 8; nothing can be
-            // fetched yet and the refusal stays honest.
+            string raceId;
+            if (!command.Parameters.TryGetValue("raceId", out raceId)
+                || string.IsNullOrEmpty(raceId))
+                return Result(command, CommandResult.Rejected, "missingParameter");
+            if (role == RoleClient)
+            {
+                // Only live-session phases can reach the host; recovery
+                // and reconnecting fail fast instead of queueing a
+                // request that can never complete.
+                if (!ResultPhase(phase))
+                    return Result(command, CommandResult.Rejected,
+                        "invalidPhase");
+                return SubmitRequest(command, NetworkProtocol.MsgResultRequest,
+                    "race", raceId);
+            }
+            // Host-local retrieval: the retained immutable result exists
+            // or it does not — the refusal stays honest either way.
+            foreach (var result in retainedResults)
+                if (result.raceId == raceId)
+                    return Result(command, CommandResult.Applied, "");
             return Result(command, CommandResult.Rejected, "noResult");
         }
 
         private CommandResult ResultsRetrySave(GameCommand command)
         {
+            if (role == RoleNone)
+                return Result(command, CommandResult.Rejected, "noSession");
+            // A retry re-applies the identical immutable result against
+            // the local store — the receipt dedup makes it safe and the
+            // retry is the only thing that can clear a failed save.
+            if (role == RoleClient)
+            {
+                foreach (var result in deliveredResults)
+                {
+                    if (result.deliveryStatus != "failed") continue;
+                    var applied = ApplyDelivered(result);
+                    return applied.status == RaceRewardService.StatusApplied
+                        || applied.status == RaceRewardService.StatusAlreadyApplied
+                        ? Result(command, CommandResult.Applied, "")
+                        : Result(command, CommandResult.Failed,
+                            applied.code.Length > 0 ? applied.code : "saveFailed");
+                }
+                return Result(command, CommandResult.Rejected, "noPendingResult");
+            }
+            foreach (var result in retainedResults)
+            {
+                var delivery = DeliveryFor(result, localParticipantId);
+                if (delivery == null || delivery.state != "failed") continue;
+                ApplyLocalResult(result);
+                return delivery.state == "persisted"
+                    ? Result(command, CommandResult.Applied, "")
+                    : Result(command, CommandResult.Failed,
+                        delivery.code.Length > 0 ? delivery.code : "saveFailed");
+            }
             return Result(command, CommandResult.Rejected, "noPendingResult");
+        }
+
+        // --- Task 8: immutable result retention + delivery -----------------
+
+        // Called by the race coordinator exactly once per finalized race.
+        // The result is retained for the host session's lifetime, offered
+        // to every connected participant named in it, and applied to the
+        // host's own profile immediately. Refuses when the ledger is full
+        // or a conflicting result id was already retained — history is
+        // never silently evicted or overwritten.
+        public bool PublishResult(RaceResult result)
+        {
+            if (role != RoleHost || result == null || !result.finalized
+                || string.IsNullOrEmpty(result.resultId)
+                || string.IsNullOrEmpty(result.raceId))
+                return false;
+            var fingerprint = result.Fingerprint();
+            foreach (var kept in retainedResults)
+            {
+                if (kept.resultId != result.resultId) continue;
+                // An identical republish is idempotent; a conflicting one
+                // is a defect the host must not absorb.
+                if (kept.Fingerprint() == fingerprint) return true;
+                lastError = "conflict";
+                return false;
+            }
+            if (retainedResults.Count >= NetworkSettings.ResultRetentionCapacity)
+            {
+                lastError = "sessionFull";
+                return false;
+            }
+            var retained = result.Copy();
+            retained.deliveryStatus = "pending";
+            retained.deliveries.Clear();
+            // Retrieval rights belong to every participant the result
+            // names — including ones that later disconnect or rematch.
+            foreach (var slot in slots)
+            {
+                if (!slot.occupied
+                    || EntryFor(retained, slot.participantId) == null)
+                    continue;
+                retained.deliveries.Add(new RaceResultDelivery
+                {
+                    participantId = slot.participantId,
+                    state = "pending",
+                    lastOfferedAt = double.NegativeInfinity
+                });
+            }
+            retainedResults.Add(retained);
+            // The host's own reward applies through the same atomic write
+            // every client uses — no privileged local path.
+            ApplyLocalResult(retained);
+            OfferPending(now);
+            return true;
+        }
+
+        // Retained results currently published this session (host only).
+        // Returned as deep copies so observers can never mutate history.
+        public List<RaceResult> RetainedResults()
+        {
+            var copies = new List<RaceResult>();
+            foreach (var result in retainedResults) copies.Add(result.Copy());
+            return copies;
+        }
+
+        // Results this client has been offered, retained locally for
+        // dedup and retry. Returned as deep copies.
+        public List<RaceResult> DeliveredResults()
+        {
+            var copies = new List<RaceResult>();
+            foreach (var result in deliveredResults) copies.Add(result.Copy());
+            return copies;
+        }
+
+        private void ApplyLocalResult(RaceResult result)
+        {
+            var delivery = DeliveryFor(result, localParticipantId);
+            if (delivery == null) return;
+            if (rewardApplier == null)
+            {
+                // No profile seam installed: honest pending, never a
+                // fabricated persistence claim.
+                delivery.state = "pending";
+                delivery.code = "";
+                RefreshDeliveryStatus(result);
+                return;
+            }
+            RewardApplyResult applied;
+            try
+            {
+                applied = rewardApplier(result);
+            }
+            catch (Exception)
+            {
+                applied = RewardApplyResult.Failed("saveFailed");
+            }
+            if (applied == null)
+                applied = RewardApplyResult.Failed("saveFailed");
+            ApplyOutcome(delivery, applied);
+            RefreshDeliveryStatus(result);
+        }
+
+        // Maps a reward-apply outcome onto a delivery row. Applied and
+        // alreadyApplied both mean the client durably owns the receipt.
+        private static void ApplyOutcome(RaceResultDelivery delivery,
+            RewardApplyResult applied)
+        {
+            if (applied.status == RaceRewardService.StatusApplied
+                || applied.status == RaceRewardService.StatusAlreadyApplied)
+            {
+                delivery.state = "persisted";
+                delivery.code = "";
+            }
+            else
+            {
+                delivery.state = "failed";
+                delivery.code = applied.code;
+            }
+        }
+
+        // Retransmits unacknowledged offers to connected participants on
+        // the redelivery cadence. Persisted deliveries and permanent
+        // failures (conflict/ineligible) are never resent — everything
+        // else keeps retrying until the ack lands.
+        private void OfferPending(double at)
+        {
+            foreach (var result in retainedResults)
+            {
+                string offer = null;
+                foreach (var delivery in result.deliveries)
+                {
+                    if (delivery.state == "persisted") continue;
+                    if (delivery.state == "failed"
+                        && PermanentDeliveryFailure(delivery.code)) continue;
+                    // Local deliveries apply directly; the wire never
+                    // carries the host's own reward.
+                    if (delivery.participantId == localParticipantId) continue;
+                    ulong connectionId;
+                    if (!connectionIdFor.TryGetValue(delivery.participantId,
+                            out connectionId)) continue;
+                    if (at - delivery.lastOfferedAt
+                        < NetworkSettings.ResultRedeliverySeconds) continue;
+                    if (offer == null)
+                        offer = NetworkProtocol.EncodeResultOffer(result);
+                    delivery.lastOfferedAt = at;
+                    link.Send(connectionId, offer);
+                }
+            }
+        }
+
+        // conflict and ineligible:* can never resolve by resending the
+        // same immutable bytes; every other failure (saveFailed, ...)
+        // is treated as transient and keeps retrying.
+        private static bool PermanentDeliveryFailure(string code)
+        {
+            return code == "conflict"
+                || (code != null && code.StartsWith("ineligible:"));
+        }
+
+        private void RefreshDeliveryStatus(RaceResult result)
+        {
+            var status = "persisted";
+            foreach (var delivery in result.deliveries)
+            {
+                if (delivery.state == "persisted") continue;
+                status = delivery.state == "failed" ? "failed" : "pending";
+                if (status == "pending") break;
+            }
+            result.deliveryStatus = result.deliveries.Count == 0
+                ? "pending" : status;
+        }
+
+        private static RaceResultEntry EntryFor(RaceResult result,
+            string participantId)
+        {
+            if (result.racers == null || participantId == null) return null;
+            foreach (var entry in result.racers)
+                if (entry != null && entry.participantId == participantId)
+                    return entry;
+            return null;
+        }
+
+        private static RaceResultDelivery DeliveryFor(RaceResult result,
+            string participantId)
+        {
+            foreach (var delivery in result.deliveries)
+                if (delivery.participantId == participantId) return delivery;
+            return null;
+        }
+
+        private RaceResult FindRetained(string resultId)
+        {
+            foreach (var result in retainedResults)
+                if (result.resultId == resultId) return result;
+            return null;
+        }
+
+        private RaceResult FindDelivered(string resultId)
+        {
+            foreach (var result in deliveredResults)
+                if (result.resultId == resultId) return result;
+            return null;
+        }
+
+        private bool HasFailedLocalDelivery()
+        {
+            if (role == RoleClient)
+            {
+                foreach (var result in deliveredResults)
+                    if (result.deliveryStatus == "failed") return true;
+                return false;
+            }
+            foreach (var result in retainedResults)
+            {
+                var delivery = DeliveryFor(result, localParticipantId);
+                if (delivery != null && delivery.state == "failed") return true;
+            }
+            return false;
+        }
+
+        private static bool ResultPhase(string phase)
+        {
+            return phase == PhaseLobby || phase == PhaseCountdown
+                || phase == PhaseRacing || phase == PhaseResults;
+        }
+
+        // Applies a delivered result to the local profile and reports the
+        // outcome back to the host. Every code path acknowledges — an
+        // unacknowledged offer is what triggers host redelivery.
+        private RewardApplyResult ApplyDelivered(RaceResult result)
+        {
+            RewardApplyResult applied;
+            try
+            {
+                applied = rewardApplier != null
+                    ? rewardApplier(result)
+                    : RewardApplyResult.Failed("saveFailed");
+            }
+            catch (Exception)
+            {
+                applied = RewardApplyResult.Failed("saveFailed");
+            }
+            if (applied == null)
+                applied = RewardApplyResult.Failed("saveFailed");
+            var persisted =
+                applied.status == RaceRewardService.StatusApplied
+                || applied.status == RaceRewardService.StatusAlreadyApplied;
+            result.deliveryStatus = persisted ? "persisted" : "failed";
+            // Ineligible is a permanent verdict on immutable facts (dnf,
+            // foreign profile, no result) — the ack prefix lets the host
+            // stop resending, while the granular reason stays observable.
+            var code = persisted ? ""
+                : applied.status == RaceRewardService.StatusIneligible
+                    ? "ineligible:" + applied.code
+                    : applied.code;
+            link.Send(serverConnection, NetworkProtocol.Encode(
+                NetworkProtocol.MsgResultAck,
+                "rid", result.resultId,
+                "st", persisted ? "persisted" : "failed",
+                "code", code));
+            return applied;
+        }
+
+        // Client inbound: an immutable result offer from the host. First
+        // offers are retained; identical re-offers dedup against the
+        // retained copy; a conflicting re-offer is rejected by fingerprint
+        // and can never overwrite local facts.
+        private void HandleResultOffer(Dictionary<string, string> fields)
+        {
+            RaceResult result;
+            if (!NetworkProtocol.TryDecodeResultOffer(fields, out result)
+                || result == null || !result.finalized
+                || string.IsNullOrEmpty(result.resultId))
+            {
+                lastError = "badMessage";
+                return;
+            }
+            var known = FindDelivered(result.resultId);
+            if (known != null)
+            {
+                if (known.Fingerprint() != result.Fingerprint())
+                {
+                    link.Send(serverConnection, NetworkProtocol.Encode(
+                        NetworkProtocol.MsgResultAck,
+                        "rid", result.resultId,
+                        "st", "failed", "code", "conflict"));
+                    return;
+                }
+                result = known;
+            }
+            else
+            {
+                result.deliveryStatus = "pending";
+                result.deliveries.Clear();
+                deliveredResults.Add(result);
+            }
+            ApplyDelivered(result);
+        }
+
+        // Host inbound: a participant's persistence acknowledgment. The
+        // owning participant is derived from the authenticated connection
+        // — a payload can only ever update its own delivery row.
+        private void HandleResultAck(ulong connectionId,
+            Dictionary<string, string> fields)
+        {
+            var participant = ParticipantFor(connectionId);
+            if (participant == null) return;
+            var result = FindRetained(Field(fields, "rid"));
+            if (result == null) return;
+            var delivery = DeliveryFor(result, participant.participantId);
+            if (delivery == null) return;
+            if (Field(fields, "st") == "persisted")
+            {
+                delivery.state = "persisted";
+                delivery.code = "";
+            }
+            else
+            {
+                delivery.state = "failed";
+                delivery.code = Field(fields, "code");
+            }
+            RefreshDeliveryStatus(result);
+        }
+
+        // Host inbound: explicit retrieval. Rights come from the
+        // authenticated connection's participant appearing in the
+        // result's racer rows — credentials survive rematches and
+        // disconnects, so a released slot does not forfeit them.
+        private void HandleResultRequest(ulong connectionId,
+            Dictionary<string, string> fields)
+        {
+            var commandId = Field(fields, "cid");
+            var participant = ParticipantFor(connectionId);
+            if (participant == null)
+            {
+                SendOpResult(connectionId, commandId,
+                    CommandResult.Rejected, "noSession");
+                return;
+            }
+            var raceId = Field(fields, "race");
+            RaceResult found = null;
+            foreach (var result in retainedResults)
+                if (result.raceId == raceId) { found = result; break; }
+            if (found == null
+                || EntryFor(found, participant.participantId) == null)
+            {
+                SendOpResult(connectionId, commandId,
+                    CommandResult.Rejected, "noResult");
+                return;
+            }
+            var delivery = DeliveryFor(found, participant.participantId);
+            if (delivery == null)
+            {
+                delivery = new RaceResultDelivery
+                {
+                    participantId = participant.participantId,
+                    state = "pending",
+                    lastOfferedAt = double.NegativeInfinity
+                };
+                found.deliveries.Add(delivery);
+            }
+            // The request forces an immediate re-offer of the identical
+            // immutable payload straight to the requester — OfferPending
+            // skips persisted rows, but a restarted process whose local
+            // copy is gone must still be able to fetch the result; the
+            // client's receipt dedup makes the replay safe.
+            delivery.lastOfferedAt = now;
+            link.Send(connectionId,
+                NetworkProtocol.EncodeResultOffer(found));
+            SendOpResult(connectionId, commandId,
+                CommandResult.Applied, "");
         }
 
         // --- host inbound handlers ------------------------------------------
@@ -949,6 +1444,9 @@ namespace FamilyRacing.Core.Networking
                     SendJoinAccept(connectionId, reclaim, commandId,
                         rotated ?? credential);
                     BroadcastSessionState();
+                    // A credentialed rejoin resumes unacknowledged result
+                    // delivery on the next offer pass.
+                    OfferPending(now);
                     return;
                 }
             }
@@ -990,6 +1488,7 @@ namespace FamilyRacing.Core.Networking
             connectionIdFor[participantId] = connectionId;
             SendJoinAccept(connectionId, participant, commandId, credential);
             BroadcastSessionState();
+            OfferPending(now);
         }
 
         private void HandleClientReady(ulong connectionId,
@@ -1491,6 +1990,8 @@ namespace FamilyRacing.Core.Networking
             foreach (var slot in slots) ClearParticipant(slot);
             pauseRequests.Clear();
             paused = false;
+            retainedResults.Clear();
+            deliveredResults.Clear();
             descriptor = null;
             sessionId = "";
             serverConnection = 0;
