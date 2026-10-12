@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using FamilyRacing.Automation;
 using FamilyRacing.Core.Automation;
+using FamilyRacing.Core.Driving;
 using FamilyRacing.Core.Foundation;
 using FamilyRacing.Core.Profiles;
 using UnityEngine;
@@ -23,6 +24,7 @@ namespace FamilyRacing
 
         private FoundationService service;
         private Networking.LanSessionLink lanLink;
+        private Networking.NetworkRaceBridge raceBridge;
         private DrivingWorld drivingWorld;
         private DrivingCamera drivingCamera;
         private TutorialPresenter tutorialPresenter;
@@ -65,9 +67,11 @@ namespace FamilyRacing
             tutorialPresenter = GetComponent<TutorialPresenter>();
             if (tutorialPresenter == null)
                 tutorialPresenter = gameObject.AddComponent<TutorialPresenter>();
+            Core.Racing.DrivingContentCatalog loadedCatalog = null;
             if (drivingWorld != null)
             {
                 var catalog = drivingWorld.Load();
+                loadedCatalog = catalog;
                 if (catalog != null) service.SetDrivingContent(catalog);
                 // Validated tutorial content enables tutorial.start; its
                 // asset carries the presenter's bundled clip slots.
@@ -108,12 +112,18 @@ namespace FamilyRacing
             }
             // LAN session service stays Unity-free; the runtime link is its
             // only window onto the real transport and discovery sockets.
-            lanLink = new Networking.LanSessionLink(
-                new Networking.LanTransport(), new Networking.LanDiscovery());
+            // The replication bridge shares the same transport so gameplay
+            // packets ride the sequenced channel while session control
+            // stays reliable-ordered.
+            var lanTransport = new Networking.LanTransport();
+            var lanDiscovery = new Networking.LanDiscovery();
+            lanLink = new Networking.LanSessionLink(lanTransport, lanDiscovery);
             var lan = new Core.Networking.LanSessionService(
                 lanLink, lanLink, Application.version);
             lanLink.Bind(lan);
             service.SetLanSession(lan);
+            raceBridge = new Networking.NetworkRaceBridge(lanTransport, lan);
+            if (loadedCatalog != null) raceBridge.SetContent(loadedCatalog);
             driverInput?.Bind(this);
             shell?.Bind(this);
             service.SetPresentation(presentation);
@@ -130,6 +140,10 @@ namespace FamilyRacing
             lanLink?.Pump(DateTime.UtcNow);
             service.AdvanceNetworkWallTime(Time.realtimeSinceStartupAsDouble);
             DrainNetworkBoundary();
+            // Replication boundary: lifecycle diffs (race create/end, pause,
+            // control/epoch transfers) and the reliable event-batch flush
+            // run once per frame, after transport callbacks have landed.
+            raceBridge?.Pump();
             driverInput?.Pump(AgentControlsInput, CurrentScreen);
             accumulator += Time.unscaledDeltaTime;
             var step = 1f / TickRate;
@@ -142,6 +156,16 @@ namespace FamilyRacing
                 // samples held input and consumes pending actions first,
                 // then the observation tick expires leases and publishes.
                 service.StepDriving(drivingWorld != null ? drivingWorld.MotorWorld : null);
+                // One local 30 Hz boundary on the replication path: host
+                // consumes validated inputs and steps the authoritative
+                // race (publishing at 15 Hz); a client emits one sample.
+                raceBridge?.StepTick(service.CurrentInput,
+                    drivingWorld != null ? drivingWorld.MotorWorld : null);
+                var raceEvents = raceBridge != null ? raceBridge.DrainRaceEvents() : null;
+                if (raceEvents != null && raceEvents.Count > 0)
+                    service.PublishNetworkRaceEvents(raceEvents);
+                service.SetNetworkRaceState(
+                    raceBridge != null ? raceBridge.LatestState : null);
                 service.AdvanceTick();
                 // One snapshot per tick boundary: the presentation refresh
                 // mutates service state after the snapshot is taken, so the
@@ -285,6 +309,7 @@ namespace FamilyRacing
         private void OnApplicationQuit()
         {
             bridge?.Dispose();
+            raceBridge?.Dispose();
             lanLink?.Dispose();
         }
 

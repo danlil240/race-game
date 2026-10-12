@@ -161,6 +161,15 @@ namespace FamilyRacing.Networking
         {
             if (session == null || payload == null) return;
             if (payload.Length > NetworkSettings.MaxWireMessageChars) return;
+            // The reliable channel is shared: binary gameplay envelopes
+            // (NetworkWireCodec tags) flow to NetworkRaceBridge; only FRN1
+            // session-protocol text belongs to the session service. A
+            // non-FRN1 payload is skipped silently rather than recorded as
+            // a protocol error.
+            if (payload.Length < 5 || payload[0] != (byte)'F'
+                || payload[1] != (byte)'R' || payload[2] != (byte)'N'
+                || payload[3] != (byte)'1' || payload[4] != (byte)'|')
+                return;
             session.OnLinkMessage(connectionId, Encoding.UTF8.GetString(payload));
         }
     }

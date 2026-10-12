@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Unity.Collections;
 using Unity.Networking.Transport;
+using Unity.Networking.Transport.Utilities;
 using LanSettings = FamilyRacing.Core.Networking.NetworkSettings;
 
 namespace FamilyRacing.Networking
@@ -22,10 +23,13 @@ namespace FamilyRacing.Networking
     /// <summary>
     /// LAN gameplay transport over the pinned Unity Transport (UTP 2.x)
     /// UDP socket. A host binds and listens; a client connects to an
-    /// explicit IPv4 endpoint; payloads are raw datagrams on the default
-    /// unreliable pipeline. Connection ids are small locally-assigned
-    /// handles (1, 2, 3, ...), stable for the life of the connection and
-    /// recycled only after Stop.
+    /// explicit IPv4 endpoint. Two channels share each connection:
+    /// the reliable-ordered channel (session protocol, lifecycle,
+    /// ownership, results, and authoritative event batches) and the
+    /// sequenced-unreliable gameplay channel (input batches inbound,
+    /// state snapshots outbound). Connection ids are small
+    /// locally-assigned handles (1, 2, 3, ...), stable for the life of
+    /// the connection and recycled only after Stop.
     ///
     /// All events are dispatched inside <see cref="Pump"/>, which callers
     /// invoke on the Unity main thread — callbacks therefore always run on
@@ -62,6 +66,14 @@ namespace FamilyRacing.Networking
 
         private readonly ILanNetworkAccess access;
         private NetworkDriver driver;
+        // Task 5: two typed lanes share each connection. reliablePipeline
+        // carries session/lobby/lifecycle/ownership/results traffic plus
+        // authoritative event batches — ordered and guaranteed.
+        // gameplayPipeline carries input batches and state snapshots —
+        // sequenced so reordered datagrams drop at the transport, loss is
+        // tolerated, and payloads may fragment up to the snapshot ceiling.
+        private NetworkPipeline reliablePipeline;
+        private NetworkPipeline gameplayPipeline;
         private readonly List<Peer> peers = new List<Peer>(4);
         private Peer clientPeer;
         private ulong nextPeerId = 1;
@@ -105,8 +117,16 @@ namespace FamilyRacing.Networking
         /// <summary>Fired on the Unity thread when a connection ends.</summary>
         public event Action<ulong> Disconnected;
 
-        /// <summary>Fired on the Unity thread for every received datagram.</summary>
+        /// <summary>Fired on the Unity thread for every received datagram
+        /// on the reliable-ordered channel (session protocol and other
+        /// ordered control traffic).</summary>
         public event Action<ulong, byte[]> Message;
+
+        /// <summary>Fired on the Unity thread for every datagram received
+        /// on the sequenced-unreliable gameplay channel (input batches
+        /// host-side, state snapshots client-side). The pipeline already
+        /// dropped reordered datagrams; gaps report loss, not stall.</summary>
+        public event Action<ulong, byte[]> GameplayMessage;
 
         /// <summary>Bind a host socket on all local interfaces.</summary>
         public bool StartHost(ushort port)
@@ -121,6 +141,7 @@ namespace FamilyRacing.Networking
             {
                 DisposeDriver();
                 driver = CreateDriver();
+                CreatePipelines();
                 var endpoint = NetworkEndpoint.AnyIpv4.WithPort(port);
                 int bindResult = driver.Bind(endpoint);
                 if (bindResult != 0)
@@ -169,6 +190,7 @@ namespace FamilyRacing.Networking
             {
                 DisposeDriver();
                 driver = CreateDriver();
+                CreatePipelines();
                 var connection = driver.Connect(endpoint);
                 clientPeer = new Peer { Id = nextPeerId++, Connection = connection };
                 state = LanTransportState.Connecting;
@@ -214,7 +236,8 @@ namespace FamilyRacing.Networking
             }
         }
 
-        /// <summary>Host: send a datagram to one accepted connection.</summary>
+        /// <summary>Host: send a datagram to one accepted connection on
+        /// the reliable-ordered channel.</summary>
         public bool Send(ulong connectionId, byte[] payload)
         {
             if (payload == null) throw new ArgumentNullException(nameof(payload));
@@ -224,10 +247,11 @@ namespace FamilyRacing.Networking
                 LastError = "unknown connection " + connectionId;
                 return false;
             }
-            return Send(connection, payload);
+            return Send(connection, payload, reliablePipeline);
         }
 
-        /// <summary>Client: send a datagram to the host.</summary>
+        /// <summary>Client: send a datagram to the host on the
+        /// reliable-ordered channel.</summary>
         public bool Send(byte[] payload)
         {
             if (payload == null) throw new ArgumentNullException(nameof(payload));
@@ -236,7 +260,35 @@ namespace FamilyRacing.Networking
                 LastError = "not connected";
                 return false;
             }
-            return Send(clientPeer.Connection, payload);
+            return Send(clientPeer.Connection, payload, reliablePipeline);
+        }
+
+        /// <summary>Host: send a datagram to one accepted connection on
+        /// the sequenced-unreliable gameplay channel. Intended for
+        /// high-rate state snapshots where loss is tolerable.</summary>
+        public bool SendGameplay(ulong connectionId, byte[] payload)
+        {
+            if (payload == null) throw new ArgumentNullException(nameof(payload));
+            var connection = Find(connectionId);
+            if (!connection.IsCreated)
+            {
+                LastError = "unknown connection " + connectionId;
+                return false;
+            }
+            return Send(connection, payload, gameplayPipeline);
+        }
+
+        /// <summary>Client: send a datagram to the host on the
+        /// sequenced-unreliable gameplay channel (input batches).</summary>
+        public bool SendGameplay(byte[] payload)
+        {
+            if (payload == null) throw new ArgumentNullException(nameof(payload));
+            if (!clientPeer.Connection.IsCreated)
+            {
+                LastError = "not connected";
+                return false;
+            }
+            return Send(clientPeer.Connection, payload, gameplayPipeline);
         }
 
         /// <summary>
@@ -270,7 +322,8 @@ namespace FamilyRacing.Networking
             if (!peer.Connection.IsCreated) return;
             NetworkEvent.Type command;
             while ((command = driver.PopEventForConnection(peer.Connection,
-                       out DataStreamReader reader)) != NetworkEvent.Type.Empty)
+                       out DataStreamReader reader, out NetworkPipeline pipeline))
+                   != NetworkEvent.Type.Empty)
             {
                 switch (command)
                 {
@@ -279,7 +332,13 @@ namespace FamilyRacing.Networking
                         Connected?.Invoke(peer.Id);
                         break;
                     case NetworkEvent.Type.Data:
-                        Message?.Invoke(peer.Id, ReadAll(ref reader));
+                        // Channel demux: sequenced-unreliable traffic is
+                        // gameplay data; everything else (reliable ordered
+                        // or a raw default-pipeline datagram) is control.
+                        if (pipeline == gameplayPipeline)
+                            GameplayMessage?.Invoke(peer.Id, ReadAll(ref reader));
+                        else
+                            Message?.Invoke(peer.Id, ReadAll(ref reader));
                         break;
                     case NetworkEvent.Type.Disconnect:
                         HandleDisconnect(peer);
@@ -319,11 +378,18 @@ namespace FamilyRacing.Networking
             return default;
         }
 
-        private bool Send(NetworkConnection connection, byte[] payload)
+        private bool Send(NetworkConnection connection, byte[] payload,
+            NetworkPipeline pipeline)
         {
-            if (driver.BeginSend(connection, out DataStreamWriter writer) != 0)
+            if (!driver.IsCreated)
             {
-                LastError = "send could not begin";
+                LastError = "not started";
+                return false;
+            }
+            if (driver.BeginSend(pipeline, connection,
+                    out DataStreamWriter writer) != 0)
+            {
+                LastError = "send could not begin (len " + payload.Length + ")";
                 return false;
             }
             for (var i = 0; i < payload.Length; i++)
@@ -331,7 +397,8 @@ namespace FamilyRacing.Networking
             var sent = driver.EndSend(writer);
             if (sent < 0)
             {
-                LastError = "send failed (code " + sent + ")";
+                LastError = "send failed (code " + sent + ", len "
+                    + payload.Length + ", pipe " + pipeline + ")";
                 return false;
             }
             LastError = "";
@@ -373,7 +440,31 @@ namespace FamilyRacing.Networking
                 connectTimeoutMS: ConnectAttemptIntervalMilliseconds,
                 maxConnectAttempts: MaxConnectAttempts,
                 disconnectTimeoutMS: PeerTimeoutMilliseconds);
+            // The fragmentation stage defaults to a 4 KiB payload
+            // capacity — far below the 16 KiB snapshot ceiling — so an
+            // oversized gameplay packet fails EndSend with
+            // NetworkPacketOverflow. Raise the capacity past the largest
+            // typed wire bound; EndSend overflow then matches the codec
+            // ceiling instead of a hidden 4 KiB limit.
+            settings.WithFragmentationStageParameters(
+                payloadCapacity: LanSettings.SnapshotCeilingBytes
+                    + LanSettings.MaxInputPacketBytes);
             return NetworkDriver.Create(settings);
+        }
+
+        // Both roles create identical pipelines before bind/connect. Stage
+        // order matters: fragmentation runs first so a large payload is
+        // split before sequencing/reliability wrap the fragments (UTP
+        // pipelines doc). Reliable+fragmented carries control traffic;
+        // unreliable-sequenced+fragmented carries gameplay streams.
+        private void CreatePipelines()
+        {
+            reliablePipeline = driver.CreatePipeline(
+                typeof(FragmentationPipelineStage),
+                typeof(ReliableSequencedPipelineStage));
+            gameplayPipeline = driver.CreatePipeline(
+                typeof(FragmentationPipelineStage),
+                typeof(UnreliableSequencedPipelineStage));
         }
 
         private void DisposeDriver()

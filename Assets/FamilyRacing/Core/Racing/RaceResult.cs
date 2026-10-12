@@ -19,6 +19,11 @@ namespace FamilyRacing.Core.Racing
         public long finishTicks;            // elapsed race ticks; 0 for DNF
         public int lapsCompleted;
         public int coinsAwarded;
+
+        public RaceResultEntry Copy()
+        {
+            return (RaceResultEntry)MemberwiseClone();
+        }
     }
 
     // The single authoritative outcome of one network race. Created
@@ -38,5 +43,14 @@ namespace FamilyRacing.Core.Racing
         public long finalizedElapsedTicks;
         public int completionCoins;
         public List<RaceResultEntry> racers = new List<RaceResultEntry>();
+
+        public RaceResult Copy()
+        {
+            var copy = (RaceResult)MemberwiseClone();
+            copy.racers = new List<RaceResultEntry>();
+            foreach (var entry in racers)
+                copy.racers.Add(entry != null ? entry.Copy() : null);
+            return copy;
+        }
     }
 }

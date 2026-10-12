@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using FamilyRacing.Core.Automation;
 using FamilyRacing.Core.Networking;
+using FamilyRacing.Core.Racing;
 
 namespace FamilyRacing.Core.Foundation
 {
@@ -15,6 +16,10 @@ namespace FamilyRacing.Core.Foundation
             new CommandResult[0];
 
         private LanSessionService lanSession;
+        // Task 5: the latest host-confirmed race state — the coordinator's
+        // snapshot on the host, the last delivered snapshot on a client.
+        // Null until a network race exists; never aliased onto `driving`.
+        private NetworkRaceState networkRaceState;
 
         // The session service Tasks 3+ drive (race coordinator hooks,
         // transport callbacks); null until the runtime attaches one.
@@ -72,6 +77,23 @@ namespace FamilyRacing.Core.Foundation
         public void AdvanceNetworkWallTime(double monotonicSeconds)
         {
             if (lanSession != null) lanSession.AdvanceWallTime(monotonicSeconds);
+        }
+
+        // Task 5: publish the host-confirmed race state delivered by the
+        // replication bridge. Stored by reference; Snapshot() deep-copies
+        // so emitted states stay independent of later mutation.
+        public void SetNetworkRaceState(NetworkRaceState state)
+        {
+            networkRaceState = state;
+        }
+
+        // Task 5: authoritative network race events join the same bounded
+        // driving-event stream, with the durable drop counter recording
+        // every eviction exactly like the solo path.
+        public void PublishNetworkRaceEvents(IReadOnlyList<DrivingEvent> events)
+        {
+            if (events == null) return;
+            AppendDrivingEvents(events);
         }
 
         private CommandResult NetworkExecute(GameCommand command)

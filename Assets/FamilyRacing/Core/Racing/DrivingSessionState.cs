@@ -109,6 +109,51 @@ namespace FamilyRacing.Core.Racing
         // featureCoverage keeps reporting that honestly.
         public TutorialState tutorial;
         public List<string> controls = new List<string>();
+
+        // Deep copy matching the rest of the DTO family: the Task-5 wire
+        // decode path produces fresh objects, but observation copies must
+        // never alias a live or shared session state either.
+        public DrivingSessionState Copy()
+        {
+            var copy = new DrivingSessionState
+            {
+                raceId = raceId,
+                vehicleId = vehicleId,
+                eventId = eventId,
+                courseId = courseId,
+                contentVersion = contentVersion,
+                phase = phase,
+                countdownTicksRemaining = countdownTicksRemaining,
+                simulationTick = simulationTick,
+                elapsedTicks = elapsedTicks,
+                lap = lap,
+                lapsRequired = lapsRequired,
+                nextCheckpoint = nextCheckpoint,
+                acceptedGatesThisLap = acceptedGatesThisLap,
+                segmentProgressMeters = segmentProgressMeters,
+                finished = finished,
+                finishTicks = finishTicks,
+                motor = motor != null ? motor.Copy() : null,
+                input = input == null ? null : new InputState
+                {
+                    steering = input.steering,
+                    drift = input.drift,
+                    boost = input.boost,
+                    gadget = input.gadget,
+                    recover = input.recover,
+                    changeCamera = input.changeCamera,
+                    pause = input.pause
+                },
+                camera = camera != null ? camera.Copy() : null,
+                tutorial = tutorial != null ? tutorial.Copy() : null
+            };
+            foreach (var mark in checkpoints)
+                copy.checkpoints.Add(mark != null ? mark.Copy() : null);
+            foreach (var action in pendingActions)
+                copy.pendingActions.Add(action != null ? action.Copy() : null);
+            copy.controls.AddRange(controls);
+            return copy;
+        }
     }
 
     // Result of one DrivingSession.Step: the post-step independent state

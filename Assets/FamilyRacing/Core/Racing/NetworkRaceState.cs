@@ -38,6 +38,13 @@ namespace FamilyRacing.Core.Racing
         public bool dnf;
         public long finishTicks;            // elapsed race ticks at finish; 0 otherwise
         public DrivingSessionState session;
+
+        public NetworkRacerState Copy()
+        {
+            var copy = (NetworkRacerState)MemberwiseClone();
+            copy.session = session != null ? session.Copy() : null;
+            return copy;
+        }
     }
 
     // Authoritative race snapshot: one host clock, one shared countdown,
@@ -61,5 +68,30 @@ namespace FamilyRacing.Core.Racing
         public List<int> standings = new List<int>(); // slot indices in rank order
         public List<DrivingEvent> events = new List<DrivingEvent>();
         public RaceResult result;           // assigned once at finalization
+
+        // Deep copy so observation/state-stream consumers can never alias
+        // the coordinator's or the wire decoder's live objects.
+        public NetworkRaceState Copy()
+        {
+            var copy = new NetworkRaceState
+            {
+                sessionId = sessionId,
+                raceId = raceId,
+                phase = phase,
+                hostTick = hostTick,
+                countdownTicksRemaining = countdownTicksRemaining,
+                elapsedTicks = elapsedTicks,
+                paused = paused,
+                firstFinishElapsedTicks = firstFinishElapsedTicks,
+                finishDeadlineElapsedTicks = finishDeadlineElapsedTicks,
+                result = result != null ? result.Copy() : null
+            };
+            copy.standings.AddRange(standings);
+            foreach (var racer in racers)
+                copy.racers.Add(racer != null ? racer.Copy() : null);
+            foreach (var ev in events)
+                copy.events.Add(ev != null ? ev.Copy() : null);
+            return copy;
+        }
     }
 }

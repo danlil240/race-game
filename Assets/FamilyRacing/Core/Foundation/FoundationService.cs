@@ -214,6 +214,11 @@ namespace FamilyRacing.Core.Foundation
         public bool Paused { get { return paused; } }
         public bool Racing { get { return driving != null; } }
 
+        // The currently held (leased) local input. Task 5's LAN path feeds
+        // this same sample through the validated network input path so the
+        // local racer takes no special-case route.
+        public DriverInput CurrentInput { get { return input; } }
+
         // Content is versioned separately from the build: the runtime
         // injects the validated catalog before race.start can report
         // available.
@@ -328,7 +333,7 @@ namespace FamilyRacing.Core.Foundation
                 drivingEvents = new List<DrivingEvent>(),
                 droppedDrivingEvents = droppedDrivingEvents,
                 network = NetworkSnapshot(),
-                networkRace = null,
+                networkRace = networkRaceState != null ? networkRaceState.Copy() : null,
                 prediction = null,
                 remotePresentation = null
             };

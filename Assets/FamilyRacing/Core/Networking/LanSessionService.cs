@@ -239,6 +239,26 @@ namespace FamilyRacing.Core.Networking
             return state;
         }
 
+        // Task 5: host-side resolution of a transport connection to its
+        // authenticated participant — null while the connection is
+        // unauthenticated (open but not joined). Gameplay validation
+        // derives ownership from this lookup, never from payload identity
+        // fields.
+        public string ParticipantIdFor(ulong connectionId)
+        {
+            string participantId;
+            return connections.TryGetValue(connectionId, out participantId)
+                ? participantId : null;
+        }
+
+        // Task 5: host fan-out — a snapshot of the authenticated
+        // connection ids for reliable/unreliable sends. Callers must not
+        // cache the list across transport callbacks.
+        public List<ulong> HostConnections()
+        {
+            return new List<ulong>(connections.Keys);
+        }
+
         // Terminal outcomes for operations accepted earlier; each is
         // produced exactly once, in completion order.
         public IReadOnlyList<CommandResult> DrainOutcomes()

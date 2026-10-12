@@ -99,5 +99,43 @@ namespace FamilyRacing.Core.Networking
 
         // Hard ceiling for a single encoded session-protocol message.
         public const int MaxWireMessageChars = 2048;
+
+        // --- Task 5: authoritative replication -------------------------
+        // Input stream: one sample per local 30 Hz tick; a packet carries
+        // up to this many recent samples for loss tolerance.
+        public const int InputPacketSampleCapacity = 4;
+        // Replay bound: 120 samples per racer. Overflow explicitly
+        // resynchronizes — the backlog clears instead of replaying stale
+        // bursts, and bursts never grant extra simulation steps (at most
+        // one new sample per racer per host tick).
+        public const int InputQueueCapacity = 120;
+        // After this many host ticks without a usable sample the held
+        // commands/steering clear to neutral; the connection timeout then
+        // hands control to AI.
+        public const int InputStaleTicks = 15;
+        // How far ahead of the newest seen sequence a frame may claim
+        // before it is rejected as bogus future traffic.
+        public const long InputSequenceWindow = 120;
+        // One-shot action ids are bounded per frame and per retained dedup
+        // set; the dedup set survives replay/reconnect/rematch boundaries.
+        public const int MaxFrameActionIds = 8;
+        public const int ActionIdLengthMax = 64;
+        public const int ActionIdDedupCapacity = 256;
+        // Accepted-but-not-yet-applied one-shot ids per racer; beyond this
+        // an id stays recorded-seen (cancelled) rather than queued.
+        public const int PendingInboundActions = 16;
+
+        // Full four-racer snapshots publish on every second host tick —
+        // 15 Hz against the 30 Hz simulation — with a hard byte ceiling.
+        // Overflow fails explicitly rather than truncating racer state.
+        public const int SnapshotEveryTicks = 2;
+        public const int SnapshotCeilingBytes = 16 * 1024;
+        // Typed payload limits for the gameplay wire: client->host input
+        // packets and the reliable host->client event batches.
+        public const int MaxInputPacketBytes = 4 * 1024;
+        public const int MaxEventBatchBytes = 8 * 1024;
+        public const int EventBatchCapacity = 64;
+        // Bounded exactly-once event consumption on the receiving side.
+        public const int SeenEventIdCapacity = 512;
     }
 }
