@@ -318,6 +318,7 @@ child/tutorial acceptance. A usable opt-in build is preserved
 | 30-minute LAN soak | **CLOSED** — `evidence-t12-soak5` `passed`, 1832.8 s observed, 5 races both classes, all invariants green (soak1–4 retained: slow-race timeout, `traceLimit`, 19.6-min pass, boundary-artifact fail) | — |
 | Credentialed rejoin under physics (process death → rejoin) | **CLOSED** — `evidence-t12-lan2` passed: kill → AI takeover → credentialed `lan.reconnect` seat reclaim | — |
 | Motorcycle rollover episode (solo) | `notVerified` this run — attempted ×3, no overturned episode | Repeat scenario attempts or a dedicated flip maneuver/content |
+| Three consecutive laps per class on the current course (spec stage-2 solo acceptance) | `notVerified` literally — closest evidence is one full physical lap (car, PlayMode) + 2-lap AI races per class in `evidence-t12-soak5`; no solo 3-consecutive-lap run | Drive the scenario (or a driver) through 3 consecutive authored-course laps per class |
 | Impaired-LAN correction targets (p95 ≤0.75 m/≤12° under 100 ms/jitter/loss; ordinary-LAN ≤0.25 m/≤5°) | `notVerified` — impaired session cannot be established in this environment (env-blocked since task 9) | An environment where the impaired UTP session establishes, or hardware devices |
 | Cross-device LAN reachability | `notVerified` — all evidence is same-machine loopback | Physical devices on a real Wi-Fi network |
 | Device matrix (A7 Lite host, 4 racers, tablet↔tablet offline, mixed OS, touch/Hebrew/thermal, perf targets) | `notVerified` — no devices | Hardware access |
