@@ -13,5 +13,5 @@ MonoBehaviour:
   m_Name: visual-benchmark-01
   m_EditorClassIdentifier: FamilyRacing.Runtime::FamilyRacing.VisualBenchmarkDefinitionAsset
   presentationVersion: visual-1
-  courseVisualPrefab: {fileID: 4656068473831479409, guid: 27d614269b044ec4f8407710870a80be, type: 3}
+  courseVisualPrefab: {fileID: 1749651245222048085, guid: 2c139f00b744d2a48ad00a85b6112475, type: 3}
   sourceTrack: {fileID: 11400000, guid: 15fda47ea6ac2b247bf2ba7b75a8eb4b, type: 2}

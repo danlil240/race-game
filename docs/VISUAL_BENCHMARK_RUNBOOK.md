@@ -266,3 +266,39 @@ likewise never substituted for rendered frame intervals.
 
 Pending: A7 Lite device qualification (tablet profile, PSS baseline,
 p95 ≤40 ms), quantified capture-overhead A/B, on-device Android launch.
+
+## Task 3 — Sunny Island course environment (2026-10-14)
+
+The benchmark's `courseVisualPrefab` now binds the authored
+`sunny-island-benchmark-01` prefab under
+`Assets/FamilyRacing/Art/VisualBenchmark/Environment/` (stable visual-root
+ID = root name). The prefab nests the shared `GrayboxCourse` prefab
+instance — the only collision in the hierarchy — so gameplay geometry
+stays byte-authoritative while every renderer is dressed. Dressing adds
+zero colliders and zero rigidbodies; tall occluder-class objects sit on
+the built-in Ignore Raycast layer (2), invisible to motor/wheel probes
+but still camera-occlusion raycastable. Warm sun, trilight ambient,
+turquoise haze and the procedural skybox live in `VisualBenchmark.unity`
+(scene-authored, migrated once from the Task-1 scaffold values);
+`PresentationState.courseVisualId` publishes the bound visual root.
+
+Regenerate only when the prefab is absent: `VisualBenchmarkSetup.Create()`
+calls `SunnyIslandCourseAuthoring.Ensure()` — hand-authored tweaks on top
+survive every setup re-run (`SetupRerunKeepsSunnyIslandArt`).
+
+### Task-3 verification results
+
+| Check | Result |
+|---|---|
+| `Verify.ps1 -Mode EditMode` | 662 passed / 663 total, 0 failed, 1 pre-existing skip — incl. `DressingPreservesGameplayGeometry` (all 16 colliders byte-identical, dressing adds none), `AllReferencedAssetsHaveInventoryEntries` (26 authored assets inventoried, US$0), `SetupRerunKeepsSunnyIslandArt`, both setup tests |
+| `Verify.ps1 -Mode VisualBenchmarkSetup` | clean run; definition migrated to the sunny prefab, scene re-bound |
+| Focused PlayMode `VisualBenchmarkCoursePlayTests` | 2/2 passed — both shortcuts traversable, ramp airborne+landing, gate-3 recovery respawn, all authored recover poses probe clean ground |
+| `Verify.ps1 -Mode PlayMode` | 248/250 passed — 2 documented environment-blocked impaired-LAN timeouts; stale schema-4 pin in `HelloRecordShapeIsUnsequencedAndAdvertisesSchema` repaired to 5 |
+| `Verify.ps1 -Mode WindowsVisualBenchmark` | dev player built clean (`result=Succeeded errors=0`) |
+| Rendered dev player scenario (`Tools/SunnyIslandShots.py`) | both classes driven through every landmark; `presentation.courseVisualId=sunny-island-benchmark-01`, `renderProfileId=pc`, scale 1.0, 1280x800; 30 screenshots under `Logs/sunny-shots/run/screenshots/` |
+| Screenshot inspection | 0% missing-shader magenta; palette/layout grids confirm deck/water/islands/route language and consistent HUD — see task-3 report |
+
+Pending: manual image review on a display, A7 Lite device
+qualification (tablet profile at 0.75 scale + sustained four-racer
+measurement), real lightmap bake (scene carries GI-contributing flags;
+no LightingDataAsset is baked yet), sustained multi-racer soak.

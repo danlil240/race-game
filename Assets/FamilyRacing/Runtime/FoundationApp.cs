@@ -503,6 +503,11 @@ namespace FamilyRacing
                 ? renderProfiles.ActiveRenderScale : 0f;
             presentation.targetFrameRate = Application.targetFrameRate;
             presentation.renderingAvailable = perfRenderingAvailable;
+            // The course visual actually bound on this device — the
+            // dressed sunny-island root on the benchmark, never silently
+            // the graybox placeholder.
+            presentation.courseVisualId = drivingWorld != null
+                ? drivingWorld.CourseVisualId : "none";
             presentation.performance = perfRecorder != null
                 ? perfRecorder.Summary() : null;
             service.SetPresentation(presentation);

@@ -76,6 +76,15 @@ namespace FamilyRacing
 
         public DrivingContentCatalog Catalog { get { return catalog; } }
         public UnityMotorWorld MotorWorld { get { return motorWorld; } }
+        // The stable identity of the bound course-visual prefab — its
+        // root name ("sunny-island-benchmark-01" on the dressed
+        // benchmark, "GrayboxCourse" on the driving slice). Published
+        // through PresentationState.courseVisualId so observers can tell
+        // the authored environment from the undressed placeholder.
+        public string CourseVisualId
+        {
+            get { return coursePrefab != null ? coursePrefab.name : "none"; }
+        }
 
         // The runtime-owned simulation provider: maps the catalog's
         // race-level backend selection to a concrete world — the arcade
@@ -217,7 +226,11 @@ namespace FamilyRacing
                 // Parented under this component so scene/test teardown of
                 // the host never leaks course or vehicle objects.
                 courseInstance = Instantiate(coursePrefab, transform);
-                courseInstance.name = "GrayboxCourse";
+                // Keep the prefab's root name: it is the published
+                // course-visual identity (the benchmark's
+                // sunny-island-benchmark-01, the driving slice's
+                // GrayboxCourse).
+                courseInstance.name = coursePrefab.name;
                 courseInstance.SetActive(false);
             }
             if (vehicleView == null)

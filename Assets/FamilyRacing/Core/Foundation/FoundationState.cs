@@ -98,6 +98,12 @@ namespace FamilyRacing.Core.Foundation
         public string renderProfileId = "none";
         public float renderScale;
         public int targetFrameRate;
+        // The course-visual hierarchy actually loaded on this device —
+        // "sunny-island-benchmark-01" on the dressed benchmark, "none"
+        // before any course prefab is bound. Published so an observer can
+        // verify the benchmark renders the authored environment rather
+        // than the undressed graybox placeholder.
+        public string courseVisualId = "none";
         // False on a headless run: frame intervals then describe unrendered
         // frames and can never pass as rendered-player evidence.
         public bool renderingAvailable = true;

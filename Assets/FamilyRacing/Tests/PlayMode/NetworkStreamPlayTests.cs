@@ -517,9 +517,11 @@ namespace FamilyRacing.Tests
         {
             // The controller hello is negotiated by ValidationBridge, not
             // the stream — this pins the advertised schema constant so a
-            // silent downgrade is caught here. Schema 4 is the Task-9
-            // physical replication epoch (protocol 2, FRN2, P1 tags).
-            Assert.That(NetworkSettings.StateSchemaVersion, Is.EqualTo(4));
+            // silent downgrade is caught here. Schema 5 is the M4 visual
+            // benchmark epoch: the Task-2 additive presentation slice
+            // (render profile/scale/frame-rate/performance summary) plus
+            // the Task-3 courseVisualId; LAN protocol stays 2.
+            Assert.That(NetworkSettings.StateSchemaVersion, Is.EqualTo(5));
         }
     }
 }

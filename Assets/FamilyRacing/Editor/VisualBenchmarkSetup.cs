@@ -3,6 +3,7 @@ using System.IO;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 using UnityEngine.SceneManagement;
 using UnityEngine.UIElements;
@@ -54,6 +55,11 @@ namespace FamilyRacing.EditorTools
         public static void Create()
         {
             EnsureFolder("Assets/FamilyRacing/Generated", "VisualBenchmark");
+            // M4 Task 3: the Sunny Island course visual is authored
+            // content under Art/VisualBenchmark — created only when
+            // missing, never regenerated (same rule as every other
+            // authored asset here).
+            SunnyIslandCourseAuthoring.Ensure();
             var definition = EnsureDefinition();
             string error;
             if (!definition.Validate(out error))
@@ -126,8 +132,10 @@ namespace FamilyRacing.EditorTools
 
         // The definition is authored content: create it if missing and
         // fill empty slots with the shared defaults, but never rewrite a
-        // bound value — Task 3 will point courseVisualPrefab at the
-        // dressed Sunny Island hierarchy and later tasks extend it.
+        // bound value — the sole exception is the documented one-time
+        // migration of the Task-1 graybox placeholder onto the Task-3
+        // Sunny Island course visual (which nests the same graybox
+        // collision, so gameplay geometry never moves).
         private static VisualBenchmarkDefinitionAsset EnsureDefinition()
         {
             var asset = AssetDatabase.LoadAssetAtPath
@@ -149,10 +157,33 @@ namespace FamilyRacing.EditorTools
             }
             if (asset.courseVisualPrefab == null)
             {
+                // Prefer the authored Sunny Island course visual; the
+                // shared graybox prefab stays the documented fallback
+                // for a workspace where Task-3 art is absent.
                 asset.courseVisualPrefab =
                     AssetDatabase.LoadAssetAtPath<GameObject>(
-                        GrayboxCoursePath);
+                        SunnyIslandCourseAuthoring.CourseVisualPath);
+                if (asset.courseVisualPrefab == null)
+                    asset.courseVisualPrefab =
+                        AssetDatabase.LoadAssetAtPath<GameObject>(
+                            GrayboxCoursePath);
                 dirty = true;
+            }
+            else if (asset.courseVisualPrefab ==
+                AssetDatabase.LoadAssetAtPath<GameObject>(GrayboxCoursePath))
+            {
+                // One-time Task-3 migration: the placeholder graybox
+                // binding moves to the Sunny Island visual root once
+                // that prefab exists (the nested graybox instance inside
+                // it keeps identical collision — dressing never moves
+                // gameplay geometry).
+                var sunny = AssetDatabase.LoadAssetAtPath<GameObject>(
+                    SunnyIslandCourseAuthoring.CourseVisualPath);
+                if (sunny != null)
+                {
+                    asset.courseVisualPrefab = sunny;
+                    dirty = true;
+                }
             }
             if (dirty) EditorUtility.SetDirty(asset);
             return asset;
@@ -260,8 +291,132 @@ namespace FamilyRacing.EditorTools
             // referenced only from managed objects.
             var definition = LoadValidatedDefinition();
             CreateAppObject(definition, LoadSceneContent());
+            EnsureSunnyIslandLighting(scene);
 
             EditorSceneManager.SaveScene(scene, ScenePath);
+        }
+
+        // ---------------------------------------------------------------
+        // M4 Task-3 Sunny Island scene lighting: the warm sun, turquoise
+        // ambient/skybox and restrained horizon haze belong to the
+        // benchmark scene, never the course prefab — the prefab stays
+        // reusable under any sky. Applied only while the scene still
+        // carries the Task-1 scaffold lighting (no fog, skybox ambient,
+        // the built-in default skybox, a scaffold-named/tuned light), so
+        // later hand-authored lighting is never rewritten.
+        private const string SkyboxPath =
+            SunnyIslandCourseAuthoring.MaterialsDir + "/Sky_SunnyIsland.mat";
+        private static readonly Color ScaffoldSunColor =
+            new Color(1f, 0.96f, 0.88f);
+
+        // Returns true when the scaffold lighting was migrated onto the
+        // Sunny Island treatment (the caller marks the scene dirty).
+        private static bool EnsureSunnyIslandLighting(Scene scene)
+        {
+            var changed = false;
+            var prevActive = SceneManager.GetActiveScene();
+            if (prevActive != scene)
+                SceneManager.SetActiveScene(scene);
+            try
+            {
+                // Unity 6 carries the skybox material on the camera's
+                // Skybox component — RenderSettings no longer holds it.
+                Camera sceneCam = null;
+                Skybox sceneSkybox = null;
+                foreach (var rootObj in scene.GetRootGameObjects())
+                foreach (var cam in rootObj
+                    .GetComponentsInChildren<Camera>(true))
+                {
+                    if (sceneCam == null) sceneCam = cam;
+                    if (sceneSkybox == null)
+                        sceneSkybox = cam.GetComponent<Skybox>();
+                }
+                var authoredSky = sceneSkybox != null
+                    && sceneSkybox.material != null
+                    && sceneSkybox.material.name != "Default-Skybox";
+                if (RenderSettings.fog
+                    || RenderSettings.ambientMode != AmbientMode.Skybox
+                    || authoredSky)
+                    return false; // authored lighting — never rewritten
+
+                var skyMat = EnsureSkyboxMaterial();
+                if (sceneCam != null)
+                {
+                    if (sceneSkybox == null)
+                        sceneSkybox =
+                            sceneCam.gameObject.AddComponent<Skybox>();
+                    sceneSkybox.material = skyMat;
+                    sceneCam.clearFlags = CameraClearFlags.Skybox;
+                }
+                RenderSettings.ambientMode = AmbientMode.Trilight;
+                RenderSettings.ambientSkyColor =
+                    new Color(0.55f, 0.80f, 0.88f);   // turquoise sky
+                RenderSettings.ambientEquatorColor =
+                    new Color(0.92f, 0.87f, 0.72f);   // warm horizon
+                RenderSettings.ambientGroundColor =
+                    new Color(0.58f, 0.47f, 0.32f);   // sand bounce
+                RenderSettings.ambientIntensity = 1f;
+                RenderSettings.fog = true;
+                RenderSettings.fogMode = FogMode.Linear;
+                RenderSettings.fogColor = new Color(0.66f, 0.87f, 0.89f);
+                RenderSettings.fogStartDistance = 130f;
+                RenderSettings.fogEndDistance = 360f;
+
+                foreach (var rootObj in scene.GetRootGameObjects())
+                foreach (var light in rootObj
+                    .GetComponentsInChildren<Light>(true))
+                {
+                    if (light.type != LightType.Directional) continue;
+                    var c = light.color;
+                    var scaffoldLight =
+                        light.name == "Directional Light"
+                        && Quaternion.Angle(light.transform.rotation,
+                            Quaternion.Euler(50f, -30f, 0f)) < 0.5f
+                        && Mathf.Abs(c.r - ScaffoldSunColor.r) < 0.02f
+                        && Mathf.Abs(c.g - ScaffoldSunColor.g) < 0.02f
+                        && Mathf.Abs(c.b - ScaffoldSunColor.b) < 0.02f;
+                    if (scaffoldLight)
+                    {
+                        light.name = "Sun";
+                        light.color = new Color(1f, 0.91f, 0.74f);
+                        light.intensity = 1.15f;
+                        light.transform.rotation =
+                            Quaternion.Euler(42f, -38f, 0f);
+                    }
+                    if (RenderSettings.sun == null)
+                        RenderSettings.sun = light;
+                }
+                changed = true;
+            }
+            finally
+            {
+                if (prevActive.IsValid() && prevActive != scene)
+                    SceneManager.SetActiveScene(prevActive);
+            }
+            return changed;
+        }
+
+        private static Material EnsureSkyboxMaterial()
+        {
+            var mat = AssetDatabase.LoadAssetAtPath<Material>(SkyboxPath);
+            if (mat == null)
+            {
+                var shader = Shader.Find("Skybox/Procedural");
+                if (shader == null)
+                    throw new InvalidDataException(
+                        "VisualBenchmarkSetup: Skybox/Procedural shader "
+                        + "is unavailable.");
+                mat = new Material(shader) { name = "Sky_SunnyIsland" };
+                AssetDatabase.CreateAsset(mat, SkyboxPath);
+            }
+            mat.SetFloat("_SunSize", 0.06f);
+            mat.SetFloat("_SunSizeConvergence", 4.2f);
+            mat.SetFloat("_AtmosphereThickness", 0.82f);
+            mat.SetColor("_SkyTint", new Color(0.45f, 0.72f, 0.78f));
+            mat.SetColor("_GroundColor", new Color(0.78f, 0.68f, 0.5f));
+            mat.SetFloat("_Exposure", 1.15f);
+            EditorUtility.SetDirty(mat);
+            return mat;
         }
 
         private static GameObject CreateAppObject(
@@ -360,6 +515,7 @@ namespace FamilyRacing.EditorTools
                 CreateAppObject(definition, content);
                 dirty = true;
             }
+            dirty |= EnsureSunnyIslandLighting(scene);
             if (dirty)
             {
                 EditorSceneManager.MarkSceneDirty(scene);
