@@ -654,6 +654,42 @@ namespace FamilyRacing.Tests
             Assert.That(prediction.FrameReplayTicks, Is.EqualTo(2));
         }
 
+        // The tick is a commit marker the host stamps post-interval
+        // (DrivingSession.CompleteStep), so prediction re-stamps it the
+        // same way: exactly +1 per replayed sample on EVERY injected
+        // backend. The injected ArcadeVehicleSimulation feeds
+        // rulesBefore into ArcadeMotor.Step — which increments tick
+        // itself — so an un-normalized path silently reports ~2x the
+        // authoritative tick on the production arcade LAN path.
+        [Test]
+        public void InjectedArcadeReplayAdvancesTickOncePerSample()
+        {
+            var prediction = new ClientPrediction("p1");
+            prediction.SetSimulation(new ArcadeVehicleSimulation(World));
+            prediction.Reconcile(Snapshot(1, "race-1", Spawn(10), 0),
+                Tuning, World);
+
+            var predicted = prediction.Predict(Frame(1, 0.4f),
+                Tuning, World);
+            Assert.That(predicted.tick, Is.EqualTo(11),
+                "one predicted sample advances the commit tick exactly "
+                + "once — the arcade adapter's own increment would "
+                + "double-count to 12");
+
+            // The same rule holds inside a reconcile replay: restore at
+            // the acknowledged boundary (host tick 11) plus two
+            // unacknowledged samples lands on exactly 13.
+            prediction.Predict(Frame(2, 0.4f), Tuning, World);
+            prediction.Predict(Frame(3, 0.4f), Tuning, World);
+            var authoritative = HostStep(Spawn(10), Frame(1, 0.4f).input);
+            Assert.That(authoritative.tick, Is.EqualTo(11));
+            var reconciled = prediction.Reconcile(
+                Snapshot(2, "race-1", authoritative, 1), Tuning, World);
+            Assert.That(reconciled.tick, Is.EqualTo(13),
+                "boundary 11 + two replayed samples = 13 on every "
+                + "backend — never 14 from a double increment");
+        }
+
         // --- RemoteInterpolation ------------------------------------------
 
         [Test]

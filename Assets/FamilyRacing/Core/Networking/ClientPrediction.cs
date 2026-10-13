@@ -208,7 +208,20 @@ namespace FamilyRacing.Core.Networking
                     foreach (var result in results)
                         if (result != null && result.step != null
                             && result.participantId == participantId)
+                        {
+                            // The tick is a commit marker, not backend
+                            // state: the host stamps it after each
+                            // interval (DrivingSession.CompleteStep), so
+                            // prediction does too — one logical tick per
+                            // replayed sample on EVERY backend. The
+                            // physical body merges rulesBefore.tick
+                            // verbatim (already +1); the arcade adapter
+                            // increments inside its own step and would
+                            // otherwise double-count.
+                            if (result.step.state != null)
+                                result.step.state.tick = state.tick + 1;
                             return result.step;
+                        }
                 return MotorStepResult.Rejected(state, "missingResult");
             }
             if (world == null) return null;
@@ -225,7 +238,9 @@ namespace FamilyRacing.Core.Networking
         // the respawned pose/velocities carry forward. `advanceTick`
         // supplies the interval's own tick count for backends that merge
         // the rule tick verbatim (the physical sim); the arcade motor
-        // increments tick inside its step and takes the unmodified view.
+        // increments tick inside its step and takes the unmodified
+        // view — the returned step state is re-stamped post-step either
+        // way so one predicted sample always advances tick once.
         private static MotorState NormalizedRules(MotorState state,
             bool advanceTick)
         {
