@@ -313,6 +313,73 @@ namespace FamilyRacing.Tests
             Assert.That(world.CameraFacts.mode, Is.EqualTo("none"));
         }
 
+        [Test]
+        public void EmptyRaceFrameCannotHideSoloCourse()
+        {
+            // Regression for the task-10 gate finding: FoundationApp.Update
+            // runs ApplyFrame (solo path) then ApplyRaceFrame(null) on every
+            // non-LAN frame. Before the fix the second call owned
+            // courseInstance.SetActive and always won, so an active solo
+            // race drove with NO ground colliders — the motor fell into an
+            // offCourse recovery loop on every real player build.
+            WireWorld();
+            service.SetDrivingContent(world.Load());
+            StartRace();
+            // The exact frame order FoundationApp.Update executes.
+            world.ApplyFrame(service.Snapshot());
+            world.ApplyRaceFrame(null);
+            Physics.SyncTransforms();
+
+            var course = FindNamed(host, "GrayboxCourse");
+            Assert.That(course, Is.Not.Null, "course instance must exist");
+            Assert.That(course.activeSelf, Is.True,
+                "a null LAN race frame must not hide the solo course");
+            var motor = service.Snapshot().driving.motor;
+            var hit = world.MotorWorld.ProbeGround(
+                new MotorPose { x = motor.x, y = motor.y, z = motor.z,
+                                heading = motor.heading }, 0.8f);
+            Assert.That(hit.hit, Is.True,
+                "the ground probe must see the course under a solo race");
+
+            // Stepping after the empty race frame keeps the car on the slab —
+            // the failure mode fell through to minCourseY and recovered.
+            Step(30);
+            var stepped = service.Snapshot().driving.motor;
+            Assert.That(stepped.y, Is.EqualTo(0f).Within(0.1f));
+            Assert.That(stepped.grounded, Is.True);
+            Assert.That(stepped.recovering, Is.False);
+        }
+
+        [Test]
+        public void RaceFrameAfterSoloKeepsCourseForLan()
+        {
+            // The reverse ordering must also hold: a LAN race frame keeps
+            // the course active even though the solo slice is empty — the
+            // course may never be visible only to one frame path.
+            WireWorld();
+            service.SetDrivingContent(world.Load());
+            StartRace();
+            world.ApplyRaceFrame(new FamilyRacing.Core.Racing.NetworkRaceState
+            {
+                racers = new System.Collections.Generic.List<
+                    FamilyRacing.Core.Racing.NetworkRacerState>
+                {
+                    new FamilyRacing.Core.Racing.NetworkRacerState
+                    {
+                        participantId = "p-1",
+                        session = new FamilyRacing.Core.Racing.DrivingSessionState
+                        {
+                            motor = new MotorState { x = 0f, y = 0f, z = 0f },
+                        },
+                    },
+                },
+            });
+            Physics.SyncTransforms();
+            var course = FindNamed(host, "GrayboxCourse");
+            Assert.That(course.activeSelf, Is.True,
+                "a LAN race frame must keep the course active");
+        }
+
         private static GameObject FindNamed(GameObject root, string name)
         {
             foreach (var transform in root.GetComponentsInChildren<Transform>(true))

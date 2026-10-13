@@ -18,6 +18,20 @@ use, streamed as schema-2 snapshot+delta boundaries and proven by the
 real-player scenarios in `Tools\` (`DrivingScenario`, `DrivingSoak`).
 Milestone acceptance is **open**: see `docs\tasks\driving-prototype-report.md`.
 
+**LAN network prototype (M3, development complete; acceptance open).**
+Offline-LAN multiplayer on Netcode for GameObjects 2.7.0 / Unity
+Transport 2.6.0: broadcast discovery + manual IP join, a four-slot lobby
+with host-configured event/class/vehicle/ready, one authoritative
+30 Hz `NetworkRace` with honest AI fill and bounded contact, client
+prediction + remote interpolation, shared pause, reserved-seat
+credentialed rejoin, AI takeover on disconnect, once-only immutable
+results with completion coins, rematch, and host-loss recovery — every
+surface bilingual and command-driven, streamed as schema-3
+snapshot+delta boundaries proven by `Tools\NetworkScenario.py` and the
+sustained `Tools\NetworkSoak.py` harness. Physical-device and human
+acceptance gates are **open**: see
+`docs\tasks\network-prototype-report.md`.
+
 **Foundation shell.** `Assets/FamilyRacing/Core` is a
 Unity-free, C# 9, .NET Standard 2.1-compatible assembly:
 
@@ -106,6 +120,15 @@ python Tools\DrivingScenario.py <dir>\connection.json --evidence <new-evidence-d
 # cameras with repeated restarts for N minutes, sampling memory, cadence,
 # trace growth and queue/backlog health:
 python Tools\DrivingSoak.py Builds\Windows\FamilyRacing.exe --evidence <new-dir> [--minutes 30]
+
+# LAN lifecycle + soak — attach to 2-4 independently launched validation
+# players by their connection.json (first is the host; --host-address is
+# the manual-join fallback when broadcast discovery cannot reach):
+python Tools\NetworkScenario.py --connections <host-run>\connection.json <client-run>\connection.json --evidence <new-dir>
+python Tools\NetworkSoak.py --connections <host-run>\connection.json <client-run>\connection.json --minutes 30 --evidence <new-dir>
+# Dev convenience: self-launch local players incl. process-kill fault
+# injection (AI takeover, credentialed rejoin, host loss):
+python Tools\NetworkScenario.py --launch Builds\Windows\FamilyRacing.exe --players 2 --evidence <new-dir>
 ```
 
 Full command/wire-protocol reference: `docs/COMMANDS.md`; command →
@@ -117,6 +140,15 @@ tests are discovered.
 
 ## Remaining gates
 
+- **M3 network-prototype gate (2026-10-12, task 10)**: Core 468/468,
+  EditMode 507 + 1 explicit voice-clip Ignore, PlayMode 174/174, Python
+  tooling 127/127, verify-tooling 12/12; same-revision Windows Mono dev,
+  Windows Mono ordinary (validation compiled out — demonstrated) and
+  offline Android APK produced; `NetworkSoak.py` delivered. Every
+  physical/human matrix row is **not verified** — no tablets, second
+  device, internet-disconnected Wi-Fi or owner review here. **M3:
+  development complete; acceptance open.** Report:
+  `docs\tasks\network-prototype-report.md`.
 - **M2 review gate (2026-10-12, task 7)**: Core 349/349, EditMode 377/377,
   PlayMode 105/105, Python tooling 71/71, verify-tooling 12/12; Windows
   Mono dev + Android IL2CPP debug APK (47,688,467 B, SHA-256 `E332C362…`)

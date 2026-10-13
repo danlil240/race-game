@@ -41,9 +41,12 @@ timeouts drive every step; there is no teleporting or forced finishing.
 
 import argparse
 import json
+import math
 import subprocess
 import sys
 import time
+import traceback
+import uuid
 from pathlib import Path
 
 from AgentScenario import (BOUNDARY_TYPES, Client, StateReconstructor,
@@ -56,7 +59,11 @@ from RestartScenario import file_hash, wait_connection, write_json
 # other hop in a reconstructed boundary history means the emitted state
 # disagrees with the lifecycle contract.
 LEGAL_PHASE_TRANSITIONS = {
-    "idle": {"idle", "discovering", "connecting", "lobby"},
+    # idle -> reconnecting is real: a restarted process whose credential
+    # store still holds session material issues lan.reconnect straight
+    # from the browser — the fault-injection relaunch does exactly this.
+    "idle": {"idle", "discovering", "connecting", "lobby",
+             "reconnecting"},
     "discovering": {"discovering", "idle", "connecting"},
     "connecting": {"connecting", "lobby", "idle", "recovery"},
     "lobby": {"lobby", "countdown", "idle", "recovery", "results"},
@@ -253,7 +260,8 @@ def wait_state(client, predicate, timeout, what):
     """Wait until the client's reconstructed boundary state matches."""
     return client.wait(
         lambda event: event.get("type") in BOUNDARY_TYPES
-        and predicate(client.state), timeout=timeout)
+        and predicate(client.state), timeout=timeout,
+        on_event=lambda event: pump_drivers())
 
 
 def wait_terminal(client, command_id, timeout=30):
@@ -262,7 +270,424 @@ def wait_terminal(client, command_id, timeout=30):
         lambda event: event.get("type") == "result"
         and event.get("commandId") == command_id
         and event.get("status") in TERMINAL_STATUSES,
-        timeout=timeout)
+        timeout=timeout,
+        on_event=lambda event: pump_drivers())
+
+
+# --- human-racer driving ---------------------------------------------------
+#
+# LAN racers auto-accelerate but never steer themselves: a connected human
+# seat that receives no input drives straight into a wall and DNFs, and a
+# DNF participant's reward is honestly ineligible — the delivery ledger can
+# never settle "persisted" unless someone actually drives the car. The
+# scenario therefore drives every attached human racer through the ordinary
+# bounded input.set hold path: a proportional-steering follower over the
+# authored graybox-01 racing line, plus the same recover one-shot a player
+# presses when beached. No teleports, no forced finishes, no privileged
+# input — every sample rides the validated command surface.
+#
+# The route below is the AI racing line authored in
+# Assets/FamilyRacing/Editor/NetworkPrototypeSetup.cs (LanRoutePoints):
+# north to gate-1, west over the landmark ramp, around IslandNorthEast to
+# gate-2, down the east edge to gate-3, under IslandSouthEast to gate-4,
+# then south of the line back across start/finish. A course layout change
+# must move this table with it.
+LAN_ROUTE = [
+    (0.0, -30.0), (0.0, 10.0), (0.0, 30.0), (-30.0, 24.0),
+    (-54.0, 14.0), (-60.0, 30.0), (-60.0, 46.0), (-40.0, 58.0),
+    (-10.0, 62.0), (20.0, 62.0), (48.0, 60.0), (62.0, 55.0),
+    (82.0, 42.0), (95.0, 18.0), (95.0, -14.0), (99.0, -34.0),
+    (92.0, -48.0), (68.0, -60.0), (38.0, -56.0), (10.0, -62.0),
+    (0.0, -66.0), (0.0, -48.0),
+]
+# Authored graybox-01 gates (graybox-01.asset), in checkpoint order:
+# centre plus the crossing direction. A route waypoint only passes near
+# a gate's plane, so close approaches aim THROUGH the plane — a point
+# past the centre in the travel direction — because the crossing only
+# counts inside the half-width and in the authored direction.
+LAN_GATES = [
+    (0.0, -60.0), (0.0, 25.0), (55.0, 55.0), (95.0, 0.0), (50.0, -55.0),
+]
+LAN_GATE_DIRS = [
+    (0.0, 1.0), (0.0, 1.0), (1.0, 0.0), (0.0, -1.0), (-1.0, 0.0),
+]
+LAN_GATE_APPROACH = 22.0   # inside this radius, aim at the gate centre
+LAN_LOOKAHEAD = 11.0       # pure-pursuit aim distance along the route
+LAN_ROUTE_LENGTH = sum(
+    math.hypot(LAN_ROUTE[i][0] - LAN_ROUTE[i - 1][0],
+               LAN_ROUTE[i][1] - LAN_ROUTE[i - 1][1])
+    for i in range(len(LAN_ROUTE)))
+# Cumulative arclen of each route vertex (LAN_ROUTE_ARC[i] is the arclen
+# of LAN_ROUTE[i]); the loop closes back to 0 at LAN_ROUTE_LENGTH.
+LAN_ROUTE_ARC = [0.0]
+for _i in range(1, len(LAN_ROUTE)):
+    LAN_ROUTE_ARC.append(
+        LAN_ROUTE_ARC[-1]
+        + math.hypot(LAN_ROUTE[_i][0] - LAN_ROUTE[_i - 1][0],
+                     LAN_ROUTE[_i][1] - LAN_ROUTE[_i - 1][1]))
+# Follower constants mirror the host's AiDriver (NetworkSettings.cs):
+# the scenario steers with the same reach/passed/gain the fill-in AI
+# proves is enough to complete laps on this course.
+LAN_ROUTE_REACH = 5.0        # AiWaypointReachMeters
+LAN_ROUTE_PASSED = 3.0       # AiWaypointPassedFactor
+# Gain is deliberately lower than the AI's 3.0: the AI re-evaluates every
+# sim tick, while a remote driver's hold spans multiple ticks — full-lock
+# holds at high gain bang-bang into orbits that never converge. The solo
+# driving scenario's proven 1.4 sits in the stable range.
+LAN_STEER_GAIN = 1.4
+LAN_BOOST_MAX_STEER = 0.2    # AiBoostMaxSteer
+LAN_BOOST_MIN_CHARGE = 0.9   # AiBoostMinCharge
+LAN_STALL_TICKS = 90         # ~3s of sim time without progress -> recover
+LAN_MAX_RECOVERIES = 12      # per race; more is an honest driving defect
+
+
+def wrap_angle(radians):
+    while radians > math.pi:
+        radians -= 2.0 * math.pi
+    while radians <= -math.pi:
+        radians += 2.0 * math.pi
+    return radians
+
+
+def steer_command(motor, target_x, target_z, gain=LAN_STEER_GAIN):
+    """Bounded proportional steering toward a world waypoint: -1..1."""
+    desired = math.atan2(target_x - motor["x"], target_z - motor["z"])
+    error = wrap_angle(desired - motor["heading"])
+    return max(-1.0, min(1.0, error * gain))
+
+
+class LanDriver:
+    """One racer's pure-pursuit follower over the shared input.set
+    surface.
+
+    Reads only the state every participant can see (its own racer's
+    replicated session: motor pose, simulation tick, recovering flag) and
+    emits held steering samples exactly like DrivingScenario's solo
+    driver. The aim point is a lookahead along the authored route's
+    closest point — projection+lookahead is the stable pursuit under
+    remote-input lag where waypoint chasing bang-bangs into orbits. A
+    genuine stall presses recover like a human would — bounded by
+    LAN_MAX_RECOVERIES per race — never a guessed sleep or a teleport.
+    """
+
+    HOLD_TICKS = 8
+    RESEND_TICKS = 3    # boundary ticks; always resend before lease-out
+    CORRECTION = 0.08   # resend earlier when steering moved this far
+
+    def __init__(self, peer, remote=False):
+        self.peer = peer
+        # A remote endpoint steers on state the wire already aged a few
+        # sim ticks (15 Hz snapshots plus input transit), and every held
+        # input keeps rotating the car for its whole duration — a strong
+        # correction held through that lag overshoots into a full-lock
+        # flip-flop that orbits the aim point. Remote drivers therefore
+        # steer with much softer gain, a longer lookahead, and a shorter
+        # hold so no single stale sample can spin the car.
+        self.lookahead = LAN_LOOKAHEAD * 1.4 if remote else LAN_LOOKAHEAD
+        self.gain = LAN_STEER_GAIN * (0.43 if remote else 1.0)
+        self.hold_ticks = 4 if remote else self.HOLD_TICKS
+        self.resend_ticks = 2 if remote else self.RESEND_TICKS
+        # Pose extrapolation from observed heading+speed compensates the
+        # same wire age: aim at where the car IS now, not where the
+        # snapshot left it — purely the replicated motor's own fields.
+        self.lead_meters = 2.4 if remote else 0.0
+        self.race_id = None
+        self.held = None
+        self.held_boost = False
+        self.held_at = -10 ** 9
+        self.recoveries = 0
+        self.best_progress = None
+        self.progress_at = 0
+        self.catchup_credit = 0.0
+        self.unwrapped = None
+        self.prev_arc = None
+        self.send_ok = True
+        self.calm_until = 0
+        # While True the driver observes the state stream but sends no
+        # input: the scenario suspends a peer's driver around the
+        # observable-input assertions (bounds rejection, held-input
+        # normalization, recover ack) so driver resends cannot overwrite
+        # the value under test before the assertion window closes.
+        self.suspended = False
+
+    def _racer(self):
+        """This endpoint's own racer while a LAN race is live, else None."""
+        state = self.peer.state
+        if not isinstance(state, dict):
+            return None
+        network = state.get("network") or {}
+        race = state.get("networkRace")
+        if race is None or network.get("phase") != "racing":
+            return None
+        own = network.get("localParticipantId")
+        for racer in race.get("racers") or []:
+            if racer.get("participantId") == own:
+                return racer
+        return None
+
+    @staticmethod
+    def _projection(motor):
+        """Closest point on the route loop: (arclen, seg_index, t)."""
+        best = None
+        count = len(LAN_ROUTE)
+        arc = 0.0
+        for index in range(count):
+            ax, az = LAN_ROUTE[index - 1]
+            bx, bz = LAN_ROUTE[index]
+            ex, ez = bx - ax, bz - az
+            seg2 = ex * ex + ez * ez
+            t = 0.0 if seg2 == 0 else max(0.0, min(1.0,
+                ((motor["x"] - ax) * ex + (motor["z"] - az) * ez) / seg2))
+            px, pz = ax + ex * t, az + ez * t
+            d2 = (px - motor["x"]) ** 2 + (pz - motor["z"]) ** 2
+            if best is None or d2 < best[0]:
+                best = (d2, arc + t * math.sqrt(seg2), index)
+            arc += math.sqrt(seg2)
+        return best[1], best[2]
+
+    @staticmethod
+    def _point_along(arclen):
+        """The route point `arclen` metres along the loop."""
+        total = LAN_ROUTE_LENGTH
+        arclen = arclen % total
+        count = len(LAN_ROUTE)
+        arc = 0.0
+        for index in range(count):
+            ax, az = LAN_ROUTE[index - 1]
+            bx, bz = LAN_ROUTE[index]
+            seglen = math.hypot(bx - ax, bz - az)
+            if arclen <= arc + seglen and seglen > 0:
+                t = (arclen - arc) / seglen
+                return ax + (bx - ax) * t, az + (bz - az) * t
+            arc += seglen
+        return LAN_ROUTE[-1]
+
+    @staticmethod
+    def _corner_deflection(vertex_index):
+        """Heading change (radians) at route vertex `vertex_index`."""
+        count = len(LAN_ROUTE)
+        px, pz = LAN_ROUTE[vertex_index - 1]
+        vx, vz = LAN_ROUTE[vertex_index]
+        nx, nz = LAN_ROUTE[(vertex_index + 1) % count]
+        return abs(wrap_angle(
+            math.atan2(nx - vx, nz - vz)
+            - math.atan2(vx - px, vz - pz)))
+
+    def _lookahead(self, arc, seg_index):
+        """Effective lookahead from the projected route position.
+
+        A fixed lookahead cuts every corner — the aim point sits on the
+        far leg, the car travels straight toward it, and the inside of
+        the corner (the landmark ramp's west edge, the island corners)
+        becomes a wall it beaches on. When a sharp vertex lies inside
+        the lookahead window, clamp the aim to just past that vertex so
+        the car genuinely reaches the corner before steering beyond it;
+        on shallow corners keep the full pursuit distance."""
+        vertex_arc = LAN_ROUTE_ARC[seg_index]
+        gap = vertex_arc - arc            # metres of route to the corner
+        if 0 <= gap < self.lookahead \
+                and self._corner_deflection(seg_index) > 0.7:
+            # Aim essentially AT the corner: a clamp beyond the vertex
+            # (gap + margin > lookahead) silently lengthens the pursuit
+            # distance right where it must shorten, and the chord again
+            # cuts across the inside wall of the hairpin.
+            return max(3.0, min(self.lookahead, gap + 0.5))
+        return self.lookahead
+
+    def _send(self, steering, boost=False, recover=False):
+        frame = {
+            "type": "command", "protocolVersion": 1,
+            "runId": self.peer.info["runId"],
+            "commandId": str(uuid.uuid4()),
+            "participantId": "local", "action": "input.set",
+            "parameters": {
+                key: (str(value).lower() if isinstance(value, bool)
+                      else str(value))
+                for key, value in lan_inputs(
+                    steering=steering, duration=self.hold_ticks,
+                    boost=boost, recover=recover).items()},
+        }
+        try:
+            self.peer.send(frame)
+        except OSError:
+            self.send_ok = False
+
+    def pump(self):
+        """Re-evaluate observed state and issue at most one fresh hold."""
+        if not self.send_ok or self.suspended:
+            return
+        racer = self._racer()
+        if (racer is None or racer.get("finished") or racer.get("dnf")):
+            return
+        session = racer.get("session") or {}
+        motor = session.get("motor")
+        if not isinstance(motor, dict):
+            return
+        if self.lead_meters:
+            # Steer against the extrapolated pose: the wire-aged motor
+            # under-reads where a moving car already is.
+            heading = motor.get("heading") or 0.0
+            motor = dict(motor)
+            motor["x"] = motor["x"] + math.sin(heading) * self.lead_meters
+            motor["z"] = motor["z"] + math.cos(heading) * self.lead_meters
+        sim_tick = session.get("simulationTick") or 0
+        if session.get("raceId") != self.race_id:
+            self.race_id = session.get("raceId")
+            self.recoveries = 0
+            self.best_progress = None
+            self.progress_at = sim_tick
+            self.catchup_credit = 0.0
+            self.unwrapped = None
+            self.prev_arc = None
+            self.held = None
+            self.calm_until = 0
+        recovering = motor.get("recovering") is True
+        # Progress = laps plus forward-unwrapped arclen. The spawn slots
+        # sit beside the route's final segment, so a raw projected arclen
+        # starts near the route END and the car's first-lap arc can never
+        # beat that false frontier — every honest lap would read as one
+        # giant stall. Unwrapping the per-sample arc delta measures only
+        # route distance actually driven: it survives the wrap, the long
+        # detours lap/gate metrics cannot express, and the loops
+        # position-churn hides.
+        arc, seg_index = self._projection(motor)
+        if self.prev_arc is None:
+            self.unwrapped = 0.0
+        else:
+            da = arc - self.prev_arc
+            half = LAN_ROUTE_LENGTH * 0.5
+            while da > half:
+                da -= LAN_ROUTE_LENGTH
+            while da <= -half:
+                da += LAN_ROUTE_LENGTH
+            self.unwrapped += da
+        self.prev_arc = arc
+        progress = (session.get("lap") or 0) * LAN_ROUTE_LENGTH \
+            + self.unwrapped
+        if self.best_progress is None or progress > self.best_progress:
+            self.best_progress = progress
+            self.progress_at = sim_tick
+            self.catchup_credit = 0.0
+        else:
+            # A respawn far behind the best mark earns catch-up time in
+            # the same metres. The budget ratchets UP to the worst gap
+            # since the frontier — never down: the old formula re-read
+            # the live gap every pump, so the credit decayed exactly as
+            # the car closed on its frontier and the driver recovered a
+            # moving car metres short of the mark, respawned it, and
+            # repeated the cycle deterministically until
+            # LAN_MAX_RECOVERIES ran out.
+            gap_now = self.best_progress - progress
+            if gap_now * 3.0 > self.catchup_credit:
+                self.catchup_credit = gap_now * 3.0
+        # A gate plane the crossing rule keeps rejecting costs a
+        # turn-around cycle, so the expected gate's approach radius buys
+        # a little more.
+        allowed = LAN_STALL_TICKS + self.catchup_credit
+        gate_index = session.get("nextCheckpoint")
+        if isinstance(gate_index, int) and 0 <= gate_index < len(LAN_GATES):
+            gx, gz = LAN_GATES[gate_index]
+            if math.hypot(gx - motor["x"], gz - motor["z"]) \
+                    <= LAN_GATE_APPROACH:
+                allowed += 60
+        # Simulation ticks freeze during a shared pause, so a paused race
+        # can never read as stalled.
+        if (motor.get("grounded") and not recovering
+                and sim_tick - self.progress_at >= allowed):
+            self.recoveries += 1
+            assert self.recoveries <= LAN_MAX_RECOVERIES, \
+                "LAN racer needed more than %d recoveries in one race" \
+                % LAN_MAX_RECOVERIES
+            self.progress_at = sim_tick
+            # Roll out of the respawn straight for ~1.5 s before
+            # resuming pursuit — the safe pose needs distance to
+            # straighten, and an immediate full-lock correction is how
+            # a recovered car re-beaches inside the same corner.
+            self.calm_until = sim_tick + 45
+            self._send(0.0, recover=True)
+            self.held = None
+            return
+        # Post-recovery rollout: the respawn just landed — hold neutral
+        # steering so the car travels straight out of the safe pose
+        # instead of re-entering the same wall under full pursuit.
+        if sim_tick < self.calm_until:
+            steering, boost = 0.0, False
+            tick = self.peer.last_state_tick or 0
+            stale = (self.held is None
+                     or tick >= self.held_at + self.resend_ticks)
+            if stale:
+                self._send(steering)
+                self.held = steering
+                self.held_boost = boost
+                self.held_at = tick
+            return
+        # Pure pursuit: aim at a lookahead point along the route, not at
+        # a waypoint — held inputs over remote lag stay stable. Sharp
+        # corners shorten the lookahead so the aim cannot cut across the
+        # inside of the turn.
+        eff_lookahead = self._lookahead(arc, seg_index)
+        tx, tz = self._point_along(arc + eff_lookahead)
+        # Lane offset perpendicular to the route direction at the car's
+        # projection, exactly the AI's LaneFor(slot) fan-out, so four
+        # followers do not shove each other off the line. Through a
+        # clamped sharp corner the offset lane is narrower than the
+        # route corridor — a fan aimed beside the route is what beaches
+        # on the inside barrier, so tight corners drive the centreline.
+        ax, az = LAN_ROUTE[seg_index - 1]
+        bx, bz = LAN_ROUTE[seg_index]
+        sx, sz = bx - ax, bz - az
+        length = math.hypot(sx, sz)
+        lane = ((racer.get("slot") or 0) - 1.5) * 2.0
+        if eff_lookahead < self.lookahead:
+            lane = 0.0
+        if length > 0.001 and lane != 0.0:
+            tx -= sz / length * lane
+            tz += sx / length * lane
+        # Final approach: the plane only counts a forward crossing in
+        # the travel direction inside its half-width, so near the
+        # expected gate aim THROUGH it — a point past the centre — never
+        # at the centre itself, which would park the car parallel on the
+        # line. If a crossing missed (the car ended up on the far side
+        # uncrossed), aim back through to the approach side and retry.
+        # The flip boundary sits ON the plane: a margin away from it
+        # turns into a wall the car orbits without ever crossing —
+        # flipping exactly past the plane makes every yo-yo a real
+        # crossing attempt instead.
+        if isinstance(gate_index, int) and 0 <= gate_index < len(LAN_GATES):
+            gx, gz = LAN_GATES[gate_index]
+            rx, rz = motor["x"] - gx, motor["z"] - gz
+            if math.hypot(rx, rz) <= LAN_GATE_APPROACH:
+                dx, dz = LAN_GATE_DIRS[gate_index]
+                along = rx * dx + rz * dz
+                if along <= 0.5:
+                    tx, tz = gx + dx * 10.0, gz + dz * 10.0
+                else:
+                    tx, tz = gx - dx * 10.0, gz - dz * 10.0
+        steering = round(steer_command(motor, tx, tz, gain=self.gain), 3)
+        boost = (abs(steering) <= LAN_BOOST_MAX_STEER
+                 and (motor.get("boostCharge") or 0.0)
+                 >= LAN_BOOST_MIN_CHARGE)
+        tick = self.peer.last_state_tick or 0
+        stale = (self.held is None or self.held_boost != boost
+                 or tick >= self.held_at + self.resend_ticks)
+        moved = self.held is None or abs(steering - self.held) >= self.CORRECTION
+        if stale or moved:
+            self._send(steering, boost=boost)
+            self.held = steering
+            self.held_boost = boost
+            self.held_at = tick
+
+
+_LAN_DRIVERS = []
+
+
+def pump_drivers():
+    """Give every registered human racer one steering re-evaluation.
+
+    Called from the shared wait path so long waits on one endpoint keep
+    the other humans' cars honestly driven instead of wall-pinned."""
+    for driver in list(_LAN_DRIVERS):
+        driver.pump()
 
 
 def launch(player_command, root, name, profile_dir, startup_timeout):
@@ -428,13 +853,18 @@ def settle_results(peers, checks):
     """Every surviving endpoint reaches results with the immutable
     result, then deliveries reach their persisted terminal state."""
     for name, peer in peers:
+        # The session phase and the finished-race snapshot are separate
+        # wire facts: a client can see "results" a boundary before the
+        # final authoritative race slice lands, so the wait must cover
+        # both rather than asserting a snapshot that is still arriving.
         wait_state(peer,
-                   lambda state: state["network"]["phase"] == "results",
+                   lambda state: state["network"]["phase"] == "results"
+                   and state["networkRace"] is not None
+                   and state["networkRace"]["phase"] == "finished",
                    600, name + " results")
         state = peer.state
         assert state["screen"] == "lan-results", name
         race = state["networkRace"]
-        assert race is not None and race["phase"] == "finished"
         assert race.get("result") is not None, "immutable result missing"
         assert state["network"]["results"], \
             "delivery ledger missing on " + name
@@ -444,11 +874,42 @@ def settle_results(peers, checks):
         return all(value in ("persisted", "failed") for value in states)
     for name, peer in peers:
         wait_state(peer, deliveries_settled, 60, name + " delivery settle")
-        states = {row["state"] for row in peer.state["network"]["results"]}
-        assert "failed" not in states, \
-            name + " persistence failed honestly? " + repr(states)
+        rows = peer.state["network"]["results"]
+        # A failed row is honest only when its code is a permanent
+        # ineligible verdict (e.g. ineligible:dnf — the delivered result
+        # was applied but the racer earned no reward by rule). Any other
+        # failure code is a retryable persistence fault the scenario
+        # must not wave through.
+        bad = [row for row in rows
+               if row["state"] == "failed"
+               and not (row.get("code") or "").startswith("ineligible:")]
+        assert not bad, \
+            name + " delivery failed for a recoverable reason: " \
+            + repr(bad)
+        for row in rows:
+            if row["state"] != "failed":
+                continue
+            # Cross-check the verdict against the immutable result when
+            # the row belongs to the live race: an ineligible:dnf row
+            # must belong to a racer the result itself records as dnf —
+            # a code that contradicts the result is a ledger bug, not
+            # an honest outcome. Rows retained from earlier races no
+            # longer have their result in the live race slice, so only
+            # the ineligible-prefix requirement above covers them.
+            race = peer.state["networkRace"] or {}
+            if row.get("raceId") != race.get("raceId"):
+                continue
+            outcome = next(
+                (r.get("outcome") for r in
+                 ((race.get("result") or {}).get("racers") or [])
+                 if r.get("participantId") == row["participantId"]),
+                None)
+            assert row.get("code") == "ineligible:" + str(outcome), \
+                name + " failed delivery code %r does not match the " \
+                "result outcome %r" % (row.get("code"), outcome)
     checks.append("results phase: immutable result, delivery ledger "
-                  "settled persisted on every survivor")
+                  "settled persisted (or honest ineligible verdicts) "
+                  "on every survivor")
 
 
 def run_lifecycle(host, clients, checks, join_address=None,
@@ -461,6 +922,11 @@ def run_lifecycle(host, clients, checks, join_address=None,
     rejoin instead of simulated disconnects."""
     peers = [("host", host)] + [("client-%d" % i, c)
                                for i, c in enumerate(clients)]
+    # Every attached endpoint owns a waypoint follower: its samples ride
+    # the same bounded input.set hold surface a human uses, so idle cars
+    # cannot wall-pin into an honest DNF while waits run elsewhere.
+    for name, peer in peers:
+        _LAN_DRIVERS.append(LanDriver(peer, remote=name != "host"))
     for name, peer in peers:
         assert peer.state["activeSlot"] == -1 \
             and peer.state["screen"] == "profiles", name
@@ -513,48 +979,64 @@ def run_lifecycle(host, clients, checks, join_address=None,
     client_id = first_client.state["network"]["localParticipantId"]
     assert client_id == first_client.state["savedProfile"]["id"]
 
-    # Input bounds and normalization: an out-of-range sample is refused
-    # wholesale, and a held input auto-expires after its duration — the
-    # observable steering returns to neutral without another command.
-    rejected, _ = first_client.command(
-        "input.set", lan_inputs(steering=2, duration=5))
-    assert rejected["status"] == "rejected" \
-        and rejected["code"] == "invalidParameter", rejected
-    first_client.applied("input.set", lan_inputs(steering=1, duration=10))
-    assert first_client.state["input"]["steering"] == 1
-    wait_state(first_client,
-               lambda state: state["input"]["steering"] == 0,
-               15, "held input normalized back to neutral")
-    checks.append("bounded input: out-of-range refused, hold normalized "
-                  "to neutral after durationTicks")
+    # Observable-input assertions read the endpoint's own input slice,
+    # which every input.set rewrites — including the driver's resends.
+    # Suspend the client driver's sends for exactly this block so the
+    # held-input window under test cannot be overwritten mid-wait. The
+    # driver resumes before the shared-pause segment: pause.toggle rides
+    # its own action path and the driver's neutral pause field is inert.
+    first_driver = next(d for d in _LAN_DRIVERS if d.peer is first_client)
+    first_driver.suspended = True
+    try:
+        # Input bounds and normalization: an out-of-range sample is
+        # refused wholesale, and a held input auto-expires after its
+        # duration — the observable steering returns to neutral without
+        # another command.
+        rejected, _ = first_client.command(
+            "input.set", lan_inputs(steering=2, duration=5))
+        assert rejected["status"] == "rejected" \
+            and rejected["code"] == "invalidParameter", rejected
+        first_client.applied("input.set",
+                             lan_inputs(steering=1, duration=10))
+        assert first_client.state["input"]["steering"] == 1
+        wait_state(first_client,
+                   lambda state: state["input"]["steering"] == 0,
+                   15, "held input normalized back to neutral")
+        checks.append("bounded input: out-of-range refused, hold "
+                      "normalized to neutral after durationTicks")
 
-    # Both cameras: the toggle flips the draft preference and the applied
-    # presentation camera facts follow on the next rendered frame.
-    assert first_client.state["draftProfile"]["camera"] == "chase"
-    first_client.applied("camera.toggle")
-    wait_state(first_client,
-               lambda state: state["presentation"]["camera"]["mode"]
-               == "overhead", 15, "overhead camera applied")
-    first_client.applied("camera.toggle")
-    wait_state(first_client,
-               lambda state: state["presentation"]["camera"]["mode"]
-               == "chase", 15, "chase camera applied")
-    checks.append("both cameras applied through observable camera facts")
+        # Both cameras: the toggle flips the draft preference and the
+        # applied presentation camera facts follow on the next rendered
+        # frame.
+        assert first_client.state["draftProfile"]["camera"] == "chase"
+        first_client.applied("camera.toggle")
+        wait_state(first_client,
+                   lambda state: state["presentation"]["camera"]["mode"]
+                   == "overhead", 15, "overhead camera applied")
+        first_client.applied("camera.toggle")
+        wait_state(first_client,
+                   lambda state: state["presentation"]["camera"]["mode"]
+                   == "chase", 15, "chase camera applied")
+        checks.append(
+            "both cameras applied through observable camera facts")
 
-    # Bounded input and the deduplicated one-shot action on the client:
-    # the recover press rides the action path, so action.* events must
-    # acknowledge it on the client's observable event stream.
-    recover, _ = first_client.command(
-        "input.set", lan_inputs(steering=0, duration=5, recover=True))
-    assert recover["status"] == "applied", recover
+        # Bounded input and the deduplicated one-shot action on the
+        # client: the recover press rides the action path, so action.*
+        # events must acknowledge it on the client's observable event
+        # stream.
+        recover, _ = first_client.command(
+            "input.set", lan_inputs(steering=0, duration=5, recover=True))
+        assert recover["status"] == "applied", recover
 
-    def action_acked(state):
-        return any(event["kind"].startswith("action.")
-                   and event.get("participantId") == client_id
-                   for event in state.get("drivingEvents") or [])
-    wait_state(first_client, action_acked, 30,
-               "client action acknowledgment")
-    checks.append("recover action acknowledged via action.* events")
+        def action_acked(state):
+            return any(event["kind"].startswith("action.")
+                       and event.get("participantId") == client_id
+                       for event in state.get("drivingEvents") or [])
+        wait_state(first_client, action_acked, 30,
+                   "client action acknowledgment")
+        checks.append("recover action acknowledged via action.* events")
+    finally:
+        first_driver.suspended = False
 
     # Shared pause: the client's request appears on the host's roster of
     # pause requests; the host's toggle pauses and resumes everyone.
@@ -606,6 +1088,7 @@ def run_lifecycle(host, clients, checks, join_address=None,
         rejoined = fault["relaunch"](first_client)
         clients[0] = rejoined
         active[0] = rejoined
+        _LAN_DRIVERS.append(LanDriver(rejoined, remote=True))
         rejoined.applied("profile.select", {"slot": 0})
         accepted, _ = rejoined.command("lan.reconnect")
         assert accepted["status"] == "accepted", accepted
@@ -682,12 +1165,22 @@ def run_lifecycle(host, clients, checks, join_address=None,
     checks.append("host loss: clients landed on lan-recovery; reconnect "
                   "attempts terminated failed honestly")
     for peer in active:
-        peer.applied("lan.leave")
+        # The failed reconnect may already have expired the client back
+        # to the browser (join timeout drops a dead session to idle), in
+        # which case lan.leave honestly reports there is nothing left to
+        # leave; otherwise the explicit leave performs the exit. Either
+        # way the endpoint must finish on the browser with no session.
+        result, _ = peer.command("lan.leave")
+        if result["status"] == "rejected":
+            assert result["code"] == "noSession", result
+        else:
+            assert result["status"] == "applied", result
         wait_state(peer,
                    lambda state: state["network"]["role"] == "none"
                    and state["screen"] == "lan-browser",
                    15, "client left")
-    checks.append("lan.leave returned every endpoint to the browser")
+    checks.append("lan.leave (or honest noSession after the failed "
+                  "reconnect) returned every endpoint to the browser")
     return checks
 
 
@@ -707,12 +1200,23 @@ def read_connection(path):
 
 def finish_capture(name, peer, report):
     """Health + finish handshake, then independent trace verification."""
+    finish_handshake(peer)
+    verify_trace_into(name, peer, report)
+
+
+def finish_handshake(peer):
+    """Ask one endpoint for its health/finish records; waits drain the
+    peer sockets, so every peer stays fed while this one is awaited."""
     peer.send({"type": "health"})
     health = peer.wait(lambda event: event.get("type") == "health")
     assert health["captureValid"], health
     peer.send({"type": "finish"})
     finished = peer.wait(lambda event: event.get("type") == "finished")
     assert finished["captureValid"], finished
+
+
+def verify_trace_into(name, peer, report):
+    """Replay the endpoint's captured stream into the shared traces map."""
     outcome = verify_lan_trace(Path(peer.info["_directory"]), peer.info)
     assert not outcome["incompleteCommands"], \
         name + " left lan.* commands without a terminal outcome"
@@ -756,19 +1260,28 @@ def run_attached(connection_paths, evidence, host_address=None):
 
         host = clients[0][1]
         rest = [peer for _, peer in clients[1:]]
-        report["checks"] = run_lifecycle(
-            host, rest, [],
+        # The report's own checks list is handed in so a mid-lifecycle
+        # failure still records every checkpoint that did pass — an
+        # empty list would misreport a late failure as "nothing ran".
+        run_lifecycle(
+            host, rest, report["checks"],
             join_address=host_address,
             allow_loopback=False)
+        # Same starvation guard as launch mode: handshakes first (waits
+        # drain peers), file verification last.
         for role, peer in clients:
-            finish_capture(role, peer, report)
+            finish_handshake(peer)
+        for role, peer in clients:
+            verify_trace_into(role, peer, report)
         report["checks"].append(
             "all captures finished; traces reconstruct; phases legal; "
             "accepted commands completed exactly once")
         report["status"] = "passed"
     except Exception as error:
-        report["error"] = str(error)
+        report["error"] = "%s: %s" % (type(error).__name__, error)
+        report["traceback"] = traceback.format_exc()
     finally:
+        _LAN_DRIVERS.clear()
         for _, peer in clients:
             try:
                 peer.close()
@@ -896,18 +1409,27 @@ def run_scenario(player_command, evidence, players=2,
 
             fault = {"kill": kill, "relaunch": relaunch}
 
-        report["checks"] = run_lifecycle(
-            host, clients, [],
+        run_lifecycle(
+            host, clients, report["checks"],
             join_address="127.0.0.1", allow_loopback=True,
             fault=fault)
 
         # Only living generations can durably finish a capture; a killed
         # process's truncated trace is recorded as a fault-injection
-        # casualty instead of being forced through verification.
+        # casualty instead of being forced through verification. The
+        # handshakes all run first: every wait drains peer sockets, so no
+        # endpoint's validation stream backs up while another finishes —
+        # a starved stream times out its server-side write and the
+        # player disposes the session before its own health check.
+        # Trace verification is file work only, so it runs last.
         for name in names:
             entry = roster[name]
             if entry["alive"]:
-                finish_capture(name, entry["client"], report)
+                finish_handshake(entry["client"])
+        for name in names:
+            entry = roster[name]
+            if entry["alive"]:
+                verify_trace_into(name, entry["client"], report)
             else:
                 report.setdefault("traces", {})[name] = {
                     "verified": False,
@@ -918,8 +1440,10 @@ def run_scenario(player_command, evidence, players=2,
             "accepted commands completed exactly once")
         report["status"] = "passed"
     except Exception as error:
-        report["error"] = str(error)
+        report["error"] = "%s: %s" % (type(error).__name__, error)
+        report["traceback"] = traceback.format_exc()
     finally:
+        _LAN_DRIVERS.clear()
         for name in names:
             entry = roster.get(name)
             if entry is None:

@@ -1,8 +1,11 @@
+using System.Collections.Generic;
 using System.IO;
 using FamilyRacing.Core.Networking;
 using FamilyRacing.Networking;
 using UnityEditor;
+using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 namespace FamilyRacing.EditorTools
 {
@@ -76,6 +79,73 @@ namespace FamilyRacing.EditorTools
             // race can award finishers (Task 8 applies it).
             EnsureLanEvent("lan-car-01", track, "car-01");
             EnsureLanEvent("lan-motorcycle-01", track, "motorcycle-01");
+            // Authoring the assets is not enough: the runtime catalog is
+            // built from the bootstrap scene's DrivingWorld.events list,
+            // which DrivingPrototypeSetup fills with solo events only.
+            // An unwired LAN event makes lan.configure fail with
+            // unknownEvent on every built player.
+            WireLanEventsIntoScene();
+        }
+
+        // Append the LAN event assets to the bootstrap scene's
+        // DrivingWorld.events list — same inspect-not-trust pattern as
+        // DrivingPrototypeSetup.WireScene: an existing entry is left
+        // alone, a missing one is added in place, and scenes we opened
+        // are closed afterwards. Never reorders or removes solo entries.
+        private static void WireLanEventsIntoScene()
+        {
+            const string scenePath =
+                "Assets/FamilyRacing/Generated/Foundation.unity";
+            var lanEvents = new List<Object>();
+            foreach (var eventId in new[] { "lan-car-01", "lan-motorcycle-01" })
+            {
+                var asset = AssetDatabase.LoadAssetAtPath<EventDefinitionAsset>(
+                    DrivingContentDir + "/" + eventId + ".asset");
+                if (asset != null) lanEvents.Add(asset);
+            }
+            if (lanEvents.Count == 0) return;
+            var alreadyOpen = false;
+            var scene = new Scene();
+            for (var i = 0; i < SceneManager.sceneCount; i++)
+            {
+                var open = SceneManager.GetSceneAt(i);
+                if (open.path == scenePath)
+                { scene = open; alreadyOpen = true; break; }
+            }
+            if (!alreadyOpen)
+                scene = EditorSceneManager.OpenScene(
+                    scenePath, OpenSceneMode.Additive);
+            var dirty = false;
+            foreach (var rootObj in scene.GetRootGameObjects())
+            foreach (var app in rootObj
+                         .GetComponentsInChildren<FoundationApp>(true))
+            {
+                var world = app.GetComponent<DrivingWorld>();
+                if (world == null) continue;
+                var serialized = new SerializedObject(world);
+                var events = serialized.FindProperty("events");
+                if (events == null || !events.isArray) continue;
+                var present = new List<Object>();
+                for (var i = 0; i < events.arraySize; i++)
+                    present.Add(events.GetArrayElementAtIndex(i)
+                        .objectReferenceValue);
+                var merged = new List<Object>(present);
+                foreach (var lanEvent in lanEvents)
+                    if (!present.Contains(lanEvent)) merged.Add(lanEvent);
+                if (merged.Count == present.Count) continue;
+                events.arraySize = merged.Count;
+                for (var i = 0; i < merged.Count; i++)
+                    events.GetArrayElementAtIndex(i)
+                        .objectReferenceValue = merged[i];
+                serialized.ApplyModifiedPropertiesWithoutUndo();
+                dirty = true;
+            }
+            if (dirty)
+            {
+                EditorSceneManager.MarkSceneDirty(scene);
+                EditorSceneManager.SaveScene(scene);
+            }
+            if (!alreadyOpen) EditorSceneManager.CloseScene(scene, true);
         }
 
         // The AI racing line for the graybox course, compatible with the

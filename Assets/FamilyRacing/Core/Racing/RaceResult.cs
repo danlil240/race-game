@@ -72,7 +72,12 @@ namespace FamilyRacing.Core.Racing
 
         // Delivery bookkeeping: aggregate status for observers plus the
         // per-participant ledger. Excluded from Fingerprint() by design.
+        // `deliveryCode` is the client-side record of the last apply
+        // outcome reason ("" when persisted/pending) so an observer can
+        // tell a permanent ineligible verdict from a transient save
+        // failure without decoding the wire ack.
         public string deliveryStatus = "";
+        public string deliveryCode = "";
         public List<RaceResultDelivery> deliveries =
             new List<RaceResultDelivery>();
 

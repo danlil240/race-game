@@ -8,8 +8,11 @@ import argparse
 import copy
 import json
 import math
+import queue
+import select
 import socket
 import sys
+import threading
 import time
 import uuid
 from collections import deque
@@ -228,6 +231,13 @@ def verify_trace(directory, info):
     assert status["captureValid"] and status["captureComplete"], "Capture not durably completed"
 
 
+# Multi-peer runs read endpoints sequentially: a wait on one client can
+# leave another's socket unread long enough for its validation stream to
+# back up and die. Every connected client registers here so any wait()
+# drains the peers it is not blocked on, keeping every sink consumed.
+_ACTIVE_CLIENTS = []
+
+
 class Client:
     def __init__(self, connection, evidence):
         self.info = connection
@@ -241,8 +251,29 @@ class Client:
         self.action_states = {}
         self.sock = socket.create_connection(("127.0.0.1", connection["port"]), timeout=10)
         self.reader = self.sock.makefile("rb")
+        # A dedicated pump consumes this socket continuously and queues raw
+        # frames: the player's stream writer fails honestly after a bounded
+        # send timeout, so a scenario thread blocked waiting on ANOTHER
+        # peer (e.g. a relaunching process mid-boot) must never let this
+        # sink back up. read() pulls from the queue — validation and state
+        # stay on the calling thread. The pump uses raw select+recv, never
+        # a makefile readline: closing the socket from close() must always
+        # unblock it, which a BufferedReader io-lock cannot guarantee.
+        # Fault-observer subclasses set _uses_pump = False and read the
+        # makefile directly — they exist to observe exactly the stalls the
+        # pump exists to prevent.
+        self._lines = queue.Queue()
+        self._terminal = None
+        self._closing = False
+        self._pump = None
+        if self._uses_pump:
+            self._pump = threading.Thread(
+                target=self._pump_lines, daemon=True,
+                name="validation-pump-%s" % connection.get("port"))
+            self._pump.start()
         self.incoming = (evidence / "observed.ndjson").open("x", encoding="utf-8")
         self.outgoing = (evidence / "commands.ndjson").open("x", encoding="utf-8")
+        _ACTIVE_CLIENTS.append(self)
         self.send({
             "type": "hello", "protocolVersion": 1,
             "runId": connection["runId"], "token": connection["token"],
@@ -261,11 +292,54 @@ class Client:
         self.outgoing.flush()
         self.sock.sendall((json.dumps(frame) + "\n").encode("utf-8"))
 
+    _MAX_LINE = 1024 * 1024 + 1
+    _uses_pump = True
+
+    def _pump_lines(self):
+        buf = bytearray()
+        try:
+            while not self._closing:
+                try:
+                    ready = select.select([self.sock], [], [], 0.5)[0]
+                except (OSError, ValueError):
+                    break
+                if not ready:
+                    continue
+                chunk = self.sock.recv(65536)
+                if not chunk:
+                    if not self._closing:
+                        self._lines.put((None, "eof"))
+                    return
+                buf += chunk
+                while True:
+                    end = buf.find(b"\n")
+                    if end < 0:
+                        break
+                    self._lines.put((bytes(buf[:end + 1]), None))
+                    del buf[:end + 1]
+                # readline's oversized path: a line that never terminates
+                # within the cap is emitted whole so read() flags it.
+                if len(buf) > self._MAX_LINE:
+                    self._lines.put((bytes(buf), None))
+                    del buf[:]
+        except Exception as error:
+            if not self._closing:
+                self._lines.put((None, error))
+
     def read(self, remaining):
-        self.sock.settimeout(max(0.01, remaining))
-        line = self.reader.readline(1024 * 1024 + 1)
-        if not line:
-            raise AssertionError("Connection closed before the expected outcome")
+        if self._terminal is not None:
+            raise self._terminal
+        try:
+            line, error = self._lines.get(timeout=max(0.01, remaining))
+        except queue.Empty:
+            raise socket.timeout("timed out")
+        if error == "eof":
+            self._terminal = AssertionError(
+                "Connection closed before the expected outcome")
+            raise self._terminal
+        if error is not None:
+            self._terminal = error
+            raise error
         if len(line) > 1024 * 1024 or not line.endswith(b"\n"):
             raise AssertionError("Oversized or truncated server frame")
         event = json.loads(line)
@@ -287,12 +361,44 @@ class Client:
         self.events.append(event)
         return event
 
-    def wait(self, predicate, timeout=20):
+    def _drain_peers(self):
+        """Consume whatever other live clients already sent; otherwise a
+        long wait on this endpoint starves their validation sinks.
+        Peers whose socket is gone (closed, or a test double without a
+        real descriptor) are skipped rather than selected on."""
+        for other in list(_ACTIVE_CLIENTS):
+            if other is self:
+                continue
+            sock = getattr(other, "sock", None)
+            try:
+                if sock is None or sock.fileno() < 0:
+                    continue
+            except (OSError, ValueError, AttributeError):
+                continue
+            try:
+                while select.select([sock], [], [], 0)[0]:
+                    try:
+                        other.read(0.02)
+                    except socket.timeout:
+                        break
+            except (OSError, ValueError, AssertionError):
+                # An AssertionError from read() is an honest EOF: the peer's
+                # server side closed the session (a finished capture does
+                # this deliberately). A closed peer is not a drain target.
+                continue
+
+    def wait(self, predicate, timeout=20, on_event=None):
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            event = self.read(deadline - time.monotonic())
+            try:
+                event = self.read(deadline - time.monotonic())
+            except (socket.timeout, TimeoutError):
+                continue
+            if on_event is not None:
+                on_event(event)
             if predicate(event):
                 return event
+            self._drain_peers()
         raise AssertionError("Timed out waiting for a recorded outcome")
 
     def command(self, action, parameters=None, command_id=None):
@@ -321,8 +427,20 @@ class Client:
         return state
 
     def close(self):
-        self.reader.close()
-        self.sock.close()
+        if self in _ACTIVE_CLIENTS:
+            _ACTIVE_CLIENTS.remove(self)
+        # The pump selects on this socket in 0.5 s slices; closing the
+        # descriptors cancels any pending recv — with no thread inside a
+        # makefile read on the healthy path, no io-lock can hold this up.
+        self._closing = True
+        try:
+            self.sock.close()
+        except Exception:
+            pass
+        try:
+            self.reader.close()
+        except Exception:
+            pass
         self.incoming.close()
         self.outgoing.close()
 

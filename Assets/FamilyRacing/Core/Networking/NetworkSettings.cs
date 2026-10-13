@@ -100,6 +100,13 @@ namespace FamilyRacing.Core.Networking
         public const double JoinTimeoutSeconds = JoinTimeoutMilliseconds / 1000.0;
         public const double RequestTimeoutSeconds = PeerTimeoutMilliseconds / 1000.0;
 
+        // Grace between broadcasting session.closed and tearing the host
+        // link down: the reliable-ordered pipeline only delivers what the
+        // driver still has time to flush, so an immediate Stop() can drop
+        // the close notification entirely and every client would fall
+        // back to the generic transport "disconnect" reason.
+        public const double SessionCloseFlushSeconds = 0.5;
+
         // Default UDP ports; configurable per start call so several
         // processes can share one machine.
         public const ushort DefaultGameplayPort = 47777;

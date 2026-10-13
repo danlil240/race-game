@@ -467,13 +467,30 @@ namespace FamilyRacing.Networking
             }
         }
 
+        // Upstream mitigation (Unity Transport 2.6.0, UDPNetworkInterface
+        // ReceiveJob): on Windows a killed peer's closed port answers our
+        // datagrams with ICMP port-unreachable, which surfaces as failed
+        // baselib receive completions. Each failed request leaks one
+        // receive buffer because ReleaseBuffer is never called on that
+        // path — the default 64-buffer pool drains after a single mid-race
+        // process kill (~100 sends to the dead endpoint during the 5 s
+        // peer-timeout window) and the host goes deaf: discovery still
+        // works and peer timeouts still fire, but new Accept() calls never
+        // arrive so joins and credentialed reconnects all time out. Unity
+        // has confirmed the missing ReleaseBuffer as a package bug and
+        // recommends a larger receive queue until the fix ships; 4096
+        // buffers (~6 MB) cover dozens of kill/rejoin cycles plus ambient
+        // failed receives on a real LAN.
+        private const int ReceiveQueueCapacity = 4096;
+
         private NetworkDriver CreateDriver()
         {
             var settings = new NetworkSettings();
             settings.WithNetworkConfigParameters(
                 connectTimeoutMS: ConnectAttemptIntervalMilliseconds,
                 maxConnectAttempts: MaxConnectAttempts,
-                disconnectTimeoutMS: PeerTimeoutMilliseconds);
+                disconnectTimeoutMS: PeerTimeoutMilliseconds,
+                receiveQueueCapacity: ReceiveQueueCapacity);
             // The fragmentation stage defaults to a 4 KiB payload
             // capacity — far below the 16 KiB snapshot ceiling — so an
             // oversized gameplay packet fails EndSend with

@@ -425,6 +425,84 @@ namespace FamilyRacing.Tests
             }
         }
 
+        // The published `prediction` slice is contract-gated to a live
+        // LAN race: a client creates its predictor on the first session
+        // tick — while still connecting or sitting in the lobby — but
+        // the slice must stay null until the first authoritative
+        // snapshot confirms a race, matching `networkRace`. A live
+        // scenario caught the slice leaking an all-null-facts object
+        // during `connecting`, violating the stream contract that
+        // prediction exists only on a client inside a LAN race.
+        [UnityTest]
+        public IEnumerator PredictionSliceStaysNullUntilFirstSnapshot()
+        {
+            var host = new Rig("p-host", new StubNetworkAccess());
+            var client = new Rig("p-guest", new StubNetworkAccess());
+            try
+            {
+                var hosted = host.Session.Execute(
+                    Cmd("lan.host", P("port", "0")));
+                Assert.That(hosted.status,
+                    Is.EqualTo(CommandResult.Applied));
+                var joined = client.Session.Execute(Cmd("lan.join",
+                    P("address", "127.0.0.1",
+                      "port", host.Transport.BoundPort.ToString(
+                          System.Globalization.CultureInfo
+                              .InvariantCulture))));
+                Assert.That(joined.status,
+                    Is.EqualTo(CommandResult.Accepted));
+
+                // Through connecting and the settled lobby the client
+                // ticks every boundary — its predictor object exists —
+                // but no snapshot has confirmed a race, so the slice
+                // stays unpublished.
+                yield return PumpUntil(() =>
+                    client.Session.Snapshot().phase
+                        == LanSessionService.PhaseLobby,
+                    host, client);
+                for (var i = 0; i < 6; i++)
+                {
+                    client.Bridge.StepTick(Neutral, World);
+                    Assert.That(client.Bridge.Prediction, Is.Null,
+                        "prediction slice leaked before any LAN race "
+                        + "existed (lobby/connecting tick " + i + ")");
+                    Assert.That(client.Bridge.LatestState, Is.Null);
+                }
+
+                // Once the race is confirmed the slice publishes again —
+                // continue from the lobby this test already established.
+                Assert.That(host.Session.Execute(Cmd("lan.configure",
+                    P("eventId", "lan-mixed", "classId", "car"))).status,
+                    Is.EqualTo(CommandResult.Applied));
+                Assert.That(host.Session.Execute(Cmd("lan.ready",
+                    P("ready", "true"))).status,
+                    Is.EqualTo(CommandResult.Applied));
+                Assert.That(client.Session.Execute(Cmd("lan.ready",
+                    P("ready", "true"))).status,
+                    Is.Not.EqualTo(CommandResult.Rejected));
+                yield return PumpUntil(() =>
+                    Find(host.Session.Snapshot(), "p-guest")?.ready == true,
+                    host, client);
+                Assert.That(host.Session.Execute(Cmd("lan.start", null))
+                    .status, Is.EqualTo(CommandResult.Applied));
+                yield return PumpUntil(() =>
+                {
+                    host.Bridge.StepTick(Neutral, World);
+                    client.Bridge.StepTick(Neutral, World);
+                    return host.Bridge.LatestState != null
+                        && client.Bridge.LatestState != null;
+                }, host, client);
+                Assert.That(client.Bridge.Prediction, Is.Not.Null,
+                    "prediction slice missing inside a live LAN race");
+                Assert.That(client.Bridge.LatestState, Is.Not.Null);
+            }
+            finally
+            {
+                host.Dispose();
+                client.Dispose();
+            }
+        }
+
         // When snapshots stop arriving the remote pose extrapolates at
         // most 100 ms, then holds and reports stale — measured against
         // the deterministic rig clock.

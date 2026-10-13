@@ -119,6 +119,10 @@ namespace FamilyRacing.Core.Networking
         private string role = RoleNone;
         private string phase = PhaseIdle;
         private double now;
+        // Armed when the host broadcasts session.closed: the link stays up
+        // for one flush window so the reliable close datagram is actually
+        // delivered before Teardown() stops the transport.
+        private double closeFlushUntil = double.NegativeInfinity;
         private string lastError = "";
         private string sessionId = "";
         private SessionDescriptor descriptor;
@@ -202,6 +206,13 @@ namespace FamilyRacing.Core.Networking
         {
             if (command == null || string.IsNullOrEmpty(command.Action))
                 return Result(null, CommandResult.Rejected, "invalidCommand");
+            // A pending close only keeps the transport alive to flush the
+            // final reliable datagram; the session itself is already over.
+            // Any new command takes precedence over the flush — tear the
+            // link down now rather than blocking the user behind the
+            // flush window.
+            if (closeFlushUntil != double.NegativeInfinity)
+                Teardown();
             switch (command.Action)
             {
                 case "lan.host": return Host(command);
@@ -229,6 +240,12 @@ namespace FamilyRacing.Core.Networking
         public void AdvanceWallTime(double monotonicSeconds)
         {
             if (monotonicSeconds > now) now = monotonicSeconds;
+            if (closeFlushUntil != double.NegativeInfinity
+                && now >= closeFlushUntil)
+            {
+                Teardown();
+                return;
+            }
             var expired = new List<PendingOp>();
             foreach (var op in pending)
             {
@@ -297,7 +314,8 @@ namespace FamilyRacing.Core.Networking
                             resultId = result.resultId,
                             raceId = result.raceId,
                             participantId = delivery.participantId,
-                            state = delivery.state
+                            state = delivery.state,
+                            code = delivery.code
                         });
             }
             else if (role == RoleClient)
@@ -308,7 +326,8 @@ namespace FamilyRacing.Core.Networking
                         resultId = result.resultId,
                         raceId = result.raceId,
                         participantId = localParticipantId,
-                        state = result.deliveryStatus
+                        state = result.deliveryStatus,
+                        code = result.deliveryCode
                     });
             }
             return state;
@@ -790,7 +809,16 @@ namespace FamilyRacing.Core.Networking
             FailPending("leaveCancelled");
             // Explicit leave removes the stored reconnect credential.
             ClearReconnectMaterial();
-            Teardown();
+            // The session is observably over the moment leave applies: the
+            // UI returns to the browser now, not after the flush window.
+            // Only the transport teardown is deferred — stopping the link
+            // in the same call risks dropping the reliable
+            // leave/session.closed datagram, and peers would then see a
+            // bare transport disconnect instead of the explicit reason.
+            closeFlushUntil = now
+                + NetworkSettings.SessionCloseFlushSeconds;
+            role = RoleNone;
+            phase = PhaseIdle;
             return Result(command, CommandResult.Applied, "");
         }
 
@@ -1259,6 +1287,7 @@ namespace FamilyRacing.Core.Networking
                 : applied.status == RaceRewardService.StatusIneligible
                     ? "ineligible:" + applied.code
                     : applied.code;
+            result.deliveryCode = code;
             link.Send(serverConnection, NetworkProtocol.Encode(
                 NetworkProtocol.MsgResultAck,
                 "rid", result.resultId,
@@ -1981,6 +2010,7 @@ namespace FamilyRacing.Core.Networking
 
         private void Teardown()
         {
+            closeFlushUntil = double.NegativeInfinity;
             link.Stop();
             if (discovery != null) discovery.StopResponder();
             openConnections.Clear();

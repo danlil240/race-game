@@ -19,7 +19,11 @@ path.
 
 ## Automated gate
 
-`Tools\Verify.ps1 -Mode PlayMode` runs the three smoke tests in
+`Tools\Verify.ps1 -Mode PlayMode` runs the LAN PlayMode suite
+(`LanTransportPlayTests`, `NetworkLifecyclePlayTests`,
+`NetworkScreensPlayTests`, `NetworkStreamPlayTests`,
+`NetworkResultsPlayTests`, `NetworkPredictionPlayTests`, …) including the
+three transport smoke tests in
 `Assets/FamilyRacing/Tests/PlayMode/LanTransportPlayTests.cs`:
 
 - `HostClientExchangeUsesRealTransport` — real host/client UDP handshake and
@@ -29,9 +33,11 @@ path.
 - `DeniedAccessDoesNotOpenSockets` — a denied `ILanNetworkAccess` gate makes
   start fail immediately; no socket opens and no pending join lingers.
 
-Latest recorded result: **124/124 PlayMode** (baseline 121 + 3 new),
-`Logs/verify-playmode-results.xml`, 2026-10-12. Regression gates unchanged:
-EditMode 393 + 1 explicit Ignore, Core 362.
+Latest recorded result: **174/174 PlayMode**
+(`Logs/verify-playmode-results.xml`, M3 task-10 gate, 2026-10-12). Full
+gate at that revision: EditMode 507 + 1 explicit voice-clip Ignore
+(`EveryCueHasWiredClipForBothLocales`, credential-gated), Core 468,
+Python tooling 127, verify-tooling 12/12.
 
 ## Windows: private-network firewall setup (do NOT disable the firewall)
 
@@ -78,24 +84,50 @@ needs (`Assets/Plugins/Android/AndroidManifest.xml`):
   before any socket opens; denial fails start immediately
   (`DeniedAccessDoesNotOpenSockets`).
 
+## Scenario tools (all attach via `connection.json`, never an exe path)
+
+| Tool | Drives | Evidence |
+|---|---|---|
+| `Tools\NetworkScenario.py --connections <host.json> <client.json> [--host-address <ip>] --evidence <new-dir>` | Complete LAN lifecycle on 2–4 launched players: discovery/manual join, lobby, both vehicle classes, bounded input, shared pause, AI takeover (leave) or process-kill credentialed rejoin (`--launch` mode), immutable results, rematch, host loss, recovery | Per-endpoint `result.json` + independently verified `state.ndjson` |
+| `Tools\NetworkScenario.py --launch <player.exe> [--players 2-4] [--no-fault-injection]` | Dev convenience: owns the processes so the labeled fault-injection segment can kill/relaunch a client (real AI takeover + credentialed rejoin) and kill the host (real host loss) | Same |
+| `Tools\NetworkSoak.py --connections <host.json> <client.json> ... --minutes 30 --evidence <new-dir>` | Sustained real-time soak: repeated lobby→race→results→rematch cycles in wall-clock time (no deterministic clock stepping), periodic bounded input + per-device health samples, once-only result/delivery ledger across rematches, per-device boundary cadence | Per-endpoint `samples.json`, `result.json`, verified traces |
+
 ## Evidence log
 
 | Date (UTC) | Check | Result |
 |---|---|---|
-| 2026-10-12 | `Verify.ps1 -Mode PlayMode` smoke tests incl. same-machine host↔client UDP exchange over real sockets | 124/124 pass (`Logs/verify-playmode-results.xml`) |
-| 2026-10-12 | `Verify.ps1 -Mode Windows` Mono development build | Succeeded, 0 errors/warnings; `Unity.Netcode.Runtime.dll` + `Unity.Networking.Transport.dll` + updated `FamilyRacing.Runtime.dll` in `Builds/Windows/FamilyRacing_Data/Managed` |
-| 2026-10-12 | `Verify.ps1 -Mode Android` export + offline Gradle | Succeeded; APK SHA-256 `9B6D7C4406C2CDD05414B4D162B1307FA046557BCF045564E883D6D7A4E5A12E`; merged manifest carries the three LAN permissions |
+| 2026-10-12 | `Verify.ps1 -Mode PlayMode` LAN + driving suite | 174/174 pass (`Logs/verify-playmode-results.xml`) |
+| 2026-10-12 | Full gate (M3 task 10) | Core 468/468, EditMode 507 + 1 explicit voice-clip Ignore, Python 127/127, verify-tooling 12/12 |
+| 2026-10-12 | `Verify.ps1 -Mode Windows` Mono development build | Succeeded; see `docs/tasks/network-prototype-report.md` for the hash at the qualified revision |
+| 2026-10-12 | `Verify.ps1 -Mode WindowsOrdinary` Mono ordinary build | Succeeded; validation endpoints compiled out — launching with `--validation-dir` produces no `connection.json` and opens no socket |
+| 2026-10-12 | `Verify.ps1 -Mode Android` export + offline Gradle | Succeeded; APK hash + exported target SDK recorded in the task-10 report |
+| 2026-10-12 | `NetworkScenario.py --launch` on the task-10 build | 22/22 checks pass incl. process-kill AI takeover, credentialed rejoin, host loss (`Logs/evidence-t10-lan-final9`); details in the task-10 report |
+| 2026-10-12 | `NetworkSoak.py` tool + unit coverage | Tool delivered (`TestNetworkSoak.py` 22/22); real 30-minute multi-device soak is hardware-gated |
 
-## Open evidence gates (explicit — hardware required)
+## Open evidence gates (explicit — hardware or human review required)
 
-These require physical devices that are not available in this environment.
-They remain open gates for milestone qualification (Task 10), not silent
-assumptions:
+These require physical devices or owner review not available in this
+environment. Each is **not verified** — never passed by a desktop
+substitute. The authoritative list with per-row status lives in
+`docs/tasks/network-prototype-report.md`:
 
-- Tablet-to-tablet handshake (two Galaxy Tab A7 Lite / supported tablets,
-  internet disconnected).
-- Mixed-platform handshake (Windows host ↔ Android client and reverse,
-  internet disconnected).
-- Discovery on a real home AP (including AP-isolation off) vs. manual
-  join fallback when broadcast is blocked.
-- Four-human session (four supported devices).
+- Tablet-to-tablet session (two supported tablets, internet disconnected):
+  discovery/manual join, ready/countdown, race/results/rematch, touch.
+- Mixed-platform session (Windows ↔ Android, either hosting), including
+  version-incompatibility rejection and Windows firewall/multi-adapter
+  diagnostics on a real LAN.
+- Four-physical-device session (A7 Lite host): four humans, repeated
+  races, AI takeover/rejoin, 30-minute `NetworkSoak.py --minutes 30` run.
+- Discovery failure matrix on a real AP: broadcast blocked → manual IP;
+  denied LAN permission; unreachable/full/incompatible lobby responses.
+- Lifecycle faults on devices: disconnect in countdown/running/pause/
+  finishing, client restart, host close, no duplicate reward.
+- Impaired-network matrix: measured/injected 100 ms RTT, ±30 ms jitter,
+  2% loss, plus normal-Wi-Fi baseline.
+- Performance on devices: tablet 30 fps / p95 steady frame ≤ 40 ms /
+  no recurring >100 ms stalls / ≤800 MB starting memory; PC 60 fps @1080p;
+  ordinary-build frame performance measured separately from
+  instrumentation.
+- Full-capture validity on every physical device.
+- Human acceptance: responsive steering, understandable flows, Hebrew
+  reading and touch usability, prior M2 child/feel/audio gates.

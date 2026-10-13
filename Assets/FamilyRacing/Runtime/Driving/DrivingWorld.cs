@@ -30,6 +30,16 @@ namespace FamilyRacing
         private UnityMotorWorld motorWorld;
         private DrivingContentCatalog catalog;
         private GameObject courseInstance;
+        // Solo and LAN frames share the one course instance: each path
+        // records its own requirement and RefreshCourseInstance applies
+        // the OR of both. Applying either path's "inactive" verdict
+        // unconditionally let the later call in the frame hide an active
+        // course — FoundationApp.Update calls ApplyFrame then
+        // ApplyRaceFrame(null) every non-LAN frame, which switched the
+        // ground colliders off during every solo race and let the motor
+        // fall through the world into an offCourse recovery loop.
+        private bool soloCourseActive;
+        private bool raceCourseActive;
         private GameObject vehicleView;
         private VehiclePresentation presentation;
         private string shownVehicleId = "";
@@ -187,8 +197,8 @@ namespace FamilyRacing
         {
             var session = state != null ? state.driving : null;
             var active = session != null && session.motor != null;
-            if (courseInstance != null && courseInstance.activeSelf != active)
-                courseInstance.SetActive(active);
+            soloCourseActive = active;
+            RefreshCourseInstance();
             if (vehicleView != null && vehicleView.activeSelf != active)
                 vehicleView.SetActive(active);
             if (active)
@@ -241,8 +251,8 @@ namespace FamilyRacing
         {
             var racers = race != null ? race.racers : null;
             var active = racers != null && racers.Count > 0;
-            if (courseInstance != null && courseInstance.activeSelf != active)
-                courseInstance.SetActive(active);
+            raceCourseActive = active;
+            RefreshCourseInstance();
             if (!active)
             {
                 ClearRacerViews();
@@ -420,9 +430,19 @@ namespace FamilyRacing
             cameraFacts.tx = cameraFacts.ty = cameraFacts.tz = 0f;
         }
 
+        private void RefreshCourseInstance()
+        {
+            if (courseInstance == null) return;
+            var active = soloCourseActive || raceCourseActive;
+            if (courseInstance.activeSelf != active)
+                courseInstance.SetActive(active);
+        }
+
         private void OnDisable()
         {
             if (overviewActive) RestoreCamera();
+            soloCourseActive = false;
+            raceCourseActive = false;
             if (courseInstance != null) courseInstance.SetActive(false);
             if (vehicleView != null) vehicleView.SetActive(false);
             foreach (var view in racerViews.Values)

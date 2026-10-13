@@ -77,7 +77,11 @@ def verify_failed_prefix(trace, info):
 
 
 class FaultClient(Client):
-    """Keep healthy Client strict; only this expected-fault observer accepts invalidity."""
+    """Keep healthy Client strict; only this expected-fault observer accepts invalidity.
+    Reads the socket makefile directly — this observer exists to watch the
+    disconnect/reset/stalled-sink faults the healthy pump thread papers over."""
+
+    _uses_pump = False
 
     def read(self, remaining):
         self.sock.settimeout(max(0.01, remaining))

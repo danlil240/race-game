@@ -248,11 +248,21 @@ clean finish completes the second capture.
   independently launched players via their connection files (`--connections`,
   ADB-forwarded loopback included) or self-launches locally (`--launch`,
   adding the labeled fault-injection segment for AI takeover, credentialed
-  rejoin, and host loss); cross-device physical LAN qualification
-  is Task 10 and is NOT claimed.
+  rejoin, and host loss). `Tools\NetworkSoak.py` now provides the
+  sustained-session tool (`--connections` attach, `--minutes` wall-clock
+  duration, per-device health/cadence sampling, once-only delivery
+  ledger across rematches); a real multi-device 30-minute soak is
+  hardware-gated. Cross-device physical LAN qualification ran as
+  M3 task 10: every hardware/human matrix row is **not verified** —
+  see `docs/tasks/network-prototype-report.md`.
   The graybox driving slice (`drivingSimulation`, `drivingOnboarding`)
   is qualified by the DrivingScenario run and PlayMode suites above.
-- A real 30-minute soak now exists — see the DrivingSoak section above
-  (Windows dev player). On-device soak, ordinary-build performance,
-  render frame times, and the later four-racer/tablet-host target remain
+- A real 30-minute solo soak now exists — see the DrivingSoak section
+  above (Windows dev player). The multi-player equivalent
+  (`Tools\NetworkSoak.py`) is delivered and unit-covered
+  (`Tools\TestNetworkSoak.py`) but its 30-minute multi-device run is
+  hardware-gated. On-device soak, ordinary-build frame performance
+  (structurally unmeasurable by this harness — validation endpoints are
+  compiled out of ordinary builds, proven in the task-10 report),
+  render frame times, and the four-racer/tablet-host target remain
   unmeasured.

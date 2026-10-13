@@ -203,10 +203,16 @@ namespace FamilyRacing.Networking
         /// <summary>Task 6: local prediction facts for the validation
         /// stream's `prediction` slice — predicted and authoritative
         /// motors, ack horizon, pending buffer, corrections. Null where
-        /// no prediction is running.</summary>
+        /// no prediction is running: on the host, before the client's
+        /// first authoritative snapshot seeds a race, and after the race
+        /// ends — the slice may never outlive `networkRace`.</summary>
         public NetworkPredictionState Prediction
         {
-            get { return prediction != null ? prediction.State() : null; }
+            get
+            {
+                if (prediction == null || latestSnapshot == null) return null;
+                return prediction.State();
+            }
         }
 
         /// <summary>Task 6: per-remote-participant interpolation facts
@@ -643,6 +649,14 @@ namespace FamilyRacing.Networking
             else if (race.Phase == NetworkRace.PhaseFinished
                 && snap.phase == LanSessionService.PhaseRacing)
             {
+                // The regular every-other-tick publish can skip the
+                // final boundary entirely: a race that finalizes on an
+                // odd host tick would leave every remote client's last
+                // race snapshot at "running" forever — the result and
+                // phase facts ride the ledger, but the networkRace slice
+                // must land "finished" too, so publish once more
+                // explicitly before stepping stops.
+                Publish(BuildSnapshot(state));
                 // Task 8: the immutable result is retained and offered to
                 // every participant before the phase flips — delivery and
                 // its persistence acks are the session service's job from

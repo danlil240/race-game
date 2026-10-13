@@ -63,7 +63,9 @@ namespace FamilyRacing.Core.Networking
     // One result-delivery row exposed to observers. On the host it is one
     // participant's delivery state inside a retained result; on a client
     // it is one locally retained result's persistence state. `state` is
-    // pending | failed | persisted.
+    // pending | failed | persisted; `code` carries the failure reason
+    // (empty otherwise) so permanent verdicts like "ineligible:dnf" are
+    // distinguishable from retryable failures like "saveFailed".
     [Serializable]
     public sealed class ResultDeliveryState
     {
@@ -71,6 +73,7 @@ namespace FamilyRacing.Core.Networking
         public string raceId = "";
         public string participantId = "";
         public string state = "";
+        public string code = "";
 
         public ResultDeliveryState Copy()
         {

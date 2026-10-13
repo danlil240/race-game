@@ -104,6 +104,11 @@ python Tools\NetworkScenario.py --connections <host-run>\connection.json <client
 # process-kill fault-injection segment — real AI takeover, credentialed
 # rejoin, host loss):
 python Tools\NetworkScenario.py --launch <player.exe> [--players 2-4] [--no-fault-injection] --evidence <new-dir>
+# Sustained real-time LAN soak — attaches the same way (first connection
+# is the host) and repeats lobby→race→results→rematch cycles in wall-clock
+# time for --minutes, sampling per-device health and boundary cadence;
+# the once-only result/delivery ledger is checked across every rematch:
+python Tools\NetworkSoak.py --connections <host-run>\connection.json <client-run>\connection.json --minutes 30 --evidence <new-dir> [--host-address <ip>]
 ```
 
 Proven recipe (wave-3 build, 2026-10-11): preview at
