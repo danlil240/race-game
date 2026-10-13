@@ -38,6 +38,19 @@ namespace FamilyRacing
         // never pump the framing between two depths.
         [SerializeField] private float pullInRate = 14f;
         [SerializeField] private float releaseRate = 3.5f;
+        // Bounded physical feedback: touchdown dips the camera by an
+        // amount proportional to the fall speed (capped) and sustained
+        // suspension compression rides a smaller steady dip — both
+        // shrink under "reduce camera shake" and the touchdown thump is
+        // scaled by the profile's effects volume.
+        [SerializeField] private float landingMaxDip = 0.45f;
+        [SerializeField] private float landingDipPerSpeed = 0.045f;
+        [SerializeField] private float landingMinImpact = 1.5f;
+        [SerializeField] private float suspensionMaxDip = 0.12f;
+        [SerializeField] private float suspensionDipPerMeter = 0.45f;
+        [SerializeField] private float feedbackRiseRate = 8f;
+        [SerializeField] private float feedbackDecayRate = 5.5f;
+        [SerializeField] private float reducedFeedbackScale = 0.3f;
 
         private Camera cam;
         private bool engaged;
@@ -47,6 +60,15 @@ namespace FamilyRacing
         private Vector3 smoothTarget;
         private bool hasTarget;
         private float pullDistance = -1f;
+        // Physical feedback state: the one-shot landing dip decays to
+        // zero while the suspension dip tracks committed compression.
+        private float landingDip;
+        private float suspensionDip;
+        private bool prevGrounded = true;
+        private bool prevGroundedValid;
+        private float lastFallSpeed;
+        private AudioSource thumpSource;
+        private static AudioClip thumpClip;
         private readonly DrivingCameraState facts = new DrivingCameraState();
 
         public DrivingCameraState Facts { get { return facts; } }
@@ -55,6 +77,20 @@ namespace FamilyRacing
         // Diagnostics for tests/debugging: which collider most recently
         // pulled the camera in (null when the view is clear).
         internal string LastObstacleName { get; private set; }
+
+        // Test/observation seam: the downward camera offset the feedback
+        // channel applied this frame — bounded by landingMaxDip +
+        // suspensionMaxDip — and the volume the last touchdown thump
+        // played at (0 when effectsVolume silenced it).
+        internal float FeedbackDip
+        {
+            get { return landingDip + suspensionDip; }
+        }
+        internal float LastThumpVolume { get; private set; }
+        internal float MaxFeedbackDip
+        {
+            get { return landingMaxDip + suspensionMaxDip; }
+        }
 
         // Capture the pre-game camera pose as early as possible — before any
         // session-driven framing has moved the camera — so race teardown can
@@ -94,7 +130,9 @@ namespace FamilyRacing
                     && state.draftProfile.camera == "overhead",
                 state.draftProfile != null
                     && state.draftProfile.reducedCameraShake,
-                deltaSeconds);
+                deltaSeconds,
+                state.draftProfile != null
+                    ? state.draftProfile.effectsVolume : 0.8f);
         }
 
         // Task 6 seam: frame any committed motor pose — the LAN race
@@ -104,6 +142,12 @@ namespace FamilyRacing
         // preference facts the solo path reads from the draft profile.
         internal void ApplyMotor(MotorState motor, bool overhead,
             bool reducedShake, float deltaSeconds)
+        {
+            ApplyMotor(motor, overhead, reducedShake, deltaSeconds, 0.8f);
+        }
+
+        internal void ApplyMotor(MotorState motor, bool overhead,
+            bool reducedShake, float deltaSeconds, float effectsVolume)
         {
             if (cam == null) cam = Camera.main;
             if (motor == null || cam == null)
@@ -116,6 +160,7 @@ namespace FamilyRacing
             {
                 engaged = true;
                 hasTarget = false; // engagement snaps into framing, no swoop
+                prevGroundedValid = false; // engagement never "lands"
             }
 
             var mode = overhead ? "overhead" : "chase";
@@ -140,17 +185,23 @@ namespace FamilyRacing
             var lookDir = smoothTarget - desired;
             // An occluder flush against the vehicle can pull the camera
             // nearly onto the target; keep the previous heading then.
+            // LookRotation is built from world up: chassis roll lives in
+            // the vehicle's attitude and can never tilt the horizon.
             var look = lookDir.sqrMagnitude > 1e-4f
                 ? Quaternion.LookRotation(lookDir, Vector3.up)
                 : cam.transform.rotation;
+            UpdateFeedback(motor, reduced, dt, effectsVolume);
+            var feedbackOffset = landingDip + suspensionDip;
             if (firstFrame || teleported)
             {
-                cam.transform.SetPositionAndRotation(desired, look);
+                cam.transform.SetPositionAndRotation(
+                    desired - Vector3.up * feedbackOffset, look);
             }
             else
             {
                 cam.transform.SetPositionAndRotation(
-                    Vector3.Lerp(cam.transform.position, desired, blend),
+                    Vector3.Lerp(cam.transform.position,
+                        desired - Vector3.up * feedbackOffset, blend),
                     Quaternion.Slerp(cam.transform.rotation, look, blend));
             }
 
@@ -161,6 +212,99 @@ namespace FamilyRacing
             facts.tx = smoothTarget.x;
             facts.ty = smoothTarget.y;
             facts.tz = smoothTarget.z;
+        }
+
+        // Committed contact state -> bounded visual/audio feedback.
+        // A grounded transition after a real fall dips the camera once
+        // (proportional to the tracked fall speed, capped) and plays a
+        // short procedural thump at the profile's effects volume;
+        // grounded wheels riding deep in their suspension hold a
+        // smaller steady dip. "Reduce camera shake" shrinks both —
+        // it softens, never deletes, the physical read.
+        private void UpdateFeedback(MotorState motor, bool reduced,
+            float deltaSeconds, float effectsVolume)
+        {
+            var dt = Mathf.Max(0f, deltaSeconds);
+            var shakeScale = reduced ? reducedFeedbackScale : 1f;
+
+            // Track the deepest fall speed of the airborne episode so
+            // the touchdown impulse measures the landing the physics
+            // actually committed, not this frame's already-settled speed.
+            if (motor.grounded)
+            {
+                if (prevGroundedValid && !prevGrounded
+                    && lastFallSpeed > landingMinImpact)
+                {
+                    landingDip += Mathf.Min(landingMaxDip,
+                        lastFallSpeed * landingDipPerSpeed * shakeScale);
+                    PlayThump(Mathf.Clamp01(effectsVolume)
+                        * Mathf.Clamp01(lastFallSpeed / 12f));
+                }
+                lastFallSpeed = 0f;
+            }
+            else
+            {
+                lastFallSpeed = Mathf.Max(lastFallSpeed,
+                    -motor.verticalSpeed);
+            }
+            prevGrounded = motor.grounded;
+            prevGroundedValid = true;
+            landingDip *= Mathf.Exp(-feedbackDecayRate * dt);
+            if (landingDip > landingMaxDip) landingDip = landingMaxDip;
+
+            // Sustained suspension compression: the mean compression
+            // over committed grounded wheels maps to a small steady dip.
+            var compressionSum = 0f;
+            var groundedWheels = 0;
+            var phys = motor.physics;
+            if (phys != null && phys.wheels != null)
+                foreach (var wheel in phys.wheels)
+                {
+                    if (wheel == null || !wheel.grounded) continue;
+                    compressionSum += wheel.compression;
+                    groundedWheels++;
+                }
+            var suspensionTarget = groundedWheels > 0
+                ? Mathf.Min(suspensionMaxDip,
+                    compressionSum / groundedWheels
+                        * suspensionDipPerMeter * shakeScale)
+                : 0f;
+            suspensionDip = Mathf.Lerp(suspensionDip, suspensionTarget,
+                1f - Mathf.Exp(-feedbackRiseRate * dt));
+            if (suspensionDip > suspensionMaxDip)
+                suspensionDip = suspensionMaxDip;
+        }
+
+        private void PlayThump(float volume)
+        {
+            LastThumpVolume = volume;
+            if (volume <= 0.001f) return;
+            if (thumpSource == null)
+            {
+                thumpSource = gameObject.AddComponent<AudioSource>();
+                thumpSource.playOnAwake = false;
+                thumpSource.spatialBlend = 0f;
+            }
+            thumpSource.PlayOneShot(ThumpClip(), volume);
+        }
+
+        // A short authored-in-code thump — no asset dependency, the
+        // volume slider owns its loudness entirely.
+        private static AudioClip ThumpClip()
+        {
+            if (thumpClip != null) return thumpClip;
+            const int rate = 22050;
+            var samples = new float[rate / 8]; // 125 ms
+            for (var i = 0; i < samples.Length; i++)
+            {
+                var t = i / (float)rate;
+                samples[i] = Mathf.Sin(2f * Mathf.PI * 65f * t)
+                    * Mathf.Exp(-t * 28f);
+            }
+            thumpClip = AudioClip.Create("landing-thump",
+                samples.Length, 1, rate, false);
+            thumpClip.SetData(samples, 0);
+            return thumpClip;
         }
 
         private Vector3 ChaseDesired(MotorState motor, Vector3 target)
@@ -230,6 +374,10 @@ namespace FamilyRacing
             engaged = false;
             hasTarget = false;
             pullDistance = -1f;
+            landingDip = 0f;
+            suspensionDip = 0f;
+            prevGroundedValid = false;
+            lastFallSpeed = 0f;
             // The Awake-captured menu pose survives every disengage:
             // each race leaving restores it, not just the first.
             if (cam != null && savedPose)

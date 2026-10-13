@@ -43,6 +43,6 @@ MonoBehaviour:
   simulationBackend: 1
   physicsTuning: {fileID: 11400000, guid: 69df347560164c24f9202877986bbff8, type: 2}
   silhouette: car
-  leanDegrees: 4
+  leanDegrees: 0
   bodyScale: {x: 1.8, y: 1.1, z: 3.2}
   bodyColor: {r: 0.42, g: 0.62, b: 0.91, a: 1}

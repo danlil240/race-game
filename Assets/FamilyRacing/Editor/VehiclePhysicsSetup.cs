@@ -3,6 +3,7 @@ using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using UnityEngine.UIElements;
 
 namespace FamilyRacing.EditorTools
 {
@@ -17,8 +18,11 @@ namespace FamilyRacing.EditorTools
     public static class VehiclePhysicsSetup
     {
         private const string PhysicsDir = "Assets/FamilyRacing/Generated/Physics";
+        private const string DrivingDir = "Assets/FamilyRacing/Generated/Driving";
         private const string ScenePath = PhysicsDir + "/PhysicsLab.unity";
         private const string PrefabPath = PhysicsDir + "/PhysicsLabCourse.prefab";
+        private const string RaceScenePath = PhysicsDir + "/PhysicsRace.unity";
+        private const string RaceContentVersion = "physics-0.1";
 
         public static void Create()
         {
@@ -26,10 +30,18 @@ namespace FamilyRacing.EditorTools
             var carTuning = EnsureCarTuning();
             EnsureHighComTuning();
             var bikeTuning = EnsureBikeTuning();
-            EnsureVehicle(carTuning);
-            EnsureBikeVehicle(bikeTuning);
+            var carVehicle = EnsureVehicle(carTuning);
+            var bikeVehicle = EnsureBikeVehicle(bikeTuning);
             var course = EnsureCoursePrefab();
             EnsureLabScene(course, carTuning);
+            // The physical race content reuses the shared graybox track
+            // (it already authors physical recovery volumes, safe poses
+            // and the four-slot LAN grid) — the backend is bound to the
+            // content identity, not to a player-facing toggle. If the
+            // driving slice has not been generated yet, this stays
+            // honest: warn and skip instead of writing a dangling event.
+            var physicsEvent = EnsurePhysicsEvent();
+            EnsureRaceScene(physicsEvent, carVehicle, bikeVehicle);
             AssetDatabase.SaveAssets();
         }
 
@@ -88,7 +100,8 @@ namespace FamilyRacing.EditorTools
 
         // Physical vehicle definition: same authored VehicleTuning as
         // car-01 but selecting the opt-in PhysicalAssisted backend.
-        private static void EnsureVehicle(VehiclePhysicsTuningAsset tuning)
+        private static VehicleDefinitionAsset EnsureVehicle(
+            VehiclePhysicsTuningAsset tuning)
         {
             var asset = EnsureAsset<VehicleDefinitionAsset>(
                 "car-physics-01-vehicle.asset");
@@ -99,10 +112,14 @@ namespace FamilyRacing.EditorTools
             asset.simulationBackend = VehicleSimulationBackend.PhysicalAssisted;
             asset.physicsTuning = tuning;
             asset.silhouette = "car";
-            asset.leanDegrees = 4f;
+            // Zero cosmetic lean: physical roll is real and the
+            // presentation must not double-apply it (Task 8 owns that
+            // visual path).
+            asset.leanDegrees = 0f;
             asset.bodyScale = new Vector3(1.8f, 1.1f, 3.2f);
             asset.bodyColor = new Color(0.42f, 0.62f, 0.91f);
             EditorUtility.SetDirty(asset);
+            return asset;
         }
 
         // Physical motorcycle definition: the arcade-era motorcycle
@@ -110,7 +127,7 @@ namespace FamilyRacing.EditorTools
         // motorcycle physics tuning asset. Cosmetic leanDegrees stays 0 —
         // the physical chassis roll is real and the presentation layer
         // must not double-apply it (Task 8 owns that visual path).
-        private static void EnsureBikeVehicle(
+        private static VehicleDefinitionAsset EnsureBikeVehicle(
             VehiclePhysicsTuningAsset tuning)
         {
             var asset = EnsureAsset<VehicleDefinitionAsset>(
@@ -126,6 +143,127 @@ namespace FamilyRacing.EditorTools
             asset.bodyScale = new Vector3(0.5f, 0.9f, 2.2f);
             asset.bodyColor = new Color(0.50f, 0.78f, 0.70f);
             EditorUtility.SetDirty(asset);
+            return asset;
+        }
+
+        // The physical solo/LAN event: same graybox loop, one extra lap
+        // of buffer, and only the physical-declared vehicles may enter.
+        // The shared track asset is referenced, never rewritten — the
+        // physical recovery volumes and safe poses it authors are the
+        // single source for both backends' content.
+        private static EventDefinitionAsset EnsurePhysicsEvent()
+        {
+            var track = AssetDatabase.LoadAssetAtPath<TrackDefinitionAsset>(
+                DrivingDir + "/graybox-01.asset");
+            if (track == null)
+            {
+                Debug.LogWarning("VehiclePhysicsSetup: graybox-01.asset is "
+                    + "missing — run DrivingPrototypeSetup first; the "
+                    + "physics event and race scene are skipped.");
+                return null;
+            }
+            var asset = EnsureAsset<EventDefinitionAsset>(
+                "physics-01.asset");
+            asset.eventId = "physics-01";
+            asset.track = track;
+            asset.laps = 2;
+            asset.countdownTicks = 90;
+            asset.vehicleIds = new[]
+                { "car-physics-01", "motorcycle-physics-01" };
+            EditorUtility.SetDirty(asset);
+            return asset;
+        }
+
+        // Developer-playable physical race scene: the same self-
+        // bootstrapping stack the bootstrap scene carries (FoundationApp
+        // + input + shell + DrivingWorld), but the world is wired to the
+        // physical vehicle definitions, the shared graybox content and
+        // the PhysicalAssisted backend — the race-level selector that
+        // binds the backend to this content identity. Deliberately not
+        // added to EditorBuildSettings: opt-in developer content like
+        // the lab. An existing scene is authored state and never
+        // overwritten.
+        private static void EnsureRaceScene(EventDefinitionAsset evt,
+            VehicleDefinitionAsset car, VehicleDefinitionAsset bike)
+        {
+            if (evt == null || car == null || bike == null) return;
+            if (AssetDatabase.LoadAssetAtPath<SceneAsset>(RaceScenePath)
+                    != null)
+                return; // authored scene exists: never overwrite
+            var coursePrefab = AssetDatabase.LoadAssetAtPath<GameObject>(
+                DrivingDir + "/GrayboxCourse.prefab");
+            var track = evt.track;
+            var panel = AssetDatabase.LoadAssetAtPath<PanelSettings>(
+                "Assets/FamilyRacing/Generated/FoundationPanelSettings.asset");
+
+            var scene = EditorSceneManager.NewScene(
+                NewSceneSetup.EmptyScene, NewSceneMode.Single);
+
+            var lightObject = new GameObject("Directional Light");
+            var light = lightObject.AddComponent<Light>();
+            light.type = LightType.Directional;
+            light.color = new Color(1f, 0.96f, 0.88f);
+            lightObject.transform.rotation = Quaternion.Euler(50f, -30f, 0f);
+
+            var cameraObject = new GameObject("Main Camera");
+            var camera = cameraObject.AddComponent<Camera>();
+            camera.clearFlags = CameraClearFlags.SolidColor;
+            camera.backgroundColor = new Color(0.55f, 0.65f, 0.78f);
+            cameraObject.tag = "MainCamera";
+
+            var appObject = new GameObject("PhysicsRaceApp");
+            appObject.AddComponent<FoundationApp>();
+            appObject.AddComponent<FoundationInput>();
+            var document = appObject.AddComponent<UIDocument>();
+            if (panel != null)
+            {
+                var panelSerialized = new SerializedObject(document);
+                var panelProperty =
+                    panelSerialized.FindProperty("m_PanelSettings");
+                if (panelProperty != null)
+                {
+                    panelProperty.objectReferenceValue = panel;
+                    panelSerialized.ApplyModifiedPropertiesWithoutUndo();
+                }
+                else
+                {
+                    document.panelSettings = panel;
+                }
+            }
+            appObject.AddComponent<FoundationShell>();
+            var world = appObject.AddComponent<DrivingWorld>();
+            var serialized = new SerializedObject(world);
+            AssignObjectArray(serialized, "vehicles", car, bike);
+            AssignObject(serialized, "track", track);
+            AssignObjectArray(serialized, "events", evt);
+            AssignObject(serialized, "coursePrefab", coursePrefab);
+            var version = serialized.FindProperty("contentVersion");
+            if (version != null) version.stringValue = RaceContentVersion;
+            var backend = serialized.FindProperty("simulationBackend");
+            if (backend != null)
+                backend.enumValueIndex =
+                    (int)VehicleSimulationBackend.PhysicalAssisted;
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+
+            EditorSceneManager.SaveScene(scene, RaceScenePath);
+        }
+
+        private static void AssignObject(SerializedObject so,
+            string property, Object value)
+        {
+            var p = so.FindProperty(property);
+            if (p != null) p.objectReferenceValue = value;
+        }
+
+        private static void AssignObjectArray(SerializedObject so,
+            string property, params Object[] values)
+        {
+            var p = so.FindProperty(property);
+            if (p == null || values == null) return;
+            p.arraySize = values.Length;
+            for (var i = 0; i < values.Length; i++)
+                p.GetArrayElementAtIndex(i).objectReferenceValue =
+                    values[i];
         }
 
         private static T EnsureAsset<T>(string file) where T : ScriptableObject

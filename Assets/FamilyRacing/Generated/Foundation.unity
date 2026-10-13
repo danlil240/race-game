@@ -419,6 +419,7 @@ MonoBehaviour:
   tutorial: {fileID: 11400000, guid: e123e5457263c71488e91e8596dc34d2, type: 2}
   coursePrefab: {fileID: 4656068473831479409, guid: 27d614269b044ec4f8407710870a80be, type: 3}
   contentVersion: driving-0.1
+  simulationBackend: 0
   cameraOffset: {x: 0, y: 38, z: -22}
   cameraPitchDegrees: 62
 --- !u!1660057539 &9223372036854775807

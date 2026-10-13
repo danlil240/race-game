@@ -22,6 +22,11 @@ namespace FamilyRacing
         [SerializeField] private TutorialDefinitionAsset tutorial;
         [SerializeField] private GameObject coursePrefab;
         [SerializeField] private string contentVersion = "driving-0.1";
+        // Developer-facing race-level backend selection, bound to this
+        // content identity: it lands on the catalog (and therefore on
+        // the compatibility token), never on a player-facing toggle.
+        [SerializeField] private VehicleSimulationBackend simulationBackend
+            = VehicleSimulationBackend.Arcade;
         [SerializeField] private Vector3 cameraOffset = new Vector3(0f, 38f, -22f);
         [SerializeField] private float cameraPitchDegrees = 62f;
 
@@ -176,7 +181,8 @@ namespace FamilyRacing
             try
             {
                 catalog = DrivingContentCatalog.Create(contentVersion,
-                    tunings, course == null ? null : new[] { course }, defs);
+                    tunings, course == null ? null : new[] { course }, defs,
+                    simulationBackend);
             }
             catch (System.ArgumentException error)
             {

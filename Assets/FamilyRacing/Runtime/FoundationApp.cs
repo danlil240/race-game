@@ -253,7 +253,9 @@ namespace FamilyRacing
                         var reduced = state.draftProfile != null
                             && state.draftProfile.reducedCameraShake;
                         drivingCamera.ApplyMotor(lanLocalPose, overhead,
-                            reduced, Time.unscaledDeltaTime);
+                            reduced, Time.unscaledDeltaTime,
+                            state.draftProfile != null
+                                ? state.draftProfile.effectsVolume : 0.8f);
                     }
                     else
                     {

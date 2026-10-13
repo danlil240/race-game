@@ -802,5 +802,261 @@ namespace FamilyRacing.Tests
                 Is.GreaterThan(results["car-01"]["boostPeakSpeed"]),
                 "the motorcycle's boost speed modifier is higher");
         }
+
+        // --- Task 8: physical-backend solo smoke ---------------------------
+        // A physical catalog drives the real PhysicsVehicleSimulation
+        // through the shared command path and the presentation renders
+        // the committed body attitude — including roll — instead of the
+        // yaw-only arcade pose.
+
+        private VehicleDefinitionAsset physCarAsset;
+        private VehicleDefinitionAsset physBikeAsset;
+
+        private void WirePhysicalWorld()
+        {
+            var carPhysics = Asset<VehiclePhysicsTuningAsset>(a =>
+                a.ApplyPreset(VehiclePhysicsTuning.Car01()));
+            var bikePhysics = Asset<VehiclePhysicsTuningAsset>(a =>
+                a.ApplyPreset(VehiclePhysicsTuning.Motorcycle01()));
+            physCarAsset = Asset<VehicleDefinitionAsset>(a =>
+            {
+                a.ApplyPreset(VehicleTuning.Car01());
+                a.vehicleId = "car-physics-01";
+                a.simulationBackend =
+                    VehicleSimulationBackend.PhysicalAssisted;
+                a.physicsTuning = carPhysics;
+                a.silhouette = "car";
+                a.leanDegrees = 0f;
+                a.bodyScale = new Vector3(1.8f, 1.1f, 3.2f);
+            });
+            physBikeAsset = Asset<VehicleDefinitionAsset>(a =>
+            {
+                a.ApplyPreset(VehicleTuning.Motorcycle01());
+                a.vehicleId = "motorcycle-physics-01";
+                a.simulationBackend =
+                    VehicleSimulationBackend.PhysicalAssisted;
+                a.physicsTuning = bikePhysics;
+                a.silhouette = "motorcycle";
+                a.leanDegrees = 0f;
+                a.bodyScale = new Vector3(0.5f, 0.9f, 2.2f);
+            });
+            var track = Asset<TrackDefinitionAsset>(a =>
+            {
+                a.courseId = "graybox-01";
+                a.spawnPosition = new Vector3(0f, 0f, -60f);
+                a.spawnHeadingDegrees = 0f;
+                a.gates = new[]
+                {
+                    Gate("start", 0f, -60f, 0f, 1f),
+                    Gate("gate-1", 0f, 25f, 0f, 1f),
+                    Gate("gate-2", 55f, 55f, 1f, 0f),
+                    Gate("gate-3", 95f, 0f, 0f, -1f),
+                    Gate("gate-4", 50f, -55f, -1f, 0f)
+                };
+                // Physical recovery judges against authored permitted
+                // volumes: the whole playfield plus its jump airspace is
+                // one honest volume — the deck drop is inside it.
+                a.recoveryBounds = new[]
+                {
+                    new TrackDefinitionAsset.BoundsVolume
+                    {
+                        min = new Vector3(-118f, -2f, -78f),
+                        max = new Vector3(118f, 30f, 78f)
+                    }
+                };
+                a.safePoses = new[]
+                {
+                    new TrackDefinitionAsset.SpawnSlot
+                    {
+                        position = new Vector3(0f, 0f, -60f),
+                        headingDegrees = 0f
+                    }
+                };
+            });
+            var evt = Asset<EventDefinitionAsset>(a =>
+            {
+                a.eventId = "phys-01";
+                a.track = track;
+                a.laps = 1;
+                a.countdownTicks = 3;
+                a.vehicleIds = new[]
+                    { "car-physics-01", "motorcycle-physics-01" };
+            });
+            Inject(world, "vehicles", new[] { physCarAsset, physBikeAsset });
+            Inject(world, "track", track);
+            Inject(world, "events", new[] { evt });
+            Inject(world, "coursePrefab", courseSource);
+            Inject(world, "contentVersion", "vclass-physics-1");
+            Inject(world, "simulationBackend",
+                VehicleSimulationBackend.PhysicalAssisted);
+        }
+
+        private void LoadAndStartPhysical(string vehicleId)
+        {
+            var catalog = world.Load();
+            Assert.That(catalog, Is.Not.Null,
+                "the physical fixture must validate");
+            Assert.That(catalog.SimulationBackend,
+                Is.EqualTo(VehicleSimulationBackend.PhysicalAssisted));
+            service.SetDrivingSimulationFactory(world.CreateSimulation);
+            service.SetDrivingContent(catalog);
+            service.Execute(Command("profile.create",
+                P("slot", "0", "language", "en")));
+            var started = service.Execute(Command("race.start",
+                P("vehicleId", vehicleId, "eventId", "phys-01")));
+            Assert.That(started.status, Is.EqualTo(CommandResult.Applied),
+                "race.start failed: " + started.code);
+            // Countdown boundaries run simulateMotion=false, so the
+            // session's motor only picks up the committed physics state
+            // on the first running step — step one past the countdown.
+            Step(4);
+            Assert.That(service.Snapshot().driving.phase,
+                Is.EqualTo("running"));
+            Assert.That(service.Snapshot().driving.motor.physics,
+                Is.Not.Null,
+                "the physical backend must publish physics state once "
+                + "the first running boundary commits");
+        }
+
+        private static Quaternion CommittedAttitude(MotorState motor)
+        {
+            var p = motor.physics;
+            return new Quaternion(p.attitudeX, p.attitudeY, p.attitudeZ,
+                p.attitudeW);
+        }
+
+        // The physical car drives the mirrored graybox through input.set,
+        // the committed state carries the full body attitude, and the
+        // rendered visual matches that attitude — not a forced-upright
+        // yaw pose. Wheels ride at physical suspension heights and the
+        // cosmetic lean pivot stays neutral.
+        [Test]
+        public void PhysicalCarDrivesAndRendersCommittedAttitude()
+        {
+            WirePhysicalWorld();
+            LoadAndStartPhysical("car-physics-01");
+
+            var spawn = service.Snapshot().driving.motor;
+            Assert.That(spawn.physics, Is.Not.Null,
+                "the physical backend must publish physics state");
+            Assert.That(spawn.y, Is.GreaterThan(0.3f),
+                "a physical spawn lifts the body to settled ride height, "
+                + "y=" + spawn.y);
+
+            // Drive forward ~2 s of sim time through the shared input
+            // path; the car must cover real distance on the flat.
+            var moved = 0f;
+            var lastZ = spawn.z;
+            for (var burst = 0; burst < 12; burst++)
+            {
+                var applied = Drive(0f, durationTicks: 5);
+                Assert.That(applied.status,
+                    Is.EqualTo(CommandResult.Applied));
+                Step(5);
+                var now = service.Snapshot().driving.motor;
+                moved += Mathf.Abs(now.z - lastZ);
+                lastZ = now.z;
+            }
+            var motor = service.Snapshot().driving.motor;
+            Assert.That(motor.z - spawn.z, Is.GreaterThan(4f),
+                "the physical car moves under held throttle: dz="
+                + (motor.z - spawn.z));
+            Assert.That(motor.grounded, Is.True);
+            Assert.That(motor.physics.grounded, Is.True);
+
+            // The render pose tracks the committed attitude — small
+            // suspension pitch/roll included — and adds no lean.
+            world.ApplyFrame(service.Snapshot());
+            var view = FindNamed(host, "DrivingVehicle");
+            Assert.That(view, Is.Not.Null);
+            Assert.That(view.activeSelf, Is.True);
+            var attitude = CommittedAttitude(motor);
+            Assert.That(Quaternion.Angle(view.transform.rotation, attitude),
+                Is.LessThan(3f),
+                "the visual renders the committed attitude, not yaw-only");
+            var presentation = view.GetComponent<VehiclePresentation>();
+            Assert.That(presentation.LeanRoll, Is.EqualTo(0f),
+                "physical presentation carries no cosmetic lean");
+            var wheelFL = view.transform.Find("LeanPivot/WheelFL");
+            Assert.That(wheelFL, Is.Not.Null,
+                "the physical car still builds visible wheels");
+            Assert.That(wheelFL.localPosition.y,
+                Is.LessThan(-0.05f).And.GreaterThan(-0.6f),
+                "a grounded wheel sits inside its suspension travel, y="
+                + wheelFL.localPosition.y);
+
+            // A real turn: attitude stays a real rigid-body attitude —
+            // bounded roll from weight transfer, never a snapped pose.
+            Drive(0.8f, durationTicks: 40);
+            Step(40);
+            var turned = service.Snapshot().driving.motor;
+            world.ApplyFrame(service.Snapshot());
+            var turnedAtt = CommittedAttitude(turned);
+            Assert.That(Quaternion.Angle(view.transform.rotation, turnedAtt),
+                Is.LessThan(3f));
+            Assert.That(Vector3.Angle(view.transform.up, Vector3.up),
+                Is.LessThan(30f),
+                "assisted roll stays bounded while cornering");
+            Assert.That(Mathf.Abs(Mathf.DeltaAngle(
+                    spawn.heading * Mathf.Rad2Deg,
+                    turned.heading * Mathf.Rad2Deg)), Is.GreaterThan(5f),
+                "the physical car actually turns under held steering");
+            // race.exit disposes the physical world its scene lives in.
+            service.Execute(Command("race.exit", null));
+        }
+
+        // The assisted motorcycle drives the same command path: the
+        // balance assistance keeps it upright through a straight run and
+        // a held steer, while the committed lean is real body roll —
+        // rendered once at the root, never doubled by the lean pivot.
+        [Test]
+        public void PhysicalMotorcycleDrivesUprightWithRealLean()
+        {
+            WirePhysicalWorld();
+            LoadAndStartPhysical("motorcycle-physics-01");
+
+            var spawn = service.Snapshot().driving.motor;
+            Assert.That(spawn.physics, Is.Not.Null);
+
+            for (var burst = 0; burst < 10; burst++)
+            {
+                var applied = Drive(0f, durationTicks: 5);
+                Assert.That(applied.status,
+                    Is.EqualTo(CommandResult.Applied));
+                Step(5);
+            }
+            var motor = service.Snapshot().driving.motor;
+            Assert.That(motor.z - spawn.z, Is.GreaterThan(3f),
+                "the assisted bike moves under held throttle: dz="
+                + (motor.z - spawn.z));
+            world.ApplyFrame(service.Snapshot());
+            var view = FindNamed(host, "DrivingVehicle");
+            var presentation = view.GetComponent<VehiclePresentation>();
+            Assert.That(Quaternion.Angle(view.transform.rotation,
+                    CommittedAttitude(motor)), Is.LessThan(3f));
+            Assert.That(Vector3.Angle(view.transform.up, Vector3.up),
+                Is.LessThan(50f),
+                "the balance assist keeps a straight-running bike upright");
+            Assert.That(presentation.LeanRoll, Is.EqualTo(0f),
+                "no cosmetic lean is stacked on the physical roll");
+
+            // Held steer: the bike must lean into the turn for real
+            // (roll reaches the committed attitude) and the assist must
+            // keep the lean inside the authored 45-degree bound.
+            Drive(0.5f, durationTicks: 45);
+            Step(45);
+            var turned = service.Snapshot().driving.motor;
+            world.ApplyFrame(service.Snapshot());
+            var rollDeg = Vector3.Angle(view.transform.up, Vector3.up);
+            Assert.That(rollDeg, Is.GreaterThan(2f),
+                "a held steer produces real lean in the committed "
+                + "attitude (roll=" + rollDeg + " deg)");
+            Assert.That(rollDeg, Is.LessThan(55f),
+                "the assisted lean stays inside its authored bound");
+            Assert.That(presentation.LeanRoll, Is.EqualTo(0f),
+                "lean still appears exactly once — at the root");
+            // race.exit disposes the physical world its scene lives in.
+            service.Execute(Command("race.exit", null));
+        }
     }
 }

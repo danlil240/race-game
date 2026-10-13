@@ -979,6 +979,18 @@ namespace FamilyRacing.Core.Foundation
                 return Result(command, CommandResult.Rejected, "unavailable");
             if (!evt.AllowsVehicle(vehicleId))
                 return Result(command, CommandResult.Rejected, "vehicleNotForEvent");
+            // The backend is a race-level contract bound to the catalog:
+            // a physically simulated race refuses to seat an arcade-tuned
+            // vehicle here, at the command boundary — the same guard
+            // NetworkRace.TryCreate applies — instead of failing inside
+            // the first stepped tick when the physical sim cannot find a
+            // valid physics tuning for it.
+            if (drivingContent.SimulationBackend
+                    == VehicleSimulationBackend.PhysicalAssisted
+                && (tuning.simulationBackend
+                        != VehicleSimulationBackend.PhysicalAssisted
+                    || tuning.physics == null))
+                return Result(command, CommandResult.Rejected, "invalidVehicle");
             driving = CreateSession(tuning, evt, command);
             screen = ScreenDriving;
             ClearInput();
@@ -1006,6 +1018,14 @@ namespace FamilyRacing.Core.Foundation
             EventDefinition evt;
             if (!drivingContent.Events.TryGetValue(eventId, out evt))
                 return Result(command, CommandResult.Rejected, "contentUnavailable");
+            // Same backend contract as race.start: a content reload must
+            // not let a retry seat an arcade tuning in a physical race.
+            if (drivingContent.SimulationBackend
+                    == VehicleSimulationBackend.PhysicalAssisted
+                && (tuning.simulationBackend
+                        != VehicleSimulationBackend.PhysicalAssisted
+                    || tuning.physics == null))
+                return Result(command, CommandResult.Rejected, "invalidVehicle");
             // The old identity ends; retry creates a new race identity
             // inside the same run. Duplicate delivery replays the cached
             // result and never reaches here.

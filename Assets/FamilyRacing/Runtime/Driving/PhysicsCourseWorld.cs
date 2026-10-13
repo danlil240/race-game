@@ -57,10 +57,17 @@ namespace FamilyRacing
             return new PhysicsCourseWorld(name, collisionTemplate);
         }
 
+        private static int worldCounter;
+
         private PhysicsCourseWorld(string name, GameObject collisionTemplate)
         {
+            // A leaked or still-unloading world with the same base name
+            // must never collide with the next one: every physical world
+            // gets a process-unique suffix. Names are diagnostic only —
+            // nothing keys on them.
             scene = SceneManager.CreateScene(
-                string.IsNullOrEmpty(name) ? "PhysicsCourseWorld" : name,
+                (string.IsNullOrEmpty(name) ? "PhysicsCourseWorld" : name)
+                    + "-" + (++worldCounter),
                 new CreateSceneParameters(LocalPhysicsMode.Physics3D));
             physics = scene.GetPhysicsScene();
             if (collisionTemplate != null)

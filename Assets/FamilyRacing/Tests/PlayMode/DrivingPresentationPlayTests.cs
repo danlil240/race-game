@@ -1228,5 +1228,237 @@ namespace FamilyRacing.Tests
             Assert.That(go.transform.position.x, Is.EqualTo(40f).Within(0.001f),
                 "a respawn-scale jump must snap instead of sweeping");
         }
+
+        // --- Task 8: horizon-stable camera + bounded physical feedback ----
+
+        // A committed physical sample for camera tests: the legacy
+        // envelope plus the VehiclePhysicsState the physical backend
+        // publishes. The camera reads the envelope — its orientation
+        // must never couple to the chassis attitude.
+        private static MotorState PhysicalMotor(Vector3 pos, float heading,
+            Quaternion attitude, bool grounded, int wheelCount = 4)
+        {
+            var physics = new VehiclePhysicsState
+            {
+                wheels = new WheelPhysicsState[wheelCount],
+                grounded = grounded
+            };
+            for (var i = 0; i < wheelCount; i++)
+                physics.wheels[i] = new WheelPhysicsState { index = i };
+            physics.TrySetAttitude(attitude.x, attitude.y, attitude.z,
+                attitude.w);
+            return new MotorState
+            {
+                x = pos.x, y = pos.y, z = pos.z, heading = heading,
+                grounded = grounded, physics = physics
+            };
+        }
+
+        private static FoundationState FakePhysical(MotorState motor,
+            string camera = "chase", bool reducedShake = false,
+            float effectsVolume = 0.8f)
+        {
+            return new FoundationState
+            {
+                language = "en",
+                screen = "driving",
+                draftProfile = new ProfileSave
+                {
+                    camera = camera,
+                    reducedCameraShake = reducedShake,
+                    effectsVolume = effectsVolume
+                },
+                driving = new DrivingSessionState
+                {
+                    phase = "running",
+                    motor = motor
+                }
+            };
+        }
+
+        // The chassis may be fully rolled — the camera still frames the
+        // horizon. Camera roll is always zero: the look rotation is built
+        // from world up, never from the body attitude.
+        [Test]
+        public void ChaseCameraStaysHorizonStableWhenVehicleRolls()
+        {
+            var rolled = FakePhysical(PhysicalMotor(
+                new Vector3(0f, 0.95f, 0f), 0f,
+                Quaternion.Euler(0f, 0f, 70f), grounded: true));
+            for (var i = 0; i < 10; i++)
+                drivingCamera.ApplyFrame(rolled, 0.1f);
+
+            var roll = renderCamera.transform.rotation.eulerAngles.z;
+            if (roll > 180f) roll -= 360f;
+            Assert.That(Mathf.Abs(roll), Is.LessThan(0.5f),
+                "a 70-degree chassis roll must not tilt the camera's "
+                + "horizon (camera roll " + roll + " deg)");
+
+            var overhead = FakePhysical(PhysicalMotor(
+                new Vector3(0f, 0.95f, 0f), 0f,
+                Quaternion.Euler(0f, 0f, -60f), grounded: true),
+                camera: "overhead");
+            for (var i = 0; i < 10; i++)
+                drivingCamera.ApplyFrame(overhead, 0.1f);
+            roll = renderCamera.transform.rotation.eulerAngles.z;
+            if (roll > 180f) roll -= 360f;
+            Assert.That(Mathf.Abs(roll), Is.LessThan(0.5f),
+                "the overhead mode keeps the horizon level under roll too "
+                + "(camera roll " + roll + " deg)");
+        }
+
+        // Touchdown dips the camera a bounded amount and plays a thump
+        // scaled by the effects volume; "reduce camera shake" shrinks the
+        // dip instead of deleting it. The dip decays back to the clean
+        // chase framing instead of leaving a permanent offset.
+        [Test]
+        public void LandingFeedbackIsBoundedAndHonoursPreferences()
+        {
+            // Converge on settled framing first.
+            var settled = FakePhysical(PhysicalMotor(
+                new Vector3(0f, 0.75f, 0f), 0f,
+                Quaternion.identity, grounded: true));
+            for (var i = 0; i < 10; i++)
+                drivingCamera.ApplyFrame(settled, 0.1f);
+            Assert.That(drivingCamera.FeedbackDip, Is.EqualTo(0f)
+                .Within(0.001f), "no feedback on flat settled driving");
+
+            // Airborne with a real downward speed, then touchdown.
+            var airborne = FakePhysical(PhysicalMotor(
+                new Vector3(0f, 2.5f, 3f), 0f,
+                Quaternion.identity, grounded: false));
+            airborne.driving.motor.airSeconds = 0.6f;
+            airborne.driving.motor.verticalSpeed = -8f;
+            drivingCamera.ApplyFrame(airborne, 0.1f);
+            var landed = FakePhysical(PhysicalMotor(
+                new Vector3(0f, 0.75f, 4f), 0f,
+                Quaternion.identity, grounded: true));
+            drivingCamera.ApplyFrame(landed, 0.1f);
+
+            Assert.That(drivingCamera.FeedbackDip, Is.GreaterThan(0.02f),
+                "touchdown feeds a bounded dip into the camera");
+            Assert.That(drivingCamera.FeedbackDip,
+                Is.LessThanOrEqualTo(drivingCamera.MaxFeedbackDip + 0.001f),
+                "the dip is bounded by the authored cap");
+            Assert.That(drivingCamera.LastThumpVolume, Is.GreaterThan(0.01f),
+                "a real landing thumps at the profile's effects volume");
+
+            var peak = drivingCamera.FeedbackDip;
+            for (var i = 0; i < 60; i++)
+            {
+                drivingCamera.ApplyFrame(landed, 0.05f);
+                Assert.That(drivingCamera.FeedbackDip,
+                    Is.LessThanOrEqualTo(peak + 0.001f),
+                    "the dip only decays after touchdown");
+            }
+            Assert.That(drivingCamera.FeedbackDip, Is.LessThan(0.01f),
+                "the feedback decays back to clean framing");
+
+            // Volume zero silences the thump but the dip still answers.
+            var quietGo = new GameObject("presenter-quiet");
+            loose.Add(quietGo);
+            var quiet = quietGo.AddComponent<DrivingCamera>();
+            var quietSettled = FakePhysical(PhysicalMotor(
+                new Vector3(0f, 0.75f, 0f), 0f,
+                Quaternion.identity, grounded: true),
+                effectsVolume: 0f);
+            for (var i = 0; i < 6; i++)
+                quiet.ApplyFrame(quietSettled, 0.1f);
+            var quietAir = FakePhysical(PhysicalMotor(
+                new Vector3(0f, 2.5f, 3f), 0f,
+                Quaternion.identity, grounded: false),
+                effectsVolume: 0f);
+            quietAir.driving.motor.airSeconds = 0.6f;
+            quietAir.driving.motor.verticalSpeed = -8f;
+            quiet.ApplyFrame(quietAir, 0.1f);
+            quiet.ApplyFrame(FakePhysical(PhysicalMotor(
+                new Vector3(0f, 0.75f, 4f), 0f,
+                Quaternion.identity, grounded: true),
+                effectsVolume: 0f), 0.1f);
+            Assert.That(quiet.FeedbackDip, Is.GreaterThan(0.02f),
+                "the camera still answers a landing with volume muted");
+            Assert.That(quiet.LastThumpVolume, Is.EqualTo(0f),
+                "effectsVolume=0 must silence the touchdown thump");
+
+            // Reduced shake shrinks the same landing's dip measurably.
+            var reducedGo = new GameObject("presenter-reduced-fb");
+            loose.Add(reducedGo);
+            var reduced = reducedGo.AddComponent<DrivingCamera>();
+            var reducedSettled = FakePhysical(PhysicalMotor(
+                new Vector3(0f, 0.75f, 0f), 0f,
+                Quaternion.identity, grounded: true),
+                reducedShake: true);
+            for (var i = 0; i < 6; i++)
+                reduced.ApplyFrame(reducedSettled, 0.1f);
+            var reducedAir = FakePhysical(PhysicalMotor(
+                new Vector3(0f, 2.5f, 3f), 0f,
+                Quaternion.identity, grounded: false),
+                reducedShake: true);
+            reducedAir.driving.motor.airSeconds = 0.6f;
+            reducedAir.driving.motor.verticalSpeed = -8f;
+            reduced.ApplyFrame(reducedAir, 0.1f);
+            reduced.ApplyFrame(FakePhysical(PhysicalMotor(
+                new Vector3(0f, 0.75f, 4f), 0f,
+                Quaternion.identity, grounded: true),
+                reducedShake: true), 0.1f);
+            Assert.That(reduced.FeedbackDip, Is.GreaterThan(0.001f),
+                "reduced shake softens the dip, it does not delete it");
+            Assert.That(reduced.FeedbackDip,
+                Is.LessThan(peak * 0.5f),
+                "reduced shake shrinks the landing dip: reduced="
+                + reduced.FeedbackDip + " full=" + peak);
+        }
+
+        // Committed suspension compression feeds a small, bounded dip —
+        // grounded wheels riding deep in their travel register, airborne
+        // or full-droop wheels register nothing.
+        [Test]
+        public void SuspensionCompressionFeedbackIsBoundedAndShakeAware()
+        {
+            var riding = FakePhysical(PhysicalMotor(
+                new Vector3(0f, 0.6f, 0f), 0f,
+                Quaternion.identity, grounded: true));
+            foreach (var wheel in riding.driving.motor.physics.wheels)
+            {
+                wheel.grounded = true;
+                wheel.compression = 0.25f;
+            }
+            for (var i = 0; i < 30; i++)
+                drivingCamera.ApplyFrame(riding, 0.05f);
+
+            Assert.That(drivingCamera.FeedbackDip, Is.GreaterThan(0.01f),
+                "sustained compression registers a bounded camera dip");
+            var sustained = drivingCamera.FeedbackDip;
+            Assert.That(sustained,
+                Is.LessThanOrEqualTo(drivingCamera.MaxFeedbackDip + 0.001f));
+
+            // Wheels at full droop (ungrounded) contribute nothing.
+            var droop = FakePhysical(PhysicalMotor(
+                new Vector3(0f, 2.5f, 0f), 0f,
+                Quaternion.identity, grounded: false));
+            droop.driving.motor.airSeconds = 0.2f;
+            for (var i = 0; i < 60; i++)
+                drivingCamera.ApplyFrame(droop, 0.05f);
+            Assert.That(drivingCamera.FeedbackDip, Is.LessThan(sustained * 0.5f),
+                "droop releases the compression dip");
+
+            var reducedGo = new GameObject("presenter-reduced-susp");
+            loose.Add(reducedGo);
+            var reduced = reducedGo.AddComponent<DrivingCamera>();
+            var reducedRide = FakePhysical(PhysicalMotor(
+                new Vector3(0f, 0.6f, 0f), 0f,
+                Quaternion.identity, grounded: true),
+                reducedShake: true);
+            foreach (var wheel in reducedRide.driving.motor.physics.wheels)
+            {
+                wheel.grounded = true;
+                wheel.compression = 0.25f;
+            }
+            for (var i = 0; i < 30; i++)
+                reduced.ApplyFrame(reducedRide, 0.05f);
+            Assert.That(reduced.FeedbackDip,
+                Is.LessThan(sustained * 0.5f),
+                "reduced shake shrinks the sustained suspension dip too");
+        }
     }
 }
