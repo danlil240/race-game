@@ -38,6 +38,9 @@ namespace FamilyRacing
         // ordered "landed" event by the sim once per Step).
         public bool landedThisTick;
         public float landedAirSeconds;
+        // Grounded->airborne transition observed this tick (emitted as the
+        // ordered "becameAirborne" event — arcade parity).
+        public bool becameAirborneThisTick;
         // An episode shorter than this is suspension flicker, not a jump.
         public const float LandedMinAirSeconds = 0.10f;
 
@@ -297,6 +300,8 @@ namespace FamilyRacing
             var priorAir = p.airSeconds;
             var grounded = anyWheel || chassisGrounded;
             p.grounded = grounded;
+            if (!grounded && wasGrounded)
+                becameAirborneThisTick = true;
             if (grounded && !wasGrounded && priorAir >= LandedMinAirSeconds)
             {
                 landedThisTick = true;

@@ -236,6 +236,110 @@ namespace FamilyRacing.Tests
                 "braking must never reverse travel (worst " + worstReverse + ")");
         }
 
+        [Test]
+        public void BrakeAppliesToNonDrivenWheels()
+        {
+            // Only one of four wheels is driven: brake demand is unscoped
+            // by drive, so all grounded wheels brake. If the brake were
+            // driven-only, the single driven wheel's mu*N cap would
+            // deliver roughly a quarter of the authored brake force and
+            // the stop below would take far longer.
+            var physics = VehiclePhysicsTuning.Car01();
+            for (var i = 1; i < physics.wheels.Length; i++)
+                physics.wheels[i].driven = false;
+            NewSim("brake-nodriven", physics,
+                PhysicsTestWorld.PhysicalSpawnState(physics,
+                    new Vector3(0f, PhysicsTestWorld.SpawnY(physics), 0f), 0f,
+                    forwardSpeed: 15f));
+            PhysicsTestWorld.FlatGround(world, 0f, 100f, 60f, 300f);
+
+            var worstReverse = 0f;
+            var stoppedAt = -1;
+            for (var i = 0; i < 150; i++)
+            {
+                sim.Step(new List<VehicleTickRequest>
+                { PhysicsTestWorld.Request("p1", PhysicsTestWorld.Drive(brake: 1f)) });
+                var forward = PhysicsTestWorld.ForwardSpeed(sim.Capture("p1"));
+                if (forward < worstReverse) worstReverse = forward;
+                if (stoppedAt < 0 && forward < 0.25f) stoppedAt = i;
+            }
+            Assert.That(stoppedAt, Is.GreaterThanOrEqualTo(0),
+                "non-driven wheels must still brake the car to a stop");
+            Assert.That(stoppedAt, Is.LessThan(90),
+                "all four grounded wheels braking must stop 15 m/s well "
+                + "inside 3 s — one-wheel braking cannot (stoppedAt "
+                + stoppedAt + ")");
+            Assert.That(worstReverse, Is.GreaterThan(-0.1f),
+                "braking must never reverse travel (worst " + worstReverse + ")");
+        }
+
+        // --- airborne/landing transitions ------------------------------------
+
+        [Test]
+        public void BecameAirborneFiresOncePerTakeoff()
+        {
+            // Drop the settled car onto flat ground: becameAirborne fires
+            // only on the grounded->airborne transition tick — never
+            // while continuously grounded, continuously airborne, or
+            // after landing — matching the arcade event's semantics.
+            var physics = VehiclePhysicsTuning.Car01();
+            NewSim("drop", physics,
+                PhysicsTestWorld.PhysicalSpawnState(physics,
+                    new Vector3(0f,
+                        PhysicsTestWorld.SpawnY(physics) + 0.5f, 0f), 0f));
+            // Big pad: the settled car keeps driving under auto-throttle
+            // for the rest of the window without reaching an edge.
+            PhysicsTestWorld.FlatGround(world, 0f, 0f, 400f, 400f);
+
+            var airborneEvents = 0;
+            var landedEvents = 0;
+            var prevGrounded = true;
+            for (var i = 0; i < 240; i++)
+            {
+                var results = sim.Step(new List<VehicleTickRequest>
+                { PhysicsTestWorld.Request("p1", PhysicsTestWorld.Drive()) });
+                var step = results[0].step;
+                var sawAirborne = false;
+                var sawLanded = false;
+                foreach (var ev in step.events)
+                {
+                    if (ev.kind == "becameAirborne") sawAirborne = true;
+                    else if (ev.kind == "landed") sawLanded = true;
+                }
+                var grounded = step.state.grounded;
+                if (sawAirborne)
+                {
+                    airborneEvents++;
+                    Assert.That(prevGrounded, Is.True,
+                        "becameAirborne must only follow a grounded tick");
+                    Assert.That(grounded, Is.False,
+                        "becameAirborne means the body left the ground "
+                        + "this interval");
+                }
+                if (sawLanded)
+                {
+                    landedEvents++;
+                    Assert.That(prevGrounded, Is.False);
+                    // A same-tick bounce can end airborne again.
+                    if (!sawAirborne) Assert.That(grounded, Is.True);
+                }
+                // No transition => no transient event.
+                if (prevGrounded == grounded && !(sawAirborne && sawLanded))
+                {
+                    Assert.That(sawAirborne, Is.False,
+                        "no becameAirborne while grounded or airborne");
+                    Assert.That(sawLanded, Is.False);
+                }
+                prevGrounded = grounded;
+            }
+            Assert.That(airborneEvents, Is.GreaterThanOrEqualTo(1),
+                "the drop must emit a becameAirborne");
+            Assert.That(landedEvents, Is.GreaterThanOrEqualTo(1),
+                "the drop must emit a landed");
+            Assert.That(prevGrounded, Is.True,
+                "the car must settle after the drop");
+        }
+
         // --- rollover fixtures -------------------------------------------------
 
         [Test]
@@ -374,6 +478,51 @@ namespace FamilyRacing.Tests
                 Is.Not.EqualTo(0.9f));
             Assert.That(again.physics.filteredSteering,
                 Is.Not.EqualTo(-0.4f));
+        }
+
+        [Test]
+        public void LegacyRestoreRejectsNonFiniteSpeed()
+        {
+            // A physics == null restore derives body velocity straight
+            // from the legacy speed fields — a non-finite claim must be
+            // refused atomically before anything reaches PhysX, never
+            // clamped silently.
+            var physics = VehiclePhysicsTuning.Car01();
+            NewSim("restore-nan", physics,
+                PhysicsTestWorld.PhysicalSpawnState(physics,
+                    new Vector3(0f, PhysicsTestWorld.SpawnY(physics), 0f), 0f));
+            PhysicsTestWorld.FlatGround(world, 0f, 100f, 60f, 300f);
+            sim.Step(new List<VehicleTickRequest>
+            { PhysicsTestWorld.Request("p1", PhysicsTestWorld.Drive()) });
+            var before = sim.Capture("p1");
+
+            var bad = before.Copy();
+            bad.physics = null; // legacy path: speed fields are authoritative
+            bad.speed = float.NaN;
+            bad.x = before.x + 25f; // distinguishable mutation
+            sim.Restore("p1", bad);
+            var after = sim.Capture("p1");
+            Assert.That(after.x, Is.EqualTo(before.x).Within(1e-4f),
+                "a non-finite legacy restore must not move the body");
+            Assert.That(after.physics.velocityZ,
+                Is.EqualTo(before.physics.velocityZ).Within(1e-4f),
+                "a rejected restore must not touch body velocity");
+            Assert.That(float.IsNaN(after.physics.velocityZ), Is.False);
+
+            // A finite legacy restore still applies honestly: speed ->
+            // world velocity along the heading.
+            var good = before.Copy();
+            good.physics = null;
+            good.speed = 7f;
+            good.lateralSpeed = 0f;
+            good.verticalSpeed = 0f;
+            good.x = before.x + 25f;
+            sim.Restore("p1", good);
+            var applied = sim.Capture("p1");
+            Assert.That(applied.x, Is.EqualTo(before.x + 25f).Within(1e-3f));
+            Assert.That(PhysicsTestWorld.ForwardSpeed(applied),
+                Is.EqualTo(7f).Within(0.05f),
+                "a finite legacy restore sets the body's forward speed");
         }
 
         [Test]

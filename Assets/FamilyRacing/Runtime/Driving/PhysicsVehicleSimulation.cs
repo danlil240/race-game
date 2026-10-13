@@ -139,7 +139,10 @@ namespace FamilyRacing
                 if (!Finite(spawn.initialState.x)
                     || !Finite(spawn.initialState.y)
                     || !Finite(spawn.initialState.z)
-                    || !Finite(spawn.initialState.heading))
+                    || !Finite(spawn.initialState.heading)
+                    || !Finite(spawn.initialState.speed)
+                    || !Finite(spawn.initialState.lateralSpeed)
+                    || !Finite(spawn.initialState.verticalSpeed))
                     throw new ArgumentException(spawn.participantId
                         + ": non-finite initial pose");
                 if (spawn.initialState.physics != null
@@ -261,10 +264,13 @@ namespace FamilyRacing
                     {
                         // Ordered transient events: chassis contact first
                         // (stable record order collapsed to the peak new
-                        // contact), then the landing transition.
+                        // contact), then the airborne transition, then
+                        // the landing transition — arcade parity.
                         if (entry.body.newContactThisTick)
                             step.events.Add(new MotorEvent("contact",
                                 entry.body.peakContactSpeed));
+                        if (entry.body.becameAirborneThisTick)
+                            step.events.Add(new MotorEvent("becameAirborne"));
                         if (entry.body.landedThisTick)
                             step.events.Add(new MotorEvent("landed",
                                 entry.body.landedAirSeconds));
@@ -284,6 +290,7 @@ namespace FamilyRacing
             {
                 b.newContactThisTick = false;
                 b.peakContactSpeed = 0f;
+                b.becameAirborneThisTick = false;
                 b.landedThisTick = false;
             }
             return results;
@@ -373,8 +380,14 @@ namespace FamilyRacing
         {
             var body = Find(participantId);
             if (body == null || state == null) return;
+            // The legacy (physics == null) restore path derives body
+            // velocity straight from the legacy speed fields — a
+            // non-finite value there would write NaN/Infinity into
+            // PhysX. Reject atomically; never clamp silently.
             if (!Finite(state.x) || !Finite(state.y) || !Finite(state.z)
-                || !Finite(state.heading))
+                || !Finite(state.heading) || !Finite(state.speed)
+                || !Finite(state.lateralSpeed)
+                || !Finite(state.verticalSpeed))
                 return;
             if (state.physics != null
                 && !state.physics.Validate(out _))

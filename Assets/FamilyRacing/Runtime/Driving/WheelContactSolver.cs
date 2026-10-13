@@ -64,6 +64,7 @@ namespace FamilyRacing
 
             // --- pass 1: suspension rays -----------------------------------
             var groundedDriven = 0;
+            var groundedWheels = 0;
             var specs = tuning.wheels;
             var rayReach = tuning.suspensionRestLength
                 + tuning.suspensionExtraDroop;
@@ -130,6 +131,7 @@ namespace FamilyRacing
                 vehicle.wheelNormalLoad[i] = normalLoad;
                 vehicle.wheelLongSpeed[i] = Vector3.Dot(contactVelocity, fwd);
                 vehicle.wheelLatSpeed[i] = Vector3.Dot(contactVelocity, right);
+                groundedWheels++;
                 if (spec.driven) groundedDriven++;
 
                 wheel.grounded = true;
@@ -190,10 +192,13 @@ namespace FamilyRacing
                     longitudinal += tuning.peakDriveForce * throttle * taper
                         / groundedDriven;
                 }
-                if (braking && spec.driven && groundedDriven > 0)
+                // Brake demand opposes travel at EVERY grounded wheel —
+                // unscoped by drive (a non-driven front wheel still
+                // brakes); demand is split across grounded contacts.
+                if (braking && groundedWheels > 0)
                 {
                     var requested = tuning.peakBrakeForce * input.Brake
-                        / groundedDriven;
+                        / groundedWheels;
                     longitudinal += VehicleForceModel.BrakeForce(
                         longSpeed, requested, supportedMass, dt);
                     // Slope hold: near rest a held brake may cancel the
