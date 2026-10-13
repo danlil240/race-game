@@ -239,7 +239,10 @@ proven by PlayMode on both ends:
   strips `substepPath`/`simulation`/`MotorState.physics` before encode,
   rebuilds `motor.physics` from the compact `racer.physics` DTO on
   decode, keeps the small identity strings crossing, stays under the
-  16 KiB ceiling, and never mutates the host's live state.
+  32 KiB ceiling (`NetworkSettings.SnapshotCeilingBytes` — raised from
+  16 KiB after live evidence showed real physical snapshots overflowing
+  16 KiB mid-race; see `docs/tasks/vehicle-physics-report.md`), and
+  never mutates the host's live state.
 - Core `OfflineTestRunner` covers the diagnostic counters directly
   (`VehicleSimulationBoundaryTests` and the backend diagnostics tests:
   arcade honestly reports `substepsSimulated = 0`, the physical world
@@ -255,7 +258,12 @@ proven by PlayMode on both ends:
   `Tools\PhysicsSoak.py --connections ... --minutes 30`
   (2–4-player sustained physical LAN observation). A live scenario/soak
   run requires the `Builds\Windows-Physics\` player — see
-  `docs/COMMANDS.md`.
+  `docs/COMMANDS.md`. Fresh task-12 runs: solo scenario passed on
+  `Logs\evidence-t12-scenario` (both classes; motorcycle rollover
+  attempted but not observed → `notVerified`); the 30-minute LAN soak
+  and physical fault-injection lifecycle are recorded in
+  `docs/tasks/vehicle-physics-report.md` (the backend stays **opt-in** —
+  arcade remains the shipped default).
 
 ## Known QA gaps (`notVerified` — do not read as passed)
 

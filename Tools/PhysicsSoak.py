@@ -500,6 +500,21 @@ def drive_physics_race(host, clients, class_id, checks):
                   % class_id)
 
 
+def rejection_code(error):
+    """The wire rejection code carried by an applied() AssertionError.
+
+    applied() asserts ``result["status"] == "applied"`` with
+    ``(action, result)`` as the assertion payload, so args[0][1] is the
+    rejected result dict when the failure is a command rejection at
+    all. Any other shape (a KeyError, an assertion from inside the
+    transport pump) yields None and stays a hard incident."""
+    args = getattr(error, "args", ())
+    if args and isinstance(args[0], tuple) and len(args[0]) == 2 \
+            and isinstance(args[0][1], dict):
+        return args[0][1].get("code")
+    return None
+
+
 def await_physics_results(peers, deadline, start_monotonic, samples,
                           incidents, input_interval, sample_seconds,
                           trace_dirs):
@@ -567,8 +582,21 @@ def await_physics_results(peers, deadline, start_monotonic, samples,
                 except PhysicsContractError:
                     raise
                 except (AssertionError, KeyError) as error:
+                    # The phase snapshot above is stale by up to one
+                    # stream boundary: an endpoint that has already
+                    # left the driving screen honestly refuses
+                    # input.set "unavailable" (SetInput rejects before
+                    # touching input state). That wire answer is the
+                    # fresher truth, so it is recorded as an
+                    # informational refusal — only a refusal while the
+                    # endpoint still accepts driving input
+                    # (invalidParameter, malformed durations, …) is a
+                    # hard inputRejected incident.
+                    kind = "inputRefused" \
+                        if rejection_code(error) == "unavailable" \
+                        else "inputRejected"
                     incidents.append({
-                        "kind": "inputRejected", "role": role,
+                        "kind": kind, "role": role,
                         "elapsedSeconds": round(
                             now - start_monotonic, 1),
                         "phase": phase, "detail": str(error)[:200]})
@@ -677,6 +705,11 @@ def run_soak(connection_paths, evidence, minutes, host_address=None,
                  "(%.1f min requested)" % (len(connection_paths),
                                           minutes),
         "minutesRequested": minutes,
+        "effectiveSettings": {
+            "resultsTimeoutSeconds": results_timeout,
+            "inputIntervalSeconds": input_interval,
+            "sampleSeconds": sample_seconds,
+        },
         "players": [], "checks": [], "cycles": [], "incidents": [],
         "notVerified": [
             "render frame times — cadence is the socket-observed "

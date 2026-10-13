@@ -32,6 +32,20 @@ sustained `Tools\NetworkSoak.py` harness. Physical-device and human
 acceptance gates are **open**: see
 `docs\tasks\network-prototype-report.md`.
 
+**Opt-in physical vehicle backend (vehicle-physics plan, qualification
+open).** Alongside the shipped arcade motor, a `PhysicalAssisted`
+backend exists: raycast-wheel force model, two fixed 1/60 s substeps per
+30 Hz logical tick, suspension/braking/rollover, assisted motorcycle
+balance, host-authoritative physical LAN world with a compact wire DTO
+and approximate client-side replay prediction. It is **not** the
+default — arcade remains the shipped backend and the developer
+comparator/fallback; physics runs via the dedicated
+`Builds\Windows-Physics` development player (see `docs\COMMANDS.md`).
+Qualification is proven by `Tools\PhysicsScenario.py` (solo, both
+classes) and `Tools\PhysicsSoak.py` (multi-endpoint LAN); device and
+human handling gates are **open**: see
+`docs\tasks\vehicle-physics-report.md`.
+
 **Foundation shell.** `Assets/FamilyRacing/Core` is a
 Unity-free, C# 9, .NET Standard 2.1-compatible assembly:
 
@@ -140,6 +154,25 @@ tests are discovered.
 
 ## Remaining gates
 
+- **Vehicle-physics qualification (2026-10-13, task 12)**: the opt-in
+  `PhysicalAssisted` backend is implemented for both vehicle classes,
+  LAN-replicated (schema 4, protocol 2) with approximate client
+  prediction — deterministic PhysX replay is **not** claimed. Latest
+  gate: Core offline ~594, EditMode 652/653 (1 pre-existing skip),
+  PlayMode green except the 2 documented impaired-link environment
+  failures, Python tooling 216, verify-tooling 12/12; Windows dev,
+  ordinary (validation compiled out) and physics players build; offline
+  Android APK per `Tools\Verify.ps1 -Mode Android`. Live evidence:
+  solo `PhysicsScenario` (both classes: accel/brake, slalom, ramp,
+  rollover→recovery, park, pause/focus cleanup); a **passed** 30.5-min
+  `PhysicsSoak` LAN run (5 races both classes, immutable results,
+  rematch baselines, wire exclusion — `Logs\evidence-t12-soak5`); and
+  a passed fault-injection lifecycle (process-kill → AI takeover →
+  credentialed `lan.reconnect`, host loss — `Logs\evidence-t12-lan2`).
+  **Rollout decision: physics stays opt-in** — the device matrix
+  (A7 Lite), impaired-LAN, cross-device and human handling gates
+  remain `notVerified`. Report:
+  `docs\tasks\vehicle-physics-report.md`.
 - **M3 network-prototype gate (2026-10-12, task 10)**: Core 468/468,
   EditMode 507 + 1 explicit voice-clip Ignore, PlayMode 174/174, Python
   tooling 127/127, verify-tooling 12/12; same-revision Windows Mono dev,

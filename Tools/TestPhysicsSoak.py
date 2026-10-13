@@ -15,7 +15,7 @@ from NetworkSoak import soak_inputs, soak_status
 from PhysicsScenario import PhysicsContractError
 from PhysicsSoak import (HISTORY_BASELINE_MARGIN, MAX_HOLD_SECONDS,
                          MAX_HOLD_TICKS, LanPhysicsObserver,
-                         PHYSICS_CLASS_EVENTS, run_soak,
+                         PHYSICS_CLASS_EVENTS, rejection_code, run_soak,
                          verify_physics_lan_trace,
                          verify_rematch_baselines)
 from TestPhysicsScenario import (diagnostics, physics, substep_path,
@@ -428,6 +428,33 @@ class CliContractTests(unittest.TestCase):
                                    min(8.0, MAX_HOLD_SECONDS))
                 duration = int(float(args["durationTicks"]))
                 assert 1 <= duration <= MAX_HOLD_TICKS
+
+    def test_rejection_code_reads_applied_assertion_payload(self):
+        result = {"status": "rejected", "code": "unavailable"}
+        error = AssertionError(("input.set", result))
+        assert rejection_code(error) == "unavailable"
+        error = AssertionError(("input.set",
+                                {"status": "rejected",
+                                 "code": "invalidParameter"}))
+        assert rejection_code(error) == "invalidParameter"
+        # Non-rejection shapes stay None so they remain hard incidents.
+        assert rejection_code(KeyError("x")) is None
+        assert rejection_code(AssertionError("plain")) is None
+        assert rejection_code(AssertionError(("a", "not-a-dict"))) \
+            is None
+
+    def test_unavailable_refusal_is_not_a_hard_incident(self):
+        # An endpoint that already left the driving screen honestly
+        # refuses input.set "unavailable" — the soak records that as
+        # informational inputRefused, which must not fail the verdict.
+        status, error = soak_status({}, False, [
+            {"kind": "inputRefused", "role": "client-0",
+             "phase": "racing"}])
+        assert status == "passed" and error is None
+        # Any other rejection code stays a hard inputRejected.
+        status, error = soak_status({}, False, [
+            {"kind": "inputRejected", "role": "client-0"}])
+        assert status == "failed"
 
     def test_single_connection_fails_honestly(self):
         with tempfile.TemporaryDirectory() as work:

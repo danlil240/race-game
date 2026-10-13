@@ -1417,6 +1417,18 @@ def main():
         result.update(outcome)
         result["status"] = "passed"
         result["runId"] = connection["runId"]
+        # Effective bounds the run was judged against (no CLI flags —
+        # these constants are the knobs), recorded so a result binds to
+        # the exact thresholds that produced it.
+        result["effectiveSettings"] = {
+            "parkedHoldSeconds": PARKED_HOLD_SECONDS,
+            "rolloverSeconds": ROLLOVER_SECONDS,
+            "backlogWarmupSeconds": BACKLOG_WARMUP_SECONDS,
+            "projectionScheduleSeconds": SCHEDULE_SECONDS,
+            "identityCapacity": IDENTITY_CAPACITY,
+            "outgoingCapacity": OUTGOING_CAPACITY,
+            "traceCapacityBytes": TRACE_CAPACITY_BYTES,
+        }
         physical = outcome["backend"] == "physicalAssisted"
         rollover = outcome["trials"]
         result["notVerified"] = [

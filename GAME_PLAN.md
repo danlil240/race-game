@@ -225,6 +225,8 @@ Flow: **Host → nearby discovery → Join → choose class/course → Ready →
 - Use a shared arcade motor with ground probes, collision sweeps, and controlled airborne states.
 - Start with 30 Hz simulation and 15 Hz snapshots. Predict local movement, acknowledge inputs, replay unacknowledged input after corrections, and interpolate remote racers.
 
+*Implementation note (2026-10-13): an opt-in `PhysicalAssisted` backend (raycast-wheel force model, fixed substeps, assisted motorcycle balance, host-authoritative physical LAN world with approximate client replay) exists behind a dedicated development player for qualification. The arcade motor above remains the shipped default and developer fallback; switching the default requires the open device/human/impaired-network gates in `docs/tasks/vehicle-physics-report.md` to pass.*
+
 Prediction is a dedicated engineering task: NGO does not supply a complete prediction/reconciliation loop. [NGO prediction limits](https://docs.unity3d.com/Packages/com.unity.netcode.gameobjects@2.7/manual/advanced-topics/client-anticipation.html)
 
 **Pausing and recovery:**

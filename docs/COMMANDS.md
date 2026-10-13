@@ -161,13 +161,23 @@ no duplicate keys, no trailing content, strict UTF-8:
 
 Actions: `profile.create`, `profile.select`, `ui.navigate`, `ui.language`,
 `settings.update`, `settings.save`, `input.set`, `input.clear`,
-`camera.toggle`, `pause.toggle`, `race.start`, `race.restart`,
+`camera.toggle`, `pause.toggle`, `app.focusLost`, `race.start`,
+`race.restart`,
 `race.exit`, `tutorial.start`, `tutorial.replay`, `tutorial.exit`, and the
 LAN surface `lan.host`, `lan.discover`, `lan.discovery.stop`, `lan.join`,
 `lan.configure`, `lan.vehicle`, `lan.ready`, `lan.start`,
 `lan.pause.request`, `lan.pause.set`, `lan.reconnect`,
 `lan.results.request`, `lan.results.retrySave`, `lan.rematch`,
 `lan.leave`.
+
+`app.focusLost` runs the same input-cleanup path an OS focus loss
+dispatches: `FoundationService.ApplicationFocusLost` clears held input
+and queued driving actions and invokes the rearm hook wired to
+`FoundationInput.RequireRearm`. `ObserveInputCleanup`
+(`OnApplicationFocus`/`OnApplicationPause`) dispatches this command
+itself, so the agent command and a real focus/pause event exercise one
+code path; it is deliberately unblocked inside LAN sessions and solo
+races.
 
 `race.start` takes `vehicleId` + `eventId` (catalog: `car-01`,
 `motorcycle-01`, `practice-02`, `intro-01`; the `tutorial-01` free-drive

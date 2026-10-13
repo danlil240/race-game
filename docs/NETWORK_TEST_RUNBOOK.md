@@ -33,11 +33,15 @@ three transport smoke tests in
 - `DeniedAccessDoesNotOpenSockets` — a denied `ILanNetworkAccess` gate makes
   start fail immediately; no socket opens and no pending join lingers.
 
-Latest recorded result: **174/174 PlayMode**
-(`Logs/verify-playmode-results.xml`, M3 task-10 gate, 2026-10-12). Full
-gate at that revision: EditMode 507 + 1 explicit voice-clip Ignore
-(`EveryCueHasWiredClipForBothLocales`, credential-gated), Core 468,
-Python tooling 133, verify-tooling 12/12.
+Latest recorded result: **245/247 PlayMode**
+(`Logs/verify-playmode-results.xml`, vehicle-physics task-12 gate,
+2026-10-13) — the 2 failures are the documented impaired-link
+environment limitation (`ImpairedLinkExercisesPredictionAndInterpolation`,
+`ImpairedLanPhysicalCorrections`: the impaired UTP session never
+establishes in this environment). Full gate at this revision:
+CoreOffline 594/594, EditMode 652/653 + 1 pre-existing skip
+(`SkippedCheckpointCannotFinish`), Python tooling 214/214,
+verify-tooling 12/12.
 
 ## Windows: private-network firewall setup (do NOT disable the firewall)
 
@@ -155,6 +159,18 @@ measurement exists yet — it stays in the open-gates list below.
 | 2026-10-13 | `Verify.ps1 -Mode PlayMode` | 244/246 pass — both new tests green (`PhysicalDiagnosticsReachTheStreamBoundary`, `WireEncodeStripsStreamOnlyDiagnostics`); the 2 failures are the documented impaired-LAN environmental timeouts (`ImpairedLinkExercisesPredictionAndInterpolation`, `ImpairedLanPhysicalCorrections`: `race=none`, `drops=0`, identical signature at HEAD pre-change — see progress ledger) |
 | 2026-10-13 | Python tooling discovery | 194/194 pass (`TestPhysicsScenario` + `TestPhysicsSoak` included) |
 | 2026-10-13 | `PhysicsScenario.py` / `PhysicsSoak.py` delivery | Tools + unit coverage delivered; live run needs the `Windows-Physics` player (`Build-Windows.ps1 -Configuration Physics`) and 2+ endpoints for the soak |
+| 2026-10-13 | Task-12 gate: `Verify.ps1 -Mode CoreOffline` | 594/594 pass |
+| 2026-10-13 | `Verify.ps1 -Mode EditMode` | 652/653 pass, 1 pre-existing skip, 0 fail (`Logs/verify-editmode-results.xml`) |
+| 2026-10-13 | `Verify.ps1 -Mode PlayMode` | 245/247 pass — the 2 failures are the documented impaired-link environmental timeouts (unchanged signature; env-blocked, not product failures) |
+| 2026-10-13 | Python tooling discovery | 214/214 pass at gate time; 216/216 after `inputRefused` coverage (soak4 fix) |
+| 2026-10-13 | `Tools\Test-VerifyTooling.ps1` | 12/12 pass |
+| 2026-10-13 | `Verify.ps1 -Mode Windows` Mono development build | Succeeded (`Logs/verify-unity-windows.log`); exe SHA-256 in `Logs/evidence-t12-provenance/provenance.json` |
+| 2026-10-13 | `Verify.ps1 -Mode WindowsOrdinary` Mono ordinary build | Succeeded; ordinary player launched with `--validation-dir` produced **no** `connection.json`, **no** token dir and **no** listening validation socket (`Logs/run-t12-ordinary-check*`) |
+| 2026-10-13 | `Verify.ps1 -Mode Android` export + offline Gradle | Succeeded; APK SHA-256 `CFDC36B6…` (`Logs/android-offline/20261013-173823-fe361b4f3e7944a6b1962f2082ecbbce/result.json`) |
+| 2026-10-13 | `Build-Windows.ps1 -Configuration Physics` | Succeeded (`Logs/windows-build/physics/20261013-174100-…/result.json`); the 17:37 attempt failed `file in use` — stale task-11 players still held the exe, killed and retried honestly |
+| 2026-10-13 | `PhysicsScenario.py` solo on a fresh physics player | Passed — both classes, ~118 s, 3745 physical boundaries replayed (`Logs/evidence-t12-scenario`); motorcycle rollover attempted ×3, not observed → `notVerified` |
+| 2026-10-13 | `PhysicsSoak.py` 30-minute 2-player LAN soak attempts | soak1 (`evidence-t12-soak`): failed — cycle-2 `resultsTimeout` (slow-race variance over the 600 s bound). soak2 (`evidence-t12-soak2`, `--results-timeout 900`): failed — host `traceLimit` at ~28 min on a 1 GiB bound. soak3 (`evidence-t12-soak3`, 2 GiB traces): passed but only 19.6 observed min — the runner declines a race that cannot fit the remaining window. soak4 (`evidence-t12-soak4`, `--minutes 45`, 2 GiB traces): failed — 31.3 observed min, all invariants green, one hard `inputRejected` that proved to be an honest `unavailable` refusal at the results boundary (harness TOCTOU; fixed as informational `inputRefused`). soak5 (`evidence-t12-soak5`): **passed** — 1832.8 s observed, 5 races both classes, all invariants green; 30-minute gate closed. Full ledger in `docs/tasks/vehicle-physics-report.md` §3 |
+| 2026-10-13 | Physical LAN fault-injection lifecycle (`run_physics_lan.py` — `NetworkScenario --launch` on `physics-01` catalogs) | Attempt 1 failed on the arcade-tuned `LAN_MAX_RECOVERIES = 12` validator bound after proving the full lifecycle (kept, `evidence-t12-lan`). Attempt 2 **passed** 22/22 (`evidence-t12-lan2`): shared pause, process-kill → AI takeover → credentialed `lan.reconnect` seat reclaim, both classes, rematch, host loss, clean teardown |
 
 ## Open evidence gates (explicit — hardware or human review required)
 
