@@ -693,6 +693,46 @@ namespace FamilyRacing.Tests
         }
 
         [Test]
+        public void SnapshotWithNonObjectStateRejectsCleanly()
+        {
+            // A crafted "state" carrying a scalar or array must never
+            // throw through the decoder — the wrong JSON kind is a clean
+            // malformed rejection, not an escaped exception.
+            foreach (var stateJson in new[] { "\"x\"", "5", "true", "[]" })
+            {
+                var packet = Wrap(NetworkWireCodec.TagSnapshot,
+                    "{\"sessionId\":\"s\",\"raceId\":\"r\",\"raceOrdinal\":1,"
+                    + "\"snapshotSequence\":1,\"state\":" + stateJson
+                    + ",\"acks\":[]}");
+                NetworkSnapshot decoded;
+                string error;
+                Assert.That(NetworkWireCodec.TryDecodeSnapshot(packet,
+                    out decoded, out error), Is.False, stateJson);
+                Assert.That(decoded, Is.Null);
+                Assert.That(error, Is.EqualTo("malformed"), stateJson);
+            }
+        }
+
+        [Test]
+        public void SnapshotWithNonArrayRacersRejectsCleanly()
+        {
+            foreach (var racersJson in new[] { "\"x\"", "5", "{}" })
+            {
+                var packet = Wrap(NetworkWireCodec.TagSnapshot,
+                    "{\"sessionId\":\"s\",\"raceId\":\"r\",\"raceOrdinal\":1,"
+                    + "\"snapshotSequence\":1,\"state\":{\"sessionId\":\"s\","
+                    + "\"raceId\":\"r\",\"phase\":\"running\",\"racers\":"
+                    + racersJson + "},\"acks\":[]}");
+                NetworkSnapshot decoded;
+                string error;
+                Assert.That(NetworkWireCodec.TryDecodeSnapshot(packet,
+                    out decoded, out error), Is.False, racersJson);
+                Assert.That(decoded, Is.Null);
+                Assert.That(error, Is.EqualTo("malformed"), racersJson);
+            }
+        }
+
+        [Test]
         public void SnapshotEncodeRejectsNullRacerList()
         {
             var snapshot = new NetworkSnapshot

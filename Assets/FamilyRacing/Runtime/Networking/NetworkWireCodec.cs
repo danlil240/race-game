@@ -216,9 +216,10 @@ namespace FamilyRacing.Networking
             // and "racers":null would decode as valid empty content
             // rather than the malformed wire data they are. Inspect the
             // payload itself before parsing: an absent field is caught
-            // by the semantic checks below, but an explicit null on a
-            // required structure rejects here.
-            if (HasStructuralNull(json))
+            // by the semantic checks below, but a required structure of
+            // the wrong JSON kind (null, scalar, or mismatched container)
+            // rejects here.
+            if (HasMalformedStructure(json))
             { error = "malformed"; return false; }
             snapshot = Parse<NetworkSnapshot>(json, out error);
             if (snapshot == null || snapshot.state == null)
@@ -250,11 +251,16 @@ namespace FamilyRacing.Networking
             return true;
         }
 
-        // True when the snapshot body carries an explicit JSON null for a
-        // required structural field: state itself, or the racer list.
-        // Parse failures fall through — Parse<T> reports them as
-        // malformed on its own.
-        private static bool HasStructuralNull(string json)
+        // True when the snapshot body carries a required structural field
+        // of the wrong JSON kind: `state` present but null/scalar/array
+        // (only an object can hold a race state), or `state.racers`
+        // present but null/scalar/object (only an array can hold the
+        // racer list). Token-type checks never index a non-JObject —
+        // crafted scalars/arrays fall through to clean rejection instead
+        // of throwing through the transport callback. Absent fields and
+        // unparseable bodies fall through — the semantic checks and
+        // Parse<T> report them as malformed on their own.
+        private static bool HasMalformedStructure(string json)
         {
             JObject root;
             try
@@ -266,9 +272,10 @@ namespace FamilyRacing.Networking
                 return false;
             }
             var state = root["state"];
-            if (state != null && state.Type == JTokenType.Null) return true;
-            var racers = state != null ? state["racers"] : null;
-            return racers != null && racers.Type == JTokenType.Null;
+            if (state != null && !(state is JObject)) return true;
+            var racers = state is JObject stateObject
+                ? stateObject["racers"] : null;
+            return racers != null && !(racers is JArray);
         }
 
         // The DTO is the wire contract: when present it validates as a
