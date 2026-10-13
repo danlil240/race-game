@@ -413,6 +413,63 @@ namespace FamilyRacing.Tests
                 P("vehicleId", "spaceship"))).code, Is.EqualTo("unknownVehicle"));
         }
 
+        // The roster/backend contract race.start enforces applies to the
+        // tutorial entry too: a physical catalog's tutorial.start rejects
+        // an arcade-only tuning at the command boundary — an honest
+        // invalidVehicle, no partial session, and nothing a stepped tick
+        // could throw on (previously the gap meant an ArgumentException
+        // inside EnsureDrivingSimulation -> PhysicsVehicleSimulation).
+        [Test]
+        public void TutorialStartRejectsBackendMismatchedVehicle()
+        {
+            var physical = new FoundationService(
+                new ProfileStore(directory + "-phys", new TestJsonSerializer()),
+                "en", RunId);
+            var free = FreeEvent();
+            free.vehicleIds = new List<string> { "car-01", "car-physical-01" };
+            var trial = IntroEvent();
+            trial.vehicleIds = new List<string> { "car-01", "car-physical-01" };
+            physical.SetDrivingContent(DrivingContentCatalog.Create(
+                "test-physical-1",
+                new[]
+                {
+                    VehicleTuning.Car01(),
+                    new VehicleTuning
+                    {
+                        vehicleId = "car-physical-01",
+                        simulationBackend =
+                            VehicleSimulationBackend.PhysicalAssisted,
+                        physics = VehiclePhysicsTuning.Car01()
+                    }
+                },
+                new[] { TestCourse() }, new[] { free, trial },
+                VehicleSimulationBackend.PhysicalAssisted));
+            physical.SetTutorialDefinition(TestTutorial());
+            physical.Execute(Cmd("profile.create",
+                P("slot", "0", "language", "en")));
+
+            var rejected = physical.Execute(Cmd("tutorial.start",
+                P("vehicleId", "car-01")));
+            Assert.That(rejected.status, Is.EqualTo(CommandResult.Rejected));
+            Assert.That(rejected.code, Is.EqualTo("invalidVehicle"),
+                "an arcade-only tuning cannot seat in a physical tutorial");
+            var state = physical.Snapshot();
+            Assert.That(state.driving, Is.Null,
+                "the rejection must leave no partial session behind");
+            Assert.That(state.screen, Is.Not.EqualTo("driving"));
+            Assert.DoesNotThrow(() =>
+            {
+                physical.StepDriving(world);
+                physical.AdvanceTick();
+            }, "no tick may throw behind a rejected tutorial.start");
+
+            // The same catalog seats a backend-matched tuning cleanly.
+            var seated = physical.Execute(Cmd("tutorial.start",
+                P("vehicleId", "car-physical-01")));
+            Assert.That(seated.status, Is.EqualTo(CommandResult.Applied),
+                "a physical tuning still enters the tutorial: " + seated.code);
+        }
+
         [Test]
         public void TutorialStartAppliesAndPublishesFirstCue()
         {

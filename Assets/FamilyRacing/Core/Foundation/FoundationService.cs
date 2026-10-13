@@ -361,13 +361,18 @@ namespace FamilyRacing.Core.Foundation
                 return drivingSimulation;
             ReleaseDrivingSimulation();
             if (drivingContent == null) return null;
+            VehicleTuning tuning;
+            drivingContent.Vehicles.TryGetValue(driving.VehicleId, out tuning);
+            // Last line of defense inside the tick path: every session-
+            // creation boundary enforces CatalogSeatsVehicle, but if one
+            // ever slipped through, refuse to initialize rather than let
+            // a backend throw mid-boundary on an incompatible roster.
+            if (!CatalogSeatsVehicle(tuning)) return null;
             if (drivingSimulationFactory != null)
                 drivingSimulation = drivingSimulationFactory(drivingContent);
             else if (legacyMotorWorld != null)
                 drivingSimulation = new ArcadeVehicleSimulation(legacyMotorWorld);
             if (drivingSimulation == null) return null;
-            VehicleTuning tuning;
-            drivingContent.Vehicles.TryGetValue(driving.VehicleId, out tuning);
             drivingSimulation.Initialize(new List<VehicleSpawn>
             {
                 new VehicleSpawn
@@ -985,11 +990,7 @@ namespace FamilyRacing.Core.Foundation
             // NetworkRace.TryCreate applies — instead of failing inside
             // the first stepped tick when the physical sim cannot find a
             // valid physics tuning for it.
-            if (drivingContent.SimulationBackend
-                    == VehicleSimulationBackend.PhysicalAssisted
-                && (tuning.simulationBackend
-                        != VehicleSimulationBackend.PhysicalAssisted
-                    || tuning.physics == null))
+            if (!CatalogSeatsVehicle(tuning))
                 return Result(command, CommandResult.Rejected, "invalidVehicle");
             driving = CreateSession(tuning, evt, command);
             screen = ScreenDriving;
@@ -1020,11 +1021,7 @@ namespace FamilyRacing.Core.Foundation
                 return Result(command, CommandResult.Rejected, "contentUnavailable");
             // Same backend contract as race.start: a content reload must
             // not let a retry seat an arcade tuning in a physical race.
-            if (drivingContent.SimulationBackend
-                    == VehicleSimulationBackend.PhysicalAssisted
-                && (tuning.simulationBackend
-                        != VehicleSimulationBackend.PhysicalAssisted
-                    || tuning.physics == null))
+            if (!CatalogSeatsVehicle(tuning))
                 return Result(command, CommandResult.Rejected, "invalidVehicle");
             // The old identity ends; retry creates a new race identity
             // inside the same run. Duplicate delivery replays the cached
@@ -1085,6 +1082,13 @@ namespace FamilyRacing.Core.Foundation
                 return Result(command, CommandResult.Rejected, "unknownEvent");
             if (!evt.AllowsVehicle(vehicleId) || !trial.AllowsVehicle(vehicleId))
                 return Result(command, CommandResult.Rejected, "vehicleNotForEvent");
+            // Same backend contract as race.start: a physical catalog's
+            // tutorial cannot seat an arcade-only tuning — reject at the
+            // command boundary rather than throwing inside the first
+            // stepped tick (the trial stage shares the same contract and
+            // is enforced again in TransitionToTrial).
+            if (!CatalogSeatsVehicle(tuning))
+                return Result(command, CommandResult.Rejected, "invalidVehicle");
             driving = CreateSession(tuning, evt, command);
             tutorial = new DrivingTutorial(tutorialContent);
             driving.EmitLifecycle("tutorial.started", command.CommandId,
@@ -1160,6 +1164,15 @@ namespace FamilyRacing.Core.Foundation
                 EndRace("tutorialContent", null);
                 return;
             }
+            // Same backend contract as race.start: a swapped/reloaded
+            // catalog must not let the trial seat an arcade-only tuning
+            // in a physical race — end the tutorial honestly instead of
+            // a session the first stepped tick would throw on.
+            if (!CatalogSeatsVehicle(tuning))
+            {
+                EndRace("invalidVehicle", null);
+                return;
+            }
             session.CancelPending("tutorialTrial");
             session.EmitLifecycle("race.ended", "", "tutorialTrial");
             DrainSessionEvents(session);
@@ -1167,6 +1180,25 @@ namespace FamilyRacing.Core.Foundation
             driving.EmitLifecycle("tutorial.trial", "", tutorial.TrialEventId);
             ClearInput();
             DrainDrivingEvents();
+        }
+
+        // The roster/backend contract NetworkRace.TryCreate enforces,
+        // shared by every session-creation path (race.start, race.restart,
+        // tutorial.start and the tutorial's trial transition): a physical
+        // catalog seats only vehicles whose tuning declares the same
+        // backend and carries a validated physics preset. Arcade catalogs
+        // seat anything — LAN parity says a physical-declared vehicle
+        // still drives its arcade fields in an arcade race.
+        private bool CatalogSeatsVehicle(VehicleTuning tuning)
+        {
+            if (drivingContent == null
+                || drivingContent.SimulationBackend
+                    != VehicleSimulationBackend.PhysicalAssisted)
+                return true;
+            return tuning != null
+                && tuning.simulationBackend
+                    == VehicleSimulationBackend.PhysicalAssisted
+                && tuning.physics != null;
         }
 
         private DrivingSession CreateSession(VehicleTuning tuning, EventDefinition evt,
