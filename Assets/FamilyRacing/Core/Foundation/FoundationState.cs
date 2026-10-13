@@ -95,7 +95,7 @@ namespace FamilyRacing.Core.Foundation
         // "pc", "none" before any Apply, or "missing" after a refused one.
         // Published with the applied render scale and frame-rate target so
         // an observer can never mistake the tablet profile for the PC one.
-        public string renderProfile = "none";
+        public string renderProfileId = "none";
         public float renderScale;
         public int targetFrameRate;
         // False on a headless run: frame intervals then describe unrendered

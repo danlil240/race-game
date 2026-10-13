@@ -193,7 +193,7 @@ def validate_state_schema(event, state):
 def validate_schema5_presentation(state):
     """The schema-5 presentation contract a boundary state must carry.
 
-    Additive over schema 4: `presentation.renderProfile` names the applied
+    Additive over schema 4: `presentation.renderProfileId` names the applied
     tablet/PC pipeline (never assumed — "none"/"missing" are honest
     states), `renderingAvailable` separates rendered-player evidence from
     headless captures, and `performance` is the bounded summary slice
@@ -202,9 +202,9 @@ def validate_schema5_presentation(state):
     presentation = state.get("presentation")
     assert isinstance(presentation, dict), \
         "Schema-5 state is missing the presentation slice"
-    profile = presentation.get("renderProfile")
+    profile = presentation.get("renderProfileId")
     assert profile in ("tablet", "pc", "none", "missing"), \
-        "Unknown renderProfile " + repr(profile)
+        "Unknown renderProfileId " + repr(profile)
     assert type(presentation.get("renderingAvailable")) is bool, \
         "Schema-5 presentation is missing renderingAvailable"
     assert "performance" in presentation, \

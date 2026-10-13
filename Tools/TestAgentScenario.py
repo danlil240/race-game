@@ -105,7 +105,7 @@ class IntegrityTests(unittest.TestCase):
             "networkLink": None,
             "presentation": {
                 "textDirection": "ltr",
-                "renderProfile": "tablet",
+                "renderProfileId": "tablet",
                 "renderScale": 0.75,
                 "targetFrameRate": 30,
                 "renderingAvailable": True,
@@ -143,9 +143,9 @@ class IntegrityTests(unittest.TestCase):
         record["state"] = self.schema5_state()
         for mutate in (
             lambda s: s.pop("presentation"),
-            lambda s: s["presentation"].pop("renderProfile"),
+            lambda s: s["presentation"].pop("renderProfileId"),
             lambda s: s["presentation"].pop("performance"),
-            lambda s: s["presentation"].update(renderProfile="quantum"),
+            lambda s: s["presentation"].update(renderProfileId="quantum"),
             lambda s: s["presentation"].update(renderingAvailable="yes"),
             lambda s: s["presentation"]["performance"].pop("reportStatus"),
         ):

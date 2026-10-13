@@ -497,7 +497,7 @@ namespace FamilyRacing
             // Schema-5 presentation truth: the profile actually applied and
             // the bounded performance summary ride every boundary, so
             // paused/menu transitions publish the same facts racing does.
-            presentation.renderProfile = renderProfiles != null
+            presentation.renderProfileId = renderProfiles != null
                 ? renderProfiles.ActiveProfile : "none";
             presentation.renderScale = renderProfiles != null
                 ? renderProfiles.ActiveRenderScale : 0f;

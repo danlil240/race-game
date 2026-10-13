@@ -193,3 +193,76 @@ is available — recorded as `notVerified` until then.
 Not run (environment): PlayMode suite, A7 Lite device matrix, rendered
 frame capture, on-device Android launch. The two impaired-LAN PlayMode
 failures carried from the physics report remain environment-blocked.
+
+## Task 2 — render profiles and truthful measurements (2026-10-14)
+
+Two authored URP profiles live under `Generated/VisualBenchmark/` and are
+selected automatically by the scene's `RenderProfileController`:
+
+| Profile | Selection | Caps |
+|---|---|---|
+| `VisualBenchmarkTabletURP` | Android (or `--render-profile tablet`) | 30 fps target, 0.75 render scale, 1 shadow cascade / 30 m hard shadows, no HDR, 1x MSAA |
+| `VisualBenchmarkPcURP` | Windows/other platforms (or `--render-profile pc`) | 60 fps target, full render scale, 2 cascades / 80 m soft shadows, HDR, 2x MSAA |
+
+Neither profile enables real-time reflections, motion blur, camera
+depth/opaque grabs or other expensive full-screen effects; UI Toolkit
+renders at display resolution regardless of internal render scale.
+`TabletAndPcProfilesKeepCollisionEqual` pins that a profile change never
+alters collision layers, gravity, solver budgets, checkpoints or route
+visibility — the profiles own presentation settings only.
+
+### Player measurement arguments (development AND ordinary builds)
+
+| Argument | Effect |
+|---|---|
+| `--render-profile tablet\|pc` | Force the profile (benchmark evidence; otherwise platform-selected) |
+| `--perf-capture off` | Disable the frame recorder — the matched no-capture arm for capture-overhead A/B runs |
+| `--perf-report-dir <dir>` | Report destination (default `persistentDataPath\performance`) |
+
+At quit the player writes compact `perf-report-<runId>.json` on a
+background writer (bounded 4 MB, failure-visible via `reportStatus`/
+`reportError` and, in development builds, a sequenced `performance`
+stream record). Ordinary builds produce the same report with no
+validation socket. The schema-5 presentation slice publishes
+`renderProfileId`, `renderScale`, `targetFrameRate`,
+`renderingAvailable` and a bounded `performance` summary on every state
+boundary — headless runs report `renderingAvailable: false` and can
+never pass evaluation.
+
+### External process-memory sampling
+
+Process memory is measured **outside** the player once per second —
+never Unity heap allocations:
+
+```powershell
+# Windows player (working set via psapi GetProcessMemoryInfo):
+python Tools\PerfSampler.py --pid <player-pid> --evidence <new-dir> [--seconds N]
+# Android player (app total PSS via `adb dumpsys meminfo`):
+python Tools\PerfSampler.py --adb-serial <serial> [--package com.daniel.familyracing] --evidence <new-dir> [--seconds N]
+```
+
+Every `memory.ndjson` record names its `metric` (`process.workingSet`
+vs `process.totalPss`), `source` (psapi vs adb dumpsys) and `units`
+(bytes); a failed sample is `status: "unavailable"`, never zero. The
+two metrics are differently-defined quantities — each device compares
+only against its own baseline, never platform-to-platform. GPU timing
+is a separate quantity from CPU frame intervals and reports
+`unavailable` on this profile (no GPU timer exposed); socket cadence is
+likewise never substituted for rendered frame intervals.
+
+### Task-2 verification results
+
+| Check | Result |
+|---|---|
+| `Verify.ps1 -Mode CoreOffline` | 599/599 passed |
+| `Verify.ps1 -Mode EditMode` | 659 passed, 0 failed, 1 pre-existing skip |
+| `Verify.ps1 -Mode PlayMode` | 245/247 passed — 2 documented environment-blocked impaired-LAN timeouts (unchanged signature) |
+| Focused PlayMode `RenderProfilePlayTests` | 3/3 passed |
+| Python scenario tooling suites | 118 tests passed (incl. new schema-5 guards + `TestPerfSampler`) |
+| Rendered Windows dev sample (~90 s race) | `perf-report-*.json`: 5,415 frames, 1,834 racing samples, median/p95/max 16.67/16.67/16.75 ms, 0 stalls, `evidenceStatus: collected`, `profile: pc` |
+| Headless sample (`-batchmode -nographics`) | `renderingAvailable: false` — cannot pass |
+| Ordinary player (15 s) | report written (`buildIdentity: 0.1.0-ordinary`); `--validation-dir` stayed empty — no socket |
+| External memory sampler | `memory.ndjson`: 90 samples @ 1 Hz, `process.workingSet`/psapi/bytes, ~387→527 MB |
+
+Pending: A7 Lite device qualification (tablet profile, PSS baseline,
+p95 ≤40 ms), quantified capture-overhead A/B, on-device Android launch.

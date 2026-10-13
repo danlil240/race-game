@@ -88,6 +88,30 @@ without `--validation-dir` and in ordinary builds):
 Validation launches set `Application.runInBackground = true` so agents do
 not depend on window focus; ordinary launches keep focus-pause.
 
+Visual-benchmark players (development AND ordinary builds) also accept
+presentation flags — none of them enable a control endpoint in ordinary
+builds:
+
+- `--render-profile tablet|pc` — force the render profile (default:
+  Android→tablet at 30 fps/0.75 render scale, other platforms→PC at
+  60 fps/full scale).
+- `--perf-capture off` — disable the frame-interval recorder for a
+  matched no-capture run (capture-overhead A/B measurement arm).
+- `--perf-report-dir <path>` — where the compact `perf-report-<runId>.json`
+  lands at quit (default `persistentDataPath\performance`); written on a
+  background writer in both development and ordinary builds.
+
+External process-memory sampling (once per second, outside the player —
+never Unity heap allocations; Android reports app **total PSS** via
+`adb dumpsys meminfo`, Windows reports **working set** via psapi; each
+record names metric/source/units and devices compare only against their
+own baseline):
+
+```powershell
+python Tools\PerfSampler.py --pid <player-pid> --evidence <new-dir> [--seconds N]
+python Tools\PerfSampler.py --adb-serial <serial> [--package com.daniel.familyracing] --evidence <new-dir> [--seconds N]
+```
+
 The lead-owned scenario drives it via:
 
 ```powershell
@@ -102,7 +126,7 @@ python Tools\DrivingScenario.py <dir>\connection.json --evidence <new-evidence-d
 python Tools\FinishDeliveryScenario.py <player.exe> --evidence <new-dir>
 # Real profile store + graceful exit (WM_CLOSE) + restart:
 python Tools\NormalProfileScenario.py <player.exe> --evidence <new-dir>
-# Multi-instance LAN lifecycle over the real UDP transport (schema 4).
+# Multi-instance LAN lifecycle over the real UDP transport (schema 5).
 # The mandated interface attaches to 2-4 independently launched players —
 # the first connection is driven as the host; Android descriptors are
 # per-device ADB-forwarded loopback endpoints:

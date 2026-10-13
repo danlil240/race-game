@@ -146,7 +146,7 @@ namespace FamilyRacing.Tests
             {
                 presentation = new PresentationState
                 {
-                    renderProfile = "tablet",
+                    renderProfileId = "tablet",
                     renderScale = 0.75f,
                     targetFrameRate = 30,
                     renderingAvailable = true,
@@ -172,7 +172,7 @@ namespace FamilyRacing.Tests
                 json, options);
 #endif
             Assert.That(roundTrip.stateSchemaVersion, Is.EqualTo(5));
-            Assert.That(roundTrip.presentation.renderProfile,
+            Assert.That(roundTrip.presentation.renderProfileId,
                 Is.EqualTo("tablet"));
             Assert.That(roundTrip.presentation.renderScale,
                 Is.EqualTo(0.75f).Within(0.0001f));
@@ -188,10 +188,10 @@ namespace FamilyRacing.Tests
             // the live presentation slice.
             var copy = state.presentation.Copy();
             copy.performance.racingSamples = -1;
-            copy.renderProfile = "pc";
+            copy.renderProfileId = "pc";
             Assert.That(state.presentation.performance.racingSamples,
                 Is.EqualTo(42));
-            Assert.That(state.presentation.renderProfile,
+            Assert.That(state.presentation.renderProfileId,
                 Is.EqualTo("tablet"));
         }
     }

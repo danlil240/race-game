@@ -92,7 +92,7 @@ def lan_state(tick=1, schema=5):
     if schema >= 5:
         state["presentation"] = {
             "textDirection": "ltr",
-            "renderProfile": "pc",
+            "renderProfileId": "pc",
             "renderScale": 1.0,
             "targetFrameRate": 60,
             "renderingAvailable": True,
@@ -343,7 +343,7 @@ class Schema3ConsumerTests(unittest.TestCase):
         record["stateSchemaVersion"] = 5
         with self.assertRaises(AssertionError):
             validate_state_schema(record, record["state"])
-        state["presentation"] = {"renderProfile": "quantum"}
+        state["presentation"] = {"renderProfileId": "quantum"}
         with self.assertRaises(AssertionError):
             validate_state_schema(record, record["state"])
         state["presentation"] = lan_state()["presentation"]
