@@ -79,9 +79,10 @@ namespace FamilyRacing.Tests
             };
         }
 
-        // Session + real physics world on one flat drivable pad; the
-        // spawn height is the settled suspension height so the first
-        // ticks are honest ground contact, not a drop.
+        // Session + real physics world on one flat drivable pad. The
+        // authored spawn convention is SURFACE height (the pad top is
+        // y=0): DrivingSession adds the per-vehicle SettledLift, so the
+        // body starts exactly at rest height with no spawn-drop episode.
         private void NewRace(CourseDefinition course,
             RecoverySettings recovery = null)
         {
@@ -90,11 +91,10 @@ namespace FamilyRacing.Tests
                 physicsTuning);
             world = PhysicsCourseWorld.Create("phys-recovery");
             sim = new PhysicsVehicleSimulation(world);
-            var spawnY = PhysicsTestWorld.SpawnY(physicsTuning);
             var spawn = new MotorPose
             {
                 x = course.spawnX,
-                y = spawnY,
+                y = 0f,
                 z = course.spawnZ,
                 heading = course.spawnHeading
             };
@@ -142,6 +142,37 @@ namespace FamilyRacing.Tests
         private static DriverInput Coast()
         {
             return PhysicsTestWorld.Drive(throttleOverride: 0f);
+        }
+
+        [Test]
+        [Timeout(120000)]
+        public void StandingStartMintsNoAirOrLandingEvents()
+        {
+            // The authored spawn is surface height + one SettledLift: the
+            // body starts at rest height, so a standing start must never
+            // produce an airborne episode, a landing, or clean-landing
+            // credit. A spawn that is lifted twice drops visibly and
+            // this test catches it.
+            NewRace(Lane());
+            var airborne = 0;
+            var landed = 0;
+            var cleanLanding = 0;
+            var everUngrounded = false;
+            for (var i = 0; i < 90; i++)
+            {
+                var step = Tick(PhysicsTestWorld.Drive());
+                airborne += CountEvents(step, "motor.becameAirborne");
+                landed += CountEvents(step, "motor.landed");
+                cleanLanding += CountEvents(step, "motor.cleanLanding");
+                everUngrounded |= !session.Snapshot().motor.grounded;
+            }
+            Assert.That(everUngrounded, Is.False,
+                "a settled standing start stays contact-supported every "
+                + "tick");
+            Assert.That(airborne + landed + cleanLanding, Is.EqualTo(0),
+                "no becameAirborne/landed/cleanLanding may fire from a "
+                + "standing start (air=" + airborne + " landed=" + landed
+                + " clean=" + cleanLanding + ")");
         }
 
         [Test]

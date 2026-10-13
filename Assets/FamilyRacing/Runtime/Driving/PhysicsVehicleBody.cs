@@ -52,6 +52,12 @@ namespace FamilyRacing
         public bool becameAirborneThisTick;
         // An episode shorter than this is suspension flicker, not a jump.
         public const float LandedMinAirSeconds = 0.10f;
+        // Contact loss must persist this long before the vehicle counts
+        // as airborne: a settle bounce or patchy contact can drop every
+        // wheel ray for a substep or two — that is flicker, not takeoff.
+        // Landing is never debounced; a formed contact is a fact.
+        private const float ContactLossDebounceSeconds = 0.05f;
+        private float unsupportedSeconds;
 
         // Injected test forces (oracle isolation): applied every substep
         // until cleared. World-frame force, optionally at a body-local
@@ -268,6 +274,7 @@ namespace FamilyRacing
             physics.airPeakY = live.y;
             physics.airWallContact = false;
             physics.overturnedSeconds = 0f;
+            unsupportedSeconds = 0f;
         }
 
         private void SyncBodyFromState()
@@ -310,7 +317,16 @@ namespace FamilyRacing
             foreach (var wheel in p.wheels) anyWheel |= wheel.grounded;
             var wasGrounded = p.grounded;
             var priorAir = p.airSeconds;
-            var grounded = anyWheel || chassisGrounded;
+            var supported = anyWheel || chassisGrounded;
+            // Contact-loss debounce: keep grounded through a transient
+            // drop of every ray (< ContactLossDebounceSeconds). The
+            // grounded->airborne edge only fires once contact loss has
+            // proved real airtime, so suspension flicker mints no
+            // becameAirborne/landed pair.
+            unsupportedSeconds = supported ? 0f : unsupportedSeconds + dt;
+            var grounded = supported
+                || (wasGrounded
+                    && unsupportedSeconds < ContactLossDebounceSeconds);
             p.grounded = grounded;
             if (!grounded && wasGrounded)
                 becameAirborneThisTick = true;

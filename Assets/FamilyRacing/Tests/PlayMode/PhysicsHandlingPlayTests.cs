@@ -343,11 +343,12 @@ namespace FamilyRacing.Tests
                 vehicleIds = new List<string> { "car-01" },
                 recovery = new RecoverySettings()
             };
-            var spawnY = PhysicsTestWorld.SpawnY(physics);
+            // Surface-height spawn convention: y=0 is the slab top; the
+            // session adds SettledLift exactly once.
             var session = new DrivingSession("e2e", tuning, course, evt,
                 "v", "start", new MotorPose
                 {
-                    x = 0f, y = spawnY, z = -60f, heading = 0f
+                    x = 0f, y = 0f, z = -60f, heading = 0f
                 });
             world = PhysicsCourseWorld.Create("e2e");
             BuildGrayboxWorld(world);

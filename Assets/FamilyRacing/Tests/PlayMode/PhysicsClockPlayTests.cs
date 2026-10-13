@@ -153,7 +153,9 @@ namespace FamilyRacing.Tests
                 {
                     PhysicsTestWorld.PhysicalTuning("car-01", physics)
                 },
-                new[] { PhysicalCourse(PhysicsTestWorld.SpawnY(physics)) },
+                // Surface-height convention: the lane's ground top is
+                // y=0; every seated session adds its own SettledLift.
+                new[] { PhysicalCourse(0f) },
                 new[] { evt },
                 VehicleSimulationBackend.PhysicalAssisted);
         }
