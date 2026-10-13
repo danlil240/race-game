@@ -241,6 +241,30 @@ namespace FamilyRacing.Tests
         }
 
         [Test]
+        public void HeldBrakeSuppressesAllEngineDrive()
+        {
+            // Task 7 shared control surface: a positive brake gives the
+            // engine zero drive demand on the arcade backend too — not
+            // merely a slower car, no drive at all. The removal force
+            // opposes travel and is capped at |speed|, so the hold
+            // stops the car but can never reverse it.
+            var world = new FlatWorld();
+            var tuning = VehicleTuning.Car01();
+            var brake = new DriverInput(0f, false, false, false, false,
+                false, false, null, 1f);
+            var state = StepN(Spawn(), brake, tuning, world, 60);
+            Assert.That(state.speed, Is.EqualTo(0f),
+                "brake=1 from rest must yield zero engine drive demand");
+            Assert.That(state.z, Is.EqualTo(0f).Within(0.001f));
+            state = StepN(Spawn(), Neutral(), tuning, world, 600);
+            Assert.That(state.speed,
+                Is.EqualTo(tuning.maxSpeed).Within(0.01f));
+            state = StepN(state, brake, tuning, world, 600);
+            Assert.That(state.speed, Is.EqualTo(0f).Within(0.001f),
+                "held brake slows to a stop but must not reverse");
+        }
+
+        [Test]
         public void SteeringChangesHeading()
         {
             var world = new FlatWorld();

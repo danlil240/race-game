@@ -360,6 +360,76 @@ namespace FamilyRacing.Tests
         }
 
         [Test]
+        public void ArcadeBoostActivationRefusedWhileBraking()
+        {
+            // Backend-agnostic contract (Task 7): a positive brake
+            // suppresses boost drive force on every backend, so
+            // activation while braking must be refused rather than
+            // latching a burst that delivers nothing.
+            var world = new TestWorld();
+            var tuning = VehicleTuning.Car01();
+            var state = Cruising(tuning, world);
+            state.boostCharge = 1f;
+            for (var i = 0; i < 10; i++)
+            {
+                var result = ArcadeMotor.Step(state, BrakeBoostInput(),
+                    tuning, world, Dt);
+                state = result.state;
+                Assert.That(HasEvent(result, "boostStart"), Is.False,
+                    "arcade boost activation is refused while braking");
+                Assert.That(state.boostActive, Is.False);
+            }
+            Assert.That(state.boostCharge, Is.EqualTo(1f).Within(0.001f),
+                "refusal consumes nothing — the meter stays full");
+            // Releasing the brake with boost still held lets the same
+            // charge fire — refusal is not a consumption.
+            var released = ArcadeMotor.Step(state, Input(0f, false, true),
+                tuning, world, Dt);
+            Assert.That(HasEvent(released, "boostStart"), Is.True);
+            Assert.That(released.state.boostActive, Is.True);
+        }
+
+        [Test]
+        public void ActiveBoostFollowsNormalDrainWhileBraking()
+        {
+            // The brake gate blocks ACTIVATION only: a boost already
+            // running keeps its ordinary drain/end policy under a brake
+            // hold (it just supplies no drive force), and the latch
+            // still cannot re-fire until the brake releases.
+            var world = new TestWorld();
+            var tuning = VehicleTuning.Car01();
+            var state = Cruising(tuning, world);
+            state = StepN(state, Input(0f, false, true), tuning, world, 10);
+            Assert.That(state.boostActive, Is.True);
+            var chargeBefore = state.boostCharge;
+            var drainResult = ArcadeMotor.Step(state, BrakeBoostInput(),
+                tuning, world, Dt);
+            Assert.That(drainResult.state.boostActive, Is.True,
+                "braking must not cancel a boost already running");
+            Assert.That(drainResult.state.boostCharge,
+                Is.LessThan(chargeBefore),
+                "the running boost still drains under the brake hold");
+            var sawEnd = false;
+            state = drainResult.state;
+            for (var i = 0; i < 300 && !sawEnd; i++)
+            {
+                var result = ArcadeMotor.Step(state, BrakeBoostInput(),
+                    tuning, world, Dt);
+                state = result.state;
+                sawEnd |= HasEvent(result, "boostEnd");
+            }
+            Assert.That(sawEnd, Is.True,
+                "the running boost ends by its normal drain/duration "
+                + "rules, brake hold or not");
+            Assert.That(state.boostActive, Is.False);
+            var extra = ArcadeMotor.Step(state, BrakeBoostInput(),
+                tuning, world, Dt);
+            Assert.That(HasEvent(extra, "boostStart"), Is.False,
+                "the latch must not re-fire while the brake stays held");
+            Assert.That(extra.state.boostActive, Is.False);
+        }
+
+        [Test]
         public void BoostSpeedModifierChangesRealMotion()
         {
             var world = new TestWorld();

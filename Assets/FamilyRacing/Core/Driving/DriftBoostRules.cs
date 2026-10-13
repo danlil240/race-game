@@ -54,27 +54,30 @@ namespace FamilyRacing.Core.Driving
         // A held boost input fires whenever the charge clears the tuning
         // minimum — the decided auto-fire semantics: while held, the
         // meter drains in bursts as it refills; a release-and-press fires
-        // immediately too. Recovery-flagged steps never fire.
+        // immediately too. Recovery-flagged steps never fire. Activation
+        // is also refused while braking on every backend: a positive
+        // brake suppresses the boost's drive force anyway, so firing
+        // would only burn the latch and drain charge for nothing —
+        // refusal consumes nothing and the same held input fires once
+        // the brake releases.
         public static bool CanStartBoost(MotorState state, DriverInput input,
             VehicleTuning tuning)
         {
             return input.Boost
                 && !state.boostActive
                 && !state.recovering
+                && input.Brake <= 0f
                 && state.boostCharge >= tuning.boostMinCharge;
         }
 
-        // Physical-backend activation: the ordinary charge/held gates plus
-        // the physical eligibility rules — activation is refused while
-        // braking (the demand would be suppressed anyway, so it must not
-        // consume the latch) and while airborne (no traction). Refusal
-        // consumes nothing: the same held input fires once the demand is
-        // legal again.
+        // Physical-backend activation: the ordinary charge/held/brake
+        // gates plus the physical eligibility rule — activation is
+        // refused while airborne (no traction). The brake gate itself
+        // is backend-agnostic and lives in CanStartBoost.
         public static bool CanStartBoostPhysical(MotorState state,
             DriverInput input, VehicleTuning tuning)
         {
             return CanStartBoost(state, input, tuning)
-                && input.Brake <= 0f
                 && state.grounded;
         }
 
