@@ -71,6 +71,29 @@ namespace FamilyRacing
 
         public DrivingContentCatalog Catalog { get { return catalog; } }
         public UnityMotorWorld MotorWorld { get { return motorWorld; } }
+
+        // The runtime-owned simulation provider: maps the catalog's
+        // race-level backend selection to a concrete world — the arcade
+        // adapter over the shared IMotorWorld, or a dedicated local
+        // physics scene populated with a collision-only clone of the
+        // course prefab. Core never constructs these; the caller owns the
+        // returned simulation's lifetime (solo session, LAN host race, or
+        // client prediction — exactly one owner per screen).
+        public IVehicleSimulation CreateSimulation(DrivingContentCatalog content)
+        {
+            var backend = content != null
+                ? content.SimulationBackend : VehicleSimulationBackend.Arcade;
+            if (backend == VehicleSimulationBackend.PhysicalAssisted)
+            {
+                var physicsWorld = coursePrefab != null
+                    ? PhysicsCourseWorld.Create("DrivingPhysics", coursePrefab)
+                    : PhysicsCourseWorld.Create("DrivingPhysics");
+                return new PhysicsVehicleSimulation(physicsWorld);
+            }
+            return motorWorld != null
+                ? (IVehicleSimulation)new ArcadeVehicleSimulation(motorWorld)
+                : null;
+        }
         // The validated tutorial definition for FoundationService and the
         // authored asset for the presenter's clip slots. Tutorial stays
         // optional content: without it the races still load and

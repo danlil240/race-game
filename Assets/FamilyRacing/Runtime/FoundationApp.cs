@@ -140,6 +140,17 @@ namespace FamilyRacing
             service.SetLanSession(lan);
             raceBridge = new Networking.NetworkRaceBridge(lanTransport, lan);
             if (loadedCatalog != null) raceBridge.SetContent(loadedCatalog);
+            // Task 4: the vehicle-simulation seam is owned here — the solo
+            // service and the replication bridge both build their worlds
+            // through DrivingWorld, which maps the catalog's backend to an
+            // arcade adapter or a dedicated physics scene. Solo and LAN
+            // never own a physical world on the same screen: the solo
+            // session is null while LAN races and vice versa.
+            if (drivingWorld != null)
+            {
+                service.SetDrivingSimulationFactory(drivingWorld.CreateSimulation);
+                raceBridge.SimulationProvider = drivingWorld.CreateSimulation;
+            }
             driverInput?.Bind(this);
             shell?.Bind(this);
             service.SetPresentation(presentation);

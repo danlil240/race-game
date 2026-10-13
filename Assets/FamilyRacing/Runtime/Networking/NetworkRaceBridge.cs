@@ -34,9 +34,18 @@ namespace FamilyRacing.Networking
         private readonly LanTransport transport;
         private readonly LanSessionService session;
         private DrivingContentCatalog content;
+        // Task 4: the runtime injects the world provider once — backend
+        // selection comes from the catalog's SimulationBackend at race
+        // creation. Null keeps the legacy IMotorWorld arcade fallback.
+        // The bridge owns every simulation it creates and disposes them
+        // with the race they served.
+        internal Func<DrivingContentCatalog, IVehicleSimulation>
+            SimulationProvider;
 
         // --- host -------------------------------------------------------
         private NetworkRace race;
+        private IVehicleSimulation hostSimulation;
+        private IMotorWorld hostWorld;
         private readonly HostInputBuffer inputs = new HostInputBuffer();
         private string hostSessionId = "";
         private string raceId = "";
@@ -90,6 +99,11 @@ namespace FamilyRacing.Networking
         // interpolation buffer behind the newest host tick. Both are
         // client-only — the host's local racer is already authoritative.
         private ClientPrediction prediction;
+        // The prediction loop's own world: a single-body simulation the
+        // client replays through the same seam the host steps — never a
+        // second authoritative world.
+        private IVehicleSimulation predictionSimulation;
+        private IMotorWorld predictionWorld;
         private readonly RemoteInterpolation interpolation =
             new RemoteInterpolation();
         // Visual smoothing is deliberately separate from sim correction:
@@ -460,11 +474,81 @@ namespace FamilyRacing.Networking
         private void EndRace()
         {
             race = null;
+            // The host simulation dies with the race: a physics world is
+            // a whole local scene, so it unloads here — never lazily.
+            if (hostSimulation != null) hostSimulation.Dispose();
+            hostSimulation = null;
+            hostWorld = null;
             inputs.EndRace();
             appliedEpochs.Clear();
             appliedControl.Clear();
             stagedEvents.Clear();
             lastPublished = null;
+        }
+
+        // The authoritative world the host steps: built once per race
+        // from the injected provider (backend selected by the catalog),
+        // or the legacy arcade adapter over the tick's IMotorWorld. The
+        // roster initializes from the race's own spawns.
+        private IVehicleSimulation EnsureHostSimulation(IMotorWorld world)
+        {
+            if (SimulationProvider == null && hostSimulation != null
+                && hostWorld != world)
+            {
+                // The legacy adapter binds a specific world; a changed
+                // world rebuilds it (the provider path ignores `world`
+                // and stays stable).
+                hostSimulation.Dispose();
+                hostSimulation = null;
+            }
+            if (hostSimulation != null) return hostSimulation;
+            hostWorld = world;
+            hostSimulation = SimulationProvider != null
+                ? SimulationProvider(content)
+                : (world != null
+                    ? (IVehicleSimulation)new ArcadeVehicleSimulation(world)
+                    : null);
+            if (hostSimulation != null && race != null)
+                hostSimulation.Initialize(race.VehicleSpawns());
+            return hostSimulation;
+        }
+
+        // The client prediction world: created lazily once a race exists
+        // and the input world is known, disposed on race adoption and
+        // teardown. One body — the local participant — so this is never a
+        // second authoritative world.
+        private IVehicleSimulation EnsurePredictionSimulation()
+        {
+            if (SimulationProvider == null && predictionSimulation != null
+                && predictionWorld != clientWorld)
+            {
+                predictionSimulation.Dispose();
+                predictionSimulation = null;
+            }
+            if (predictionSimulation != null) return predictionSimulation;
+            predictionWorld = clientWorld;
+            predictionSimulation = SimulationProvider != null
+                ? SimulationProvider(content)
+                : (clientWorld != null
+                    ? (IVehicleSimulation)new ArcadeVehicleSimulation(clientWorld)
+                    : null);
+            return predictionSimulation;
+        }
+
+        private void ReleasePredictionSimulation()
+        {
+            if (predictionSimulation != null) predictionSimulation.Dispose();
+            predictionSimulation = null;
+            predictionWorld = null;
+        }
+
+        private void BindPredictionSimulation()
+        {
+            if (prediction == null) return;
+            var sim = appliedRaceOrdinal >= 0
+                ? EnsurePredictionSimulation() : null;
+            if (prediction.Simulation != sim)
+                prediction.SetSimulation(sim);
         }
 
         // Pause plus control/epoch diffs apply at a host boundary: the
@@ -625,7 +709,7 @@ namespace FamilyRacing.Networking
                 }
             }
 
-            var state = race.Step(map, world);
+            var state = race.Step(map, EnsureHostSimulation(world));
             if (state.events != null && state.events.Count > 0)
             {
                 // Transient events leave the snapshot channel entirely:
@@ -827,9 +911,14 @@ namespace FamilyRacing.Networking
                 latestSnapshotSeq = -1;
                 latestSnapshot = null;
                 recentOut.Clear();
-                if (prediction != null) prediction.Reset();
+                if (prediction != null)
+                {
+                    prediction.SetSimulation(null);
+                    prediction.Reset();
+                }
                 interpolation.Reset();
                 ResetPresentation();
+                ReleasePredictionSimulation();
             }
         }
 
@@ -845,7 +934,11 @@ namespace FamilyRacing.Networking
             var epoch = LocalEpoch(snap);
             if (prediction == null
                 || prediction.ParticipantId != snap.localParticipantId)
+            {
                 prediction = new ClientPrediction(snap.localParticipantId);
+                prediction.SetSimulation(null);
+            }
+            BindPredictionSimulation();
             // An ownership-epoch bump (rejoin supersedes this client)
             // fences the whole pending history: the host will reject
             // old-epoch samples as staleEpoch, so replaying them is dead
@@ -982,6 +1075,7 @@ namespace FamilyRacing.Networking
             interpolation.Push(snapshot);
             if (prediction != null)
             {
+                BindPredictionSimulation();
                 prediction.Reconcile(snapshot, LocalTuning(), clientWorld);
                 BlendCorrection();
             }
@@ -998,9 +1092,14 @@ namespace FamilyRacing.Networking
             pendingActionOrder.Clear();
             // Prediction/interpolation history is per-race: the new race
             // reseeds from its own snapshots.
-            if (prediction != null) prediction.Reset();
+            if (prediction != null)
+            {
+                prediction.SetSimulation(null);
+                prediction.Reset();
+            }
             interpolation.Reset();
             ResetPresentation();
+            ReleasePredictionSimulation();
         }
 
         private void ApplyEventBatch(NetworkEventBatch batch)
@@ -1172,9 +1271,14 @@ namespace FamilyRacing.Networking
             pendingActionOrder.Clear();
             seenEventIds.Clear();
             seenEventOrder.Clear();
-            if (prediction != null) prediction.Reset();
+            if (prediction != null)
+            {
+                prediction.SetSimulation(null);
+                prediction.Reset();
+            }
             interpolation.Reset();
             ResetPresentation();
+            ReleasePredictionSimulation();
             lastSentEpoch = -1;
             lastSnapshotHostTick = 0;
             lastSnapshotReceivedAt = double.NaN;
@@ -1185,6 +1289,9 @@ namespace FamilyRacing.Networking
         {
             transport.GameplayMessage -= OnGameplayMessage;
             transport.Message -= OnReliableMessage;
+            if (hostSimulation != null) hostSimulation.Dispose();
+            hostSimulation = null;
+            ReleasePredictionSimulation();
         }
     }
 }

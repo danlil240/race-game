@@ -196,6 +196,15 @@ namespace FamilyRacing.Core.Foundation
         private PresentationState presentation = new PresentationState();
         private DrivingContentCatalog drivingContent;
         private DrivingSession driving;
+        // The injected vehicle simulation the solo session steps through
+        // (Task 4 boundary). The runtime installs the factory once — Core
+        // never constructs Unity objects; without it, the legacy
+        // IMotorWorld adapter supplies an arcade simulation.
+        private Func<DrivingContentCatalog, IVehicleSimulation>
+            drivingSimulationFactory;
+        private IVehicleSimulation drivingSimulation;
+        private DrivingSession drivingSimulationFor;
+        private IMotorWorld legacyMotorWorld;
         private TutorialDefinition tutorialContent;
         private DrivingTutorial tutorial;
         private long raceCounter;
@@ -248,6 +257,17 @@ namespace FamilyRacing.Core.Foundation
             if (lanSession != null) lanSession.SetContent(catalog);
         }
 
+        // The composition root injects the simulation factory once:
+        // backend selection comes from DrivingContentCatalog.SimulationBackend
+        // at race creation and is fixed for that race's lifetime. The
+        // factory returns an uninitialized simulation; the service owns,
+        // initializes and disposes it with the session it was built for.
+        public void SetDrivingSimulationFactory(
+            Func<DrivingContentCatalog, IVehicleSimulation> factory)
+        {
+            drivingSimulationFactory = factory;
+        }
+
         // The validated tutorial definition travels with the run like the
         // driving catalog; tutorial.start reports contentUnavailable until
         // the runtime injects one.
@@ -267,16 +287,96 @@ namespace FamilyRacing.Core.Foundation
             cameraFacts = facts != null ? facts.Copy() : new DrivingCameraState();
         }
 
-        // One simulated driving boundary. Called before AdvanceTick so the
-        // held-input sample (including its last leased tick) is consumed by
-        // the session before the observation tick expires leases. Frozen
-        // while paused: observation ticks continue, simulation time does not.
-        public void StepDriving(IMotorWorld world)
+        // One simulated driving boundary through the injected vehicle
+        // simulation: prepare the rule request, land any pending reset on
+        // the body before the batch, run the single request batch, then
+        // complete the rules and land any rule-requested recovery reset —
+        // all before the boundary publishes. Called before AdvanceTick so
+        // the held-input sample (including its last leased tick) is
+        // consumed by the session before the observation tick expires
+        // leases. Frozen while paused: observation ticks continue,
+        // simulation time does not.
+        public void StepDriving()
         {
-            if (driving == null || paused || world == null) return;
-            var result = driving.Step(input, world);
+            if (driving == null || paused) return;
+            var simulation = EnsureDrivingSimulation();
+            if (simulation == null) return;
+            var request = driving.PrepareStep(input);
+            DrivingStepResult result;
+            if (request == null)
+            {
+                // The session finalized: nothing steps, but the boundary
+                // still drains staged events exactly like the old path.
+                result = driving.CompleteStep(null);
+            }
+            else
+            {
+                if (request.reset != null)
+                    simulation.Restore(request.reset.participantId,
+                        request.reset.state);
+                var results = simulation.Step(new[] { request });
+                VehicleTickResult tickResult = null;
+                if (results != null)
+                    foreach (var candidate in results)
+                        if (candidate != null
+                            && candidate.participantId
+                                == driving.ParticipantId)
+                            tickResult = candidate;
+                result = driving.CompleteStep(tickResult);
+                if (result.reset != null)
+                    simulation.Restore(result.reset.participantId,
+                        result.reset.state);
+            }
             AppendDrivingEvents(result.events);
             if (tutorial != null) AdvanceTutorial(result);
+        }
+
+        // Legacy call shape retained while callers migrate: binds the
+        // motor world the runtime used to pass and steps through the same
+        // seam via a lazily-wrapped arcade simulation.
+        public void StepDriving(IMotorWorld world)
+        {
+            legacyMotorWorld = world;
+            StepDriving();
+        }
+
+        // The simulation the active session steps through: built once per
+        // session from the injected factory (or the legacy world adapter),
+        // initialized with the session's own roster identity, and disposed
+        // with the session — the solo screen can never own a stale world.
+        private IVehicleSimulation EnsureDrivingSimulation()
+        {
+            if (driving == null) return null;
+            if (drivingSimulation != null && drivingSimulationFor == driving)
+                return drivingSimulation;
+            ReleaseDrivingSimulation();
+            if (drivingContent == null) return null;
+            if (drivingSimulationFactory != null)
+                drivingSimulation = drivingSimulationFactory(drivingContent);
+            else if (legacyMotorWorld != null)
+                drivingSimulation = new ArcadeVehicleSimulation(legacyMotorWorld);
+            if (drivingSimulation == null) return null;
+            VehicleTuning tuning;
+            drivingContent.Vehicles.TryGetValue(driving.VehicleId, out tuning);
+            drivingSimulation.Initialize(new List<VehicleSpawn>
+            {
+                new VehicleSpawn
+                {
+                    participantId = driving.ParticipantId,
+                    tuning = tuning,
+                    initialState = driving.Snapshot().motor
+                }
+            });
+            drivingSimulationFor = driving;
+            return drivingSimulation;
+        }
+
+        private void ReleaseDrivingSimulation()
+        {
+            if (drivingSimulation != null)
+                drivingSimulation.Dispose();
+            drivingSimulation = null;
+            drivingSimulationFor = null;
         }
 
         public CommandResult Execute(GameCommand command)
@@ -1014,6 +1114,10 @@ namespace FamilyRacing.Core.Foundation
             var course = drivingContent.Courses[evt.courseId];
             var raceId = "race-" + (++raceCounter).ToString(
                 System.Globalization.CultureInfo.InvariantCulture);
+            // A new session identity retires the simulation the previous
+            // session owned — worlds are per-session, never shared across
+            // race identities.
+            ReleaseDrivingSimulation();
             // A new race identity always starts unpaused: pause is a race
             // affordance (sandbox/driving only) and must never leak into a
             // fresh session started from a screen without one.
@@ -1044,6 +1148,7 @@ namespace FamilyRacing.Core.Foundation
                     ? "race.exited" : "race.ended",
                 command != null ? command.CommandId : "", reason);
             driving = null;
+            ReleaseDrivingSimulation();
             DrainSessionEvents(session);
             if (screen == ScreenDriving) screen = ScreenPractice;
             // Pause belongs to the race affordance: it cannot survive the

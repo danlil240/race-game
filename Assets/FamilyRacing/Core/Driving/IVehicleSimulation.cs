@@ -3,6 +3,19 @@ using System.Collections.Generic;
 
 namespace FamilyRacing.Core.Driving
 {
+    // Which simulation backend advances a vehicle. Legacy content keeps
+    // Arcade; PhysicalAssisted is opt-in and requires a validated
+    // VehiclePhysicsTuning on the owning VehicleTuning. The enum lives on
+    // the simulation seam: both the per-vehicle selection
+    // (VehicleTuning.simulationBackend) and the race-level selection
+    // (DrivingContentCatalog.SimulationBackend) share it, and the runtime
+    // — never Core — maps it to a concrete IVehicleSimulation.
+    public enum VehicleSimulationBackend
+    {
+        Arcade = 0,
+        PhysicalAssisted = 1
+    }
+
     // One vehicle joining a physical simulation. `tuning` is the full
     // VehicleTuning envelope — its `physics` member carries the validated
     // SI tuning the backend consumes and must select PhysicalAssisted.
@@ -16,6 +29,17 @@ namespace FamilyRacing.Core.Driving
         public MotorState initialState;
     }
 
+    // An authoritative body reset the rule layer asks the simulation to
+    // apply. `state` is the post-reset MotorState (pose, velocities and
+    // the `recovering` flag) as the rules committed it — the coordinator
+    // routes it to IVehicleSimulation.Restore, never through a stepped
+    // request, so a reset can never be mistaken for a movement segment.
+    public sealed class VehicleReset
+    {
+        public string participantId;
+        public MotorState state;
+    }
+
     // One racer's demand for a single logical interval. `rulesBefore`
     // supplies logical motor facts owned by the rule layer (boost economy,
     // drift flags, recovery bookkeeping, tick): it is merged into the
@@ -23,12 +47,17 @@ namespace FamilyRacing.Core.Driving
     // rulesBefore merges nothing. `simulateMotion` false marks a frozen
     // body (disabled/countdown/finished): it does not move and does not
     // interfere with active racers, but still reports its state.
+    // `reset`, when non-null, carries a pending/manual reset the
+    // coordinator applies to the body BEFORE the batch runs — such a
+    // request is always frozen, so the reset tick never manufactures a
+    // crossing.
     public sealed class VehicleTickRequest
     {
         public string participantId;
         public DriverInput input;
         public MotorState rulesBefore;
         public bool simulateMotion = true;
+        public VehicleReset reset;
     }
 
     // A pose sampled inside one Step's two fixed substeps: offsetSeconds

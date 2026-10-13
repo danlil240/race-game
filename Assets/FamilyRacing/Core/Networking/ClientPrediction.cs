@@ -33,6 +33,13 @@ namespace FamilyRacing.Core.Networking
         private string raceId = "";
         private long appliedSnapshotSequence = -1;
         private long lastAckedSequence;
+        // The injected single-body simulation prediction replays through
+        // (Task 4 boundary): the same IVehicleSimulation seam the host
+        // steps, seeded once per use with the participant's own tuning.
+        // Null keeps the legacy inline ArcadeMotor path for callers that
+        // still pass an IMotorWorld.
+        private IVehicleSimulation simulation;
+        private bool simulationSeeded;
         // Sent-but-unacknowledged samples in sequence order, plus the
         // per-sequence predicted pose that lets a reconcile measure the
         // divergence exactly at the ack horizon.
@@ -47,6 +54,19 @@ namespace FamilyRacing.Core.Networking
         }
 
         public string ParticipantId { get { return participantId; } }
+
+        // The prediction loop's injected simulation (the same seam the
+        // authoritative race steps). The caller owns its lifetime; the
+        // roster seeds lazily on first use because the participant's
+        // tuning/state only exist once a snapshot has arrived.
+        public void SetSimulation(IVehicleSimulation value)
+        {
+            simulation = value;
+            simulationSeeded = false;
+        }
+
+        public IVehicleSimulation Simulation { get { return simulation; } }
+
         public bool HasPrediction { get { return predicted != null; } }
         public int PendingCount { get { return pending.Count; } }
         public int HistoryCount { get { return history.Count; } }
@@ -95,16 +115,64 @@ namespace FamilyRacing.Core.Networking
                 ResyncRequested = true;
             }
             pending.Add(frame.Copy());
-            if (predicted == null || tuning == null || world == null)
-                return predicted != null ? predicted.Copy() : null;
-            var step = ArcadeMotor.Step(predicted, frame.input, tuning,
-                world, DrivingSession.StepSeconds);
+            if (predicted == null || tuning == null) return Predicted;
+            var step = ReplayStep(predicted, frame.input, tuning, world);
+            if (step == null) return Predicted;
             SuppressedMotorEvents += step.events.Count;
             if (step.rejected)
                 return predicted.Copy();
             predicted = step.state;
             history[frame.inputSequence] = predicted.Copy();
             return predicted.Copy();
+        }
+
+        // One replayed sample through whichever backend prediction owns:
+        // the injected simulation batch when present, the legacy inline
+        // motor otherwise. Both produce one 1/30-second interval per
+        // sample — exactly the interval the host consumes for that
+        // sequence number. Returns null when no usable backend exists.
+        private MotorStepResult ReplayStep(MotorState state,
+            DriverInput input, VehicleTuning tuning, IMotorWorld world)
+        {
+            if (simulation != null)
+            {
+                if (!simulationSeeded)
+                {
+                    simulation.Initialize(new List<VehicleSpawn>
+                    {
+                        new VehicleSpawn
+                        {
+                            participantId = participantId,
+                            tuning = tuning,
+                            initialState = state
+                        }
+                    });
+                    simulationSeeded = true;
+                }
+                // Restore keeps the body's own record aligned with the
+                // prediction state before the interval runs — the same
+                // authoritative-reset contract the coordinator uses.
+                simulation.Restore(participantId, state);
+                var results = simulation.Step(new List<VehicleTickRequest>
+                {
+                    new VehicleTickRequest
+                    {
+                        participantId = participantId,
+                        input = input,
+                        rulesBefore = state,
+                        simulateMotion = true
+                    }
+                });
+                if (results != null)
+                    foreach (var result in results)
+                        if (result != null && result.step != null
+                            && result.participantId == participantId)
+                            return result.step;
+                return MotorStepResult.Rejected(state, "missingResult");
+            }
+            if (world == null) return null;
+            return ArcadeMotor.Step(state, input, tuning, world,
+                DrivingSession.StepSeconds);
         }
 
         // Apply one authoritative snapshot: drop acknowledged samples,
@@ -178,9 +246,9 @@ namespace FamilyRacing.Core.Networking
             LastReplayCount = 0;
             foreach (var frame in pending)
             {
-                if (tuning == null || world == null) break;
-                var step = ArcadeMotor.Step(state, frame.input, tuning,
-                    world, DrivingSession.StepSeconds);
+                if (tuning == null) break;
+                var step = ReplayStep(state, frame.input, tuning, world);
+                if (step == null) break;
                 SuppressedMotorEvents += step.events.Count;
                 if (step.rejected) break;
                 state = step.state;
@@ -213,6 +281,10 @@ namespace FamilyRacing.Core.Networking
             StaleSnapshots = 0;
             SuppressedMotorEvents = 0;
             SuppressedOneShots = 0;
+            // The injected simulation survives a Reset (its owner manages
+            // the roster); only the seed flag resets so the next race
+            // re-initializes it with fresh facts.
+            simulationSeeded = false;
         }
 
         // The resync latch is a one-shot signal, not a state: the wire

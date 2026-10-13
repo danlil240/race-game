@@ -3,13 +3,16 @@ using System.Collections.Generic;
 using FamilyRacing.Core.Driving;
 using FamilyRacing.Core.Networking;
 
-namespace FamilyRacing.Core.Racing
+namespace FamilyRacing.Core.Driving
 {
-    // Bounded racer-to-racer contact source built once per race step from
-    // the single pre-step racer snapshot. Every participant's contact
-    // queries this tick read that one fixed view, so a racer stepped
-    // earlier can never leak its post-step pose into a later racer's
-    // contact — iteration order cannot change outcomes.
+    // Bounded racer-to-racer contact source built once per simulation
+    // batch from the single pre-step body view. Every participant's
+    // contact queries this interval read that one fixed view, so a body
+    // stepped earlier in the batch can never leak its post-step pose
+    // into a later body's contact — batch order cannot change outcomes.
+    // This is driving-level contact fabric, not race rules: the arcade
+    // backend (ArcadeVehicleSimulation) builds it inside each Step;
+    // physical mode never applies these artificial nudges.
     //
     // Contact semantics: two bodies nudge when their ground-plane
     // separation is inside NetworkSettings.ContactRadiusMeters and their

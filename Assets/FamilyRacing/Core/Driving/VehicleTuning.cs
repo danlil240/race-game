@@ -2,15 +2,6 @@ using System;
 
 namespace FamilyRacing.Core.Driving
 {
-    // Which simulation backend advances a vehicle. Legacy content keeps
-    // Arcade; PhysicalAssisted is opt-in and requires a validated
-    // VehiclePhysicsTuning on the owning VehicleTuning.
-    public enum VehicleSimulationBackend
-    {
-        Arcade = 0,
-        PhysicalAssisted = 1
-    }
-
     // Editable arcade vehicle parameters. Every value must be finite;
     // Validate() is the single authority the motor consults so a NaN or
     // out-of-range asset can never partially mutate state.
@@ -48,7 +39,8 @@ namespace FamilyRacing.Core.Driving
         // Physical backend is opt-in: legacy content stays Arcade. `physics`
         // carries the validated SI tuning the physical backend consumes — it
         // is required when simulationBackend is PhysicalAssisted and is
-        // validated whenever present, even under Arcade.
+        // validated whenever present, even under Arcade. The
+        // VehicleSimulationBackend enum lives in IVehicleSimulation.cs.
         public VehicleSimulationBackend simulationBackend = VehicleSimulationBackend.Arcade;
         public VehiclePhysicsTuning physics;
 

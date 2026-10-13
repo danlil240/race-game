@@ -15,14 +15,37 @@ namespace FamilyRacing.Core.Racing
         public IReadOnlyDictionary<string, VehicleTuning> Vehicles { get; private set; }
         public IReadOnlyDictionary<string, CourseDefinition> Courses { get; private set; }
         public IReadOnlyDictionary<string, EventDefinition> Events { get; private set; }
+        // The race-level simulation backend the runtime instantiates once
+        // per race. Arcade keeps every legacy behaviour; PhysicalAssisted
+        // requires seated vehicles to carry a validated physics tuning.
+        public VehicleSimulationBackend SimulationBackend { get; private set; }
+
+        // The compatibility token the session layer compares on join:
+        // identical authored version AND identical backend are required
+        // for compatibility. Arcade catalogs keep the bare version string
+        // so existing wire fixtures and records stay byte-identical; a
+        // non-arcade backend folds into the token so an arcade build can
+        // never silently join a physical race.
+        public string CompatibilityVersion
+        {
+            get
+            {
+                return SimulationBackend == VehicleSimulationBackend.Arcade
+                    ? Version
+                    : Version + "|sim=" + (int)SimulationBackend;
+            }
+        }
 
         public static DrivingContentCatalog Create(string version,
             IEnumerable<VehicleTuning> vehicles,
             IEnumerable<CourseDefinition> courses,
-            IEnumerable<EventDefinition> events)
+            IEnumerable<EventDefinition> events,
+            VehicleSimulationBackend backend = VehicleSimulationBackend.Arcade)
         {
             if (string.IsNullOrEmpty(version))
                 throw new ArgumentException("Content version must not be empty.", "version");
+            if (!Enum.IsDefined(typeof(VehicleSimulationBackend), backend))
+                throw new ArgumentException("Invalid simulation backend: " + backend);
             var vehicleMap = new Dictionary<string, VehicleTuning>(StringComparer.Ordinal);
             if (vehicles != null)
                 foreach (var tuning in vehicles)
@@ -72,7 +95,8 @@ namespace FamilyRacing.Core.Racing
                 Version = version,
                 Vehicles = vehicleMap,
                 Courses = courseMap,
-                Events = eventMap
+                Events = eventMap,
+                SimulationBackend = backend
             };
         }
     }
@@ -118,13 +142,20 @@ namespace FamilyRacing.Core.Racing
         private MotorPose lastSafePose;
         private readonly RecoveryRules recovery = new RecoveryRules();
         private long finishTicks;
+        private readonly string participantId;
+        // The request this session prepared for the boundary currently in
+        // flight — null between boundaries. CompleteStep consumes it.
+        private VehicleTickRequest inFlightRequest;
 
         // `startPose` lets an authoritative coordinator seat this racer at
         // an authored grid slot instead of the course's solo spawn; solo
-        // callers omit it and get the course spawn unchanged.
+        // callers omit it and get the course spawn unchanged. `participantId`
+        // is the simulation roster identity the coordinator binds requests
+        // and resets to; solo callers omit it and the session answers to its
+        // own raceId.
         public DrivingSession(string raceId, VehicleTuning tuning, CourseDefinition course,
             EventDefinition evt, string contentVersion, string startCommandId,
-            MotorPose? startPose = null)
+            MotorPose? startPose = null, string participantId = null)
         {
             if (string.IsNullOrEmpty(raceId)) throw new ArgumentException("raceId", "raceId");
             if (tuning == null || course == null || evt == null)
@@ -146,6 +177,8 @@ namespace FamilyRacing.Core.Racing
                 || !Finite(spawn.heading))
                 throw new ArgumentException("Invalid start pose.");
             this.raceId = raceId;
+            this.participantId = string.IsNullOrEmpty(participantId)
+                ? raceId : participantId;
             vehicleId = tuning.vehicleId;
             this.tuning = tuning;
             this.course = course;
@@ -175,6 +208,7 @@ namespace FamilyRacing.Core.Racing
         public string EventId { get { return evt.id; } }
         public string Phase { get { return phase; } }
         public long SimulationTick { get { return simulationTick; } }
+        public string ParticipantId { get { return participantId; } }
 
         // Latch a one-shot action until a simulated boundary consumes it.
         // Rejecting returns an error code and changes nothing — callers rely
@@ -233,27 +267,43 @@ namespace FamilyRacing.Core.Racing
             return drained;
         }
 
-        // `racers` is the shared racer-contact seam (Task 4): solo callers
-        // omit it and ArcadeMotor steps with racers:null exactly as before.
-        public DrivingStepResult Step(DriverInput input, IMotorWorld world,
-            IRacerContactSource racers = null)
+        // --- Task 4 simulation/rule boundary --------------------------------
+        // One boundary is now two explicit phases so a coordinator can
+        // prepare EVERY racer, run ONE shared simulation batch, then
+        // complete every rule in slot order:
+        //   PrepareStep  — rule bookkeeping only: held input, pending
+        //     action consumption, countdown/elapsed clocks, manual
+        //     recovery. Produces the batch request; a manual reset rides
+        //     out on request.reset for the coordinator to apply to the
+        //     body BEFORE the batch runs.
+        //   CompleteStep — rule completion from the returned result:
+        //     motor commit, motor/progress/finish events, per-segment
+        //     gate evaluation over the chronological substep path,
+        //     automatic recovery. A rule-requested recovery rides out on
+        //     result.reset for the coordinator to apply BEFORE the state
+        //     is published.
+        // A finished session prepares nothing (null) — the coordinator
+        // simply does not include it in the batch.
+
+        public VehicleTickRequest PrepareStep(DriverInput input)
         {
-            var result = new DrivingStepResult();
             lastInput = input;
-            if (phase == PhaseFinished || world == null)
-            {
-                result.state = Snapshot();
-                result.events = DrainEvents();
-                return result;
-            }
+            inFlightRequest = null;
+            if (phase == PhaseFinished) return null;
 
             simulationTick++;
             var consumed = ConsumePendingOnce();
+            var request = new VehicleTickRequest
+            {
+                participantId = participantId,
+                input = input,
+                simulateMotion = false
+            };
 
             if (phase == PhaseCountdown)
             {
                 if (consumed != null && consumed.kind == "recover")
-                    ApplyRecovery("manual", consumed.commandId);
+                    ApplyRecovery("manual", consumed.commandId, request);
                 countdownRemaining--;
                 if (countdownRemaining <= 0)
                 {
@@ -267,70 +317,197 @@ namespace FamilyRacing.Core.Racing
                 if (consumed != null && consumed.kind == "recover")
                 {
                     // Manual recovery replaces the pose on this boundary;
-                    // no motor step and no progress evaluation run, so the
-                    // teleport can never manufacture a crossing.
-                    ApplyRecovery("manual", consumed.commandId);
+                    // the body stays frozen and no progress evaluation
+                    // runs, so the teleport can never manufacture a
+                    // crossing. The reset travels on the request so the
+                    // coordinator lands it on the body before physics.
+                    ApplyRecovery("manual", consumed.commandId, request);
                 }
                 else
                 {
-                    var previousPose = motor.Pose;
-                    // The respawn boundary is flagged: its movement is
-                    // excluded from progress and landing evaluation, and
-                    // the flag clears when this step commits.
-                    var recoveryFlagged = motor.recovering;
-                    var step = ArcadeMotor.Step(motor, input, tuning, world, StepSeconds, racers);
-                    if (step.rejected)
+                    request.simulateMotion = true;
+                }
+            }
+
+            // The rule facts the simulation merges from — exactly the
+            // pre-step motor state the old inline step consumed.
+            request.rulesBefore = motor.Copy();
+            inFlightRequest = request;
+            return request;
+        }
+
+        public DrivingStepResult CompleteStep(VehicleTickResult result)
+        {
+            var output = new DrivingStepResult();
+            var request = inFlightRequest;
+            inFlightRequest = null;
+            var step = result != null ? result.step : null;
+
+            if (phase == PhaseFinished && request == null)
+            {
+                // Nothing was prepared for a finished session — the
+                // coordinator calls CompleteStep(null) so staged events
+                // still drain on the boundary.
+            }
+            else if (request == null)
+            {
+                Emit("motor.error", "", "unpreparedComplete");
+            }
+            else if (step == null || step.state == null)
+            {
+                Emit("motor.error", "", "missingResult");
+            }
+            else if (step.rejected)
+            {
+                // A rejected result leaves the motor state untouched.
+                Emit("motor.error", "", step.error ?? "rejected");
+            }
+            else if (!request.simulateMotion)
+            {
+                // Frozen boundary (countdown or a pending-reset tick):
+                // the rule side already committed everything it owns in
+                // PrepareStep; the body's pose was restored by the
+                // coordinator and its reported state is not a movement.
+            }
+            else
+            {
+                // The respawn boundary is flagged: its movement is
+                // excluded from progress and landing evaluation, and the
+                // flag clears when this step commits.
+                var recoveryFlagged = motor.recovering;
+                motor = step.state;
+                motor.tick = simulationTick;
+                motor.recovering = false;
+                foreach (var motorEvent in step.events)
+                {
+                    var detail = motorEvent.value != 0f
+                        ? motorEvent.value.ToString("0.###",
+                            System.Globalization.CultureInfo.InvariantCulture)
+                        : "";
+                    Emit("motor." + motorEvent.kind, "", detail);
+                }
+                if (!recoveryFlagged)
+                {
+                    // Gate crossings evaluate on the two chronological
+                    // substep segments — never the end-to-end chord, so
+                    // a reset boundary (absent here by construction) or a
+                    // mid-interval excursion can never be flattened away
+                    // or manufacture a crossing.
+                    var poses = SegmentPoses(request, result);
+                    for (var i = 0; i + 1 < poses.Count && !progress.finished; i++)
                     {
-                        // A rejected step leaves the motor state untouched.
-                        Emit("motor.error", "", step.error ?? "rejected");
+                        var advance = CheckpointProgress.Advance(
+                            course, progress, poses[i], poses[i + 1]);
+                        foreach (var progressEvent in advance.events)
+                        {
+                            if (progressEvent.kind == "checkpoint")
+                                Emit("checkpoint.crossed", "", progressEvent.gateId ?? "");
+                            else if (progressEvent.kind == "lap")
+                                Emit("race.lap", "", progressEvent.lap.ToString(
+                                    System.Globalization.CultureInfo.InvariantCulture));
+                        }
+                        if (advance.recoveryPoseUpdated)
+                            lastSafePose = advance.recoveryPose;
                     }
-                    else
+                }
+                if (progress.finished)
+                {
+                    phase = PhaseFinished;
+                    finishTicks = elapsedTicks;
+                    Emit("race.finished", "", elapsedTicks.ToString(
+                        System.Globalization.CultureInfo.InvariantCulture));
+                }
+                else
+                {
+                    var reason = recovery.Evaluate(motor, evt.recovery, StepSeconds);
+                    if (reason != null)
                     {
-                        motor = step.state;
-                        motor.tick = simulationTick;
-                        motor.recovering = false;
-                        foreach (var motorEvent in step.events)
+                        // Rule-requested recovery: the session commits the
+                        // reset pose now and asks the coordinator to land
+                        // the identical state on the body before the
+                        // boundary publishes — snapshots always show the
+                        // post-reset pose, never the fallen one.
+                        ApplyRecovery(reason, "", null);
+                        output.reset = new VehicleReset
                         {
-                            var detail = motorEvent.value != 0f
-                                ? motorEvent.value.ToString("0.###",
-                                    System.Globalization.CultureInfo.InvariantCulture)
-                                : "";
-                            Emit("motor." + motorEvent.kind, "", detail);
-                        }
-                        if (!recoveryFlagged)
-                        {
-                            var advance = CheckpointProgress.Advance(
-                                course, progress, previousPose, motor.Pose);
-                            foreach (var progressEvent in advance.events)
-                            {
-                                if (progressEvent.kind == "checkpoint")
-                                    Emit("checkpoint.crossed", "", progressEvent.gateId ?? "");
-                                else if (progressEvent.kind == "lap")
-                                    Emit("race.lap", "", progressEvent.lap.ToString(
-                                        System.Globalization.CultureInfo.InvariantCulture));
-                            }
-                            if (advance.recoveryPoseUpdated)
-                                lastSafePose = advance.recoveryPose;
-                        }
-                        if (progress.finished)
-                        {
-                            phase = PhaseFinished;
-                            finishTicks = elapsedTicks;
-                            Emit("race.finished", "", elapsedTicks.ToString(
-                                System.Globalization.CultureInfo.InvariantCulture));
-                        }
-                        else
-                        {
-                            var reason = recovery.Evaluate(motor, evt.recovery, StepSeconds);
-                            if (reason != null) ApplyRecovery(reason, "");
-                        }
+                            participantId = participantId,
+                            state = motor.Copy()
+                        };
                     }
                 }
             }
 
-            result.state = Snapshot();
-            result.events = DrainEvents();
-            return result;
+            output.state = Snapshot();
+            output.events = DrainEvents();
+            return output;
+        }
+
+        // The chronological pose list for crossing evaluation: the
+        // simulation's three substep-boundary samples when supplied, or
+        // the single pre-step -> committed segment otherwise.
+        private List<MotorPose> SegmentPoses(VehicleTickRequest request,
+            VehicleTickResult result)
+        {
+            var poses = new List<MotorPose>(4);
+            var path = result != null ? result.path : null;
+            if (path != null && path.Length >= 2)
+            {
+                for (var i = 0; i < path.Length; i++)
+                    poses.Add(path[i].pose);
+                return poses;
+            }
+            if (request != null && request.rulesBefore != null)
+                poses.Add(request.rulesBefore.Pose);
+            poses.Add(motor.Pose);
+            return poses;
+        }
+
+        // Legacy inline-step adapter retained while callers migrate to the
+        // simulation seam: runs the identical rule work through
+        // PrepareStep/CompleteStep with the arcade motor stepped inline,
+        // so observable behaviour (events, ticks, progress, recovery) is
+        // unchanged. `racers` is the shared racer-contact seam: solo
+        // callers omit it and ArcadeMotor steps with racers:null exactly
+        // as before.
+        public DrivingStepResult Step(DriverInput input, IMotorWorld world,
+            IRacerContactSource racers = null)
+        {
+            lastInput = input;
+            if (phase == PhaseFinished || world == null)
+            {
+                var idle = new DrivingStepResult();
+                idle.state = Snapshot();
+                idle.events = DrainEvents();
+                return idle;
+            }
+            var request = PrepareStep(input);
+            VehicleTickResult result;
+            if (request.simulateMotion)
+            {
+                var step = ArcadeMotor.Step(request.rulesBefore, input,
+                    tuning, world, StepSeconds, racers);
+                var before = request.rulesBefore.Pose;
+                result = new VehicleTickResult
+                {
+                    participantId = participantId,
+                    step = step,
+                    path = step != null && step.rejected
+                        ? ArcadeVehicleSimulation.FixedPath(before)
+                        : ArcadeVehicleSimulation.MovementPath(before,
+                            step != null && step.state != null
+                                ? step.state.Pose : before)
+                };
+            }
+            else
+            {
+                result = new VehicleTickResult
+                {
+                    participantId = participantId,
+                    step = new MotorStepResult { state = motor.Copy() },
+                    path = ArcadeVehicleSimulation.FixedPath(motor.Pose)
+                };
+            }
+            return CompleteStep(result);
         }
 
         // Respawn at the last accepted safe pose: velocity and held motion
@@ -339,7 +516,8 @@ namespace FamilyRacing.Core.Racing
         // flagged `recovering` so progress/landing evaluation skips it,
         // and the race clock keeps running via the elapsedTicks increment
         // the caller already applied.
-        private void ApplyRecovery(string reason, string commandId)
+        private void ApplyRecovery(string reason, string commandId,
+            VehicleTickRequest request)
         {
             var charge = motor.boostCharge;
             motor = new MotorState
@@ -355,6 +533,17 @@ namespace FamilyRacing.Core.Racing
                 tick = simulationTick
             };
             recovery.Reset();
+            if (request != null)
+            {
+                // The reset rides the prepared request: the coordinator
+                // lands it on the body before the batch runs, so the
+                // simulation never sees the pre-reset pose this boundary.
+                request.reset = new VehicleReset
+                {
+                    participantId = participantId,
+                    state = motor.Copy()
+                };
+            }
             Emit("race.recovered", commandId ?? "", reason ?? "");
         }
 

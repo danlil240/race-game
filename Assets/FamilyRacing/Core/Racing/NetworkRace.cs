@@ -47,6 +47,11 @@ namespace FamilyRacing.Core.Racing
             new Racer[NetworkSettings.ParticipantCapacity];
         private readonly List<DrivingEvent> staged = new List<DrivingEvent>();
         private long eventSequence;
+        // Legacy IMotorWorld adapter: one lazily-built arcade simulation
+        // per world so the old call shape stays alive while callers
+        // migrate to the injected-seam Step.
+        private IMotorWorld legacyWorld;
+        private ArcadeVehicleSimulation legacySimulation;
 
         private string phase;
         private bool paused;
@@ -79,7 +84,7 @@ namespace FamilyRacing.Core.Racing
                 var session = new DrivingSession(
                     raceId + "-r" + slot.ToString(CultureInfo.InvariantCulture),
                     content.Vehicles[spec.vehicleId], course, evt,
-                    content.Version, "", spawn);
+                    content.Version, "", spawn, spec.participantId);
                 var attribution = AttributionFor(spec.controlSource);
                 racers[slot] = new Racer
                 {
@@ -145,6 +150,19 @@ namespace FamilyRacing.Core.Racing
                 if (!evt.AllowsVehicle(spec.vehicleId)
                     || VehicleTuning.ClassIdOf(spec.vehicleId) != classId)
                 { error = "invalidVehicle"; return false; }
+                // The backend is a race-level contract selected once at
+                // creation: a physically simulated race refuses to seat
+                // a vehicle that cannot satisfy the backend instead of
+                // failing inside the first batch.
+                if (content.SimulationBackend
+                        == VehicleSimulationBackend.PhysicalAssisted)
+                {
+                    var vehicle = content.Vehicles[spec.vehicleId];
+                    if (vehicle.simulationBackend
+                            != VehicleSimulationBackend.PhysicalAssisted
+                        || vehicle.physics == null)
+                    { error = "invalidVehicle"; return false; }
+                }
                 specs[spec.slot] = spec;
             }
             foreach (var spec in specs)
@@ -161,21 +179,53 @@ namespace FamilyRacing.Core.Racing
         public long HostTick { get { return hostTick; } }
         public RaceResult Result { get { return result; } }
 
+        // The roster the owning simulation must be initialized with
+        // before the first Step: one VehicleSpawn per seated racer,
+        // carrying the catalog tuning for its vehicle and the session's
+        // current motor (the authored grid pose at race start).
+        public List<VehicleSpawn> VehicleSpawns()
+        {
+            var spawns = new List<VehicleSpawn>(racers.Length);
+            foreach (var racer in racers)
+            {
+                if (racer == null) continue;
+                VehicleTuning tuning;
+                if (!content.Vehicles.TryGetValue(racer.vehicleId, out tuning)
+                    || tuning == null)
+                    continue;
+                spawns.Add(new VehicleSpawn
+                {
+                    participantId = racer.participantId,
+                    tuning = tuning,
+                    initialState = racer.session.Snapshot().motor
+                });
+            }
+            return spawns;
+        }
+
         // Advances every unfinalized racer exactly one 30 Hz boundary under
-        // the shared clock. Inputs are keyed by participantId; absent racers
-        // take the zero input (auto-acceleration still drives). Racers
-        // attributed "ai" are driven by the Task-4 waypoint follower on the
-        // course's authored route — submitted inputs for an ai-owned slot
-        // never steer it. Every contact query and every AI sample reads
-        // the same pre-step snapshot, so slot iteration order cannot
-        // change outcomes. Returns the state plus the events produced by
-        // this step; while paused, or once the race is finished/aborted,
-        // the state is republished unchanged.
+        // the shared clock through ONE injected simulation batch. The
+        // per-tick order is the binding seam every backend honours:
+        //   validate/sample inputs -> prepare every request (+ pending
+        //   resets) -> apply resets -> forces + the shared batch -> complete
+        //   every rule from the returned paths -> apply rule-requested
+        //   recovery resets -> publish ONE committed boundary.
+        // Inputs are keyed by participantId; absent racers take the zero
+        // input (auto-acceleration still drives). Racers attributed "ai"
+        // are driven by the waypoint follower on the course's authored
+        // route — submitted inputs for an ai-owned slot never steer it.
+        // Every AI sample reads the same pre-step snapshot, and every
+        // contact body the backend consults is the batch's own pre-step
+        // view, so slot iteration order cannot change outcomes. Returns
+        // the state plus the events produced by this step; while paused,
+        // or once the race is finished/aborted, the simulation is never
+        // called and the state is republished unchanged.
         public NetworkRaceState Step(
-            IReadOnlyDictionary<string, DriverInput> inputs, IMotorWorld world)
+            IReadOnlyDictionary<string, DriverInput> inputs,
+            IVehicleSimulation simulation)
         {
             var emitted = DrainStaged();
-            if (paused || world == null
+            if (paused || simulation == null
                 || phase == PhaseFinished || phase == PhaseAborted)
                 return BuildState(emitted);
 
@@ -194,11 +244,12 @@ namespace FamilyRacing.Core.Racing
                 elapsedTicks++;
             }
 
-            // The single pre-step view every contact query and AI sample
-            // reads this tick.
+            // The single pre-step view every AI sample reads this tick.
             var preStep = SnapshotAll();
-            var contacts = BuildContacts(preStep);
 
+            // --- 1) prepare every request (+ pending resets) ------------
+            var prepared = new List<Prepared>(racers.Length);
+            var requests = new List<VehicleTickRequest>(racers.Length);
             for (var slot = 0; slot < racers.Length; slot++)
             {
                 var racer = racers[slot];
@@ -231,13 +282,52 @@ namespace FamilyRacing.Core.Racing
                         out _);
                 }
                 racer.recoverHeld = input.Recover;
-                var contact = contacts.ForParticipant(racer.participantId);
-                var step = racer.session.Step(input, world, contact);
-                Stamp(racer, step.events, emitted);
-                if (!racer.finished && step.state.finished)
+                var request = racer.session.PrepareStep(input);
+                if (request == null) continue; // session finalized
+                request.participantId = racer.participantId;
+                prepared.Add(new Prepared { racer = racer, request = request });
+                requests.Add(request);
+            }
+
+            // --- 2) pending/manual resets land on the bodies first ------
+            for (var i = 0; i < prepared.Count; i++)
+            {
+                var reset = prepared[i].request.reset;
+                if (reset != null)
+                    simulation.Restore(reset.participantId, reset.state);
+            }
+
+            // --- 3) exactly one shared batch for the whole roster -------
+            var results = simulation.Step(requests);
+            var byParticipant = new Dictionary<string, VehicleTickResult>(
+                StringComparer.Ordinal);
+            if (results != null)
+                foreach (var result in results)
+                    if (result != null && result.participantId != null
+                        && !byParticipant.ContainsKey(result.participantId))
+                        byParticipant[result.participantId] = result;
+
+            // --- 4) complete every rule in slot order -------------------
+            for (var i = 0; i < prepared.Count; i++)
+            {
+                var entry = prepared[i];
+                var racer = entry.racer;
+                VehicleTickResult result;
+                if (!byParticipant.TryGetValue(racer.participantId,
+                        out result))
+                    result = null;
+                var completed = racer.session.CompleteStep(result);
+                Stamp(racer, completed.events, emitted);
+                // 5) a rule-requested recovery reset lands on the body
+                // before this boundary publishes — the committed state
+                // already shows the post-reset pose.
+                if (completed.reset != null)
+                    simulation.Restore(completed.reset.participantId,
+                        completed.reset.state);
+                if (!racer.finished && completed.state.finished)
                 {
                     racer.finished = true;
-                    racer.finishTicks = step.state.finishTicks;
+                    racer.finishTicks = completed.state.finishTicks;
                     if (firstFinishElapsedTicks == 0)
                     {
                         firstFinishElapsedTicks = racer.finishTicks;
@@ -248,6 +338,31 @@ namespace FamilyRacing.Core.Racing
             }
             TryFinalize(emitted);
             return BuildState(emitted);
+        }
+
+        private sealed class Prepared
+        {
+            internal Racer racer;
+            internal VehicleTickRequest request;
+        }
+
+        // Legacy call shape retained while callers migrate: wraps the
+        // supplied motor world in a persistent ArcadeVehicleSimulation so
+        // this overload produces bit-for-bit identical outcomes through
+        // the same prepare/batch/complete seam. Removed once every caller
+        // injects a simulation.
+        public NetworkRaceState Step(
+            IReadOnlyDictionary<string, DriverInput> inputs, IMotorWorld world)
+        {
+            if (world == null)
+                return Step(inputs, (IVehicleSimulation)null);
+            if (legacySimulation == null || legacyWorld != world)
+            {
+                legacyWorld = world;
+                legacySimulation = new ArcadeVehicleSimulation(world);
+                legacySimulation.Initialize(VehicleSpawns());
+            }
+            return Step(inputs, legacySimulation);
         }
 
         public NetworkRaceState Snapshot()
@@ -427,26 +542,6 @@ namespace FamilyRacing.Core.Racing
             for (var i = 0; i < racers.Length; i++)
                 snaps[i] = racers[i].session.Snapshot();
             return snaps;
-        }
-
-        // The bounded contact fabric for one step: every participant's
-        // queries read the same pre-step bodies. Finalized racers
-        // (finished or DNF) ghost out of the contact set — they no
-        // longer simulate, so their parked poses must not wall off the
-        // racing line for the racers still driving.
-        private RacerContacts BuildContacts(DrivingSessionState[] preStep)
-        {
-            var entries = new List<RacerContacts.Entry>(racers.Length);
-            for (var i = 0; i < racers.Length; i++)
-            {
-                if (racers[i].finished || racers[i].dnf) continue;
-                entries.Add(new RacerContacts.Entry
-                {
-                    participantId = racers[i].participantId,
-                    motor = preStep[i] != null ? preStep[i].motor : null
-                });
-            }
-            return new RacerContacts(entries);
         }
 
         // Standings order: finishers rank ahead of non-finishers and sort

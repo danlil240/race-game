@@ -2031,7 +2031,12 @@ namespace FamilyRacing.Core.Networking
 
         private string ContentVersion()
         {
-            return content != null ? content.Version : "none";
+            // Compatibility includes the simulation backend: arcade
+            // catalogs keep the bare authored version (existing wire
+            // fixtures are byte-identical), while a non-arcade backend
+            // folds into the token so an arcade build can never silently
+            // join a physical race.
+            return content != null ? content.CompatibilityVersion : "none";
         }
 
         private static bool PausePhase(string phase)

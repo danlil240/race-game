@@ -156,11 +156,16 @@ namespace FamilyRacing.Core.Racing
         }
     }
 
-    // Result of one DrivingSession.Step: the post-step independent state
-    // copy plus the ordered events emitted by that step (already drained).
+    // Result of one DrivingSession boundary completion: the post-step
+    // independent state copy plus the ordered events emitted by that
+    // step (already drained). `reset`, when non-null, is a rule-requested
+    // recovery the coordinator must land on the body through
+    // IVehicleSimulation.Restore BEFORE this boundary publishes — the
+    // committed `state` already carries the post-reset pose.
     public sealed class DrivingStepResult
     {
         public DrivingSessionState state;
         public List<DrivingEvent> events = new List<DrivingEvent>();
+        public VehicleReset reset;
     }
 }
