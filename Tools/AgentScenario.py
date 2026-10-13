@@ -11,6 +11,7 @@ import math
 import queue
 import select
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -33,7 +34,10 @@ BOUNDARY_TYPES = {"snapshot", "state", "delta"}
 # Schema 4 adds the protocol-2 physical surfaces: discovered hosts and
 # session descriptors carry the tuned-content fingerprint, and LAN race
 # snapshots may carry per-racer physical DTOs.
-SUPPORTED_STATE_SCHEMAS = {1, 2, 3, 4}
+# Schema 5 (M4) is additive presentation truth: the applied render
+# profile and a bounded render-performance summary on `presentation` —
+# bounded scalars only, never frame-sized buffers.
+SUPPORTED_STATE_SCHEMAS = {1, 2, 3, 4, 5}
 
 
 def _remove_path(state, path):
@@ -182,6 +186,45 @@ def validate_state_schema(event, state):
         for host in session.get("discovered") or []:
             assert isinstance(host, dict) and "compat" in host, \
                 "Schema-4 discovered host is missing compat"
+    if schema >= 5:
+        validate_schema5_presentation(state)
+
+
+def validate_schema5_presentation(state):
+    """The schema-5 presentation contract a boundary state must carry.
+
+    Additive over schema 4: `presentation.renderProfile` names the applied
+    tablet/PC pipeline (never assumed — "none"/"missing" are honest
+    states), `renderingAvailable` separates rendered-player evidence from
+    headless captures, and `performance` is the bounded summary slice
+    (null only when capture is disabled — key must exist either way).
+    """
+    presentation = state.get("presentation")
+    assert isinstance(presentation, dict), \
+        "Schema-5 state is missing the presentation slice"
+    profile = presentation.get("renderProfile")
+    assert profile in ("tablet", "pc", "none", "missing"), \
+        "Unknown renderProfile " + repr(profile)
+    assert type(presentation.get("renderingAvailable")) is bool, \
+        "Schema-5 presentation is missing renderingAvailable"
+    assert "performance" in presentation, \
+        "Schema-5 presentation is missing the performance key"
+    perf = presentation["performance"]
+    if perf is not None:
+        assert isinstance(perf, dict), "performance must be an object or null"
+        for key in ("profile", "captureValid", "frames", "racingSamples",
+                    "reportStatus", "reportError", "gpuTimingStatus",
+                    "processMemoryStatus", "processMemoryMetric",
+                    "processMemorySource", "processMemoryUnits"):
+            assert key in perf, "performance summary missing " + key
+        assert perf["profile"] in ("tablet", "pc", "none", "missing"), \
+            "performance.profile disagrees with known profiles"
+        # Metric values stay absent (null) when unavailable — a null p95 is
+        # honest; a zero would masquerade as measurement.
+        for key in ("medianFrameMs", "p95FrameMs", "maxFrameMs"):
+            value = perf.get(key)
+            assert value is None or type(value) in (int, float), \
+                "performance." + key + " must be a number or null"
 
 
 def validate_presentation(state, language):
@@ -469,6 +512,150 @@ class Client:
             pass
         self.incoming.close()
         self.outgoing.close()
+
+
+# --- external process-memory sampling (M4 Task 2) -------------------------
+#
+# Process memory is measured OUTSIDE the player once per second, never
+# from Unity heap counters: Android reports the app's total PSS through
+# `adb dumpsys meminfo`, Windows reports the process working set through
+# psapi. Every record names its metric, source and units, and a failed
+# sample is an explicit "unavailable" record — never a fabricated zero.
+# Devices compare only against their own baseline; PSS and working set are
+# differently-defined quantities and are never compared to each other.
+
+def _windows_working_set_bytes(pid):
+    """Process working set in bytes via psapi; raises on failure."""
+    import ctypes
+    from ctypes import wintypes
+
+    class PROCESS_MEMORY_COUNTERS(ctypes.Structure):
+        _fields_ = [
+            ("cb", wintypes.DWORD),
+            ("PageFaultCount", wintypes.DWORD),
+            ("PeakWorkingSetSize", ctypes.c_size_t),
+            ("WorkingSetSize", ctypes.c_size_t),
+            ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+            ("PagefileUsage", ctypes.c_size_t),
+            ("PeakPagefileUsage", ctypes.c_size_t),
+        ]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    psapi = ctypes.WinDLL("psapi", use_last_error=True)
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    handle = kernel32.OpenProcess(
+        PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        raise OSError("OpenProcess failed for pid %d" % pid)
+    try:
+        counters = PROCESS_MEMORY_COUNTERS()
+        counters.cb = ctypes.sizeof(counters)
+        if not psapi.GetProcessMemoryInfo(
+                handle, ctypes.byref(counters), counters.cb):
+            raise OSError("GetProcessMemoryInfo failed for pid %d" % pid)
+        return int(counters.WorkingSetSize)
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def _android_total_pss_bytes(serial, package, adb="adb"):
+    """App total PSS via `adb shell dumpsys meminfo`; raises on failure."""
+    import re
+    command = [adb]
+    if serial:
+        command += ["-s", serial]
+    command += ["shell", "dumpsys", "meminfo", package]
+    output = subprocess.run(command, capture_output=True, text=True,
+                            timeout=20)
+    if output.returncode != 0:
+        raise OSError("dumpsys meminfo failed: " + output.stderr.strip())
+    # The summary block ends with "Total PSS: <n> kB" (also rendered as a
+    # "TOTAL" row on older dumpsys output). Capture either form in kB.
+    match = re.search(r"TOTAL\s+PSS[:\s]+([\d,]+)\s*(?:kB|KB)?",
+                      output.stdout, re.IGNORECASE)
+    if match is None:
+        raise OSError("dumpsys meminfo carried no TOTAL PSS row")
+    return int(match.group(1).replace(",", "")) * 1024
+
+
+class MemorySampler:
+    """Once-per-second external process-memory sampler.
+
+    One daemon thread appends `memory.ndjson` under the evidence directory;
+    every line names metric/source/units and either carries `value` bytes
+    or `status: "unavailable"` with a reason. Stop() joins the writer.
+    """
+
+    def __init__(self, evidence_dir, pid=None, adb_serial=None,
+                 package="com.daniel.familyracing", interval=1.0):
+        assert pid is not None or adb_serial is not None, \
+            "MemorySampler needs a Windows pid or an adb device serial"
+        self._path = Path(evidence_dir) / "memory.ndjson"
+        self._pid = pid
+        self._serial = adb_serial
+        self._package = package
+        self._interval = interval
+        self._sequence = 0
+        self._clock = time.monotonic()
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True,
+                                        name="memory-sampler")
+
+    def __enter__(self):
+        self.start()
+        return self
+
+    def __exit__(self, *exc):
+        self.stop()
+        return False
+
+    def start(self):
+        self._thread.start()
+        return self
+
+    def stop(self, timeout=5.0):
+        self._stop.set()
+        self._thread.join(timeout)
+
+    def _sample(self):
+        if self._pid is not None:
+            return ("process.workingSet",
+                    "psapi GetProcessMemoryInfo",
+                    _windows_working_set_bytes(self._pid))
+        return ("process.totalPss",
+                "adb dumpsys meminfo",
+                _android_total_pss_bytes(self._serial, self._package))
+
+    def _run(self):
+        with self._path.open("x", encoding="utf-8") as sink:
+            while not self._stop.is_set():
+                self._sequence += 1
+                record = {
+                    "type": "memory",
+                    "sequence": self._sequence,
+                    "monotonicMs": int((time.monotonic() - self._clock)
+                                       * 1000),
+                    "units": "bytes",
+                }
+                try:
+                    metric, source, value = self._sample()
+                    record.update(metric=metric, source=source,
+                                  status="ok", value=value)
+                except Exception as error:
+                    record.update(
+                        metric=("process.workingSet" if self._pid is not None
+                                else "process.totalPss"),
+                        source=("psapi GetProcessMemoryInfo"
+                                if self._pid is not None
+                                else "adb dumpsys meminfo"),
+                        status="unavailable",
+                        reason=type(error).__name__ + ": " + str(error))
+                sink.write(json.dumps(record) + "\n")
+                sink.flush()
+                self._stop.wait(self._interval)
 
 
 def settings(language="he", camera="chase"):

@@ -20,17 +20,18 @@ from NetworkScenario import (LEGAL_PHASE_TRANSITIONS,
                              verify_lan_trace)
 
 
-def lan_state(tick=1, schema=4):
+def lan_state(tick=1, schema=5):
     """A minimal well-formed LAN state at the given schema marker.
 
-    Schema 4 (the current REQUIRED_LAN_SCHEMA) adds the compatibility
-    surfaces: the session descriptor carries the canonical tuned-content
-    fingerprint and every discovered host carries its compat token."""
+    Schema 4 adds the compatibility surfaces (descriptor fingerprint,
+    discovered-host compat). Schema 5 (the current REQUIRED_LAN_SCHEMA)
+    adds the additive presentation slice: the applied render profile and
+    the bounded performance summary key."""
     descriptor = {"sessionId": "s-1", "eventId": "lan-car-01",
                   "classId": "car", "joinable": True}
     if schema >= 4:
         descriptor["contentFingerprint"] = "f" * 64
-    return {
+    state = {
         "stateSchemaVersion": schema,
         "contentVersion": "lan-content-1",
         "screen": "lan-lobby",
@@ -88,6 +89,16 @@ def lan_state(tick=1, schema=4):
         "remotePresentation": {"racers": []},
         "networkLink": None,
     }
+    if schema >= 5:
+        state["presentation"] = {
+            "textDirection": "ltr",
+            "renderProfile": "pc",
+            "renderScale": 1.0,
+            "targetFrameRate": 60,
+            "renderingAvailable": True,
+            "performance": None,
+        }
+    return state
 
 
 class LanStateValidationTests(unittest.TestCase):
@@ -316,12 +327,30 @@ class Schema3ConsumerTests(unittest.TestCase):
         validate_state_schema(record, record["state"])
 
     def test_schema4_boundary_validates(self):
-        record = self.record()
+        record = self.record(state=lan_state(schema=4))
         record["stateSchemaVersion"] = 4
         validate_state_schema(record, record["state"])
 
-    def test_schema4_descriptor_fingerprint_is_required(self):
+    def test_schema5_boundary_validates(self):
+        record = self.record()
+        record["stateSchemaVersion"] = 5
+        validate_state_schema(record, record["state"])
+
+    def test_schema5_missing_presentation_is_rejected(self):
         state = lan_state()
+        del state["presentation"]
+        record = self.record(state=state)
+        record["stateSchemaVersion"] = 5
+        with self.assertRaises(AssertionError):
+            validate_state_schema(record, record["state"])
+        state["presentation"] = {"renderProfile": "quantum"}
+        with self.assertRaises(AssertionError):
+            validate_state_schema(record, record["state"])
+        state["presentation"] = lan_state()["presentation"]
+        validate_state_schema(record, record["state"])
+
+    def test_schema4_descriptor_fingerprint_is_required(self):
+        state = lan_state(schema=4)
         del state["network"]["descriptor"]["contentFingerprint"]
         record = self.record(state=state)
         record["stateSchemaVersion"] = 4
@@ -329,7 +358,7 @@ class Schema3ConsumerTests(unittest.TestCase):
             validate_state_schema(record, record["state"])
 
     def test_schema4_discovered_hosts_need_compat(self):
-        state = lan_state()
+        state = lan_state(schema=4)
         state["network"]["discovered"] = [
             {"address": "192.168.1.50", "port": 47777,
              "hostName": "peer"}]
@@ -417,7 +446,7 @@ class TraceIntegrityTests(unittest.TestCase):
                 "type": kind, "protocolVersion": 1, "runId": "lan-trace",
                 "deviceId": "d", "participantId": "local",
                 "buildVersion": "b", "contentVersion": "c",
-                "stateSchemaVersion": 4,
+                "stateSchemaVersion": 5,
                 "sequence": index + 1, "monotonicMs": (index + 1) * 10,
                 "tick": index + 1, "state": state,
             }

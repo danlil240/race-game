@@ -133,6 +133,7 @@ GameObject:
   - component: {fileID: 1246834024}
   - component: {fileID: 1246834023}
   - component: {fileID: 1246834022}
+  - component: {fileID: 1246834028}
   m_Layer: 0
   m_Name: VisualBenchmarkApp
   m_TagString: Untagged
@@ -242,6 +243,20 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1246834028
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1246834021}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 3a6170bf3fad4c946a4bea94627eb27c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: FamilyRacing.Runtime::FamilyRacing.RenderProfileController
+  tabletPipeline: {fileID: 11400000, guid: 1b99441e3ca3c9c4f848f337c8ab6829, type: 2}
+  pcPipeline: {fileID: 11400000, guid: 6188ad7e5e27bf74084513d90c64d05f, type: 2}
 --- !u!1 &1694600028
 GameObject:
   m_ObjectHideFlags: 0

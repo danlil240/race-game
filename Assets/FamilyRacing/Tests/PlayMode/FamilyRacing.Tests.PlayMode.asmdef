@@ -6,7 +6,8 @@
     "FamilyRacing.Runtime",
     "Unity.Networking.Transport",
     "Unity.InputSystem",
-    "Unity.InputSystem.TestFramework"
+    "Unity.InputSystem.TestFramework",
+    "Unity.RenderPipelines.Universal.Runtime"
   ],
   "overrideReferences": true,
   "precompiledReferences": ["Newtonsoft.Json.dll"],

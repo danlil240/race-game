@@ -8,6 +8,7 @@ using FamilyRacing.Core.Foundation;
 using FamilyRacing.Core.Profiles;
 using FamilyRacing.Core.Racing;
 using UnityEngine;
+using UnityEngine.Rendering;
 using UnityEngine.UIElements;
 
 namespace FamilyRacing
@@ -36,6 +37,14 @@ namespace FamilyRacing
         private FoundationInput driverInput;
         private FoundationShell shell;
         private UIDocument document;
+        // M4 Task 2: the applied tablet/PC render profile plus the bounded
+        // frame-interval recorder. Both are absent-legal: a scene without a
+        // controller reports profile "none", and --perf-capture off gives
+        // matched runs a no-capture arm for overhead measurement.
+        private RenderProfileController renderProfiles;
+        private RenderPerformanceRecorder perfRecorder;
+        private bool perfRenderingAvailable;
+        private string perfReportDirectory;
         private PresentationState presentation = new PresentationState();
         private string runId;
         private string lastInputSource = "";
@@ -111,6 +120,42 @@ namespace FamilyRacing
                 drivingWorld.BindPresentationCamera();
             document = GetComponent<UIDocument>();
             presentation.buildTarget = Application.platform.ToString();
+            // Render profile applies before the first rendered frame:
+            // Android takes the tablet profile, other platforms the PC one;
+            // --render-profile tablet|pc overrides for benchmark evidence.
+            perfRenderingAvailable = !Application.isBatchMode
+                && SystemInfo.graphicsDeviceType != GraphicsDeviceType.Null;
+            renderProfiles = GetComponent<RenderProfileController>();
+            if (renderProfiles != null)
+                renderProfiles.Apply(RenderProfileController.ResolveTablet(
+                    Application.platform, Environment.GetCommandLineArgs()));
+            if (PerfCaptureEnabled(Environment.GetCommandLineArgs()))
+            {
+                string memoryMetric, memorySource;
+                if (Application.platform == RuntimePlatform.Android)
+                {
+                    memoryMetric = "process.totalPss";
+                    memorySource = "adb dumpsys meminfo";
+                }
+                else
+                {
+                    memoryMetric = "process.workingSet";
+                    memorySource = "psapi GetProcessMemoryInfo";
+                }
+                perfRecorder = new RenderPerformanceRecorder(
+                    renderProfiles != null ? renderProfiles.ActiveProfile : "none",
+                    Application.version + (Debug.isDebugBuild
+                        ? "-development" : "-ordinary"),
+                    service.ContentVersion,
+                    Application.platform.ToString(),
+                    perfRenderingAvailable,
+                    processMemoryMetric: memoryMetric,
+                    processMemorySource: memorySource,
+                    processMemoryUnits: "bytes",
+                    clockSeconds: () => Time.realtimeSinceStartupAsDouble);
+            }
+            perfReportDirectory = PerfReportDirectory(
+                Environment.GetCommandLineArgs());
             if (validationDir != null)
             {
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
@@ -308,6 +353,15 @@ namespace FamilyRacing
             if (tutorialPresenter != null)
                 tutorialPresenter.ApplyFrame(state,
                     shell != null ? shell.TutorialCueIcon : null);
+            // One rendered-frame interval per Update, classified by the
+            // published phase/camera/vehicle — unscaled wall time, the same
+            // clock the step accumulator reads.
+            if (perfRecorder != null)
+            {
+                perfRecorder.RecordFrame(Time.unscaledDeltaTime * 1000.0,
+                    PerfPhase(state), PerfCameraMode(), PerfVehicleClass(state));
+                DrainPerformanceReportEvents();
+            }
         }
 
         // Shared entry for every UI/physical command; the agent channel calls
@@ -440,7 +494,115 @@ namespace FamilyRacing
             // it here because networkRace is host-confirmed shared state.
             presentation.camera = currentCameraFacts != null
                 ? currentCameraFacts.Copy() : null;
+            // Schema-5 presentation truth: the profile actually applied and
+            // the bounded performance summary ride every boundary, so
+            // paused/menu transitions publish the same facts racing does.
+            presentation.renderProfile = renderProfiles != null
+                ? renderProfiles.ActiveProfile : "none";
+            presentation.renderScale = renderProfiles != null
+                ? renderProfiles.ActiveRenderScale : 0f;
+            presentation.targetFrameRate = Application.targetFrameRate;
+            presentation.renderingAvailable = perfRenderingAvailable;
+            presentation.performance = perfRecorder != null
+                ? perfRecorder.Summary() : null;
             service.SetPresentation(presentation);
+        }
+
+        // Recorder phase vocabulary mirrors the published lifecycle: paused
+        // (either pause flag), the solo driving phase, the LAN session
+        // phase, otherwise menu. "loading" is reserved for a real loading
+        // state; this build never fabricates one.
+        private static string PerfPhase(FoundationState state)
+        {
+            if (state == null) return RenderPerformanceCapture.PhaseMenu;
+            if (state.paused || (state.network != null && state.network.paused))
+                return RenderPerformanceCapture.PhasePaused;
+            if (state.driving != null && state.driving.phase == "countdown")
+                return RenderPerformanceCapture.PhaseCountdown;
+            if (state.driving != null && state.driving.phase == "running")
+                return RenderPerformanceCapture.PhaseRacing;
+            if (state.driving != null && state.driving.phase == "finished")
+                return RenderPerformanceCapture.PhaseResults;
+            var net = state.network;
+            if (net != null)
+            {
+                if (net.phase == "countdown")
+                    return RenderPerformanceCapture.PhaseCountdown;
+                if (net.phase == "racing")
+                    return RenderPerformanceCapture.PhaseRacing;
+                if (net.phase == "results")
+                    return RenderPerformanceCapture.PhaseResults;
+            }
+            return RenderPerformanceCapture.PhaseMenu;
+        }
+
+        private string PerfCameraMode()
+        {
+            return currentCameraFacts != null && currentCameraFacts.mode != null
+                ? currentCameraFacts.mode : "none";
+        }
+
+        // The vehicle class the frame rendered: the solo vehicle id, or the
+        // locally owned LAN racer's id — never a remote racer's.
+        private static string PerfVehicleClass(FoundationState state)
+        {
+            if (state == null) return "";
+            if (state.driving != null && state.driving.vehicleId != null)
+                return state.driving.vehicleId;
+            var race = state.networkRace;
+            var localId = state.network != null
+                ? state.network.localParticipantId : null;
+            if (race != null && race.racers != null && localId != null)
+                foreach (var racer in race.racers)
+                    if (racer != null && racer.participantId == localId)
+                        return racer.vehicleId ?? "";
+            return "";
+        }
+
+        // Report-write outcomes become sequenced stream records when a
+        // validation stream exists; ordinary builds rely on the report file
+        // and the presentation summary's reportStatus/reportError fields.
+        private void DrainPerformanceReportEvents()
+        {
+            if (perfRecorder == null || bridge == null) return;
+            var events = perfRecorder.DrainReportEvents();
+            if (events == null) return;
+            foreach (var reportEvent in events)
+                bridge.EmitPerformance(reportEvent.file ?? "",
+                    reportEvent.status, reportEvent.error,
+                    service.Snapshot().tick);
+        }
+
+        private static bool PerfCaptureEnabled(string[] args)
+        {
+            if (args == null) return true;
+            for (var i = 0; i < args.Length - 1; i++)
+            {
+                if (args[i] != "--perf-capture") continue;
+                var value = args[i + 1];
+                return !(value == "off" || value == "0" || value == "false");
+            }
+            return true;
+        }
+
+        // --perf-report-dir <dir>: compact perf-report-<runId>.json written
+        // at quit on a background writer. Without the flag the report still
+        // lands under persistentDataPath/performance so ordinary benchmark
+        // builds produce the same evidence without any control socket.
+        private static string PerfReportDirectory(string[] args)
+        {
+            if (args != null)
+                for (var i = 0; i < args.Length - 1; i++)
+                    if (args[i] == "--perf-report-dir")
+                    {
+                        var value = args[i + 1];
+                        if (!string.IsNullOrWhiteSpace(value)
+                            && !value.StartsWith("--",
+                                StringComparison.Ordinal))
+                            return Path.GetFullPath(value);
+                    }
+            return Path.Combine(Application.persistentDataPath,
+                "performance");
         }
 
         private void OnApplicationFocus(bool hasFocus)
@@ -466,6 +628,22 @@ namespace FamilyRacing
 
         private void OnApplicationQuit()
         {
+            // The compact performance report is a mandatory artifact in both
+            // development and ordinary builds: queue the write on the
+            // recorder's writer thread, flush it before exit, and emit the
+            // outcome record while the stream can still carry it.
+            if (perfRecorder != null)
+            {
+                try
+                {
+                    perfRecorder.RequestReport(Path.Combine(
+                        perfReportDirectory, "perf-report-" + runId + ".json"));
+                    perfRecorder.FlushReportWrites();
+                    DrainPerformanceReportEvents();
+                }
+                catch (Exception) { }
+                perfRecorder.Dispose();
+            }
             bridge?.Dispose();
             raceBridge?.Dispose();
             lanLink?.Dispose();

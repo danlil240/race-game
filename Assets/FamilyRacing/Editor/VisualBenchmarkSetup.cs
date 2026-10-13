@@ -3,6 +3,7 @@ using System.IO;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.Rendering.Universal;
 using UnityEngine.SceneManagement;
 using UnityEngine.UIElements;
 
@@ -27,6 +28,20 @@ namespace FamilyRacing.EditorTools
             BenchmarkDir + "/visual-benchmark-01.asset";
         public const string ScenePath = BenchmarkDir + "/VisualBenchmark.unity";
         public const string PresentationVersion = "visual-1";
+        // M4 Task 2 render profiles: the A7 Lite tablet pipeline (0.75
+        // internal render scale, simple shadows, restrained cost) and the
+        // reference-PC pipeline (full scale, richer shadows/detail). The
+        // benchmark scene's RenderProfileController selects between them at
+        // startup; neither enables real-time reflections, motion blur or
+        // full-screen effects, and UIToolkit stays at display resolution.
+        public const string TabletPipelinePath =
+            BenchmarkDir + "/VisualBenchmarkTabletURP.asset";
+        public const string TabletRendererPath =
+            BenchmarkDir + "/VisualBenchmarkTabletRenderer.asset";
+        public const string PcPipelinePath =
+            BenchmarkDir + "/VisualBenchmarkPcURP.asset";
+        public const string PcRendererPath =
+            BenchmarkDir + "/VisualBenchmarkPcRenderer.asset";
         private const string DrivingDir =
             "Assets/FamilyRacing/Generated/Driving";
         private const string TrackPath = DrivingDir + "/graybox-01.asset";
@@ -44,8 +59,62 @@ namespace FamilyRacing.EditorTools
             if (!definition.Validate(out error))
                 throw new InvalidDataException(
                     "VisualBenchmarkSetup: " + error);
+            EnsureRenderProfiles();
             EnsureScene();
             AssetDatabase.SaveAssets();
+        }
+
+        // The two authored profile pipelines. Existing assets keep authored
+        // tuning — only missing assets are created — so hand-tuned profile
+        // work survives a re-run like every other authored asset here.
+        private static void EnsureRenderProfiles()
+        {
+            EnsurePipeline(TabletPipelinePath, TabletRendererPath,
+                renderScale: 0.75f, shadowCascades: 1, shadowDistance: 30f,
+                softShadows: false, hdr: false, msaa: 1);
+            EnsurePipeline(PcPipelinePath, PcRendererPath,
+                renderScale: 1.0f, shadowCascades: 2, shadowDistance: 80f,
+                softShadows: true, hdr: true, msaa: 2);
+        }
+
+        private static void EnsurePipeline(string pipelinePath,
+            string rendererPath, float renderScale, int shadowCascades,
+            float shadowDistance, bool softShadows, bool hdr, int msaa)
+        {
+            if (AssetDatabase.LoadAssetAtPath<UniversalRenderPipelineAsset>(
+                    pipelinePath) != null)
+                return;
+            var renderer = AssetDatabase
+                .LoadAssetAtPath<UniversalRendererData>(rendererPath);
+            if (renderer == null)
+            {
+                renderer = ScriptableObject
+                    .CreateInstance<UniversalRendererData>();
+                AssetDatabase.CreateAsset(renderer, rendererPath);
+            }
+            var pipeline = UniversalRenderPipelineAsset.Create(renderer);
+            pipeline.renderScale = renderScale;
+            pipeline.shadowCascadeCount = shadowCascades;
+            pipeline.shadowDistance = shadowDistance;
+            pipeline.supportsHDR = hdr;
+            pipeline.msaaSampleCount = msaa;
+            // Simple vehicle shadows on the tablet and bounded cascades on
+            // PC; no depth/opaque grabs or post-heavy features in either.
+            pipeline.supportsCameraDepthTexture = false;
+            pipeline.supportsCameraOpaqueTexture = false;
+            AssetDatabase.CreateAsset(pipeline, pipelinePath);
+            // URP 17 derives supportsSoftShadows from the serialized
+            // ShadowQuality enum — the public setter is internal, so soft
+            // shadows are authored through the serialized property.
+            var so = new SerializedObject(pipeline);
+            var shadowType = so.FindProperty("m_ShadowType");
+            if (shadowType != null)
+            {
+                shadowType.intValue = softShadows
+                    ? (int)UnityEngine.Rendering.Universal.ShadowQuality.SoftShadows
+                    : (int)UnityEngine.Rendering.Universal.ShadowQuality.HardShadows;
+                so.ApplyModifiedPropertiesWithoutUndo();
+            }
         }
 
         private static void EnsureFolder(string parent, string name)
@@ -205,6 +274,7 @@ namespace FamilyRacing.EditorTools
             var document = appObject.AddComponent<UIDocument>();
             AssignPanel(document, content.panel);
             appObject.AddComponent<FoundationShell>();
+            WireRenderProfiles(appObject);
             var world = appObject.AddComponent<DrivingWorld>();
             var serialized = new SerializedObject(world);
             Assign(serialized, "track", definition.sourceTrack);
@@ -276,6 +346,7 @@ namespace FamilyRacing.EditorTools
                     dirty = true;
                 }
                 serialized.ApplyModifiedPropertiesWithoutUndo();
+                dirty |= WireRenderProfiles(app.gameObject);
                 foreach (var document in app
                     .GetComponentsInChildren<UIDocument>(true))
                 {
@@ -296,6 +367,29 @@ namespace FamilyRacing.EditorTools
             }
             if (!alreadyOpen)
                 EditorSceneManager.CloseScene(scene, true);
+        }
+
+        // The scene's profile selector: add the component if missing and
+        // keep its pipeline references bound to the two authored profile
+        // assets. Returning true marks the scene dirty (repair path).
+        private static bool WireRenderProfiles(GameObject appObject)
+        {
+            var controller = appObject.GetComponent<RenderProfileController>();
+            var dirty = false;
+            if (controller == null)
+            {
+                controller = appObject.AddComponent<RenderProfileController>();
+                dirty = true;
+            }
+            var serialized = new SerializedObject(controller);
+            dirty |= Assign(serialized, "tabletPipeline",
+                AssetDatabase.LoadAssetAtPath<UniversalRenderPipelineAsset>(
+                    TabletPipelinePath));
+            dirty |= Assign(serialized, "pcPipeline",
+                AssetDatabase.LoadAssetAtPath<UniversalRenderPipelineAsset>(
+                    PcPipelinePath));
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+            return dirty;
         }
 
         // Serialized assignment: the property setter alone was observed

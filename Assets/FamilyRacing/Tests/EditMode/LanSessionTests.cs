@@ -419,12 +419,14 @@ namespace FamilyRacing.Tests
         [Test]
         public void ProtocolTwoIsTheLanContract()
         {
-            // Task 9: the physical replication epoch — protocol 2,
-            // gameplay-2 and observation schema 4 move together.
+            // Task 9: the physical replication epoch — protocol 2 and
+            // gameplay-2 are the wire contract. Observation schema 5 (M4
+            // Task 2) is additive presentation truth and does not touch
+            // either gameplay binding.
             Assert.That(NetworkSettings.LanProtocolVersion, Is.EqualTo(2));
             Assert.That(NetworkSettings.GameplayVersion,
                 Is.EqualTo("gameplay-2"));
-            Assert.That(NetworkSettings.StateSchemaVersion, Is.EqualTo(4));
+            Assert.That(NetworkSettings.StateSchemaVersion, Is.EqualTo(5));
         }
 
         [Test]

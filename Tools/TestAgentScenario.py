@@ -82,11 +82,78 @@ class IntegrityTests(unittest.TestCase):
             validate_state_schema(record, record["state"])
 
     def test_unsupported_schemas_are_rejected_before_driving_evidence(self):
-        for schema in (0, 5, "2", True):
+        for schema in (0, 6, "2", True):
             record = self.record()
             record["stateSchemaVersion"] = schema
             with self.subTest(schema=schema), self.assertRaises(AssertionError):
                 validate_state_schema(record, record["state"])
+
+    def schema5_state(self):
+        return {
+            "stateSchemaVersion": 5,
+            "driving": None,
+            "drivingEvents": [],
+            "network": {
+                "role": "host", "phase": "lobby", "localParticipantId": "p",
+                "participants": [], "paused": False, "pauseRequests": [],
+                "lastError": "", "pendingOperations": [],
+                "discovered": [], "results": [],
+            },
+            "networkRace": None,
+            "prediction": None,
+            "remotePresentation": {"racers": []},
+            "networkLink": None,
+            "presentation": {
+                "textDirection": "ltr",
+                "renderProfile": "tablet",
+                "renderScale": 0.75,
+                "targetFrameRate": 30,
+                "renderingAvailable": True,
+                "performance": {
+                    "profile": "tablet",
+                    "captureValid": True,
+                    "frames": 120,
+                    "racingSamples": 90,
+                    "medianFrameMs": 32.0,
+                    "p95FrameMs": 38.0,
+                    "maxFrameMs": 41.0,
+                    "reportStatus": "none",
+                    "reportError": "",
+                    "gpuTimingStatus": "unavailable",
+                    "processMemoryStatus": "external",
+                    "processMemoryMetric": "process.totalPss",
+                    "processMemorySource": "adb dumpsys meminfo",
+                    "processMemoryUnits": "bytes",
+                },
+            },
+        }
+
+    def test_schema_5_boundary_includes_presentation_slice(self):
+        record = self.record()
+        record["stateSchemaVersion"] = 5
+        record["state"] = self.schema5_state()
+        validate_state_schema(record, record["state"])
+        # A disabled capture publishes the performance key as null.
+        record["state"]["presentation"]["performance"] = None
+        validate_state_schema(record, record["state"])
+
+    def test_schema_5_rejects_missing_or_forged_presentation(self):
+        record = self.record()
+        record["stateSchemaVersion"] = 5
+        record["state"] = self.schema5_state()
+        for mutate in (
+            lambda s: s.pop("presentation"),
+            lambda s: s["presentation"].pop("renderProfile"),
+            lambda s: s["presentation"].pop("performance"),
+            lambda s: s["presentation"].update(renderProfile="quantum"),
+            lambda s: s["presentation"].update(renderingAvailable="yes"),
+            lambda s: s["presentation"]["performance"].pop("reportStatus"),
+        ):
+            state = self.schema5_state()
+            mutate(state)
+            record["state"] = state
+            with self.subTest(mutate=mutate), self.assertRaises(AssertionError):
+                validate_state_schema(record, state)
 
     def test_schema_3_requires_the_network_slices(self):
         record = self.record()

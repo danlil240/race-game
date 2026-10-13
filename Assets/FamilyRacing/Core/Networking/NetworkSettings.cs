@@ -17,8 +17,11 @@ namespace FamilyRacing.Core.Networking
         // separate version and stays in Core/Profiles. Schema 4 adds the
         // physical-state surfaces: racer DTOs may carry the compact
         // NetworkPhysicsState projection and host descriptors the content
-        // fingerprint.
-        public const int StateSchemaVersion = 4;
+        // fingerprint. Schema 5 (M4 Task 2) is additive presentation truth:
+        // the applied render profile and a bounded render-performance
+        // summary on PresentationState — never frame-sized buffers, and
+        // nothing that crosses the gameplay wire DTO.
+        public const int StateSchemaVersion = 5;
 
         // Compatibility fingerprint for gameplay rules: peers must report
         // the exact same value before a slot is allocated. Content version

@@ -180,6 +180,16 @@ namespace FamilyRacing.Automation
             stream.EmitResult(result);
         }
 
+        // Sequenced report-write outcome for the render-performance capture:
+        // "written" carries the file, "failed" the code — report health is
+        // durable stream evidence, not only a log line.
+        internal void EmitPerformance(string file, string status,
+            string error, long tick)
+        {
+            if (finishRequested) return;
+            stream.EmitPerformance(file, status, error, tick);
+        }
+
         private void AttachPending()
         {
             ControllerSession candidate;

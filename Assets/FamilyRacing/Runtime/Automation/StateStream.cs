@@ -295,6 +295,19 @@ namespace FamilyRacing.Automation
             Emit(record);
         }
 
+        // A sequenced performance-report outcome (M4 Task 2): the compact
+        // report's write health is durable trace evidence — a failed or
+        // refused write can never look like a delivered report.
+        internal void EmitPerformance(string file, string status,
+            string error, long tick)
+        {
+            var record = Record("performance", tick, null);
+            record["file"] = file ?? "";
+            record["status"] = status ?? "unknown";
+            record["error"] = error ?? "";
+            Emit(record);
+        }
+
         // Unsequenced protocol error frame; socket only, never traced.
         internal void EmitError(string code)
         {

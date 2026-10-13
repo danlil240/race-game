@@ -50,16 +50,18 @@ import uuid
 from pathlib import Path
 
 from AgentScenario import (BOUNDARY_TYPES, Client, StateReconstructor,
-                           SUPPORTED_STATE_SCHEMAS, verify_trace)
+                           SUPPORTED_STATE_SCHEMAS,
+                           validate_schema5_presentation, verify_trace)
 from RestartScenario import file_hash, wait_connection, write_json
 
 
 # The observation schema this scenario requires — mirrors
-# NetworkSettings.StateSchemaVersion in the pinned build. Schema 4 is the
-# protocol-2 epoch: physical LAN replication, content fingerprints on
-# descriptors/discovery, and P1 gameplay envelopes. Historical schema-3
-# evidence is not valid proof of a current build.
-REQUIRED_LAN_SCHEMA = 4
+# NetworkSettings.StateSchemaVersion in the pinned build. Schema 5 (M4)
+# adds the additive render-profile/performance presentation slice on top
+# of the schema-4 protocol-2 epoch (physical LAN replication, content
+# fingerprints on descriptors/discovery, P1 gameplay envelopes).
+# Historical schema-3/4 evidence is not valid proof of a current build.
+REQUIRED_LAN_SCHEMA = 5
 
 # The schema-3+ session phases in their legal neighbourhood graph. A phase
 # may repeat or move only along an edge the session policy permits; any
@@ -142,6 +144,11 @@ def validate_lan_state(state):
             "prediction exists only on a client; the host is authoritative"
         assert state.get("networkRace") is not None, \
             "prediction without a live LAN race"
+
+    # Schema 5: LAN evidence at this schema must also carry the additive
+    # presentation slice — the render profile this endpoint actually
+    # applied and its bounded performance summary contract.
+    validate_schema5_presentation(state)
 
     # The result/reward ledger is unique per (resultId, participantId):
     # a duplicated row is a duplicated reward claim. The immutable result

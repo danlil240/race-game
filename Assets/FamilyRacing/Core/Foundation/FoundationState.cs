@@ -8,8 +8,9 @@ namespace FamilyRacing.Core.Foundation
 {
     // Serializable full-state DTO. Every Snapshot() call returns an
     // independent deep copy; callers can freely mutate what they receive.
-    // stateSchemaVersion 3 adds the network session slice; consumers must
-    // negotiate the schema, never silently reinterpret it.
+    // stateSchemaVersion 3 adds the network session slice, 4 the physical
+    // surfaces, and 5 the render-profile/performance presentation slice;
+    // consumers must negotiate the schema, never silently reinterpret it.
     [Serializable]
     public sealed class FoundationState
     {
@@ -89,11 +90,26 @@ namespace FamilyRacing.Core.Foundation
         // networkRace slice is host-confirmed shared state and a local
         // camera choice is not shared state.
         public DrivingCameraState camera;
+        // --- Schema-5 additive slice (M4 Task 2) --------------------------
+        // The render profile actually applied on this device — "tablet",
+        // "pc", "none" before any Apply, or "missing" after a refused one.
+        // Published with the applied render scale and frame-rate target so
+        // an observer can never mistake the tablet profile for the PC one.
+        public string renderProfile = "none";
+        public float renderScale;
+        public int targetFrameRate;
+        // False on a headless run: frame intervals then describe unrendered
+        // frames and can never pass as rendered-player evidence.
+        public bool renderingAvailable = true;
+        // Bounded render-performance summary (counts/percentiles/health —
+        // never per-frame buffers). Null only when capture is disabled.
+        public RenderPerformanceSummary performance;
 
         public PresentationState Copy()
         {
             var copy = (PresentationState)MemberwiseClone();
             copy.camera = camera != null ? camera.Copy() : null;
+            copy.performance = performance != null ? performance.Copy() : null;
             return copy;
         }
     }
