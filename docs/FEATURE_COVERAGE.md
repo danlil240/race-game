@@ -266,3 +266,13 @@ clean finish completes the second capture.
   compiled out of ordinary builds, proven in the task-10 report),
   render frame times, and the four-racer/tablet-host target remain
   unmeasured.
+- Ordinary Windows LAN play is **not verified**: it can only be
+  demonstrated by humans driving ordinary builds on two machines —
+  validation sockets are compiled out of ordinary builds by design, so
+  no agent attach exists. The Android analogue is likewise open: the
+  offline APK pipeline builds with `BuildOptions.Development`
+  (`DEVELOPMENT_BUILD` defined, validation bridge present for ADB
+  attach); an ordinary APK path is documented in
+  `docs/NETWORK_TEST_RUNBOOK.md` ("Android: ordinary (non-development)
+  build") but no Verify mode produces one, and ordinary-build
+  performance needs physical profiling rather than this harness.

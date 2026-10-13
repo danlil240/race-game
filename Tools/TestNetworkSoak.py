@@ -3,7 +3,8 @@
 These tests prove the soak can catch lies without any player: rematches
 that reuse race/result identities, rewards delivered twice or never
 settled, results claimed before the results phase, duplicated racers in
-an immutable result, malformed per-device health samples, and the
+an immutable result, failed deliveries that are not permanent
+ineligible verdicts, malformed per-device health samples, and the
 mandated CLI contract (--connections/--minutes/--evidence)."""
 
 import argparse
@@ -12,18 +13,24 @@ import unittest
 from pathlib import Path
 
 from NetworkSoak import (RaceLedger, build_parser, cycle_class,
-                         deliveries_settled, health_sample,
-                         should_start_cycle, soak_inputs, summarize_race)
+                         deliveries_settled, delivery_verdicts,
+                         health_sample, record_delivery_verdicts,
+                         should_start_cycle, soak_inputs, soak_status,
+                         summarize_race)
 
 
 def results_state(result_id="res-1", race_id="race-1",
                   session_id="session-1", phase="results",
-                  delivery_states=("persisted",)):
+                  delivery_states=("persisted",),
+                  delivery_codes=None, outcomes=None):
     """A minimal well-formed post-race observation for one endpoint."""
+    codes = delivery_codes or ("",) * 4
+    racer_outcomes = outcomes or ("finished",) * 4
     racers = [
         {"position": index + 1, "slot": index,
          "participantId": "p-%d" % index, "vehicleId": "car-01",
-         "attribution": "human", "outcome": "finished",
+         "attribution": "human",
+         "outcome": racer_outcomes[index % len(racer_outcomes)],
          "finishTicks": 900 + index, "lapsCompleted": 1,
          "coinsAwarded": 20}
         for index in range(4)]
@@ -33,7 +40,8 @@ def results_state(result_id="res-1", race_id="race-1",
             "results": [
                 {"resultId": result_id, "raceId": race_id,
                  "participantId": "p-%d" % index,
-                 "state": delivery_states[index % len(delivery_states)]}
+                 "state": delivery_states[index % len(delivery_states)],
+                 "code": codes[index % len(codes)]}
                 for index in range(4)],
         },
         "networkRace": {
@@ -173,6 +181,20 @@ class RaceLedgerTests(unittest.TestCase):
         ledger.record(summarize_race(state, "t"), "cycle-0")
         self.assertEqual(len(ledger.deliveries), 4)
 
+    def test_summary_surfaces_delivery_codes_and_outcomes(self):
+        # The verdict check needs the row's code (ResultDeliveryState.code)
+        # and the immutable result's per-racer outcome side by side.
+        summary = summarize_race(
+            results_state(delivery_states=("persisted", "failed"),
+                          delivery_codes=("", "ineligible:dnf"),
+                          outcomes=("finished", "dnf")),
+            "t")
+        self.assertEqual(summary["deliveries"]["p-1"], "failed")
+        self.assertEqual(summary["deliveryCodes"]["p-1"],
+                         "ineligible:dnf")
+        self.assertEqual(summary["deliveryCodes"]["p-0"], "")
+        self.assertEqual(summary["outcomes"]["p-1"], "dnf")
+
     def test_deliveries_settled_predicate(self):
         self.assertTrue(deliveries_settled(
             results_state(delivery_states=("persisted", "failed"))))
@@ -182,6 +204,104 @@ class RaceLedgerTests(unittest.TestCase):
             results_state(delivery_states=("persisted", "pending"))))
         self.assertFalse(deliveries_settled({"network": {"results": []}}))
         self.assertFalse(deliveries_settled({}))
+
+
+class DeliveryVerdictTests(unittest.TestCase):
+    """Failed delivery rows are judged by the NetworkScenario
+    settle_results standard: `failed` is a legal outcome only when the
+    code is exactly the permanent `ineligible:<outcome>` verdict the
+    immutable result itself records. `saveFailed`, an absent code, or a
+    verdict contradicting the result must fail the soak run — a
+    systematic persistence regression can never yield a passing soak
+    with incidents."""
+
+    def test_save_failed_delivery_fails_the_run(self):
+        report = {"incidents": []}
+        state = results_state(delivery_states=("failed",),
+                              delivery_codes=("saveFailed",))
+        verdicts = delivery_verdicts(
+            {"host": summarize_race(state, "host")})
+        self.assertEqual(len(verdicts), 4)
+        self.assertTrue(all(not verdict["honest"]
+                            for verdict in verdicts))
+        dishonest = record_delivery_verdicts(report, verdicts, 0)
+        self.assertTrue(dishonest)
+        self.assertEqual(len(report["incidents"]), 4)
+        for incident in report["incidents"]:
+            self.assertEqual(incident["kind"], "deliveryFailed")
+            self.assertEqual(incident["code"], "saveFailed")
+            self.assertFalse(incident["honest"])
+        status, error = soak_status({}, dishonest)
+        self.assertEqual(status, "failed")
+        self.assertIsNotNone(error)
+
+    def test_ineligible_verdict_passes_with_the_incident_logged(self):
+        report = {"incidents": []}
+        state = results_state(
+            delivery_states=("persisted", "failed"),
+            delivery_codes=("", "ineligible:dnf"),
+            outcomes=("finished", "dnf"))
+        verdicts = delivery_verdicts(
+            {"host": summarize_race(state, "host")})
+        self.assertEqual(len(verdicts), 2)
+        self.assertTrue(all(verdict["honest"] for verdict in verdicts))
+        # An honest ineligible verdict is still recorded as an incident —
+        # legal outcome, visible evidence — but it must not fail the run.
+        dishonest = record_delivery_verdicts(report, verdicts, 0)
+        self.assertFalse(dishonest)
+        self.assertEqual(len(report["incidents"]), 2)
+        for incident in report["incidents"]:
+            self.assertEqual(incident["kind"], "deliveryFailed")
+            self.assertEqual(incident["code"], "ineligible:dnf")
+            self.assertTrue(incident["honest"])
+        status, error = soak_status({}, dishonest)
+        self.assertEqual(status, "passed")
+        self.assertIsNone(error)
+
+    def test_absent_or_mismatched_code_fails_the_run(self):
+        # No code at all, and an ineligible verdict the immutable result
+        # contradicts (racer finished, not dnf), are both dishonest.
+        for codes, outcomes in (
+                (("",), ("finished",) * 4),
+                (("ineligible:dnf",), ("finished",) * 4)):
+            with self.subTest(code=codes[0]):
+                state = results_state(delivery_states=("failed",),
+                                      delivery_codes=codes,
+                                      outcomes=outcomes)
+                verdicts = delivery_verdicts(
+                    {"host": summarize_race(state, "host")})
+                self.assertTrue(all(not verdict["honest"]
+                                    for verdict in verdicts))
+                status, _ = soak_status(
+                    {}, any(not verdict["honest"]
+                            for verdict in verdicts))
+                self.assertEqual(status, "failed")
+
+    def test_retained_ledger_failures_obey_the_prefix_rule(self):
+        # Failed rows retained from an earlier race outlive their result
+        # slice — the outcome cross-check no longer applies, only the
+        # ineligible-prefix requirement, matching settle_results.
+        state = results_state()
+        state["network"]["results"].append(
+            {"resultId": "res-old", "raceId": "race-old",
+             "participantId": "p-0", "state": "failed",
+             "code": "saveFailed"})
+        verdicts = delivery_verdicts(
+            {"host": summarize_race(state, "host")})
+        self.assertEqual(len(verdicts), 1)
+        self.assertFalse(verdicts[0]["honest"])
+        state["network"]["results"][-1]["code"] = "ineligible:dnf"
+        verdicts = delivery_verdicts(
+            {"host": summarize_race(state, "host")})
+        self.assertTrue(verdicts[0]["honest"])
+
+    def test_lost_peers_and_clean_deliveries(self):
+        status, error = soak_status({"client-0": object()}, False)
+        self.assertEqual(status, "failed")
+        self.assertIn("client-0", error)
+        status, error = soak_status({}, False)
+        self.assertEqual(status, "passed")
+        self.assertIsNone(error)
 
 
 class HealthSampleTests(unittest.TestCase):

@@ -23,7 +23,11 @@ input.set holds (light family traffic — never teleports, never
 sleeps-as-proof) and a periodic health sample. Per-device boundary
 cadence is recorded at the socket; the immutable-result/delivery ledger
 is checked once-only across every rematch (fresh raceId/resultId per
-race, each (resultId, participantId) reward delivered exactly once); and
+race, each (resultId, participantId) reward delivered exactly once) —
+a `failed` delivery row is a legal outcome only when its `code` is the
+permanent `ineligible:<outcome>` verdict the immutable result itself
+implies (the NetworkScenario settle standard); any other failure code
+fails the run; and
 every endpoint's NDJSON trace is verified independently at teardown with
 the full NetworkScenario LAN verification — contiguous sequencing,
 schema-3 boundary validity, legal phase transitions, async command
@@ -139,9 +143,22 @@ def summarize_race(state, label):
     assert len(participants) == len(set(participants)), \
         label + ": duplicated racer in the immutable result"
     deliveries = {}
+    delivery_codes = {}
+    retained_failures = []
     for row in network.get("results") or []:
         if row.get("resultId") == result["resultId"]:
             deliveries[row["participantId"]] = row["state"]
+            delivery_codes[row["participantId"]] = row.get("code") or ""
+        elif row.get("state") == "failed":
+            # Failed rows retained from earlier races outlive their
+            # result slice: the outcome cross-check no longer applies,
+            # only the ineligible-prefix requirement (the settle_results
+            # standard).
+            retained_failures.append({
+                "resultId": row["resultId"],
+                "participantId": row["participantId"],
+                "code": row.get("code") or "",
+            })
     assert deliveries, label + ": no delivery rows for the finalized result"
     return {
         "sessionId": race.get("sessionId"),
@@ -152,6 +169,10 @@ def summarize_race(state, label):
         "finishers": sum(1 for racer in result["racers"]
                          if racer.get("outcome") == "finished"),
         "deliveries": deliveries,
+        "deliveryCodes": delivery_codes,
+        "outcomes": {racer.get("participantId"): racer.get("outcome")
+                     for racer in result.get("racers", [])},
+        "retainedFailures": retained_failures,
     }
 
 
@@ -321,6 +342,66 @@ def deliveries_settled(state):
         row.get("state") in ("persisted", "failed") for row in rows)
 
 
+def delivery_verdicts(summaries):
+    """One verdict per `failed` delivery row across the summarized
+    endpoints, judged by the same standard NetworkScenario's
+    settle_results asserts: a `failed` row is honest only when its
+    `code` is exactly the permanent ineligible verdict the immutable
+    result's own outcome implies (`ineligible:<outcome>`). `saveFailed`,
+    an absent code, or an ineligible verdict contradicting the recorded
+    outcome is a dishonest failure that must fail the soak — incident
+    evidence, never a passing footnote."""
+    verdicts = []
+    for role in sorted(summaries):
+        summary = summaries[role]
+        for participant, state in sorted(summary["deliveries"].items()):
+            if state != "failed":
+                continue
+            code = summary["deliveryCodes"].get(participant) or ""
+            expected = "ineligible:" + str(
+                summary["outcomes"].get(participant))
+            verdicts.append({
+                "role": role, "participant": participant,
+                "code": code, "expected": expected,
+                "honest": code == expected})
+        for row in summary["retainedFailures"]:
+            code = row["code"]
+            verdicts.append({
+                "role": role, "participant": row["participantId"],
+                "resultId": row["resultId"], "code": code,
+                "expected": "ineligible:*",
+                "honest": code.startswith("ineligible:")})
+    return verdicts
+
+
+def record_delivery_verdicts(report, verdicts, cycle):
+    """Append one deliveryFailed incident per failed row — the observed
+    code and the honesty verdict recorded — and return True when any
+    failure was dishonest (the run-level failure trigger)."""
+    dishonest = False
+    for verdict in verdicts:
+        report["incidents"].append({
+            "kind": "deliveryFailed", "role": verdict["role"],
+            "participant": verdict["participant"], "cycle": cycle,
+            "code": verdict["code"], "honest": verdict["honest"]})
+        if not verdict["honest"]:
+            dishonest = True
+    return dishonest
+
+
+def soak_status(lost, dishonest_delivery):
+    """The honest top-level verdict: a lost participant or a failed
+    delivery that is not a permanent ineligible verdict fails the run
+    no matter how many races completed cleanly."""
+    if lost:
+        return "failed", "lost participant(s): " + \
+            ", ".join(sorted(lost))
+    if dishonest_delivery:
+        return "failed", "result delivery failed for a recoverable " \
+            "or result-mismatched reason (see deliveryFailed incidents)"
+    return "passed", None
+
+
 def enter_lobby(peers, host, clients, checks, host_address,
                 discovery_timeout=8):
     """Profiles -> lan-browser -> host on an ephemeral port -> every
@@ -388,6 +469,7 @@ def run_soak(connection_paths, evidence, minutes, host_address=None,
     trace_dirs = {}
     ledger = RaceLedger()
     lost = {}
+    dishonest_delivery = False
     try:
         assert 2 <= len(connection_paths) <= 4, \
             "--connections takes 2-4 connection descriptors"
@@ -453,6 +535,7 @@ def run_soak(connection_paths, evidence, minutes, host_address=None,
                 break
             survivors = [(role, peer) for role, peer in peers
                          if role not in lost]
+            summaries = {}
             try:
                 for role, peer in survivors:
                     wait_state(peer, deliveries_settled,
@@ -461,17 +544,13 @@ def run_soak(connection_paths, evidence, minutes, host_address=None,
                     summary = summarize_race(peer.state, role)
                     summary["role"] = role
                     ledger.record(summary, "%s %s" % (label, role))
+                    summaries[role] = summary
             except (AssertionError, KeyError) as error:
                 report["incidents"].append({
                     "kind": "resultLedger", "cycle": cycle,
                     "detail": str(error)[:300]})
                 break
-            failed_deliveries = [
-                (role, pid, state)
-                for role, peer in survivors
-                for pid, state in summarize_race(
-                    peer.state, role)["deliveries"].items()
-                if state == "failed"]
+            verdicts = delivery_verdicts(summaries)
             report["cycles"].append({
                 "cycle": cycle, "class": class_id,
                 "elapsedSeconds": round(time.monotonic() - start, 1),
@@ -479,13 +558,15 @@ def run_soak(connection_paths, evidence, minutes, host_address=None,
                 "resultId": ledger.races[-1]["resultId"],
                 "deliveries": ledger.races[-1]["deliveries"],
                 "failedDeliveries": [
-                    {"role": role, "participant": pid}
-                    for role, pid, _ in failed_deliveries],
+                    {"role": verdict["role"],
+                     "participant": verdict["participant"],
+                     "resultId": verdict.get("resultId"),
+                     "code": verdict["code"],
+                     "honest": verdict["honest"]}
+                    for verdict in verdicts],
             })
-            for role, pid, _state in failed_deliveries:
-                report["incidents"].append({
-                    "kind": "deliveryFailed", "role": role,
-                    "participant": pid, "cycle": cycle})
+            if record_delivery_verdicts(report, verdicts, cycle):
+                dishonest_delivery = True
             checks.append("cycle %d: %s race completed with immutable "
                           "result %s" % (cycle, class_id,
                                          ledger.races[-1]["resultId"]))
@@ -510,12 +591,20 @@ def run_soak(connection_paths, evidence, minutes, host_address=None,
         report["racesCompleted"] = len(report["cycles"])
 
         # Teardown: host leave -> survivors land on recovery -> each
-        # leaves honestly. Lost peers are skipped, not forced.
+        # leaves honestly. Lost peers are skipped, not forced. A
+        # `noSession` rejection is the NetworkScenario tolerance: a late
+        # session close may already have expired the endpoint back to
+        # the browser, so there is honestly nothing left to leave — an
+        # already-clean exit, not a failure.
         survivors = [(role, peer) for role, peer in peers
                      if role not in lost]
         if survivors:
             try:
-                host.applied("lan.leave")
+                result, _ = host.command("lan.leave")
+                if result["status"] == "rejected":
+                    assert result["code"] == "noSession", result
+                else:
+                    assert result["status"] == "applied", result
                 wait_state(host,
                            lambda state: state["network"]["role"] == "none"
                            and state["screen"] == "lan-browser",
@@ -526,15 +615,20 @@ def run_soak(connection_paths, evidence, minutes, host_address=None,
                     wait_state(
                         peer,
                         lambda state: state["network"]["phase"]
-                        == "recovery",
+                        in ("recovery", "idle"),
                         30, role + " recovery")
-                    peer.applied("lan.leave")
+                    result, _ = peer.command("lan.leave")
+                    if result["status"] == "rejected":
+                        assert result["code"] == "noSession", result
+                    else:
+                        assert result["status"] == "applied", result
                     wait_state(
                         peer,
                         lambda state: state["network"]["role"] == "none",
                         15, role + " left")
                 checks.append("teardown: host leave, client recovery, "
-                              "clean leave on every surviving endpoint")
+                              "clean leave (or honest noSession) on "
+                              "every surviving endpoint")
             except (AssertionError, KeyError) as error:
                 report["incidents"].append({
                     "kind": "teardownFailed",
@@ -571,11 +665,10 @@ def run_soak(connection_paths, evidence, minutes, host_address=None,
                 assert peer.max_backlog_steps < MAX_STEPS_PER_FRAME, \
                     role + " backlog stayed saturated"
 
-        if lost:
-            report["error"] = "lost participant(s): " + \
-                ", ".join(sorted(lost))
-        else:
-            report["status"] = "passed"
+        status, error = soak_status(lost, dishonest_delivery)
+        report["status"] = status
+        if error is not None:
+            report["error"] = error
     except Exception as error:
         report["error"] = type(error).__name__ + ": " + str(error)
     finally:

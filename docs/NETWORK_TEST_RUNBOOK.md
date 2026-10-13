@@ -37,7 +37,7 @@ Latest recorded result: **174/174 PlayMode**
 (`Logs/verify-playmode-results.xml`, M3 task-10 gate, 2026-10-12). Full
 gate at that revision: EditMode 507 + 1 explicit voice-clip Ignore
 (`EveryCueHasWiredClipForBothLocales`, credential-gated), Core 468,
-Python tooling 127, verify-tooling 12/12.
+Python tooling 133, verify-tooling 12/12.
 
 ## Windows: private-network firewall setup (do NOT disable the firewall)
 
@@ -84,6 +84,51 @@ needs (`Assets/Plugins/Android/AndroidManifest.xml`):
   before any socket opens; denial fails start immediately
   (`DeniedAccessDoesNotOpenSockets`).
 
+## Android: ordinary (non-development) build
+
+The published APK **is** a development build — this is now stated
+explicitly. `Tools\Verify.ps1 -Mode Android` runs
+`Tools\Build-AndroidOffline.ps1`, which calls
+`FamilyRacing.EditorTools.FoundationBuild.ExportAndroid`
+(`Assets/FamilyRacing/Editor/FoundationBuild.cs`): the Gradle export is
+produced with `BuildOptions.Development |
+BuildOptions.AcceptExternalModificationsToPlayer`, then bundled Gradle
+builds `:launcher:assembleDebug` under `--offline`. `BuildOptions.
+Development` defines `DEVELOPMENT_BUILD`, so the debug APK **does**
+carry `DEVELOPMENT_BUILD` and **does** contain the loopback,
+token-protected validation bridge — that is exactly what lets the
+scenario tools attach over ADB forwarding on Android.
+
+An ordinary Android build has **no automated `Verify` mode today**. The
+path is the same two stages with the development flag removed:
+
+1. Export the Gradle project from the pinned editor without
+   `BuildOptions.Development` — either a `FoundationBuild` entry point
+   that passes `BuildOptions.AcceptExternalModificationsToPlayer` alone
+   to `BuildPipeline.BuildPlayer`, or the Editor's Build Settings window
+   with "Development Build" unchecked. Everything else in
+   `ExportAndroid` stays identical (`exportAsGoogleAndroidProject`,
+   `buildAppBundle = false`, the `Builds\Android\offline` export-dir
+   contract, `VerifyBuildConfiguration`).
+2. Build it with the same bundled-Gradle offline invocation
+   (`:launcher:assembleDebug --offline`) used by
+   `Tools\Build-AndroidOffline.ps1`.
+
+That APK is the Android analogue of `-Mode WindowsOrdinary`: same
+content and backend, `DEVELOPMENT_BUILD` undefined, validation
+endpoints compiled out — no `--validation-dir` socket, no
+`connection.json`, no agent attach.
+
+**Instrumented-vs-ordinary comparison (honest line):** instrumented
+(development) performance is measurable through the validation harness
+— boundary cadence, health samples, backlog — on both Windows and
+ADB-attached Android. Ordinary-build performance **cannot** be measured
+by this harness on either platform: the endpoints are compiled out, so
+it requires physical profiling (e.g. Unity Profiler against a
+development build approximates, but the ordinary figure needs
+device-side measurement on the ordinary player itself). No such
+measurement exists yet — it stays in the open-gates list below.
+
 ## Scenario tools (all attach via `connection.json`, never an exe path)
 
 | Tool | Drives | Evidence |
@@ -97,12 +142,12 @@ needs (`Assets/Plugins/Android/AndroidManifest.xml`):
 | Date (UTC) | Check | Result |
 |---|---|---|
 | 2026-10-12 | `Verify.ps1 -Mode PlayMode` LAN + driving suite | 174/174 pass (`Logs/verify-playmode-results.xml`) |
-| 2026-10-12 | Full gate (M3 task 10) | Core 468/468, EditMode 507 + 1 explicit voice-clip Ignore, Python 127/127, verify-tooling 12/12 |
+| 2026-10-12 | Full gate (M3 task 10) | Core 468/468, EditMode 507 + 1 explicit voice-clip Ignore, Python 133/133, verify-tooling 12/12 |
 | 2026-10-12 | `Verify.ps1 -Mode Windows` Mono development build | Succeeded; see `docs/tasks/network-prototype-report.md` for the hash at the qualified revision |
 | 2026-10-12 | `Verify.ps1 -Mode WindowsOrdinary` Mono ordinary build | Succeeded; validation endpoints compiled out — launching with `--validation-dir` produces no `connection.json` and opens no socket |
 | 2026-10-12 | `Verify.ps1 -Mode Android` export + offline Gradle | Succeeded; APK hash + exported target SDK recorded in the task-10 report |
 | 2026-10-12 | `NetworkScenario.py --launch` on the task-10 build | 22/22 checks pass incl. process-kill AI takeover, credentialed rejoin, host loss (`Logs/evidence-t10-lan-final9`); details in the task-10 report |
-| 2026-10-12 | `NetworkSoak.py` tool + unit coverage | Tool delivered (`TestNetworkSoak.py` 22/22); real 30-minute multi-device soak is hardware-gated |
+| 2026-10-12 | `NetworkSoak.py` tool + unit coverage | Tool delivered (`TestNetworkSoak.py` 28/28); real 30-minute multi-device soak is hardware-gated |
 
 ## Open evidence gates (explicit — hardware or human review required)
 
@@ -111,6 +156,15 @@ environment. Each is **not verified** — never passed by a desktop
 substitute. The authoritative list with per-row status lives in
 `docs/tasks/network-prototype-report.md`:
 
+- Ordinary Windows LAN play: two human-driven ordinary Windows builds on
+  a real LAN (discovery/manual join, race, results, rematch) —
+  validation sockets are compiled out of ordinary builds by design, so
+  this can only ever be demonstrated by a human; no agent attach exists.
+- Ordinary-build performance, both platforms: the offline Android APK is
+  a development build (`DEVELOPMENT_BUILD` defined); an ordinary APK
+  path is documented above but not automated, and ordinary-build frame
+  performance cannot be measured by this harness — it requires physical
+  profiling on the ordinary player.
 - Tablet-to-tablet session (two supported tablets, internet disconnected):
   discovery/manual join, ready/countdown, race/results/rematch, touch.
 - Mixed-platform session (Windows ↔ Android, either hosting), including

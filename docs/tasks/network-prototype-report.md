@@ -31,7 +31,7 @@ documentation delta in this commit). Prior task-9 baseline
 | Core | `Tools\Verify.ps1 -Mode Core` | **468 passed / 0 failed** |
 | EditMode | `Tools\Verify.ps1 -Mode EditMode` | **507 passed / 0 failed / 1 explicitly skipped** — `EveryCueHasWiredClipForBothLocales` (unchanged credential-gated voice-clip gate; no AZURE_SPEECH_KEY in this environment) |
 | PlayMode | `Tools\Verify.ps1 -Mode PlayMode` | **174 passed / 0 failed** (`Logs/verify-playmode-results.xml`; +3 vs task-9 baseline from new regression tests below) |
-| Python tooling | `python -B -m unittest discover -s Tools -p "Test*.py"` | **127 passed / 0 failed** |
+| Python tooling | `python -B -m unittest discover -s Tools -p "Test*.py"` | **133 passed / 0 failed** on the fix-round tree (127 at the task-10 commit + 6 soak delivery-verdict honesty tests added in fix round 1) |
 | Verify tooling | `Tools\Test-VerifyTooling.ps1` | **12 passed / 0 failed** |
 
 Note: one intermediate EditMode run showed a transient
@@ -46,7 +46,7 @@ regression.
 |---|---|---|---|
 | Windows Mono **development** | `Tools\Verify.ps1 -Mode Windows` | `Builds\Windows\FamilyRacing.exe` | exe stub `b7cca8b82003185f22644d0ee1c23b3640de1b996802d4f5d0501e287011afa6` (Unity launcher stub is incremental — freshness is in `FamilyRacing_Data\Managed\FamilyRacing.Core.dll`/`FamilyRacing.Runtime.dll`, rebuilt 2026-10-13 02:25 local); log `Logs\verify-unity-windows.log` |
 | Windows Mono **ordinary** | `Tools\Verify.ps1 -Mode WindowsOrdinary` | `Builds\Windows-Ordinary\FamilyRacing.exe` | exe `eb143ead6441b6dd9d7d145adb85410e9389fb3878899ae537e8c9869cce38fa`; `BuildOptions.None`, no `DEVELOPMENT_BUILD` |
-| Android IL2CPP debug APK | `Tools\Verify.ps1 -Mode Android` (offline export + bundled Gradle `--offline`) | `Builds\Android\FamilyRacing.apk` | **`21c9498d3aa5ca978e1cf943ba74bfecc9181321999b9d4e4db304811f254977`**; evidence `Logs\android-offline\20261012-234239-c9fac196bebf4b3c9c9358c5aab86e87\result.json`; exported `unityLibrary\build.gradle`: compileSdk **36**, minSdk **25**, targetSdk **36** (serialized `AndroidTargetSdkVersion: 0` = automatic, resolves to 36 in the export) |
+| Android IL2CPP debug APK (**development** — `BuildOptions.Development`, `DEVELOPMENT_BUILD` defined, validation bridge present for ADB attach) | `Tools\Verify.ps1 -Mode Android` (offline export + bundled Gradle `--offline`) | `Builds\Android\FamilyRacing.apk` | **`21c9498d3aa5ca978e1cf943ba74bfecc9181321999b9d4e4db304811f254977`**; evidence `Logs\android-offline\20261012-234239-c9fac196bebf4b3c9c9358c5aab86e87\result.json`; exported `unityLibrary\build.gradle`: compileSdk **36**, minSdk **25**, targetSdk **36** (serialized `AndroidTargetSdkVersion: 0` = automatic, resolves to 36 in the export). No `Verify` mode produces an Android *ordinary* build today — the path and its consequences are documented in `docs/NETWORK_TEST_RUNBOOK.md` ("Android: ordinary (non-development) build") |
 
 ### Ordinary-build validation absence — demonstrated, not asserted
 
@@ -56,7 +56,10 @@ received only `stdout.txt` — **no `connection.json`, no `state.ndjson`,
 no `profiles/`**, and no validation socket was bound. The flag is
 compiled out of ordinary builds (`FoundationApp` + `ValidationBridge`
 are behind `DEVELOPMENT_BUILD`/`UNITY_EDITOR`), so automation can only
-ever attach to development/editor players.
+ever attach to development/editor players. The Android equivalent —
+an ordinary (non-development) APK — is documented in
+`docs/NETWORK_TEST_RUNBOOK.md` ("Android: ordinary (non-development)
+build"); no `Verify` mode produces one today.
 
 ## Real-process scenario evidence (fresh development build)
 
@@ -66,7 +69,7 @@ input paths.
 
 | Scenario | Evidence | Result |
 |---|---|---|
-| `NetworkScenario.py --launch` (two instances, real UDP, process-kill fault injection) | `Logs\evidence-t10-lan-final9\result.json` (+ `evidence-t10-network-h` on the pre-cleanup build) | **22/22 checks passed** — discovery/join, schema-3, duplicate command dedupe, countdown→racing, bounded input normalization, camera toggles, recover ack, shared pause/resume, **process-kill → AI takeover → credentialed rejoin**, immutable results + honest delivery (`ineligible:dnf` for the dropped seat), rematch, second vehicle class, **host loss → lan-recovery → honest failed reconnect**, browser return; verified traces (host 9700 / client-0 9490 events, no incomplete commands, legal phase table) |
+| `NetworkScenario.py --launch` (two instances, real UDP, process-kill fault injection) | `Logs\evidence-t10-lan-final9\result.json` (+ `evidence-t10-network-h` on the pre-cleanup build) | **22/22 checks passed** — discovery/join, schema-3, duplicate command dedupe, countdown→racing, bounded input normalization, camera toggles, recover ack, shared pause/resume, **process-kill → AI takeover → credentialed rejoin**, immutable results + honest delivery (`ineligible:dnf` for the dropped seat), rematch, second vehicle class, **host loss → lan-recovery → honest failed reconnect**, browser return; verified traces (host 13379 / client-0 16737 events, no incomplete commands, legal phase table) |
 | `DrivingScenario.py` | `Logs\evidence-t10-driving2\result.json` | **28/28 checks** — both vehicles, honest full laps, recovery, restart identities, capacity projection |
 | `AgentScenario.py` | `Logs\evidence-t10-agent3\result.json` | **21/21 checks** — command surface, profiles, tutorial, driving, capture |
 | `RestartScenario.py` | `Logs\evidence-t10-restart2\result.json` | **6/6** — persistence across two processes, byte-identical save hashes |
@@ -109,7 +112,12 @@ input paths.
 - `Tools/NetworkSoak.py` (new) + `Tools/TestNetworkSoak.py` — the
   mandated `--connections … --minutes … --evidence` attach harness for a
   sustained multi-device soak; unit-tested, hardware-gated for the real
-  30-minute run.
+  30-minute run. A `failed` delivery row is a legal outcome only as the
+  permanent `ineligible:<outcome>` verdict the immutable result itself
+  implies (the `NetworkScenario.settle_results` standard) — any other
+  code (`saveFailed`, absent, or result-mismatched) logs a
+  `deliveryFailed` incident *and* fails the run. Teardown `lan.leave`
+  tolerates an honest `noSession` rejection as an already-clean exit.
 
 ## Physical / human evidence matrix — NOT VERIFIED
 
@@ -120,6 +128,7 @@ above substitutes for them:
 
 | Row | Status | What is missing |
 |---|---|---|
+| Ordinary Windows LAN play (two human-driven ordinary Windows builds on a real LAN: discovery/manual join, race, results, rematch) | **not verified** | Human-driven ordinary builds on two machines — validation sockets are compiled out of ordinary builds by design, so no agent attach exists |
 | Tablet-to-tablet session (discovery or manual join, countdown, race, results, rematch, touch input) | **not verified** | Two supported tablets |
 | Mixed-platform session (Windows ↔ Android, either hosting; version-mismatch rejection on real devices) | **not verified** | One Android device |
 | Four-physical-device session (A7 Lite host, four humans, repeated races, AI takeover/rejoin, 30-min `NetworkSoak.py`) | **not verified** | Four devices + participants |
