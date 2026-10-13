@@ -110,6 +110,41 @@ namespace FamilyRacing.Core.Racing
         public TutorialState tutorial;
         public List<string> controls = new List<string>();
 
+        // --- Task 11 physical observability -------------------------------
+        // The simulation backend this session actually steps through —
+        // the race-level selection, not the vehicle declaration, so an
+        // arcade race seating a physical-declared tuning still reports
+        // "arcade". Vocabulary: "arcade" | "physicalAssisted".
+        public string simulationBackend = "arcade";
+        // The canonical tuned-content fingerprint this session was
+        // created under (DrivingContentCatalog.CompatibilityFingerprint)
+        // — the tuning identity every physics assertion binds to.
+        // Empty when the host could not supply one.
+        public string contentFingerprint = "";
+        // The reason of the most recent recovery this session applied
+        // (RecoveryRules vocabulary plus "manual"); empty until the
+        // first recovery. A rule-fact mirror of the race.recovered
+        // event detail so a delta consumer can attribute an epoch bump
+        // without mining the event ledger.
+        public string lastRecoveryReason = "";
+        // The three ordered substep-boundary poses of the most recent
+        // stepped interval (offsets 0, 1/60, 1/30 s): the within-tick
+        // motion evidence a regular 30 Hz boundary would otherwise
+        // flatten — contact blips and mid-interval excursions included.
+        // Empty until the first stepped boundary. Deliberately NOT
+        // JsonUtility-serializable (the element type is a plain struct):
+        // this diagnostic rides the state stream only and never crosses
+        // the compact LAN snapshot wire.
+        public List<VehiclePathSample> substepPath = new List<VehiclePathSample>();
+        // Live simulation cost/shape counters for the world this session
+        // steps through (the optional IVehicleSimulationDiagnostics
+        // seam): tick/substep counts, body roster, wall-clock step cost,
+        // invalid-state refusals. Null before the first stepped boundary
+        // or on a backend that exposes none. Attached by the owning
+        // service/coordinator — the session only publishes it — and
+        // never serialized to the LAN wire.
+        public VehicleSimulationDiagnostics simulation;
+
         // Deep copy matching the rest of the DTO family: the Task-5 wire
         // decode path produces fresh objects, but observation copies must
         // never alias a live or shared session state either.
@@ -148,13 +183,22 @@ namespace FamilyRacing.Core.Racing
                     throttle = input.throttle
                 },
                 camera = camera != null ? camera.Copy() : null,
-                tutorial = tutorial != null ? tutorial.Copy() : null
+                tutorial = tutorial != null ? tutorial.Copy() : null,
+                simulationBackend = simulationBackend,
+                contentFingerprint = contentFingerprint,
+                lastRecoveryReason = lastRecoveryReason,
+                simulation = simulation != null ? simulation.Copy() : null
             };
             foreach (var mark in checkpoints)
                 copy.checkpoints.Add(mark != null ? mark.Copy() : null);
             foreach (var action in pendingActions)
                 copy.pendingActions.Add(action != null ? action.Copy() : null);
             copy.controls.AddRange(controls);
+            // VehiclePathSample is a value type — AddRange copies the
+            // samples, so the published list never aliases the session's
+            // staged path array.
+            if (substepPath != null)
+                copy.substepPath.AddRange(substepPath);
             return copy;
         }
     }

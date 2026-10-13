@@ -126,7 +126,8 @@ def validate_lan_state(state):
                     "ownershipEpoch"):
             assert key in participant, "participant missing " + key
     assert "networkRace" in state and "prediction" in state \
-        and "remotePresentation" in state
+        and "remotePresentation" in state \
+        and "networkLink" in state
     assert_no_secrets(session, "state.network")
 
     # Predicted-vs-authoritative separation: while a LAN race exists the

@@ -113,7 +113,8 @@ namespace FamilyRacing
                 // player would freeze Pump and the controller could never attach.
                 Application.runInBackground = true;
                 bridge = new ValidationBridge(service, runId, validationDir,
-                    ExecuteAndEmit, MarkInputSource);
+                    ExecuteAndEmit, MarkInputSource,
+                    ValidationTraceLimitBytes());
                 presentation.validationActive = true;
 #else
                 Debug.LogError("--validation-dir ignored: validation endpoints are disabled in regular builds.");
@@ -214,6 +215,11 @@ namespace FamilyRacing
                 service.SetRemotePresentationState(
                     raceBridge != null ? raceBridge.RemotePresentation
                         : null);
+                // Task 11: the bridge's own packet/loss counters ride the
+                // same boundary — transport starvation vs session
+                // rejection stays observable instead of inferred.
+                service.SetNetworkLinkState(
+                    raceBridge != null ? raceBridge.LinkState() : null);
                 service.AdvanceTick();
                 // One snapshot per tick boundary: the presentation refresh
                 // mutates service state after the snapshot is taken, so the
@@ -518,6 +524,26 @@ namespace FamilyRacing
                     return args[i + 1];
 #endif
             return null;
+        }
+
+        // --validation-trace-mb <N>: the still-bounded capture ceiling for
+        // this run, in MiB. The default is the shared 256 MiB bound;
+        // physical-diagnostic streams run ~500 KB/s of boundary data, so
+        // qualification launches raise the bound deliberately (e.g. 1024)
+        // instead of dropping required fields. Values outside 64-2048 MiB
+        // clamp into range — never unbounded, never absurdly small.
+        private static long ValidationTraceLimitBytes()
+        {
+            const long mib = 1024L * 1024L;
+            var args = Environment.GetCommandLineArgs();
+            for (var i = 0; i < args.Length - 1; i++)
+            {
+                if (args[i] != "--validation-trace-mb") continue;
+                int mib_;
+                if (int.TryParse(args[i + 1], out mib_))
+                    return Math.Max(64, Math.Min(2048, mib_)) * mib;
+            }
+            return Automation.StateStream.DefaultMaxTraceBytes;
         }
 
         private static readonly Lazy<IReadOnlyDictionary<string, string>> EmptyParameters =

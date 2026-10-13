@@ -57,6 +57,7 @@ namespace FamilyRacing.Automation
         private readonly string token;
         private readonly string deviceId;
         private readonly StateStream stream;
+        private readonly long traceLimitBytes;
         private readonly ConcurrentQueue<InboundItem> inbound = new ConcurrentQueue<InboundItem>();
         private readonly object sessionLock = new object();
         private TcpListener listener;
@@ -68,7 +69,8 @@ namespace FamilyRacing.Automation
         private volatile bool finishRequested;
 
         internal ValidationBridge(FoundationService service, string runId, string directory,
-            Func<GameCommand, CommandResult> executeAndEmit, Action<string> markInputSource)
+            Func<GameCommand, CommandResult> executeAndEmit, Action<string> markInputSource,
+            long maxTraceBytes = StateStream.DefaultMaxTraceBytes)
         {
             this.service = service;
             this.executeAndEmit = executeAndEmit;
@@ -88,8 +90,10 @@ namespace FamilyRacing.Automation
 
             stream = new StateStream(directory, runId, deviceId,
                 FoundationService.RequiredParticipant, BuildVersion,
-                () => service.ContentVersion);
+                () => service.ContentVersion,
+                maxTraceBytes: maxTraceBytes);
             stream.Start();
+            traceLimitBytes = maxTraceBytes;
 
             listener = new TcpListener(IPAddress.Loopback, 0);
             listener.Start();
@@ -116,6 +120,11 @@ namespace FamilyRacing.Automation
             info["participantId"] = FoundationService.RequiredParticipant;
             info["stateSchemaVersion"] = NetworkSettings.StateSchemaVersion;
             info["contentVersion"] = service.ContentVersion;
+            // The configured trace bound, so verification tools measure the
+            // capture against the run's actual limit — the default remains
+            // StateStream.DefaultMaxTraceBytes; physical-diagnostic runs
+            // configure a larger (still bounded) ceiling at launch.
+            info["traceLimitBytes"] = traceLimitBytes;
             File.WriteAllText(Path.Combine(directory, "connection.json"),
                 ValidationJson.Line(info) + "\n");
         }

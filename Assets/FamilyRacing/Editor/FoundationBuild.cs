@@ -50,6 +50,28 @@ namespace FamilyRacing.EditorTools
             Report(report, "Windows Mono ordinary build (no validation)");
         }
 
+        // Opt-in physical-backend development player: regenerates the
+        // physics content (tunings, vehicles, course, lab + race scenes)
+        // and builds the self-bootstrapping PhysicsRace scene — the same
+        // validation endpoints the ordinary development player carries,
+        // but with the PhysicalAssisted catalog and the shared graybox
+        // course. Explicit scene override so the lab/race scene never
+        // has to join EditorBuildSettings (it stays opt-in developer
+        // content per VehiclePhysicsSetup's contract).
+        public static void WindowsPhysics()
+        {
+            FoundationProjectSetup.Create();
+            VehiclePhysicsSetup.Create();
+            NetworkPrototypeSetup.VerifyBuildConfiguration(BuildTarget.StandaloneWindows64);
+            var report = Build("Builds/Windows-Physics/FamilyRacing.exe",
+                BuildTarget.StandaloneWindows64, BuildOptions.Development,
+                new[]
+                {
+                    "Assets/FamilyRacing/Generated/Physics/PhysicsRace.unity"
+                });
+            Report(report, "Windows Mono physics development build");
+        }
+
         public static void Android()
         {
             // Retain the old entry point, but never implicitly invoke online
@@ -100,12 +122,14 @@ namespace FamilyRacing.EditorTools
         }
 
         private static BuildReport Build(string location, BuildTarget target,
-            BuildOptions options)
+            BuildOptions options, string[] scenesOverride = null)
         {
-            var scenes = EditorBuildSettings.scenes
-                .Where(scene => scene.enabled)
-                .Select(scene => scene.path)
-                .ToArray();
+            var scenes = scenesOverride != null && scenesOverride.Length > 0
+                ? scenesOverride
+                : EditorBuildSettings.scenes
+                    .Where(scene => scene.enabled)
+                    .Select(scene => scene.path)
+                    .ToArray();
             if (scenes.Length == 0)
                 throw new InvalidOperationException("No enabled scenes in build settings.");
             var buildOptions = new BuildPlayerOptions

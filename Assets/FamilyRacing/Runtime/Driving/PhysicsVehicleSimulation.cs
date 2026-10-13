@@ -14,7 +14,8 @@ namespace FamilyRacing
     // flagged recovery boundary) produce non-interfering kinematic
     // ghosts; collision callbacks are collected during Simulate and only
     // turned into ordered MotorEvents afterwards.
-    public sealed class PhysicsVehicleSimulation : IVehicleSimulation
+    public sealed class PhysicsVehicleSimulation : IVehicleSimulation,
+        IVehicleSimulationDiagnostics
     {
         public const float TickSeconds = 1f / 30f;
         public const float SubstepSeconds = 1f / 60f;
@@ -42,6 +43,9 @@ namespace FamilyRacing
         private readonly List<MotorPose> substepPoses = new List<MotorPose>();
         private bool disposed;
         private bool initialized;
+        private double lastStepSeconds;
+        private double totalStepSeconds;
+        private long invalidStateFaults;
 
         public PhysicsVehicleSimulation(PhysicsCourseWorld courseWorld)
         {
@@ -55,6 +59,27 @@ namespace FamilyRacing
         public double SimulatedSeconds
         {
             get { return TicksSimulated * (1.0 / 30.0); }
+        }
+
+        // Observable cost/shape facts for the state stream (Task 11):
+        // the tick/substep counters, live body roster, wall-clock step
+        // cost, and the invalid-state refusal count. An independent
+        // snapshot each call — the diagnostic never crosses the LAN wire.
+        public VehicleSimulationDiagnostics Diagnostics
+        {
+            get
+            {
+                return new VehicleSimulationDiagnostics
+                {
+                    backend = "physicalAssisted",
+                    ticksSimulated = TicksSimulated,
+                    substepsSimulated = SubstepsSimulated,
+                    bodies = ordered.Count,
+                    lastStepSeconds = lastStepSeconds,
+                    totalStepSeconds = totalStepSeconds,
+                    invalidStateFaults = invalidStateFaults
+                };
+            }
         }
 
         // --- test/lab seams -------------------------------------------------
@@ -181,6 +206,7 @@ namespace FamilyRacing
                 nameof(PhysicsVehicleSimulation));
             if (!initialized)
                 Initialize(null);
+            var watch = System.Diagnostics.Stopwatch.StartNew();
             TicksSimulated++;
             results.Clear();
             BuildPlan(requests);
@@ -310,6 +336,12 @@ namespace FamilyRacing
                 b.becameAirborneThisTick = false;
                 b.landedThisTick = false;
             }
+            for (var i = 0; i < plan.Count; i++)
+                if (plan[i].error != null)
+                    invalidStateFaults++;
+            watch.Stop();
+            lastStepSeconds = watch.Elapsed.TotalSeconds;
+            totalStepSeconds += lastStepSeconds;
             return results;
         }
 
@@ -400,15 +432,22 @@ namespace FamilyRacing
             // The legacy (physics == null) restore path derives body
             // velocity straight from the legacy speed fields — a
             // non-finite value there would write NaN/Infinity into
-            // PhysX. Reject atomically; never clamp silently.
+            // PhysX. Reject atomically; never clamp silently. A refused
+            // restore is an observable fault, never a silent drop.
             if (!Finite(state.x) || !Finite(state.y) || !Finite(state.z)
                 || !Finite(state.heading) || !Finite(state.speed)
                 || !Finite(state.lateralSpeed)
                 || !Finite(state.verticalSpeed))
+            {
+                invalidStateFaults++;
                 return;
+            }
             if (state.physics != null
                 && !state.physics.Validate(out _))
+            {
+                invalidStateFaults++;
                 return;
+            }
             body.ApplyRestore(state);
         }
 

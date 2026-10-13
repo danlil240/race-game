@@ -364,4 +364,48 @@ namespace FamilyRacing.Core.Networking
             return copy;
         }
     }
+
+    // Observable replication-link counters for the validation stream
+    // (Task 11): the replication bridge's own packet/loss facts so a
+    // state consumer can tell "no snapshots arrived" apart from
+    // "snapshots arrived and were rejected" — the difference between a
+    // transport wedge and a session fence. Null until a replication
+    // bridge exists; the host and every client publish their own side's
+    // counters under the same field name.
+    [Serializable]
+    public sealed class NetworkLinkState
+    {
+        // Gameplay datagrams seen at the transport demux on THIS
+        // endpoint (host: inbound input batches; client: inbound
+        // snapshots). A frozen counter on a client while the host's
+        // snapshotsPublished climbs is wire loss, not a stopped sender.
+        public long gameplayPacketsSeen;
+        // Gameplay packets dropped before application: oversized,
+        // malformed, wrong direction, or foreign-session.
+        public long droppedPackets;
+        // Snapshots rejected as reordered or stale-race (client only).
+        public long staleSnapshots;
+        // Authoritative events dropped by the staged-send cap or by
+        // already-seen dedup on the client.
+        public long droppedEvents;
+        // Host-side snapshot datagrams encoded and pushed (host only).
+        public long snapshotsPublished;
+        // Host-side input frames refused by validation (host only).
+        public long inputRejections;
+        // One-shot action ids still awaiting a host apply/cancel
+        // acknowledgment (client only) — proves retries terminate.
+        public int pendingOneShots;
+        // Host tick carried by the newest accepted snapshot (client) —
+        // a direct staleness measurement against the host's own tick.
+        public long lastSnapshotHostTick = -1;
+        // Last codec/publish failure on this endpoint in plain terms.
+        public string lastError = "";
+        // Host-side input-validation error code (host only).
+        public string lastInputError = "";
+
+        public NetworkLinkState Copy()
+        {
+            return (NetworkLinkState)MemberwiseClone();
+        }
+    }
 }

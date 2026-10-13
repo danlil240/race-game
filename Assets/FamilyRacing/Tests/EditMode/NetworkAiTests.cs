@@ -341,6 +341,116 @@ namespace FamilyRacing.Tests
                 "a followable approach speed must not manufacture brake");
         }
 
+        // Physical pursuit feasibility: the physical backend's reachable
+        // turn radius is real (wheel authority AND the friction ellipse),
+        // so a target inside that radius can only be orbited — the
+        // honest response is the same brake a human presses to shrink
+        // the radius. The arcade kinematic, whose constant-rate heading
+        // can reach any bearing, sees no such brake.
+        private static DrivingSessionState PhysicalRacerAt(float x, float z,
+            float heading, float speed)
+        {
+            var racer = RacerAt(x, z, heading, speed);
+            racer.vehicleId = "car-physics-01";
+            racer.simulationBackend = "physicalAssisted";
+            return racer;
+        }
+
+        [Test]
+        public void AiPhysicalBrakeCoversUnreachablePursuitTarget()
+        {
+            var ai = new AiDriver();
+            // Wide-square route: the pursuit target is the next vertex —
+            // place the racer 12 m short of it at cruise speed. The
+            // physical car's reachable radius at 16 m/s (~30 m) swallows
+            // the target — inside the off-axis Dubins disc, not merely
+            // near the car: steering alone would orbit, so brake demand
+            // must fire — ordinary DriverInput.Brake, not a slowdown.
+            // Heading 0.4 rad off the target bearing saturates the
+            // steering demand, so drift would engage on a flat gate —
+            // the pursuit brake's suppression is what the assert sees.
+            var racer = PhysicalRacerAt(0f, 48f, 0.4f, 16f);
+            var sample = ai.Sample(racer, WideSquareCourse());
+            Assert.That(sample.Brake, Is.GreaterThan(0.15f),
+                "a pursuit target inside the reachable turn radius must " +
+                "drive held brake on the physical backend");
+            Assert.That(sample.Drift, Is.False,
+                "the pursuit brake suppresses drift: a shrinking radius " +
+                "needs the rear bite a drift surrenders");
+            Assert.That(sample.Boost, Is.False,
+                "boost stays gated off while the pursuit brake demands");
+
+            // Arcade identical pose: the kinematic heading reaches any
+            // bearing at speed, so no pursuit brake may appear — the
+            // change is strictly physical-backend aware.
+            var arcade = new AiDriver();
+            var eased = arcade.Sample(
+                RacerAt(0f, 48f, 0f, 16f), WideSquareCourse());
+            Assert.That(eased.Brake, Is.EqualTo(0f),
+                "the arcade backend's constant-rate heading must not " +
+                "manufacture a pursuit brake");
+
+            // Physical, but the target is beyond the reachable radius:
+            // steering alone converges and no brake is fabricated.
+            var far = new AiDriver();
+            var sample2 = far.Sample(
+                PhysicalRacerAt(0f, 0f, 0f, 16f), WideSquareCourse());
+            Assert.That(sample2.Brake, Is.EqualTo(0f),
+                "a pursuit target beyond the reachable radius brakes nothing");
+        }
+
+        [Test]
+        public void AiPursuitBrakeIgnoresDeadAheadTarget()
+        {
+            // The Dubins unreachable discs sit BESIDE the heading axis:
+            // a pursuit target well inside the reachable radius but
+            // nearly dead ahead is reachable by driving straight, and
+            // braking for it only slows lines that were never orbiting
+            // (live regression: the authored-ramp approach slowed, the
+            // shortened jump fell off the edge, and the same overturn
+            // cycle repeated until the lap bound broke).
+            var ai = new AiDriver();
+            var course = WideSquareCourse();
+            // The (0,-30) -> (0,30) leg is dead straight: the pursuit
+            // target lands ~28 m ahead, inside the ~32 m reachable
+            // radius at 16 m/s — the old distance-only test braked
+            // ~0.7 here; the Dubins disc test sees the target outside
+            // both tangent circles and demands nothing.
+            var racer = PhysicalRacerAt(0f, -18f, 0f, 16f);
+            var sample = ai.Sample(racer, course);
+            Assert.That(sample.Brake, Is.EqualTo(0f),
+                "a dead-ahead pursuit target inside the turn radius " +
+                "must not brake — it is reachable, not orbited");
+        }
+
+        [Test]
+        public void AiDisplacementWatchdogSeesThroughSpeedometer()
+        {
+            var ai = new AiDriver();
+            var course = WideSquareCourse();
+            // A car ramming a wall reads real speed while its net
+            // position never moves — the velocity streak stays blind,
+            // so the displacement watchdog is what requests the same
+            // ordinary recover one-shot a stalled car presses.
+            var ramming = RacerAt(0f, 20f, 0f, 10f);
+            var seen = false;
+            for (var i = 0; i < NetworkSettings.AiProgressStuckTicks + 4; i++)
+                seen |= ai.Sample(ramming, course).Recover;
+            Assert.That(seen, Is.True,
+                "a grounded racer pinned inside the progress disc must " +
+                "request recovery even while the speedometer reads speed");
+
+            // A moving racer re-anchors the disc: an honest slow drive
+            // never accumulates the streak.
+            var moving = new AiDriver();
+            var seenMoving = false;
+            for (var i = 0; i < NetworkSettings.AiProgressStuckTicks + 4; i++)
+                seenMoving |= moving.Sample(
+                    RacerAt(i * 0.5f, 20f, 0f, 3f), course).Recover;
+            Assert.That(seenMoving, Is.False,
+                "net displacement outside the disc must reset the watchdog");
+        }
+
         [Test]
         public void AiBoostStaysAStraightLineAssist()
         {

@@ -23,6 +23,10 @@ namespace FamilyRacing.Core.Racing
     public sealed class AiDriver
     {
         private const float TwoPi = (float)(Math.PI * 2.0);
+        // The session vocabulary for DrivingSessionState.simulationBackend
+        // ("arcade" | "physicalAssisted"); the physical path needs the
+        // pursuit-feasibility brake below because its turn radius is real.
+        private const string PhysicalBackendId = "physicalAssisted";
 
         // Lateral lane offset applied perpendicular to the local route
         // direction at the current target. The coordinator gives each
@@ -33,6 +37,15 @@ namespace FamilyRacing.Core.Racing
         private bool initialized;
         private int routeIndex;
         private int stuckTicks;
+        private int progressTicks;
+        private float progressAnchorX;
+        private float progressAnchorZ;
+        // Escalating aim skip: repeated displacement wedges mean the
+        // fixed lane aims into an obstruction; each streak moves the
+        // pursuit one waypoint further ahead. Gate progress clears it.
+        private int wedgeSkips;
+        private int lastNextCheckpoint = -1;
+        private bool wasRecovering;
 
         public AiDriver()
             : this(0f)
@@ -58,6 +71,13 @@ namespace FamilyRacing.Core.Racing
                 || !Finite(motor.heading))
                 return default;
 
+            // Gate progress clears the wedge escalation — a fresh
+            // section starts clean instead of carrying a stale skip.
+            if (racer.nextCheckpoint != lastNextCheckpoint)
+            {
+                lastNextCheckpoint = racer.nextCheckpoint;
+                wedgeSkips = 0;
+            }
             var route = course.route;
             float tx, tz;
             if (route != null && route.Count > 0)
@@ -65,12 +85,24 @@ namespace FamilyRacing.Core.Racing
                 // First contact (or a respawn boundary) re-anchors onto
                 // the nearest route point — a disconnect/rejoin takeover
                 // or a recovery starts following from where the body
-                // actually is instead of rewinding to index zero.
+                // actually is instead of rewinding to index zero. The
+                // wedge escalation survives the respawn boundary on
+                // purpose: respawning erases position but not the fact
+                // that the direct line trapped the body — the re-anchor
+                // aims the accrued skip ahead of the nearest point, and
+                // each respawn's edge accrues one skip itself so the
+                // rules' quicker recoveries (stuck/beached/off-course
+                // fire inside the watchdog window) still escalate the
+                // line instead of repeating it.
                 if (!initialized || motor.recovering)
                 {
-                    routeIndex = NearestIndex(motor, route);
+                    if (motor.recovering && !wasRecovering)
+                        wedgeSkips = (wedgeSkips + 1) % route.Count;
+                    routeIndex = (NearestIndex(motor, route) + wedgeSkips)
+                        % route.Count;
                     initialized = true;
                 }
+                wasRecovering = motor.recovering;
                 AdvanceIndex(motor, route);
                 var wp = route[routeIndex];
                 var prev = route[(routeIndex - 1 + route.Count) % route.Count];
@@ -117,10 +149,25 @@ namespace FamilyRacing.Core.Racing
             // ordinary brake control a human presses, not a privileged
             // slowdown: the backend's brake force decides what it does.
             var brake = CornerBrake(racer, course);
+            // Physical pursuit feasibility: a physical racer's reachable
+            // turn radius is bounded by real wheel-angle authority AND
+            // the friction ellipse — it never shrinks to the arcade
+            // kinematic's constant-rate bound. When the pursuit target
+            // sits inside the reachable disc, steering alone can only
+            // orbit it forever (the waypoint stays beyond both the reach
+            // and passed-forgiveness windows); the human answer is
+            // braking until the reachable radius closes on the target.
+            var pursuitBrake = racer.simulationBackend == PhysicalBackendId
+                ? PursuitBrake(racer, tx, tz)
+                : 0f;
+            if (pursuitBrake > brake) brake = pursuitBrake;
             // Drift is a normal input: real steering demand at speed, so
             // DriftEligible's ordinary gates (grounded, min speed,
-            // threshold) decide whether it actually engages.
+            // threshold) decide whether it actually engages. While the
+            // pursuit brake is active a drift would surrender exactly the
+            // rear bite the shrinking radius needs, so it stays off.
             var drift = motor.grounded
+                && pursuitBrake <= 0f
                 && Math.Abs(steer) >= NetworkSettings.AiDriftSteerThreshold
                 && motor.speed >= NetworkSettings.AiDriftMinSpeed;
             // Boost is held on straights with a charged meter — the same
@@ -145,6 +192,60 @@ namespace FamilyRacing.Core.Racing
             else
             {
                 stuckTicks = 0;
+            }
+            // Displacement watchdog, windowed: a speedometer cannot see
+            // a wall-ramming or ramp-stall loop — the motor reads real
+            // speed into the obstruction while the net position never
+            // moves, so the velocity streak above stays blind. Once per
+            // streak window the check asks whether the grounded position
+            // covered less than the stuck span since the last window —
+            // a bouncing wedge cannot dodge it by escaping a fixed disc
+            // because the anchor re-seats every window and net
+            // displacement stays small either way. A legitimately moving
+            // car always covers the span. A respawn boundary resets the
+            // window instead of counting the teleport.
+            if (motor.grounded && !motor.recovering)
+            {
+                if (progressTicks == 0)
+                {
+                    progressAnchorX = motor.x;
+                    progressAnchorZ = motor.z;
+                }
+                progressTicks++;
+                if (progressTicks >= NetworkSettings.AiProgressStuckTicks)
+                {
+                    progressTicks = 0;
+                    if (Distance(motor.x - progressAnchorX,
+                            motor.z - progressAnchorZ)
+                            <= NetworkSettings.AiProgressStuckMeters)
+                    {
+                        recover = true;
+                        // The firing window also escalates the pursuit
+                        // further ahead: re-driving the exact aim that
+                        // wedged it would re-wedge deterministically
+                        // (lane offset never changes), while the
+                        // checkpoint rules — not the route — decide what
+                        // counts, so aiming past the obstruction stays
+                        // honest. The skip persists across the recovery
+                        // respawn through wedgeSkips, so each cycle aims
+                        // measurably further along the loop instead of
+                        // repeating the same line.
+                        if (route != null && route.Count > 0)
+                        {
+                            wedgeSkips = (wedgeSkips + 1) % route.Count;
+                            routeIndex = (routeIndex + 1 + wedgeSkips)
+                                % route.Count;
+                        }
+                    }
+                    progressAnchorX = motor.x;
+                    progressAnchorZ = motor.z;
+                }
+            }
+            else
+            {
+                progressTicks = 0;
+                progressAnchorX = motor.x;
+                progressAnchorZ = motor.z;
             }
             return new DriverInput(steer, drift, boost, false, recover,
                 false, false, null, brake);
@@ -226,6 +327,101 @@ namespace FamilyRacing.Core.Racing
             if (target == float.MaxValue || speed <= target) return 0f;
             return Clamp((speed - target) / NetworkSettings.AiBrakeOverspeedSpan,
                 0f, 1f);
+        }
+
+        // Brake demand while the pursuit target sits inside the turn
+        // radius reachable at the current speed — the physical backend's
+        // orbit breaker. The demand is the size of the unreachable disc
+        // beyond the target's distance, ramped over the same span
+        // CornerBrake uses for overshoot: barely inside yields a touch,
+        // deep inside yields full braking. Ordinary DriverInput.Brake —
+        // the backend's brake force decides the deceleration.
+        private float PursuitBrake(DrivingSessionState racer,
+            float tx, float tz)
+        {
+            var phys = ClassPhysicsTuning(racer.vehicleId);
+            if (phys == null) return 0f;
+            var motor = racer.motor;
+            var speed = motor.speed;
+            if (!Finite(speed) || speed <= 0.1f) return 0f;
+            var radius = PhysicalTurnRadius(phys, speed);
+            if (float.IsInfinity(radius) || radius <= 0.001f) return 0f;
+            // Exact Dubins unreachability: the target must sit inside
+            // one of the two minimum-radius tangent circles — the discs
+            // a constant-radius arc from this heading can never enter —
+            // not merely within `radius` of the car. A target dead ahead
+            // inside that disc IS reachable by driving straight, so the
+            // old distance-only test braked on approach lines that were
+            // never orbiting (observed live: the authored-ramp approach
+            // slowed to ~8 m/s, the shortened jump dropped off the ramp
+            // edge, and the same overturn cycle repeated).
+            var fx = (float)Math.Sin(motor.heading);
+            var fz = (float)Math.Cos(motor.heading);
+            var lx = tx - (motor.x - fz * radius);
+            var lz = tz - (motor.z + fx * radius);
+            var rx = tx - (motor.x + fz * radius);
+            var rz = tz - (motor.z - fx * radius);
+            var insideSq = Math.Min(lx * lx + lz * lz,
+                                    rx * rx + rz * rz);
+            if (insideSq >= radius * radius) return 0f;
+            var margin = radius - (float)Math.Sqrt(insideSq);
+            return Clamp(margin
+                / NetworkSettings.AiBrakeOverspeedSpan, 0f, 1f);
+        }
+
+        // Steady-state turn radius a physical vehicle can actually hold
+        // at this speed: the larger of the wheel-angle (Ackermann) bound
+        // and the friction-ellipse bound. The grip margin keeps the
+        // ellipse budget honest — drive force and surface noise consume
+        // part of mu*N, so demanding the full coefficient would promise
+        // a radius the tires cannot deliver.
+        private static float PhysicalTurnRadius(VehiclePhysicsTuning phys,
+            float speed)
+        {
+            var authority = VehicleAssistRules.SteeringTarget(
+                1f, speed, phys);
+            var geometric = authority > 0.0001f
+                ? Wheelbase(phys) / (float)Math.Tan(authority)
+                : float.MaxValue;
+            var friction = speed > 0.001f
+                ? speed * speed / (phys.frictionCoefficient
+                    * VehiclePhysicsTuning.StandardGravity
+                    * NetworkSettings.AiCorneringMargin)
+                : 0f;
+            return Math.Max(geometric, friction);
+        }
+
+        // The physics preset the class convention resolves to — the same
+        // authored presets the physical vehicles are generated from.
+        // Unknown classes yield no pursuit model rather than a guessed
+        // one.
+        private static VehiclePhysicsTuning ClassPhysicsTuning(
+            string vehicleId)
+        {
+            switch (VehicleTuning.ClassIdOf(vehicleId))
+            {
+                case "car": return VehiclePhysicsTuning.Car01();
+                case "motorcycle": return VehiclePhysicsTuning.Motorcycle01();
+                default: return null;
+            }
+        }
+
+        // Axle span from the authored wheel mounts — the Ackermann
+        // wheelbase the steering geometry turns about.
+        private static float Wheelbase(VehiclePhysicsTuning phys)
+        {
+            var wheels = phys.wheels;
+            if (wheels == null || wheels.Length == 0) return 1f;
+            var min = float.MaxValue;
+            var max = float.MinValue;
+            foreach (var w in wheels)
+            {
+                if (w == null) continue;
+                if (w.mountZ < min) min = w.mountZ;
+                if (w.mountZ > max) max = w.mountZ;
+            }
+            var span = max - min;
+            return span > 0.01f ? span : 1f;
         }
 
         private static float Distance(float x, float z)

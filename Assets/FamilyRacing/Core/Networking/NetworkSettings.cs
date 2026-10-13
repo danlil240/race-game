@@ -92,6 +92,13 @@ namespace FamilyRacing.Core.Networking
         // recover input — the same one-shot a human presses.
         public const float AiRecoverStuckSpeed = 0.75f;
         public const int AiRecoverStuckTicks = 45; // 1.5 s at 30 Hz
+        // Displacement watchdog, windowed: a grounded racer covering
+        // less than this span across one window is stuck even while its
+        // speedometer reads motion — wall-ramming and ramp-stall loops
+        // move at real speed with no net progress. Under ~0.6 m/s of
+        // honest advance the check can never trip a moving car.
+        public const float AiProgressStuckMeters = 3f;
+        public const int AiProgressStuckTicks = 150; // 5 s at 30 Hz
         // Per-slot lateral lane spread (metres between lanes): slots aim
         // at (slot - centre) * spacing off the route line so four AI
         // racers fan out instead of tailgating.
@@ -164,8 +171,13 @@ namespace FamilyRacing.Core.Networking
         // Full four-racer snapshots publish on every second host tick —
         // 15 Hz against the 30 Hz simulation — with a hard byte ceiling.
         // Overflow fails explicitly rather than truncating racer state.
+        // The 32 KiB bound covers the physical-backend wire: the compact
+        // NetworkPhysicsState projection per racer plus the shared race
+        // envelope crosses 16 KiB within the first minute of a real race
+        // (live evidence: run-physics-t11-s, snapshotOverflow after 45
+        // publishes) — arcade snapshots sit far below either bound.
         public const int SnapshotEveryTicks = 2;
-        public const int SnapshotCeilingBytes = 16 * 1024;
+        public const int SnapshotCeilingBytes = 32 * 1024;
         // Typed payload limits for the gameplay wire: client->host input
         // packets and the reliable host->client event batches.
         public const int MaxInputPacketBytes = 4 * 1024;

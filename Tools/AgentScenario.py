@@ -135,6 +135,12 @@ def validate_state_schema(event, state):
         for key in ("network", "networkRace", "prediction",
                     "remotePresentation"):
             assert key in state, "Schema-3 state is missing " + key
+        # Schema-4 adds the replication-link counter slice: always a
+        # present key (null until a replication bridge exists) so a
+        # consumer can tell transport starvation from rejected traffic.
+        if schema >= 4:
+            assert "networkLink" in state, \
+                "Schema-4 state is missing networkLink"
         session = state["network"]
         assert isinstance(session, dict), "network must be an object"
         for key in ("role", "phase", "localParticipantId", "participants",
@@ -219,7 +225,13 @@ def validate_state_tick(state, event_tick, previous_tick):
 
 def verify_trace(directory, info):
     trace = directory / "state.ndjson"
-    assert trace.stat().st_size <= 256 * 1024 * 1024, "Trace exceeded configured storage bound"
+    # The bound is whatever the run configured: connection.json carries
+    # traceLimitBytes; legacy descriptors without it are held to the
+    # shared 256 MiB default.
+    bound = int((info or {}).get("traceLimitBytes")
+                or 256 * 1024 * 1024)
+    assert trace.stat().st_size <= bound, \
+        "Trace exceeded configured storage bound"
     sequence, timestamp = None, None
     state_tick = None
     first = True

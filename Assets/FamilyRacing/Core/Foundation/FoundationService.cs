@@ -470,7 +470,9 @@ namespace FamilyRacing.Core.Foundation
                 prediction = networkPrediction != null
                     ? networkPrediction.Copy() : null,
                 remotePresentation = networkRemotePresentation != null
-                    ? networkRemotePresentation.Copy() : null
+                    ? networkRemotePresentation.Copy() : null,
+                networkLink = networkLinkState != null
+                    ? networkLinkState.Copy() : null
             };
             if (driving != null)
             {
@@ -478,6 +480,13 @@ namespace FamilyRacing.Core.Foundation
                 state.driving.camera = cameraFacts != null ? cameraFacts.Copy() : new DrivingCameraState();
                 state.driving.tutorial = tutorial != null ? tutorial.Snapshot() : null;
                 FillDrivingControls(state.driving);
+                // The live world's cost/shape facts ride the session
+                // state when the backend exposes them — null before the
+                // first stepped boundary, never fabricated (Task 11).
+                var diagnostics = drivingSimulation
+                    as IVehicleSimulationDiagnostics;
+                if (diagnostics != null && drivingSimulationFor == driving)
+                    state.driving.simulation = diagnostics.Diagnostics;
             }
             foreach (var ev in drivingEvents)
                 state.drivingEvents.Add(ev.Copy());
@@ -1215,8 +1224,17 @@ namespace FamilyRacing.Core.Foundation
             // affordance (sandbox/driving only) and must never leak into a
             // fresh session started from a screen without one.
             paused = false;
+            // The canonical tuned-content fingerprint and the catalog's
+            // race-level backend selection ride the session state so a
+            // stream consumer binds physics evidence to a tuning
+            // identity (Task 11). The fingerprint detects ANY canonical
+            // tuning delta, not just authored version bumps.
             return new DrivingSession(raceId, tuning, course, evt,
-                drivingContent.Version, command != null ? command.CommandId : "");
+                drivingContent.Version,
+                command != null ? command.CommandId : "",
+                null, null,
+                drivingContent.CompatibilityFingerprint,
+                drivingContent.SimulationBackend);
         }
 
         // Ends the active session: latched actions cancel with their

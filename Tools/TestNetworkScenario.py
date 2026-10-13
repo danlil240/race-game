@@ -86,6 +86,7 @@ def lan_state(tick=1, schema=4):
         "networkRace": None,
         "prediction": None,
         "remotePresentation": {"racers": []},
+        "networkLink": None,
     }
 
 

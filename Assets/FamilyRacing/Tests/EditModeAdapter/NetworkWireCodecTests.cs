@@ -75,7 +75,7 @@ namespace FamilyRacing.Tests
         }
 
         // Encode-side contract: a snapshot whose body would exceed the
-        // 16 KiB ceiling fails explicitly — packet stays null, nothing
+        // snapshot ceiling fails explicitly — packet stays null, nothing
         // is truncated or partially emitted.
         [Test]
         public void OversizedSnapshotEncodeFailsExplicitlyNeverTruncates()
@@ -366,6 +366,41 @@ namespace FamilyRacing.Tests
         private static NetworkRacerState PhysicalRacer(int slot,
             int idChars)
         {
+            // A live mid-race session shape, not a fresh spawn: gate
+            // marks, held input, camera/tutorial/controls facts, the
+            // 64-char content fingerprint and the recovery bookkeeping a
+            // real boundary accumulates — the skeletal fixture let the
+            // snapshot "stay well under" a ceiling the real race crossed
+            // (run-physics-t11-s: snapshotOverflow after 45 publishes).
+            var session = new DrivingSessionState
+            {
+                raceId = "race-net" + new string('r', idChars),
+                vehicleId = "car-01" + new string('v', idChars),
+                eventId = "evt-net" + new string('e', idChars),
+                courseId = "course-net" + new string('c', idChars),
+                contentVersion = "physics-1|sim=1",
+                contentFingerprint = new string('f', 64),
+                phase = "running",
+                nextCheckpoint = 3,
+                lap = 2,
+                motor = PhysicalMotor(),
+                input = new InputState
+                {
+                    steering = -0.31f,
+                    drift = true,
+                    boost = false,
+                    throttle = 1f,
+                    hasThrottleOverride = true
+                },
+                lastRecoveryReason = "route-trap#2"
+            };
+            for (var gate = 0; gate < 8; gate++)
+                session.checkpoints.Add(new CheckpointMark
+                {
+                    id = "gate-" + gate,
+                    index = gate,
+                    crossed = true
+                });
             return new NetworkRacerState
             {
                 participantId = "p-" + slot
@@ -374,17 +409,7 @@ namespace FamilyRacing.Tests
                 vehicleId = "car-01" + new string('v', idChars),
                 attribution = "human",
                 position = slot + 1,
-                session = new DrivingSessionState
-                {
-                    raceId = "race-net",
-                    vehicleId = "car-01",
-                    eventId = "evt-net",
-                    courseId = "course-net",
-                    contentVersion = "physics-1|sim=1",
-                    phase = "running",
-                    motor = PhysicalMotor(),
-                    input = new InputState()
-                }
+                session = session
             };
         }
 
@@ -635,17 +660,18 @@ namespace FamilyRacing.Tests
                 out decoded, out error), Is.True, error);
             var motor = decoded.state.racers[0].session.motor;
             Assert.That(motor, Is.Not.Null);
-            Assert.That(motor.physics == null
-                || motor.physics.wheels.Length == 0, Is.True,
-                "an absent physical DTO must not mint physical state");
+            Assert.That(motor.physics, Is.Null,
+                "an absent physical DTO must not mint physical state — "
+                + "the materialized default instance is normalized away");
         }
 
         [Test]
         public void FourRacerMaxIdentitySnapshotStaysUnderCeiling()
         {
             // Worst case: four physical racers at the 64-char identity
-            // bound with 60-char session/race ids — the compact DTO
-            // keeps the legal maximum well under 16 KiB.
+            // bound with 60-char session/race ids in live mid-race
+            // session shape — the compact DTO keeps the legal maximum
+            // inside the snapshot ceiling.
             var snapshot = PhysicalSnapshot(4, 56);
             byte[] packet;
             string error;

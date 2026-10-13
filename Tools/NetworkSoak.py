@@ -83,13 +83,21 @@ def should_start_cycle(remaining_seconds, minimum=MIN_CYCLE_SECONDS):
     return remaining_seconds >= minimum
 
 
+# input.set's held-sample bound (FoundationService.MaxDurationTicks):
+# hold_seconds is wall-clock, durationTicks counts 30 Hz ticks, so an
+# interval past 5 s would produce an illegal duration that the endpoint
+# rejects — the soak clamps instead of emitting invalid traffic.
+MAX_DURATION_TICKS = 150
+
+
 def soak_inputs(role_index, refresh_index, hold_seconds):
     """One bounded held input sample: alternating steering direction per
     refresh and periodic boost — legal LAN input through the shared
     command path, nothing a child could not produce."""
     steering = 1 if (role_index + refresh_index) % 2 == 0 else -1
     return lan_inputs(steering=steering,
-                      duration=max(1, int(hold_seconds * 30)),
+                      duration=max(1, min(MAX_DURATION_TICKS,
+                                          int(hold_seconds * 30))),
                       boost=refresh_index % 3 == 0)
 
 
@@ -187,22 +195,45 @@ class RaceLedger:
         self.result_ids = set()
         self.deliveries = set()
         self.races = []
+        # Identities recorded within the CURRENT cycle: every surviving
+        # endpoint summarizes the same race, so a second record of the
+        # same (raceId, resultId) is peer agreement — never a rematch.
+        # A different identity inside one cycle is peer disagreement;
+        # reuse across cycles is the violation the all-time sets guard.
+        self._cycle_identities = set()
+
+    def begin_cycle(self):
+        """Called once per completed race before the survivors' per-peer
+        summaries are recorded — cycles are the once-only boundary."""
+        self._cycle_identities = set()
 
     def record(self, summary, label):
-        assert summary["raceId"] not in self.race_ids, \
-            label + ": rematch reused raceId " + repr(summary["raceId"])
-        assert summary["resultId"] not in self.result_ids, \
-            label + ": duplicated resultId " + repr(summary["resultId"])
+        identity = (summary["raceId"], summary["resultId"])
+        if identity in self._cycle_identities:
+            pass  # another endpoint's view of the same live race
+        else:
+            assert not self._cycle_identities, \
+                "%s: peer disagrees on race identity %s (expected %s)" % (
+                    label, repr(identity), repr(self._cycle_identities))
+            assert summary["raceId"] not in self.race_ids, \
+                label + ": rematch reused raceId " + \
+                repr(summary["raceId"])
+            assert summary["resultId"] not in self.result_ids, \
+                label + ": duplicated resultId " + \
+                repr(summary["resultId"])
+            self.race_ids.add(summary["raceId"])
+            self.result_ids.add(summary["resultId"])
+            self._cycle_identities.add(identity)
         for participant, state in summary["deliveries"].items():
             assert state in ("persisted", "failed"), \
                 "%s: delivery for %s never settled (%s)" % (
                     label, participant, state)
             key = (summary["resultId"], participant)
-            assert key not in self.deliveries, \
-                label + ": reward delivered twice for " + repr(key)
-            self.deliveries.add(key)
-        self.race_ids.add(summary["raceId"])
-        self.result_ids.add(summary["resultId"])
+            # The same settled row observed by every endpoint is one
+            # delivery, not a duplicate — the once-only guard lives
+            # across (resultId, participant) pairs, not per observation.
+            if key not in self.deliveries:
+                self.deliveries.add(key)
         self.races.append(summary)
 
 
@@ -529,8 +560,13 @@ def run_soak(connection_paths, evidence, minutes, host_address=None,
         host = peers[0][1]
         clients = [peer for _, peer in peers[1:]]
 
-        checks = enter_lobby(peers, host, clients, [],
-                             host_address)
+        checks = []
+        # enter_lobby appends to the list it is given and returns the
+        # bound host port — binding its return to `checks` would replace
+        # the evidence list with an int and crash the first append.
+        host_port = enter_lobby(peers, host, clients, checks,
+                                host_address)
+        report["hostPort"] = host_port
         report["checks"] = checks
 
         # The soak window starts once the session is assembled — lobby
@@ -571,6 +607,10 @@ def run_soak(connection_paths, evidence, minutes, host_address=None,
                          if role not in lost]
             summaries = {}
             try:
+                # Once-only bookkeeping is per cycle: every surviving
+                # endpoint records its view of the same race next —
+                # peer agreement on identity, fresh ids across cycles.
+                ledger.begin_cycle()
                 for role, peer in survivors:
                     wait_state(peer, deliveries_settled,
                                DELIVERY_SETTLE_SECONDS,

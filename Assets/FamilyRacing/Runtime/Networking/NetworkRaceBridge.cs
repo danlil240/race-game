@@ -187,6 +187,27 @@ namespace FamilyRacing.Networking
         /// acknowledgment — diagnostic proving retries terminate.</summary>
         public int PendingOneShotCount { get { return pendingActions.Count; } }
 
+        /// <summary>Task 11: this endpoint's replication-link counters as
+        /// a stream-ready slice — the packet/loss facts that distinguish
+        /// "no snapshots arrived" (transport starvation) from "snapshots
+        /// arrived and were rejected" (session fence, stale-race drop).</summary>
+        public NetworkLinkState LinkState()
+        {
+            return new NetworkLinkState
+            {
+                gameplayPacketsSeen = GameplayPacketsSeen,
+                droppedPackets = DroppedPackets,
+                staleSnapshots = StaleSnapshots,
+                droppedEvents = DroppedEvents,
+                snapshotsPublished = SnapshotsPublished,
+                inputRejections = InputRejections,
+                pendingOneShots = PendingOneShotCount,
+                lastSnapshotHostTick = lastSnapshotHostTick,
+                lastError = LastError,
+                lastInputError = LastInputError,
+            };
+        }
+
         /// <summary>Latest authoritative race state: the coordinator's own
         /// snapshot on the host, the newest accepted snapshot on a
         /// client.</summary>
@@ -853,7 +874,7 @@ namespace FamilyRacing.Networking
 
         /// <summary>Publish a full four-racer snapshot to every
         /// authenticated connection on the sequenced-unreliable channel.
-        /// The 16 KiB ceiling is enforced at encode AND at send; an
+        /// The snapshot ceiling is enforced at encode AND at send; an
         /// overflowing snapshot fails explicitly instead of truncating
         /// racer state.</summary>
         public bool Publish(NetworkSnapshot snapshot)

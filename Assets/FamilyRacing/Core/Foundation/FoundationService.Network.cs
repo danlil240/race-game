@@ -28,6 +28,9 @@ namespace FamilyRacing.Core.Foundation
         // stay independent.
         private NetworkPredictionState networkPrediction;
         private RemoteInterpolationState networkRemotePresentation;
+        // Task 11: replication-link packet/loss counters published by
+        // the bridge — the starvation-vs-rejection evidence.
+        private NetworkLinkState networkLinkState;
 
         // The session service Tasks 3+ drive (race coordinator hooks,
         // transport callbacks); null until the runtime attaches one.
@@ -120,6 +123,15 @@ namespace FamilyRacing.Core.Foundation
         public void SetRemotePresentationState(RemoteInterpolationState state)
         {
             networkRemotePresentation = state;
+        }
+
+        // Task 11: publish the replication bridge's own packet/loss
+        // counters — the facts that distinguish "no snapshots arrived"
+        // from "snapshots arrived and were rejected". Null where no
+        // replication bridge exists.
+        public void SetNetworkLinkState(NetworkLinkState state)
+        {
+            networkLinkState = state;
         }
 
         private CommandResult NetworkExecute(GameCommand command)

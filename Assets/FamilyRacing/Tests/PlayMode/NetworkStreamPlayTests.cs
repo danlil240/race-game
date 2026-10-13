@@ -151,7 +151,53 @@ namespace FamilyRacing.Tests
                             session = new DrivingSessionState
                             {
                                 raceId = "race-1",
-                                motor = new MotorState { x = 1f, z = 2f }
+                                // Task 11 physical observability: the
+                                // full diagnostic slice rides the
+                                // stream — identity, recovery facts,
+                                // ordered substep path, world counters
+                                // and the complete physics state.
+                                simulationBackend = "physicalAssisted",
+                                contentFingerprint =
+                                    "0123456789abcdef0123456789abcdef"
+                                    + "0123456789abcdef0123456789abcdef",
+                                lastRecoveryReason = "",
+                                substepPath =
+                                    new List<VehiclePathSample>
+                                    {
+                                        new VehiclePathSample
+                                        {
+                                            offsetSeconds = 0f,
+                                            pose = new MotorPose
+                                            { x = 1f, z = 2f }
+                                        },
+                                        new VehiclePathSample
+                                        {
+                                            offsetSeconds = 1f / 60f,
+                                            pose = new MotorPose
+                                            { x = 1.1f, z = 2.1f }
+                                        },
+                                        new VehiclePathSample
+                                        {
+                                            offsetSeconds = 1f / 30f,
+                                            pose = new MotorPose
+                                            { x = 1.2f, z = 2.2f }
+                                        }
+                                    },
+                                simulation = new VehicleSimulationDiagnostics
+                                {
+                                    backend = "physicalAssisted",
+                                    ticksSimulated = 42,
+                                    substepsSimulated = 84,
+                                    bodies = 1,
+                                    lastStepSeconds = 0.001,
+                                    totalStepSeconds = 0.042,
+                                    invalidStateFaults = 0
+                                },
+                                motor = new MotorState
+                                {
+                                    x = 1f, z = 2f,
+                                    physics = PhysicalMotor()
+                                }
                             }
                         }
                     },
@@ -168,6 +214,34 @@ namespace FamilyRacing.Tests
                 },
                 remotePresentation = new RemoteInterpolationState()
             };
+        }
+
+        // A valid four-wheel physical state for the stream fixture:
+        // unit yaw attitude, finite velocities and a full index-ordered
+        // wheel array — enough that every consumer can treat it as real
+        // evidence rather than a placeholder.
+        private static VehiclePhysicsState PhysicalMotor()
+        {
+            var physics = new VehiclePhysicsState
+            {
+                wheels = new WheelPhysicsState[4],
+                grounded = true,
+                lastContact = "ground",
+                recoveryEpoch = 1
+            };
+            physics.TrySetAttitude(0f, 0f, 0f, 1f);
+            for (var i = 0; i < physics.wheels.Length; i++)
+            {
+                physics.wheels[i] = new WheelPhysicsState
+                {
+                    index = i,
+                    grounded = true,
+                    contactValid = true,
+                    normalLoad = 2000f,
+                    normalY = 1f
+                };
+            }
+            return physics;
         }
 
         // Independent merge — mirrors the documented consumer semantics in
@@ -249,6 +323,31 @@ namespace FamilyRacing.Tests
                 Is.EqualTo(7));
             Assert.That(state["remotePresentation"], Is.Not.Null);
             Assert.That(state["presentation"]["camera"], Is.Not.Null);
+            // Task 11: the complete physical + diagnostic slice rides
+            // the stream verbatim — backend identity, canonical tuning
+            // fingerprint, ordered substep path, world counters and the
+            // full wheel-array physics state.
+            var session = (JObject)state["networkRace"]["racers"][0]
+                ["session"];
+            Assert.That((string)session["simulationBackend"],
+                Is.EqualTo("physicalAssisted"));
+            Assert.That((string)session["contentFingerprint"],
+                Is.Not.Null.And.Length.EqualTo(64));
+            var substep = (JArray)session["substepPath"];
+            Assert.That(substep, Is.Not.Null.And.Count.EqualTo(3),
+                "the ordered substep path must serialize per boundary");
+            Assert.That((float)substep[1]["offsetSeconds"],
+                Is.EqualTo(1f / 60f).Within(0.0001f));
+            var sim = (JObject)session["simulation"];
+            Assert.That(sim, Is.Not.Null);
+            Assert.That((long)sim["ticksSimulated"], Is.EqualTo(42));
+            Assert.That((long)sim["substepsSimulated"], Is.EqualTo(84));
+            Assert.That((int)sim["bodies"], Is.EqualTo(1));
+            var physics = (JObject)session["motor"]["physics"];
+            Assert.That(physics, Is.Not.Null);
+            Assert.That((JArray)physics["wheels"],
+                Is.Not.Null.And.Count.EqualTo(4));
+            Assert.That((long)physics["recoveryEpoch"], Is.EqualTo(1));
             // Discovery carries the negotiated schema too.
             var discovery = records[1];
             Assert.That((string)discovery["type"], Is.EqualTo("discovery"));
@@ -357,6 +456,60 @@ namespace FamilyRacing.Tests
             Assert.That((int)records[1]["base"],
                 Is.EqualTo((int)records[0]["sequence"]),
                 "A delta must identify the previous boundary sequence");
+        }
+
+        [Test]
+        public void WireEncodeStripsStreamOnlyDiagnostics()
+        {
+            // The compact LAN snapshot must never carry the full
+            // diagnostic weight: the session's ordered substep path and
+            // the world counters are stream-only facts (non-serializable
+            // DTO element types JsonUtility cannot write), while the
+            // small identity strings and the compact physics DTO DO
+            // cross. Encoding must never grow past the snapshot ceiling.
+            var wire = new NetworkSnapshot
+            {
+                sessionId = "s-1",
+                raceId = "race-1",
+                raceOrdinal = 1,
+                snapshotSequence = 9,
+                state = LanState(9).networkRace
+            };
+            byte[] packet;
+            string error;
+            Assert.That(Networking.NetworkWireCodec.TryEncodeSnapshot(
+                wire, out packet, out error), Is.True, error);
+            Assert.That(packet.Length,
+                Is.LessThanOrEqualTo(NetworkSettings.SnapshotCeilingBytes));
+
+            NetworkSnapshot decoded;
+            Assert.That(Networking.NetworkWireCodec.TryDecodeSnapshot(
+                packet, out decoded, out error), Is.True, error);
+            var session = decoded.state.racers[0].session;
+            Assert.That(session.substepPath, Is.Empty,
+                "substep diagnostics must not cross the compact wire");
+            Assert.That(session.simulation, Is.Null,
+                "world diagnostics must not cross the compact wire");
+            // Identity strings are small wire facts: they DO cross.
+            Assert.That(session.simulationBackend,
+                Is.EqualTo("physicalAssisted"));
+            Assert.That(session.contentFingerprint,
+                Is.Not.Null.And.Length.EqualTo(64));
+            // The compact racer.physics DTO replaced the full
+            // diagnostic physics and folded back onto the motor.
+            Assert.That(decoded.state.racers[0].physics, Is.Not.Null);
+            Assert.That(decoded.state.racers[0].physics.present,
+                Is.True);
+            Assert.That(session.motor.physics, Is.Not.Null,
+                "decode folds the compact DTO back onto the motor");
+            Assert.That(session.motor.physics.recoveryEpoch,
+                Is.EqualTo(1));
+            // The host's live state was never mutated by the encode:
+            // the wire transform works on a deep copy.
+            var live = wire.state.racers[0].session;
+            Assert.That(live.substepPath.Count, Is.EqualTo(3));
+            Assert.That(live.simulation, Is.Not.Null);
+            Assert.That(live.motor.physics, Is.Not.Null);
         }
 
         [Test]

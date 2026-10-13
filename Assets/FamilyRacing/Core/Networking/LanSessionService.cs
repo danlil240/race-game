@@ -1177,7 +1177,13 @@ namespace FamilyRacing.Core.Networking
             else
             {
                 delivery.state = "failed";
-                delivery.code = applied.code;
+                // Same verdict code the remote ack path records —
+                // ineligible carries its permanent prefix so the local
+                // row reads identically to the wire-acknowledged row.
+                delivery.code =
+                    applied.status == RaceRewardService.StatusIneligible
+                        ? "ineligible:" + applied.code
+                        : applied.code;
             }
         }
 

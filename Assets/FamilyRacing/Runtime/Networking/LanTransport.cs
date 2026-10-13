@@ -492,7 +492,7 @@ namespace FamilyRacing.Networking
                 disconnectTimeoutMS: PeerTimeoutMilliseconds,
                 receiveQueueCapacity: ReceiveQueueCapacity);
             // The fragmentation stage defaults to a 4 KiB payload
-            // capacity — far below the 16 KiB snapshot ceiling — so an
+            // capacity — far below the snapshot ceiling — so an
             // oversized gameplay packet fails EndSend with
             // NetworkPacketOverflow. Raise the capacity past the largest
             // typed wire bound; EndSend overflow then matches the codec

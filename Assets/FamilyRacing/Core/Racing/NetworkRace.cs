@@ -69,6 +69,11 @@ namespace FamilyRacing.Core.Racing
         private long firstFinishElapsedTicks;
         private long finishDeadlineElapsedTicks;
         private RaceResult result;
+        // The world the most recent Step ran inside — retained so the
+        // published state can attach its live cost/shape diagnostics on
+        // every boundary, including paused/finalized boundaries where
+        // the sim is not stepped again (Task 11).
+        private IVehicleSimulation lastSimulation;
 
         private NetworkRace(string sessionId, string raceId,
             DrivingContentCatalog content, EventDefinition evt,
@@ -81,6 +86,11 @@ namespace FamilyRacing.Core.Racing
             this.course = course;
             countdownRemaining = evt.countdownTicks;
             phase = countdownRemaining > 0 ? PhaseCountdown : PhaseRunning;
+            // One canonical content identity + backend selection for the
+            // whole race — computed once so every seated session binds
+            // the same tuning fingerprint (Task 11 observability).
+            var fingerprint = content.CompatibilityFingerprint;
+            var backend = content.SimulationBackend;
             for (var slot = 0; slot < specs.Length; slot++)
             {
                 var spec = specs[slot];
@@ -92,7 +102,8 @@ namespace FamilyRacing.Core.Racing
                 var session = new DrivingSession(
                     raceId + "-r" + slot.ToString(CultureInfo.InvariantCulture),
                     content.Vehicles[spec.vehicleId], course, evt,
-                    content.Version, "", spawn, spec.participantId);
+                    content.Version, "", spawn, spec.participantId,
+                    fingerprint, backend);
                 var attribution = AttributionFor(spec.controlSource);
                 racers[slot] = new Racer
                 {
@@ -258,6 +269,7 @@ namespace FamilyRacing.Core.Racing
             IVehicleSimulation simulation)
         {
             var emitted = DrainStaged();
+            if (simulation != null) lastSimulation = simulation;
             if (paused || simulation == null
                 || phase == PhaseFinished || phase == PhaseAborted)
                 return BuildState(emitted);
@@ -630,9 +642,18 @@ namespace FamilyRacing.Core.Racing
                 events = emitted ?? new List<DrivingEvent>()
             };
             state.standings.AddRange(order);
+            // One shared world serves the whole roster, so the same
+            // diagnostics snapshot describes every racer's simulation;
+            // it rides the state stream and is stripped from the
+            // compact LAN wire by its non-serializable DTO type.
+            var diagnosticsSource = lastSimulation
+                as IVehicleSimulationDiagnostics;
+            var diagnostics = diagnosticsSource != null
+                ? diagnosticsSource.Diagnostics : null;
             for (var i = 0; i < racers.Length; i++)
             {
                 var racer = racers[i];
+                snaps[i].simulation = diagnostics;
                 state.racers.Add(new NetworkRacerState
                 {
                     participantId = racer.participantId,

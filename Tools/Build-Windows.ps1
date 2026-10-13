@@ -7,12 +7,17 @@
 #                               player at Builds\Windows-Ordinary\
 #                               FamilyRacing.exe (no DEVELOPMENT_BUILD;
 #                               validation endpoints compiled out).
+#   -Configuration Physics      FoundationBuild.WindowsPhysics -> Mono
+#                               development player at
+#                               Builds\Windows-Physics\FamilyRacing.exe
+#                               booting the opt-in PhysicalAssisted race
+#                               scene (validation endpoints compiled in).
 #
 # Evidence lands under Logs\windows-build\<flavor>\<run-id>\: the editor
 # -logFile (unity.log), the child process stdout/stderr (unity-process.log),
 # and result.json with the outcome and exe SHA-256.
 param(
-    [ValidateSet('Development', 'Ordinary')]
+    [ValidateSet('Development', 'Ordinary', 'Physics')]
     [string]$Configuration = 'Development',
     [string]$ProjectPath = (Join-Path $PSScriptRoot '..'),
     [string]$EditorRoot = 'C:\Program Files\Unity\Hub\Editor'
@@ -30,6 +35,10 @@ $flavors = @{
     ordinary = @{
         Method = 'FamilyRacing.EditorTools.FoundationBuild.WindowsOrdinary'
         Exe = 'Builds\Windows-Ordinary\FamilyRacing.exe'
+    }
+    physics = @{
+        Method = 'FamilyRacing.EditorTools.FoundationBuild.WindowsPhysics'
+        Exe = 'Builds\Windows-Physics\FamilyRacing.exe'
     }
 }
 $flavor = $Configuration.ToLowerInvariant()

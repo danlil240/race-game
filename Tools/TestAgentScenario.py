@@ -188,6 +188,33 @@ class IntegrityTests(unittest.TestCase):
             with self.assertRaises(AssertionError):
                 verify_trace(directory, info)
 
+    def test_trace_bound_comes_from_the_configured_limit(self):
+        # A run that configured its own trace ceiling publishes it on
+        # connection.json; descriptors without the field stay bound to
+        # the shared 256 MiB default.
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            info = {"runId": "test-run", "token": "secret-never-in-stream"}
+            snapshot = self.record(1, "snapshot")
+            finished = self.record(2, "finished")
+            finished["captureValid"] = True
+            trace = directory / "state.ndjson"
+            status_path = directory / "capture-status.json"
+            trace.write_text(json.dumps(snapshot) + "\n" + json.dumps(finished) + "\n",
+                             encoding="utf-8")
+            status_path.write_text(json.dumps(
+                {"captureValid": True, "captureComplete": True}),
+                encoding="utf-8")
+
+            # The small trace fits the shared default…
+            verify_trace(directory, info)
+            # …but a descriptor carrying a smaller configured bound must
+            # trip exactly that bound.
+            with self.assertRaises(AssertionError):
+                verify_trace(directory, {"runId": "test-run",
+                                         "token": "secret-never-in-stream",
+                                         "traceLimitBytes": 10})
+
 
 if __name__ == "__main__":
     unittest.main()

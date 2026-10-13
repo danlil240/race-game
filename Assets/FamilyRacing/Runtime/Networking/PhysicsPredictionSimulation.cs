@@ -16,7 +16,8 @@ namespace FamilyRacing.Networking
     // as dynamic colliders. Racer-versus-racer contact prediction is
     // deliberately absent — remote contacts are authoritative host
     // facts that arrive as corrections after separation.
-    public sealed class PhysicsPredictionSimulation : IVehicleSimulation
+    public sealed class PhysicsPredictionSimulation : IVehicleSimulation,
+        IVehicleSimulationDiagnostics
     {
         private readonly PhysicsVehicleSimulation inner;
         private bool disposed;
@@ -29,6 +30,20 @@ namespace FamilyRacing.Networking
         // The collision-only world this prediction runs inside —
         // diagnostic seam only.
         public PhysicsCourseWorld World { get { return inner.World; } }
+
+        // The prediction world's own cost/shape facts — the same
+        // counters the composed physical backend tracks, tagged for the
+        // prediction role so a stream consumer can never mistake it for
+        // the authoritative world.
+        public VehicleSimulationDiagnostics Diagnostics
+        {
+            get
+            {
+                var diagnostics = inner.Diagnostics;
+                diagnostics.backend = "physicalAssistedPrediction";
+                return diagnostics;
+            }
+        }
 
         // The single local body plus static course collision — never
         // a second authoritative roster. Re-initialization replaces the

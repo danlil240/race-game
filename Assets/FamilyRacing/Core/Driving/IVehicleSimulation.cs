@@ -81,6 +81,41 @@ namespace FamilyRacing.Core.Driving
         public VehiclePathSample[] path;
     }
 
+    // Observable simulation cost and shape facts for one world: which
+    // backend it is, the logical tick and fixed-substep counts (two
+    // substeps per physical tick, zero on the kinematic backend — an
+    // honest zero, not a missing number), the live body roster, the
+    // wall-clock cost of the last Step plus the cumulative total, and
+    // the count of invalid requests/states the backend refused rather
+    // than simulated. Deliberately NOT [Serializable]: this diagnostic
+    // never crosses the compact LAN snapshot wire — it exists for the
+    // state stream, where the full observation lives.
+    public sealed class VehicleSimulationDiagnostics
+    {
+        public string backend = "";
+        public long ticksSimulated;
+        public long substepsSimulated;
+        public int bodies;
+        public double lastStepSeconds;
+        public double totalStepSeconds;
+        public long invalidStateFaults;
+
+        public VehicleSimulationDiagnostics Copy()
+        {
+            return (VehicleSimulationDiagnostics)MemberwiseClone();
+        }
+    }
+
+    // Optional diagnostics seam a backend implements when it tracks the
+    // facts above. The property returns an independent snapshot every
+    // call — mutating it can never disturb the live counters. Backends
+    // that expose nothing simply do not implement it and callers observe
+    // a null diagnostic rather than a fabricated one.
+    public interface IVehicleSimulationDiagnostics
+    {
+        VehicleSimulationDiagnostics Diagnostics { get; }
+    }
+
     // The physical-backend seam the rule layer steps once per logical
     // interval. Implementations own one authoritative world; Unity-free
     // callers only see these DTOs.

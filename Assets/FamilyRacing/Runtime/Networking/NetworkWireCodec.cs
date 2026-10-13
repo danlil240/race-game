@@ -309,13 +309,16 @@ namespace FamilyRacing.Networking
 
         // True when a decoded MotorState.physics is the stripped-encode
         // artifact rather than a sent payload: JsonUtility materializes
-        // an empty {} as an all-default instance — zero attitude, no
-        // wheels, no episode state, the default contact label.
+        // the null member as a fresh VehiclePhysicsState — the type's own
+        // default instance — identity attitude (field initializer gives
+        // attitudeW=1, not 0), no wheels, no episode state, the default
+        // contact label. A real payload is never that shape: an authored
+        // body's wheel array always matches the tuning's wheel count.
         private static bool IsEmptyWirePhysics(VehiclePhysicsState physics)
         {
             if (physics.wheels != null && physics.wheels.Length > 0) return false;
             if (physics.attitudeX != 0f || physics.attitudeY != 0f
-                || physics.attitudeZ != 0f || physics.attitudeW != 0f) return false;
+                || physics.attitudeZ != 0f || physics.attitudeW != 1f) return false;
             if (physics.velocityX != 0f || physics.velocityY != 0f
                 || physics.velocityZ != 0f) return false;
             if (physics.angularVelocityX != 0f || physics.angularVelocityY != 0f

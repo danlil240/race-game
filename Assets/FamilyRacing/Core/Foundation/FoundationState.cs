@@ -60,6 +60,10 @@ namespace FamilyRacing.Core.Foundation
         // state and runs no client-side interpolation.
         public NetworkPredictionState prediction;
         public RemoteInterpolationState remotePresentation;
+        // Task 11 replication-link counters (same emitted field name):
+        // the bridge's own packet/loss facts on THIS endpoint — null
+        // until a replication bridge exists, never fabricated.
+        public NetworkLinkState networkLink;
     }
 
     // Runtime-visible presentation facts (geometry, input ownership, locale,

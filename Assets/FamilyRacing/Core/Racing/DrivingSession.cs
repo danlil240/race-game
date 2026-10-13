@@ -141,6 +141,13 @@ namespace FamilyRacing.Core.Racing
         private readonly CourseDefinition course;
         private readonly EventDefinition evt;
         private readonly string contentVersion;
+        // Task 11 observability: the canonical tuned-content fingerprint
+        // this session was created under plus the race-level backend the
+        // coordinator selected — both published verbatim on the session
+        // state so a stream consumer binds physics evidence to a tuning
+        // identity without resolving the catalog itself.
+        private readonly string contentFingerprint;
+        private readonly VehicleSimulationBackend raceBackend;
         private readonly List<PendingAction> pending = new List<PendingAction>();
         private readonly List<DrivingEvent> staged = new List<DrivingEvent>();
 
@@ -159,6 +166,11 @@ namespace FamilyRacing.Core.Racing
         // The request this session prepared for the boundary currently in
         // flight — null between boundaries. CompleteStep consumes it.
         private VehicleTickRequest inFlightRequest;
+        // Task 11: the three-sample path of the most recent completed
+        // interval (published verbatim on the snapshot) and the reason
+        // of the most recent applied recovery.
+        private VehiclePathSample[] lastPath;
+        private string lastRecoveryReason = "";
 
         // `startPose` lets an authoritative coordinator seat this racer at
         // an authored grid slot instead of the course's solo spawn; solo
@@ -166,9 +178,17 @@ namespace FamilyRacing.Core.Racing
         // is the simulation roster identity the coordinator binds requests
         // and resets to; solo callers omit it and the session answers to its
         // own raceId.
+        // `contentFingerprint` and `raceBackend` are pure observability:
+        // they pin the session's published state to the catalog identity
+        // and race-level backend selection without changing behaviour.
+        // Callers that omit them publish "" and the tuning's declared
+        // backend — the same effective backend every existing fixture
+        // already selected.
         public DrivingSession(string raceId, VehicleTuning tuning, CourseDefinition course,
             EventDefinition evt, string contentVersion, string startCommandId,
-            MotorPose? startPose = null, string participantId = null)
+            MotorPose? startPose = null, string participantId = null,
+            string contentFingerprint = null,
+            VehicleSimulationBackend? raceBackend = null)
         {
             if (string.IsNullOrEmpty(raceId)) throw new ArgumentException("raceId", "raceId");
             if (tuning == null || course == null || evt == null)
@@ -197,6 +217,8 @@ namespace FamilyRacing.Core.Racing
             this.course = course;
             this.evt = evt;
             this.contentVersion = contentVersion ?? "";
+            this.contentFingerprint = contentFingerprint ?? "";
+            this.raceBackend = raceBackend ?? tuning.simulationBackend;
             countdownRemaining = evt.countdownTicks;
             if (countdownRemaining <= 0) phase = PhaseRunning;
             // Authored poses carry surface height; the physical backend
@@ -368,6 +390,10 @@ namespace FamilyRacing.Core.Racing
             var request = inFlightRequest;
             inFlightRequest = null;
             var step = result != null ? result.step : null;
+            // The last completed interval's ordered substep path — the
+            // within-tick motion evidence the snapshot publishes
+            // verbatim (null until the first stepped boundary).
+            if (result != null) lastPath = result.path;
 
             if (phase == PhaseFinished && request == null)
             {
@@ -688,6 +714,7 @@ namespace FamilyRacing.Core.Racing
         private void ApplyRecovery(string reason, string commandId,
             VehicleTickRequest request)
         {
+            lastRecoveryReason = reason ?? "";
             var charge = motor.boostCharge;
             var pose = SelectRecoveryPose();
             var detail = reason ?? "";
@@ -776,8 +803,15 @@ namespace FamilyRacing.Core.Racing
                 pendingActions = new List<PendingActionState>(),
                 checkpoints = new List<CheckpointMark>(),
                 camera = null,
-                controls = new List<string>()
+                controls = new List<string>(),
+                simulationBackend = raceBackend
+                    == VehicleSimulationBackend.PhysicalAssisted
+                    ? "physicalAssisted" : "arcade",
+                contentFingerprint = contentFingerprint,
+                lastRecoveryReason = lastRecoveryReason
             };
+            if (lastPath != null)
+                state.substepPath.AddRange(lastPath);
             // Clamped progress toward the next expected gate on the current
             // legal segment — enough for an authoritative standings sort
             // without reproducing checkpoint sweeps.

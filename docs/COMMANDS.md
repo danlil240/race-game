@@ -28,6 +28,9 @@ Tools\Verify.ps1 -Mode Windows
 # (Logs\windows-build\<flavor>\<run-id>\result.json):
 Tools\Build-Windows.ps1                          # development flavor
 Tools\Build-Windows.ps1 -Configuration Ordinary  # -> Builds\Windows-Ordinary\
+# Opt-in physical-backend development player -> Builds\Windows-Physics\
+# (self-bootstrapping PhysicsRace scene, PhysicalAssisted catalog):
+Tools\Build-Windows.ps1 -Configuration Physics
 ```
 
 `Verify.ps1` modes write `Logs\verify-unity-<mode>.log` and propagate the
@@ -75,6 +78,12 @@ without `--validation-dir` and in ordinary builds):
 - `--validation-normal-profiles` — use the REAL
   `persistentDataPath\Profiles` store; valueless; exercised by
   `Tools\NormalProfileScenario.py`.
+- `--validation-trace-mb <n>` — raise the still-bounded trace ceiling for
+  this run (default 256 MiB, clamped to 64–2048). Physical-diagnostic
+  streams emit ~500 KB/s of boundary data, so a long physical soak
+  launches with e.g. `--validation-trace-mb 1024`; the run's effective
+  bound is published on `connection.json` as `traceLimitBytes` so
+  `verify_trace` measures the capture against it.
 
 Validation launches set `Application.runInBackground = true` so agents do
 not depend on window focus; ordinary launches keep focus-pause.
@@ -109,6 +118,23 @@ python Tools\NetworkScenario.py --launch <player.exe> [--players 2-4] [--no-faul
 # time for --minutes, sampling per-device health and boundary cadence;
 # the once-only result/delivery ledger is checked across every rematch:
 python Tools\NetworkSoak.py --connections <host-run>\connection.json <client-run>\connection.json --minutes 30 --evidence <new-dir> [--host-address <ip>]
+# Physical-backend qualification: attach to a launched
+# Builds\Windows-Physics\FamilyRacing.exe validation run. Drives the
+# authored physics-01 event on both physical vehicles through the same
+# command path — acceleration/coast/braking, grip, ordered gates,
+# recovery epochs, diagnostics (two 1/60 s substeps per 30 Hz tick,
+# live body count, invalid-state faults), the ordered substep path and
+# the full wheel-array physics state on the stream — then verifies the
+# whole trace by independent reconstruction:
+python Tools\PhysicsScenario.py <dir>\connection.json --evidence <new-evidence-dir>
+# Sustained physical LAN soak: attaches to 2-4 independently launched
+# physical players (first connection is driven as the host), repeats
+# physics-01 lobby->race->results->rematch cycles in wall-clock time,
+# samples physical state/diagnostics/fingerprints/recovery epochs per
+# peer, checks the compact wire projection never leaks the full
+# diagnostic slice, and verifies each trace — a lost peer is an
+# incident, never silently replaced:
+python Tools\PhysicsSoak.py --connections <host-run>\connection.json <client-run>\connection.json ... --minutes 30 --evidence <new-dir> [--host-address <ip>]
 ```
 
 Proven recipe (wave-3 build, 2026-10-11): preview at
@@ -240,6 +266,26 @@ emitted for attach and explicit `snapshot` resynchronization.
 (the highest y of the current airborne episode; `0` while grounded) —
 it backs the `landingMinDrop` clean-landing check and lets observers
 distinguish a real jump from a probe outage.
+On the physical backend the driving session slice additionally carries
+full observability: `driving.simulationBackend`
+(`"arcade"`/`"physicalAssisted"`), `driving.contentFingerprint` (the
+64-hex canonical tuning fingerprint every LAN peer must agree on
+before a race starts), `driving.lastRecoveryReason` (the most recent
+recovery cause, suffixed with `#<recoveryEpoch>` for physical
+resets), `driving.substepPath` (the ordered three-pose path through
+the tick's two fixed 1/60 s substeps — gate evaluation follows the
+segments, not the end-to-end chord), `driving.simulation` (world
+diagnostics: `backend`, `ticksSimulated`, `substepsSimulated`,
+`bodies`, `lastStepSeconds`, `totalStepSeconds`,
+`invalidStateFaults`), and `driving.motor.physics` (the complete
+`VehiclePhysicsState` — attitude quaternion, velocities, controller
+histories, recovery epoch and the index-ordered wheel array with
+contact/load/slip diagnostics). `substepPath`, `simulation` and the
+diagnostic-only physics fields (contact points/normals/loads/slips)
+are **stream-only**: the compact LAN snapshot carries the small
+identity strings plus the compact `racer.physics` wire DTO, and
+`MotorState.physics` is stripped before encode and rebuilt from that
+DTO on decode — full diagnostics never cross the gameplay wire.
 `contentVersion` now travels independently of `buildVersion` and names the
 driving content catalog (`driving-0.1`). The trace opens with
 a `snapshot` at sequence 1; an authenticated controller's first live frame

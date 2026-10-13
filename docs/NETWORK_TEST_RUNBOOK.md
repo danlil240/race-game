@@ -136,6 +136,8 @@ measurement exists yet — it stays in the open-gates list below.
 | `Tools\NetworkScenario.py --connections <host.json> <client.json> [--host-address <ip>] --evidence <new-dir>` | Complete LAN lifecycle on 2–4 launched players: discovery/manual join, lobby, both vehicle classes, bounded input, shared pause, AI takeover (leave) or process-kill credentialed rejoin (`--launch` mode), immutable results, rematch, host loss, recovery | Per-endpoint `result.json` + independently verified `state.ndjson` |
 | `Tools\NetworkScenario.py --launch <player.exe> [--players 2-4] [--no-fault-injection]` | Dev convenience: owns the processes so the labeled fault-injection segment can kill/relaunch a client (real AI takeover + credentialed rejoin) and kill the host (real host loss) | Same |
 | `Tools\NetworkSoak.py --connections <host.json> <client.json> ... --minutes 30 --evidence <new-dir>` | Sustained real-time soak: repeated lobby→race→results→rematch cycles in wall-clock time (no deterministic clock stepping), periodic bounded input + per-device health samples, once-only result/delivery ledger across rematches, per-device boundary cadence | Per-endpoint `samples.json`, `result.json`, verified traces |
+| `Tools\PhysicsScenario.py <run>\connection.json --evidence <new-dir>` | Agent-driven physical-backend qualification on the `Windows-Physics` player: physics-01 on `car-physics-01` + `motorcycle-physics-01` — accel/coast/brake, grip, ordered gates, input/recover epochs, simulation diagnostics (2 substeps/tick, bodies, faults), ordered substep path, full wheel physics — never teleports | `result.json` checks + independently verified `state.ndjson` |
+| `Tools\PhysicsSoak.py --connections <host.json> <client.json> ... --minutes 30 --evidence <new-dir>` | Sustained physical LAN soak (2–4 physical players): physics-01 lobby→race→results→rematch cycles alternating classes, per-peer physical state/diagnostics/fingerprint/recovery-epoch sampling, compact-wire-projection checks (no leaked full diagnostics), trace integrity per endpoint — a lost peer is an incident, never substituted | Per-endpoint `samples.json`, `result.json`, verified traces |
 
 ## Evidence log
 
@@ -148,6 +150,11 @@ measurement exists yet — it stays in the open-gates list below.
 | 2026-10-12 | `Verify.ps1 -Mode Android` export + offline Gradle | Succeeded; APK hash + exported target SDK recorded in the task-10 report |
 | 2026-10-12 | `NetworkScenario.py --launch` on the task-10 build | 22/22 checks pass incl. process-kill AI takeover, credentialed rejoin, host loss (`Logs/evidence-t10-lan-final9`); details in the task-10 report |
 | 2026-10-12 | `NetworkSoak.py` tool + unit coverage | Tool delivered (`TestNetworkSoak.py` 28/28); real 30-minute multi-device soak is hardware-gated |
+| 2026-10-13 | Task-11 gate: `Verify.ps1 -Mode CoreOffline` | 589/589 pass — Core diagnostics counters, state/fingerprint/recovery wiring |
+| 2026-10-13 | `Verify.ps1 -Mode EditMode` | 647 pass / 1 skip / 0 fail — `FoundationBuild.WindowsPhysics` + all runtime code compile clean |
+| 2026-10-13 | `Verify.ps1 -Mode PlayMode` | 244/246 pass — both new tests green (`PhysicalDiagnosticsReachTheStreamBoundary`, `WireEncodeStripsStreamOnlyDiagnostics`); the 2 failures are the documented impaired-LAN environmental timeouts (`ImpairedLinkExercisesPredictionAndInterpolation`, `ImpairedLanPhysicalCorrections`: `race=none`, `drops=0`, identical signature at HEAD pre-change — see progress ledger) |
+| 2026-10-13 | Python tooling discovery | 194/194 pass (`TestPhysicsScenario` + `TestPhysicsSoak` included) |
+| 2026-10-13 | `PhysicsScenario.py` / `PhysicsSoak.py` delivery | Tools + unit coverage delivered; live run needs the `Windows-Physics` player (`Build-Windows.ps1 -Configuration Physics`) and 2+ endpoints for the soak |
 
 ## Open evidence gates (explicit — hardware or human review required)
 

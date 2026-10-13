@@ -215,6 +215,48 @@ terminal `captureError:"processExit"`, the saved profile survives into the
 relaunch's saved AND draft state, unsaved drafts are never persisted, and a
 clean finish completes the second capture.
 
+## Verified (physical-backend observability, Task 11)
+
+The physical backend now publishes complete diagnostics on the state
+stream while the compact LAN wire keeps its bounded projection —
+proven by PlayMode on both ends:
+
+- `DrivingStreamPlayTests.PhysicalDiagnosticsReachTheStreamBoundary`
+  runs a real `PhysicsVehicleSimulation` through `FoundationService` +
+  `ValidationBridge` and reconstructs the boundary independently:
+  `driving.simulationBackend` reports `physicalAssisted`, the 64-hex
+  `contentFingerprint` is present, `lastRecoveryReason` is empty before
+  any recovery, the ordered three-sample `substepPath` endpoint agrees
+  with the motor pose, `driving.simulation` reports ≥6 ticks, exactly
+  two substeps per tick, one body and zero invalid-state faults, the
+  full four-wheel `motor.physics` state is streamed verbatim, and the
+  physics forward velocity agrees with the legacy motor speed.
+- `NetworkStreamPlayTests` pins the wire boundary:
+  `BoundaryRecordsCarrySchema4IdentityAndSlices` now streams the full
+  diagnostic slice (backend identity, fingerprint, ordered substep
+  path, world counters, wheel array, recovery epoch), and
+  `WireEncodeStripsStreamOnlyDiagnostics` proves the compact snapshot
+  strips `substepPath`/`simulation`/`MotorState.physics` before encode,
+  rebuilds `motor.physics` from the compact `racer.physics` DTO on
+  decode, keeps the small identity strings crossing, stays under the
+  16 KiB ceiling, and never mutates the host's live state.
+- Core `OfflineTestRunner` covers the diagnostic counters directly
+  (`VehicleSimulationBoundaryTests` and the backend diagnostics tests:
+  arcade honestly reports `substepsSimulated = 0`, the physical world
+  reports two substeps per logical tick, invalid requests/restores
+  increment `invalidStateFaults` instead of vanishing).
+- Python tooling: `Tools\TestPhysicsScenario.py` +
+  `Tools\TestPhysicsSoak.py` lock the validators (schema-4 physical
+  slices, recovery-epoch monotonicity, fingerprint agreement, compact
+  wire projection, trace reconstruction, peer-loss honesty).
+- Live tools delivered for the physical player:
+  `Tools\PhysicsScenario.py <run>\connection.json --evidence <dir>`
+  (agent-driven physics-01 qualification on both physical vehicles) and
+  `Tools\PhysicsSoak.py --connections ... --minutes 30`
+  (2–4-player sustained physical LAN observation). A live scenario/soak
+  run requires the `Builds\Windows-Physics\` player — see
+  `docs/COMMANDS.md`.
+
 ## Known QA gaps (`notVerified` — do not read as passed)
 
 - Physical input/UI parity is covered by synthetic PlayMode callbacks only

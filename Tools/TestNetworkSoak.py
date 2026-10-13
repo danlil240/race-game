@@ -133,6 +133,7 @@ class RaceLedgerTests(unittest.TestCase):
     def test_distinct_races_accumulate(self):
         ledger = RaceLedger()
         for index in range(3):
+            ledger.begin_cycle()
             ledger.record(
                 summarize_race(
                     results_state(result_id="res-%d" % index,
@@ -141,9 +142,38 @@ class RaceLedgerTests(unittest.TestCase):
         self.assertEqual(len(ledger.races), 3)
         self.assertEqual(len(ledger.deliveries), 12)
 
+    def test_peer_views_of_one_race_agree(self):
+        # Every surviving endpoint summarizes the SAME race within a
+        # cycle: the second record is agreement, not a rematch — the
+        # failure this fix removes from the live soak path.
+        ledger = RaceLedger()
+        ledger.begin_cycle()
+        ledger.record(
+            summarize_race(results_state(), "host"), "cycle-0 host")
+        ledger.record(
+            summarize_race(results_state(), "client-0"),
+            "cycle-0 client-0")
+        self.assertEqual(len(ledger.races), 2)
+        self.assertEqual(len(ledger.deliveries), 4)
+
+    def test_peer_identity_disagreement_is_rejected(self):
+        # Two different identities inside ONE cycle means the endpoints
+        # observed different races — an honest violation, not agreement.
+        ledger = RaceLedger()
+        ledger.begin_cycle()
+        ledger.record(
+            summarize_race(results_state(), "host"), "cycle-0 host")
+        with self.assertRaises(AssertionError):
+            ledger.record(
+                summarize_race(
+                    results_state(result_id="res-9", race_id="race-9"),
+                    "client-0"), "cycle-0 client-0")
+
     def test_reused_race_identity_is_rejected(self):
         ledger = RaceLedger()
+        ledger.begin_cycle()
         ledger.record(summarize_race(results_state(), "t"), "cycle-0")
+        ledger.begin_cycle()
         with self.assertRaises(AssertionError):
             ledger.record(
                 summarize_race(
@@ -152,7 +182,9 @@ class RaceLedgerTests(unittest.TestCase):
 
     def test_duplicated_result_identity_is_rejected(self):
         ledger = RaceLedger()
+        ledger.begin_cycle()
         ledger.record(summarize_race(results_state(), "t"), "cycle-0")
+        ledger.begin_cycle()
         with self.assertRaises(AssertionError):
             ledger.record(
                 summarize_race(
@@ -161,7 +193,9 @@ class RaceLedgerTests(unittest.TestCase):
 
     def test_double_reward_delivery_is_rejected(self):
         ledger = RaceLedger()
+        ledger.begin_cycle()
         ledger.record(summarize_race(results_state(), "t"), "cycle-0")
+        ledger.begin_cycle()
         # A second report of the same result (duplicate delivery retry
         # elsewhere) must not add a second reward row.
         state = results_state(result_id="res-1", race_id="race-2")

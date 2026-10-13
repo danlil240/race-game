@@ -239,6 +239,39 @@ namespace FamilyRacing.Tests
         }
 
         [Test]
+        public void LocalIneligibleDeliveryCarriesTheVerdictPrefix()
+        {
+            var hostStore = Store();
+            var hostProfile = ValidProfile(0, 7, HostPid);
+            hostStore.Save(hostProfile);
+            var hostSaved = hostStore.Load(0).Profile;
+
+            var hostLink = new LanSessionTests.FakeLanLink();
+            var host = LanSessionTests.StandaloneService(
+                hostLink, new LanSessionTests.FakeLanProbe(), HostPid);
+            Assert.That(host.Execute(Cmd("lan.host",
+                P("port", "47777"))).status, Is.EqualTo("applied"));
+            host.SetRewardApplier(r =>
+                RaceRewardService.Apply(r, HostPid, hostSaved, hostStore));
+
+            // The host's own racer DNFs: the reward applier answers
+            // ineligible, and the local delivery row must record the same
+            // permanent verdict the remote ack path reports —
+            // "ineligible:dnf", never the bare outcome — so endpoint
+            // observations of one delivery agree byte-for-byte.
+            var result = FinishedResult("s-1", "s-1-r1",
+                HostPid, "dnf", "ai-slot-1", "finished");
+            Assert.That(host.PublishResult(result), Is.True);
+
+            var delivery = DeliveryOf(host.Snapshot(), result.resultId, HostPid);
+            Assert.That(delivery, Is.Not.Null);
+            Assert.That(delivery.state, Is.EqualTo("failed"));
+            Assert.That(delivery.code, Is.EqualTo("ineligible:dnf"));
+            Assert.That(hostSaved.coins, Is.EqualTo(7));
+            Assert.That(hostSaved.appliedResults.Count, Is.EqualTo(0));
+        }
+
+        [Test]
         public void DnfAndAbortAwardZero()
         {
             var store = Store();

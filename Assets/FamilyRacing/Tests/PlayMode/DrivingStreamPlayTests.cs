@@ -507,6 +507,139 @@ namespace FamilyRacing.Tests
             }
         }
 
+        // Task 11 physical observability, end-to-end over the real
+        // stream: a PhysicalAssisted session stepped through a genuine
+        // PhysicsVehicleSimulation publishes the full diagnostic slice
+        // on every boundary — motor physics with the ordered wheel
+        // array, the three-sample substep path, backend/fingerprint
+        // identity, recovery bookkeeping and live world counters — and
+        // the independent reconstruction still equals the producer's
+        // own serialization field for field.
+        [UnityTest]
+        public IEnumerator PhysicalDiagnosticsReachTheStreamBoundary()
+        {
+            var physicsWorld = PhysicsCourseWorld.Create("StreamPhysics");
+            try
+            {
+                PhysicsTestWorld.FlatGround(physicsWorld, 0f, 0f,
+                    400f, 400f);
+                service.SetDrivingContent(PhysicalCatalog());
+                service.SetDrivingSimulationFactory(content =>
+                    new PhysicsVehicleSimulation(physicsWorld));
+                StartBridge();
+                using (var client = Connect())
+                {
+                    Hello(client);
+                    client.Read(); // hello
+                    yield return PumpSeconds(0.3f);
+                    client.ReadBoundary(); // attach snapshot
+
+                    client.Send(Command("cmd-create", "profile.create",
+                        ("slot", "0"), ("language", "en")));
+                    yield return PumpSeconds(0.4f);
+                    client.ReadBoundary();
+                    client.Read(); // result
+
+                    client.Send(Command("cmd-race", "race.start",
+                        ("vehicleId", "car-physics-01"),
+                        ("eventId", "phys-test")));
+                    yield return PumpSeconds(0.4f);
+                    var pair = client.ReadBoundary();
+                    AssertEquivalent(pair[1]);
+                    client.Read(); // result
+
+                    var driving = pair[1]["driving"];
+                    Assert.That((string)driving["simulationBackend"],
+                        Is.EqualTo("physicalAssisted"),
+                        "the session must name its real backend");
+                    var fingerprint =
+                        (string)driving["contentFingerprint"];
+                    Assert.That(fingerprint,
+                        Is.Not.Null.And.Length.EqualTo(64),
+                        "the canonical tuning fingerprint must be a "
+                        + "64-hex token");
+                    Assert.That((string)driving["lastRecoveryReason"],
+                        Is.EqualTo(""), "no recovery has run yet");
+
+                    // Past the countdown plus a few running boundaries:
+                    // physics, path and diagnostics must all be live.
+                    Tick(6);
+                    for (var i = 0; i < 6; i++)
+                        pair = client.ReadBoundary();
+                    AssertEquivalent(pair[1]);
+                    driving = pair[1]["driving"];
+                    var motor = (JObject)driving["motor"];
+                    var physics = (JObject)motor["physics"];
+                    Assert.That(physics, Is.Not.Null,
+                        "physical backend must publish physics state");
+                    var wheels = (JArray)physics["wheels"];
+                    Assert.That(wheels,
+                        Is.Not.Null.And.Count.EqualTo(4));
+                    for (var w = 0; w < wheels.Count; w++)
+                    {
+                        Assert.That((int)wheels[w]["index"],
+                            Is.EqualTo(w),
+                            "wheel array must stay index-ordered");
+                        Assert.That(wheels[w]["grounded"].Type,
+                            Is.EqualTo(JTokenType.Boolean));
+                        Assert.That(wheels[w]["contactValid"].Type,
+                            Is.EqualTo(JTokenType.Boolean));
+                        Assert.That((float)wheels[w]["normalLoad"],
+                            Is.GreaterThanOrEqualTo(0f));
+                    }
+
+                    // Ordered substep evidence: exactly three samples at
+                    // the fixed 0 / 1/60 / 1/30 offsets, the terminal
+                    // sample matching the committed envelope pose.
+                    var path = (JArray)driving["substepPath"];
+                    Assert.That(path, Is.Not.Null.And.Count.EqualTo(3),
+                        "every boundary must carry the ordered "
+                        + "substep path");
+                    var offsets = new[] { 0f, 1f / 60f, 1f / 30f };
+                    for (var s = 0; s < 3; s++)
+                        Assert.That((float)path[s]["offsetSeconds"],
+                            Is.EqualTo(offsets[s]).Within(0.001f));
+                    Assert.That((float)path[2]["pose"]["x"],
+                        Is.EqualTo((float)motor["x"]).Within(0.05f));
+                    Assert.That((float)path[2]["pose"]["z"],
+                        Is.EqualTo((float)motor["z"]).Within(0.05f));
+
+                    // Live world counters: one body, two substeps per
+                    // tick, real non-negative cost, no refused states.
+                    var sim = (JObject)driving["simulation"];
+                    Assert.That(sim, Is.Not.Null,
+                        "the physical world must publish diagnostics");
+                    Assert.That((string)sim["backend"],
+                        Is.EqualTo("physicalAssisted"));
+                    Assert.That((long)sim["ticksSimulated"],
+                        Is.GreaterThanOrEqualTo(6));
+                    Assert.That((long)sim["substepsSimulated"],
+                        Is.EqualTo((long)sim["ticksSimulated"] * 2));
+                    Assert.That((int)sim["bodies"], Is.EqualTo(1));
+                    Assert.That((double)sim["totalStepSeconds"],
+                        Is.GreaterThanOrEqualTo(0));
+                    Assert.That((double)sim["lastStepSeconds"],
+                        Is.GreaterThanOrEqualTo(0));
+                    Assert.That((long)sim["invalidStateFaults"],
+                        Is.EqualTo(0));
+
+                    // The current-course regression: the legacy envelope
+                    // still agrees with the physics body's own velocity.
+                    var vx = (float)physics["velocityX"];
+                    var vz = (float)physics["velocityZ"];
+                    var forward = vx * Math.Sin((float)motor["heading"])
+                        + vz * Math.Cos((float)motor["heading"]);
+                    Assert.That(Math.Abs(forward - (float)motor["speed"]),
+                        Is.LessThan(0.5f),
+                        "legacy envelope diverged from physics velocity");
+                }
+            }
+            finally
+            {
+                physicsWorld.Dispose();
+            }
+        }
+
         [UnityTest]
         public IEnumerator OverloadTelemetryReachesBoundaryState()
         {
@@ -627,6 +760,43 @@ namespace FamilyRacing.Tests
             return DrivingContentCatalog.Create("test-content-1",
                 new[] { VehicleTuning.Car01(), VehicleTuning.Motorcycle01() },
                 new[] { course }, new[] { intro });
+        }
+
+        // A physical-backend catalog on flat geometry: one physical car
+        // tuning plus the same minimal course shape the arcade fixture
+        // uses — the course ground itself is supplied by the test's own
+        // collision-only PhysicsCourseWorld.
+        private static DrivingContentCatalog PhysicalCatalog()
+        {
+            var course = new CourseDefinition
+            {
+                id = "course-phys",
+                checkpoints = new List<CheckpointGate>
+                {
+                    new CheckpointGate { id = "start", x = 0f, y = 0f, z = 0f,
+                        halfWidth = 6f, dirX = 0f, dirZ = 1f,
+                        recoverX = 0f, recoverZ = -3f },
+                    new CheckpointGate { id = "gate-1", x = 0f, y = 0f, z = 2000f,
+                        halfWidth = 6f, dirX = 0f, dirZ = 1f,
+                        recoverX = 0f, recoverZ = 1997f }
+                }
+            };
+            var evt = new EventDefinition
+            {
+                id = "phys-test",
+                courseId = "course-phys",
+                laps = 1,
+                countdownTicks = 2,
+                vehicleIds = new List<string> { "car-physics-01" }
+            };
+            return DrivingContentCatalog.Create("phys-content-1",
+                new[]
+                {
+                    PhysicsTestWorld.PhysicalTuning("car-physics-01",
+                        VehiclePhysicsTuning.Car01())
+                },
+                new[] { course }, new[] { evt },
+                VehicleSimulationBackend.PhysicalAssisted);
         }
 
         private static JObject Command(string id, string action,

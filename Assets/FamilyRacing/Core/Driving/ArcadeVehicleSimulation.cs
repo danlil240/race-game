@@ -19,7 +19,8 @@ namespace FamilyRacing.Core.Driving
     // included every unfinalized racer in the contact set. A reset the
     // coordinator applied through Restore lands in the stored state
     // before any request reads it.
-    public sealed class ArcadeVehicleSimulation : IVehicleSimulation
+    public sealed class ArcadeVehicleSimulation : IVehicleSimulation,
+        IVehicleSimulationDiagnostics
     {
         private sealed class Body
         {
@@ -34,6 +35,10 @@ namespace FamilyRacing.Core.Driving
             new List<VehicleTickResult>();
         private bool initialized;
         private bool disposed;
+        private long ticksSimulated;
+        private double lastStepSeconds;
+        private double totalStepSeconds;
+        private long invalidStateFaults;
 
         public ArcadeVehicleSimulation(IMotorWorld world)
         {
@@ -41,6 +46,26 @@ namespace FamilyRacing.Core.Driving
         }
 
         public IMotorWorld World { get { return world; } }
+
+        // The kinematic backend honestly reports no fixed substeps — it
+        // computes one end pose per interval; the substep count is a
+        // real zero, not missing telemetry.
+        public VehicleSimulationDiagnostics Diagnostics
+        {
+            get
+            {
+                return new VehicleSimulationDiagnostics
+                {
+                    backend = "arcade",
+                    ticksSimulated = ticksSimulated,
+                    substepsSimulated = 0,
+                    bodies = bodies.Count,
+                    lastStepSeconds = lastStepSeconds,
+                    totalStepSeconds = totalStepSeconds,
+                    invalidStateFaults = invalidStateFaults
+                };
+            }
+        }
 
         // Roster setup mirrors the physical backend: whole-batch
         // validation before any body exists; re-initialize replaces the
@@ -101,6 +126,7 @@ namespace FamilyRacing.Core.Driving
             if (disposed) throw new ObjectDisposedException(
                 nameof(ArcadeVehicleSimulation));
             if (!initialized) Initialize(null);
+            var watch = System.Diagnostics.Stopwatch.StartNew();
             results.Clear();
 
             var count = requests != null ? requests.Count : 0;
@@ -204,6 +230,13 @@ namespace FamilyRacing.Core.Driving
                 }
                 results.Add(result);
             }
+            for (var i = 0; i < count; i++)
+                if (errors[i] != null)
+                    invalidStateFaults++;
+            ticksSimulated++;
+            watch.Stop();
+            lastStepSeconds = watch.Elapsed.TotalSeconds;
+            totalStepSeconds += lastStepSeconds;
             return results;
         }
 
@@ -222,7 +255,11 @@ namespace FamilyRacing.Core.Driving
                 || !Finite(state.heading) || !Finite(state.speed)
                 || !Finite(state.lateralSpeed)
                 || !Finite(state.verticalSpeed))
+            {
+                // A refused reset is an observable fault, never silent.
+                invalidStateFaults++;
                 return;
+            }
             body.state = state.Copy();
         }
 
