@@ -389,16 +389,49 @@ def record_delivery_verdicts(report, verdicts, cycle):
     return dishonest
 
 
-def soak_status(lost, dishonest_delivery):
-    """The honest top-level verdict: a lost participant or a failed
-    delivery that is not a permanent ineligible verdict fails the run
-    no matter how many races completed cleanly."""
+# Incident kinds that abort a race cycle or violate a checked
+# invariant — any one of them fails the soak verdict no matter how many
+# races completed cleanly; a passing run with hard incidents is a lie.
+# `streamLost` is absent because every append site already moves the
+# peer into `lost` (the lost-participant verdict covers it), and
+# `deliveryFailed` is judged per-row: only a dishonest code fails.
+HARD_INCIDENTS = frozenset({
+    "captureInvalid", "inputRejected", "outgoingQueueFull",
+    "raceStartFailed", "rematchFailed", "resultLedger",
+    "resultsTimeout", "teardownFailed",
+})
+
+
+def hard_incident_kinds(incidents):
+    """The hard incident kinds present in a report's incident list.
+    Informational records — an honest `ineligible:*` deliveryFailed
+    verdict — are legal outcomes, not run failures."""
+    kinds = set()
+    for incident in incidents:
+        kind = incident.get("kind")
+        if kind == "deliveryFailed":
+            if not incident.get("honest"):
+                kinds.add(kind)
+        elif kind in HARD_INCIDENTS:
+            kinds.add(kind)
+    return kinds
+
+
+def soak_status(lost, dishonest_delivery, incidents=()):
+    """The honest top-level verdict: a lost participant, a failed
+    delivery that is not a permanent ineligible verdict, or ANY hard
+    incident (a cycle abort or invariant violation — see
+    HARD_INCIDENTS) fails the run no matter how many races completed
+    cleanly."""
     if lost:
         return "failed", "lost participant(s): " + \
             ", ".join(sorted(lost))
     if dishonest_delivery:
         return "failed", "result delivery failed for a recoverable " \
             "or result-mismatched reason (see deliveryFailed incidents)"
+    hard = hard_incident_kinds(incidents)
+    if hard:
+        return "failed", "hard incident(s): " + ", ".join(sorted(hard))
     return "passed", None
 
 
@@ -591,24 +624,29 @@ def run_soak(connection_paths, evidence, minutes, host_address=None,
         report["racesCompleted"] = len(report["cycles"])
 
         # Teardown: host leave -> survivors land on recovery -> each
-        # leaves honestly. Lost peers are skipped, not forced. A
-        # `noSession` rejection is the NetworkScenario tolerance: a late
-        # session close may already have expired the endpoint back to
-        # the browser, so there is honestly nothing left to leave — an
-        # already-clean exit, not a failure.
+        # leaves honestly. Lost peers are skipped, not forced — when the
+        # host itself is lost its leave is skipped too (a dead socket
+        # cannot leave), so surviving clients still get their own
+        # recovery + leave. A `noSession` rejection is the
+        # NetworkScenario tolerance: a late session close may already
+        # have expired the endpoint back to the browser, so there is
+        # honestly nothing left to leave — an already-clean exit, not a
+        # failure.
         survivors = [(role, peer) for role, peer in peers
                      if role not in lost]
         if survivors:
             try:
-                result, _ = host.command("lan.leave")
-                if result["status"] == "rejected":
-                    assert result["code"] == "noSession", result
-                else:
-                    assert result["status"] == "applied", result
-                wait_state(host,
-                           lambda state: state["network"]["role"] == "none"
-                           and state["screen"] == "lan-browser",
-                           15, "host left")
+                if "host" not in lost:
+                    result, _ = host.command("lan.leave")
+                    if result["status"] == "rejected":
+                        assert result["code"] == "noSession", result
+                    else:
+                        assert result["status"] == "applied", result
+                    wait_state(
+                        host,
+                        lambda state: state["network"]["role"] == "none"
+                        and state["screen"] == "lan-browser",
+                        15, "host left")
                 for role, peer in survivors:
                     if peer is host:
                         continue
@@ -665,7 +703,8 @@ def run_soak(connection_paths, evidence, minutes, host_address=None,
                 assert peer.max_backlog_steps < MAX_STEPS_PER_FRAME, \
                     role + " backlog stayed saturated"
 
-        status, error = soak_status(lost, dishonest_delivery)
+        status, error = soak_status(lost, dishonest_delivery,
+                                    report["incidents"])
         report["status"] = status
         if error is not None:
             report["error"] = error

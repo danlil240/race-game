@@ -12,8 +12,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from NetworkSoak import (RaceLedger, build_parser, cycle_class,
-                         deliveries_settled, delivery_verdicts,
+from NetworkSoak import (HARD_INCIDENTS, RaceLedger, build_parser,
+                         cycle_class, deliveries_settled,
+                         delivery_verdicts, hard_incident_kinds,
                          health_sample, record_delivery_verdicts,
                          should_start_cycle, soak_inputs, soak_status,
                          summarize_race)
@@ -302,6 +303,72 @@ class DeliveryVerdictTests(unittest.TestCase):
         status, error = soak_status({}, False)
         self.assertEqual(status, "passed")
         self.assertIsNone(error)
+
+
+class SoakStatusTests(unittest.TestCase):
+    """The top-level verdict fails on ANY hard incident — a cycle
+    abort or invariant violation can never leave `status: "passed"`
+    behind. Informational records (an honest `ineligible:*`
+    deliveryFailed verdict) remain legal outcomes that do not fail
+    the run."""
+
+    def test_result_ledger_incident_fails_the_run(self):
+        # e.g. a delivery row stuck `pending` past the settle window:
+        # the cycle breaks on the incident and the run must fail.
+        incidents = [{
+            "kind": "resultLedger", "cycle": 0,
+            "detail": "cycle-0 client-0: delivery for p-1 never "
+                      "settled (pending)"}]
+        self.assertEqual(hard_incident_kinds(incidents),
+                         {"resultLedger"})
+        status, error = soak_status({}, False, incidents)
+        self.assertEqual(status, "failed")
+        self.assertIsNotNone(error)
+
+    def test_results_timeout_incident_fails_the_run(self):
+        incidents = [{
+            "kind": "resultsTimeout", "role": "client-0", "cycle": 0,
+            "detail": "no results phase within the race window"}]
+        status, error = soak_status({}, False, incidents)
+        self.assertEqual(status, "failed")
+        self.assertIsNotNone(error)
+
+    def test_every_hard_kind_fails_the_run(self):
+        for kind in sorted(HARD_INCIDENTS):
+            with self.subTest(kind=kind):
+                status, error = soak_status(
+                    {}, False, [{"kind": kind, "cycle": 0}])
+                self.assertEqual(status, "failed")
+                self.assertIn(kind, error)
+
+    def test_honest_ineligible_delivery_still_passes(self):
+        # An informational-only run: failed rows carrying the exact
+        # permanent ineligible verdict are logged as incidents but the
+        # verdict stays passed while no peer is lost.
+        report = {"incidents": []}
+        state = results_state(
+            delivery_states=("persisted", "failed"),
+            delivery_codes=("", "ineligible:dnf"),
+            outcomes=("finished", "dnf"))
+        verdicts = delivery_verdicts(
+            {"host": summarize_race(state, "host")})
+        dishonest = record_delivery_verdicts(report, verdicts, 0)
+        self.assertFalse(dishonest)
+        self.assertEqual(len(report["incidents"]), 2)
+        self.assertEqual(hard_incident_kinds(report["incidents"]),
+                         set())
+        status, error = soak_status({}, dishonest, report["incidents"])
+        self.assertEqual(status, "passed")
+        self.assertIsNone(error)
+
+    def test_dishonest_delivery_incident_alone_fails(self):
+        # A dishonest deliveryFailed incident is hard even if the
+        # caller's flag was missed — the incident list is authoritative.
+        incidents = [{"kind": "deliveryFailed", "role": "host",
+                      "participant": "p-0", "cycle": 0,
+                      "code": "saveFailed", "honest": False}]
+        status, _ = soak_status({}, False, incidents)
+        self.assertEqual(status, "failed")
 
 
 class HealthSampleTests(unittest.TestCase):
