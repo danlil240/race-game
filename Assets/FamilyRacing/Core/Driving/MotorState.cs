@@ -32,6 +32,10 @@ namespace FamilyRacing.Core.Driving
         public bool recovering;
         public string lastContact = "none"; // "none" | "ground" | "wall" | "obstacle"
         public long tick;
+        // Optional full physical state for the physical backend. Null while
+        // the arcade backend drives; when present it is an additive carried
+        // state — the legacy x/y/z/heading/speed rule envelope still applies.
+        public VehiclePhysicsState physics;
 
         public MotorPose Pose
         {
@@ -61,7 +65,8 @@ namespace FamilyRacing.Core.Driving
                 airPeakY = airPeakY,
                 recovering = recovering,
                 lastContact = lastContact,
-                tick = tick
+                tick = tick,
+                physics = physics == null ? null : physics.Copy()
             };
         }
     }

@@ -103,6 +103,70 @@ namespace FamilyRacing.Tests
             Assert.That(merged.Pause, Is.True);
         }
 
+        // --- throttle override and brake semantics -----------------------------
+
+        [Test]
+        public void DefaultInputUsesAutoThrottle_ExplicitZeroCoasts()
+        {
+            // Missing throttle means automatic throttle — a zero-initialized
+            // struct included — while an explicit override of 0 is a coast.
+            Assert.That(default(DriverInput).Throttle, Is.EqualTo(1f));
+            Assert.That(default(DriverInput).HasThrottleOverride, Is.False);
+            Assert.That(default(DriverInput).Brake, Is.EqualTo(0f));
+            var explicitCoast = new DriverInput(0f, false, false, false,
+                false, false, false, 0f, 0f);
+            Assert.That(explicitCoast.Throttle, Is.EqualTo(0f));
+            Assert.That(explicitCoast.HasThrottleOverride, Is.True);
+            // The pre-brake constructor keeps automatic-throttle semantics.
+            var legacy = Input();
+            Assert.That(legacy.HasThrottleOverride, Is.False);
+            Assert.That(legacy.Throttle, Is.EqualTo(1f));
+            Assert.That(legacy.Brake, Is.EqualTo(0f));
+        }
+
+        [Test]
+        public void InputCompositionKeepsBrakeAndOverride()
+        {
+            var keyboard = new DriverInput(0f, false, false, false,
+                false, false, false, 0.5f, 0.8f);
+            var touch = Input();
+            var composed = DriverInputComposer.Compose(keyboard, touch);
+            // Brake combines by max; an absent source never cancels an
+            // explicit override.
+            Assert.That(composed.Brake, Is.EqualTo(0.8f));
+            Assert.That(composed.HasThrottleOverride, Is.True);
+            Assert.That(composed.Throttle, Is.EqualTo(0.5f));
+        }
+
+        [Test]
+        public void InputCompositionUsesLowerOverrideWhenBothSourcesOverride()
+        {
+            var keyboard = new DriverInput(0f, false, false, false,
+                false, false, false, 0.3f, 0f);
+            var touch = new DriverInput(0f, false, false, false,
+                false, false, false, 0.7f, 0.4f);
+            var composed = DriverInputComposer.Compose(keyboard, touch);
+            Assert.That(composed.Throttle, Is.EqualTo(0.3f));
+            Assert.That(composed.Brake, Is.EqualTo(0.4f));
+        }
+
+        [Test]
+        public void ThrottleAndBrakeArgumentsAreBoundedDefensively()
+        {
+            var clamped = new DriverInput(0f, false, false, false,
+                false, false, false, 4f, -2f);
+            Assert.That(clamped.Throttle, Is.EqualTo(1f));
+            Assert.That(clamped.HasThrottleOverride, Is.True);
+            Assert.That(clamped.Brake, Is.EqualTo(0f));
+            // A non-finite override or brake is defensive-neutralized:
+            // automatic throttle and no brake.
+            var nonFinite = new DriverInput(0f, false, false, false,
+                false, false, false, float.NaN, float.PositiveInfinity);
+            Assert.That(nonFinite.HasThrottleOverride, Is.False);
+            Assert.That(nonFinite.Throttle, Is.EqualTo(1f));
+            Assert.That(nonFinite.Brake, Is.EqualTo(0f));
+        }
+
         [Test]
         public void ComposeOfNeutralInputsStaysNeutral()
         {

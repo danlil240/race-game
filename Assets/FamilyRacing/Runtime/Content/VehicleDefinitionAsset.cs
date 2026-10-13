@@ -41,6 +41,13 @@ namespace FamilyRacing
         public float halfLength = 1.6f;
         public float height = 1.1f;
         public float wallSpeedRetention = 0.15f;
+        [Header("Physical simulation (opt-in)")]
+        [Tooltip("Arcade keeps the legacy motor; PhysicalAssisted requires a " +
+            "valid physics tuning asset below.")]
+        public VehicleSimulationBackend simulationBackend = VehicleSimulationBackend.Arcade;
+        [Tooltip("Validated SI tuning used when simulationBackend is " +
+            "PhysicalAssisted. Legacy assets leave this unassigned.")]
+        public VehiclePhysicsTuningAsset physicsTuning;
         [Header("Presentation")]
         // Which graybox silhouette VehiclePresentation builds; collision
         // always uses the tuning box above, never the visual shape.
@@ -116,8 +123,23 @@ namespace FamilyRacing
                 halfWidth = halfWidth,
                 halfLength = halfLength,
                 height = height,
-                wallSpeedRetention = wallSpeedRetention
+                wallSpeedRetention = wallSpeedRetention,
+                simulationBackend = simulationBackend
             };
+            // Physical tuning joins the candidate atomically: an invalid or
+            // missing asset fails the whole conversion before anything is
+            // returned.
+            if (physicsTuning != null)
+            {
+                string physicsError;
+                var physics = physicsTuning.ToTuning(out physicsError);
+                if (physics == null)
+                {
+                    error = name + ": " + physicsError;
+                    return null;
+                }
+                tuning.physics = physics;
+            }
             if (!tuning.Validate(out error))
             {
                 error = name + ": invalid tuning field " + error;

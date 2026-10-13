@@ -40,6 +40,8 @@ MonoBehaviour:
   halfLength: 1.1
   height: 1.4
   wallSpeedRetention: 0.1
+  simulationBackend: 0
+  physicsTuning: {fileID: 0}
   silhouette: motorcycle
   leanDegrees: 24
   bodyScale: {x: 0.9, y: 1.4, z: 2.2}

@@ -2,6 +2,15 @@ using System;
 
 namespace FamilyRacing.Core.Driving
 {
+    // Which simulation backend advances a vehicle. Legacy content keeps
+    // Arcade; PhysicalAssisted is opt-in and requires a validated
+    // VehiclePhysicsTuning on the owning VehicleTuning.
+    public enum VehicleSimulationBackend
+    {
+        Arcade = 0,
+        PhysicalAssisted = 1
+    }
+
     // Editable arcade vehicle parameters. Every value must be finite;
     // Validate() is the single authority the motor consults so a NaN or
     // out-of-range asset can never partially mutate state.
@@ -35,6 +44,13 @@ namespace FamilyRacing.Core.Driving
         public float halfLength = 1.6f;
         public float height = 1.1f;
         public float wallSpeedRetention = 0.15f; // fraction of into-wall speed kept on contact
+
+        // Physical backend is opt-in: legacy content stays Arcade. `physics`
+        // carries the validated SI tuning the physical backend consumes — it
+        // is required when simulationBackend is PhysicalAssisted and is
+        // validated whenever present, even under Arcade.
+        public VehicleSimulationBackend simulationBackend = VehicleSimulationBackend.Arcade;
+        public VehiclePhysicsTuning physics;
 
         public bool Validate(out string error)
         {
@@ -81,6 +97,13 @@ namespace FamilyRacing.Core.Driving
             if (float.IsNaN(wallSpeedRetention) || float.IsInfinity(wallSpeedRetention)
                 || wallSpeedRetention < 0f || wallSpeedRetention > 1f)
             { error = "wallSpeedRetention"; return false; }
+            if (!Enum.IsDefined(typeof(VehicleSimulationBackend), simulationBackend))
+            { error = "simulationBackend"; return false; }
+            if (physics != null && !physics.Validate(out error))
+            { error = "physics." + error; return false; }
+            if (simulationBackend == VehicleSimulationBackend.PhysicalAssisted
+                && physics == null)
+            { error = "physics"; return false; }
             return true;
         }
 
