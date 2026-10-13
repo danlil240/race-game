@@ -93,7 +93,7 @@ python Tools\DrivingScenario.py <dir>\connection.json --evidence <new-evidence-d
 python Tools\FinishDeliveryScenario.py <player.exe> --evidence <new-dir>
 # Real profile store + graceful exit (WM_CLOSE) + restart:
 python Tools\NormalProfileScenario.py <player.exe> --evidence <new-dir>
-# Multi-instance LAN lifecycle over the real UDP transport (schema 3).
+# Multi-instance LAN lifecycle over the real UDP transport (schema 4).
 # The mandated interface attaches to 2-4 independently launched players —
 # the first connection is driven as the host; Android descriptors are
 # per-device ADB-forwarded loopback endpoints:
@@ -213,13 +213,16 @@ contiguous `sequence`, `monotonicMs`, `tick`: `snapshot`, `state`,
 `delta`, `result`, `discovery`, `lookup`, `health`, `screenshot`,
 `finished`.
 `snapshot`/`state` records carry a complete `state` payload and
-`stateSchemaVersion` (currently `3`: on top of the schema-2 `driving`
+`stateSchemaVersion` (currently `4`: on top of the schema-2 `driving`
 slice the state adds `network` (session role/phase, roster, shared pause,
 pending operations, discovered hosts, result deliveries — always
 populated, idle/none without a session), `networkRace` (host-confirmed
 shared race facts; null outside a LAN race), `prediction` (client-side
 local prediction facts; null on the host and outside a LAN race) and
-`remotePresentation` (per-remote interpolation diagnostics)); consumers
+`remotePresentation` (per-remote interpolation diagnostics); schema 4 adds
+the protocol-2 surfaces — the session descriptor's `contentFingerprint`,
+a `compat` token on every discovered host, and per-racer physical state
+inside LAN race snapshots); consumers
 must reject unsupported schemas before trusting driving evidence. The
 `hello` frame, `connection.json` and `discovery` records all advertise
 the same `stateSchemaVersion`.
@@ -250,7 +253,7 @@ input; after `finish` the run is closed (`captureClosed` rejects new
 controllers/commands); `capture-status.json` reports `captureComplete`
 only after the trace is flushed and the final status stamped.
 
-## LAN commands and screens (schema 3)
+## LAN commands and screens (schema 4)
 
 The five LAN screens are `lan-browser` (the only user-navigable LAN
 screen — a `ui.navigate` target), plus the phase-derived `lan-lobby`,

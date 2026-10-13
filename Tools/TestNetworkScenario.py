@@ -1,7 +1,7 @@
 """Integrity checks for the LAN scenario's validators, not the game itself.
 
 These tests prove the scenario tooling can catch lies: mutated or missing
-schema-3 slices, impossible phase transitions, unsequenced or gapped
+schema-3/4 slices, impossible phase transitions, unsequenced or gapped
 records, deltas that do not name their boundary, commands accepted but
 never completed, and credential leakage into observable state."""
 
@@ -20,10 +20,18 @@ from NetworkScenario import (LEGAL_PHASE_TRANSITIONS,
                              verify_lan_trace)
 
 
-def lan_state(tick=1):
-    """A minimal well-formed schema-3 state with a live LAN session."""
+def lan_state(tick=1, schema=4):
+    """A minimal well-formed LAN state at the given schema marker.
+
+    Schema 4 (the current REQUIRED_LAN_SCHEMA) adds the compatibility
+    surfaces: the session descriptor carries the canonical tuned-content
+    fingerprint and every discovered host carries its compat token."""
+    descriptor = {"sessionId": "s-1", "eventId": "lan-car-01",
+                  "classId": "car", "joinable": True}
+    if schema >= 4:
+        descriptor["contentFingerprint"] = "f" * 64
     return {
-        "stateSchemaVersion": 3,
+        "stateSchemaVersion": schema,
         "contentVersion": "lan-content-1",
         "screen": "lan-lobby",
         "language": "en",
@@ -49,8 +57,7 @@ def lan_state(tick=1):
             "role": "host",
             "phase": "lobby",
             "localParticipantId": "p-host",
-            "descriptor": {"sessionId": "s-1", "eventId": "lan-car-01",
-                           "classId": "car", "joinable": True},
+            "descriptor": descriptor,
             "participants": [
                 {"participantId": "p-host", "slot": 0, "occupied": True,
                  "avatar": "fox", "colorIndex": 0, "vehicleId": "car-01",
@@ -303,15 +310,40 @@ class Schema3ConsumerTests(unittest.TestCase):
         }
 
     def test_schema3_boundary_validates(self):
-        record = self.record()
+        record = self.record(state=lan_state(schema=3))
         record["stateSchemaVersion"] = 3
+        validate_state_schema(record, record["state"])
+
+    def test_schema4_boundary_validates(self):
+        record = self.record()
+        record["stateSchemaVersion"] = 4
+        validate_state_schema(record, record["state"])
+
+    def test_schema4_descriptor_fingerprint_is_required(self):
+        state = lan_state()
+        del state["network"]["descriptor"]["contentFingerprint"]
+        record = self.record(state=state)
+        record["stateSchemaVersion"] = 4
+        with self.assertRaises(AssertionError):
+            validate_state_schema(record, record["state"])
+
+    def test_schema4_discovered_hosts_need_compat(self):
+        state = lan_state()
+        state["network"]["discovered"] = [
+            {"address": "192.168.1.50", "port": 47777,
+             "hostName": "peer"}]
+        record = self.record(state=state)
+        record["stateSchemaVersion"] = 4
+        with self.assertRaises(AssertionError):
+            validate_state_schema(record, record["state"])
+        state["network"]["discovered"][0]["compat"] = "g|c|f"
         validate_state_schema(record, record["state"])
 
     def test_schema3_missing_slices_are_rejected(self):
         for key in ("network", "networkRace", "prediction",
                     "remotePresentation"):
             with self.subTest(key=key):
-                state = lan_state()
+                state = lan_state(schema=3)
                 del state[key]
                 state["driving"] = None
                 state["drivingEvents"] = []
@@ -321,7 +353,7 @@ class Schema3ConsumerTests(unittest.TestCase):
                     validate_state_schema(record, record["state"])
 
     def test_schema3_nested_marker_must_match(self):
-        state = lan_state()
+        state = lan_state(schema=3)
         state["stateSchemaVersion"] = 2
         record = self.record(state=state)
         record["stateSchemaVersion"] = 3
@@ -384,7 +416,7 @@ class TraceIntegrityTests(unittest.TestCase):
                 "type": kind, "protocolVersion": 1, "runId": "lan-trace",
                 "deviceId": "d", "participantId": "local",
                 "buildVersion": "b", "contentVersion": "c",
-                "stateSchemaVersion": 3,
+                "stateSchemaVersion": 4,
                 "sequence": index + 1, "monotonicMs": (index + 1) * 10,
                 "tick": index + 1, "state": state,
             }
@@ -436,7 +468,7 @@ class TraceIntegrityTests(unittest.TestCase):
         return {
             "type": "delta", "protocolVersion": 1, "runId": "lan-trace",
             "deviceId": "d", "participantId": "local", "buildVersion": "b",
-            "contentVersion": "c", "stateSchemaVersion": 3,
+            "contentVersion": "c", "stateSchemaVersion": 4,
             "sequence": sequence, "monotonicMs": sequence * 10,
             "tick": tick, "base": base,
             "changed": {"tick": tick}, "removed": [],

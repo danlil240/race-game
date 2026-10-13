@@ -660,6 +660,60 @@ namespace FamilyRacing.Tests
         }
 
         [Test]
+        public void SnapshotWithNullRacerListRejectsCleanly()
+        {
+            // A crafted "racers":null body parses to a null list — the
+            // codec must refuse it as malformed instead of dereferencing
+            // it inside the physical fold.
+            var nullRacers = Wrap(NetworkWireCodec.TagSnapshot,
+                "{\"sessionId\":\"s\",\"raceId\":\"r\",\"raceOrdinal\":1,"
+                + "\"snapshotSequence\":1,\"state\":{\"sessionId\":\"s\","
+                + "\"raceId\":\"r\",\"phase\":\"running\",\"racers\":null},"
+                + "\"acks\":[]}");
+            NetworkSnapshot decoded;
+            string error;
+            Assert.That(NetworkWireCodec.TryDecodeSnapshot(nullRacers,
+                out decoded, out error), Is.False);
+            Assert.That(decoded, Is.Null);
+            Assert.That(error, Is.EqualTo("malformed"));
+        }
+
+        [Test]
+        public void SnapshotWithNullStateRejectsCleanly()
+        {
+            var nullState = Wrap(NetworkWireCodec.TagSnapshot,
+                "{\"sessionId\":\"s\",\"raceId\":\"r\",\"raceOrdinal\":1,"
+                + "\"snapshotSequence\":1,\"state\":null,\"acks\":[]}");
+            NetworkSnapshot decoded;
+            string error;
+            Assert.That(NetworkWireCodec.TryDecodeSnapshot(nullState,
+                out decoded, out error), Is.False);
+            Assert.That(decoded, Is.Null);
+            Assert.That(error, Is.EqualTo("malformed"));
+        }
+
+        [Test]
+        public void SnapshotEncodeRejectsNullRacerList()
+        {
+            var snapshot = new NetworkSnapshot
+            {
+                sessionId = "s", raceId = "r", raceOrdinal = 1,
+                snapshotSequence = 1,
+                state = new NetworkRaceState
+                {
+                    sessionId = "s", raceId = "r", phase = "running",
+                    racers = null
+                }
+            };
+            byte[] packet;
+            string error;
+            Assert.That(NetworkWireCodec.TryEncodeSnapshot(snapshot,
+                out packet, out error), Is.False);
+            Assert.That(packet, Is.Null);
+            Assert.That(error, Is.EqualTo("malformed"));
+        }
+
+        [Test]
         public void LegacyN5TagsAreNotGameplayPackets()
         {
             // Protocol 2 gameplay uses P1** tags; legacy N5** traffic is

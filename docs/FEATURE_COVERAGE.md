@@ -44,7 +44,7 @@ are explicitly `notImplemented`; additional QA gaps are listed below.
 `captureValid/captureError`, `presentation` (incl. `backlogSteps`,
 `stepOverloads`, and the actually-applied `presentation.camera` facts),
 `featureCoverage`, `driving`, `drivingEvents`,
-`droppedDrivingEvents`, and the schema-3 network slices `network`
+`droppedDrivingEvents`, and the schema-3+ network slices `network`
 (always populated: `role`, `phase`, `localParticipantId`, `descriptor`,
 `participants[]`, `paused`, `pauseRequests`, `lastError`,
 `pendingOperations[]`, `discovered[]`, `results[]`),
@@ -181,7 +181,7 @@ pointer-downs before the hold handlers, so `AddHoldButton` registrations now
 run in the trickle-down phase (`Logs\qualification-gaps\`; report
 `docs/tasks/foundation-gaps-report.md`).
 
-## Verified (LAN screens and schema-3 stream, Task 9)
+## Verified (LAN screens and schema-4 stream, Task 9)
 
 `NetworkScreensPlayTests` drives the five LAN screens with synthetic
 pointer events against a real `FoundationService` + `LanSessionService`
@@ -194,7 +194,7 @@ steering controls, hold buttons produce bounded `input.set`, host loss
 lands on the recovery screen and reconnect reuses the stored endpoint,
 the results screen renders the delivery ledger, and Hebrew renders the
 LAN surface RTL while addresses/participant ids stay LTR.
-`NetworkStreamPlayTests` proves schema-3 record identity (all required
+`NetworkStreamPlayTests` proves schema-4 record identity (all required
 fields plus `stateSchemaVersion` on boundary, discovery and nested
 state), deep-copy isolation of every emitted network slice under
 producer mutation, and independent snapshot+delta reconstruction where

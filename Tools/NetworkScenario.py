@@ -32,7 +32,7 @@ dropped seat, immutable results + duplicate result retrieval, rematch
 with the second vehicle class, host loss, recovery and leave.
 
 Every endpoint's NDJSON trace is verified independently: contiguous
-sequencing, schema-3 boundary validity, reconstructable snapshot/delta
+sequencing, schema-4 boundary validity, reconstructable snapshot/delta
 boundaries, async command/terminal-outcome correlation, honest lifecycle
 phases, predicted-vs-authoritative separation, unique reward rows, and no
 credential or transport-secret leakage. State predicates with bounded
@@ -54,7 +54,14 @@ from AgentScenario import (BOUNDARY_TYPES, Client, StateReconstructor,
 from RestartScenario import file_hash, wait_connection, write_json
 
 
-# The schema-3 session phases in their legal neighbourhood graph. A phase
+# The observation schema this scenario requires — mirrors
+# NetworkSettings.StateSchemaVersion in the pinned build. Schema 4 is the
+# protocol-2 epoch: physical LAN replication, content fingerprints on
+# descriptors/discovery, and P1 gameplay envelopes. Historical schema-3
+# evidence is not valid proof of a current build.
+REQUIRED_LAN_SCHEMA = 4
+
+# The schema-3+ session phases in their legal neighbourhood graph. A phase
 # may repeat or move only along an edge the session policy permits; any
 # other hop in a reconstructed boundary history means the emitted state
 # disagrees with the lifecycle contract.
@@ -98,9 +105,9 @@ def assert_no_secrets(node, path="state"):
 
 
 def validate_lan_state(state):
-    """Schema-3 network-slice shape a reconstructed boundary must carry."""
-    assert state.get("stateSchemaVersion") == 3, \
-        "LAN evidence requires schema 3"
+    """Schema-4 network-slice shape a reconstructed boundary must carry."""
+    assert state.get("stateSchemaVersion") == REQUIRED_LAN_SCHEMA, \
+        "LAN evidence requires schema %d" % REQUIRED_LAN_SCHEMA
     session = state.get("network")
     assert isinstance(session, dict), "network slice must be an object"
     for key in ("role", "phase", "localParticipantId", "participants",
@@ -798,7 +805,7 @@ def drive_join(client, host_port, join_address, allow_loopback,
 def drive_race(host, clients, class_id, checks):
     """Lobby -> racing for one vehicle class: configure, per-peer vehicle
     + ready (clients round-trip asynchronously), host start, then the
-    schema-3 race assertions both endpoints must satisfy."""
+    schema-4 race assertions both endpoints must satisfy."""
     event_id, vehicle_id = CLASS_EVENTS[class_id]
     host.applied("lan.configure",
                  {"eventId": event_id, "classId": class_id})
@@ -930,14 +937,14 @@ def run_lifecycle(host, clients, checks, join_address=None,
     for name, peer in peers:
         assert peer.state["activeSlot"] == -1 \
             and peer.state["screen"] == "profiles", name
-        assert peer.hello.get("stateSchemaVersion") == 3, \
-            name + " did not advertise schema 3"
+        assert peer.hello.get("stateSchemaVersion") == REQUIRED_LAN_SCHEMA, \
+            name + " did not advertise schema %d" % REQUIRED_LAN_SCHEMA
         validate_lan_state(peer.state)
         peer.applied("profile.create", {"slot": 0, "language": "en"})
         peer.applied("ui.navigate", {"screen": "lan-browser"})
         assert peer.state["screen"] == "lan-browser", name
-    checks.append("%d instances on the LAN browser with schema-3 slices"
-                  % len(peers))
+    checks.append("%d instances on the LAN browser with schema-%d slices"
+                  % (len(peers), REQUIRED_LAN_SCHEMA))
 
     # Host on an ephemeral port so two concurrent runs never collide;
     # the bound port is observable in the descriptor.

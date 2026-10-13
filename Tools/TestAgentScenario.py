@@ -82,7 +82,7 @@ class IntegrityTests(unittest.TestCase):
             validate_state_schema(record, record["state"])
 
     def test_unsupported_schemas_are_rejected_before_driving_evidence(self):
-        for schema in (0, 4, "2", True):
+        for schema in (0, 5, "2", True):
             record = self.record()
             record["stateSchemaVersion"] = schema
             with self.subTest(schema=schema), self.assertRaises(AssertionError):

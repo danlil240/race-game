@@ -30,7 +30,7 @@ implies (the NetworkScenario settle standard); any other failure code
 fails the run; and
 every endpoint's NDJSON trace is verified independently at teardown with
 the full NetworkScenario LAN verification — contiguous sequencing,
-schema-3 boundary validity, legal phase transitions, async command
+schema-4 boundary validity, legal phase transitions, async command
 completion exactly once, predicted-vs-authoritative separation, and no
 credential leakage.
 
@@ -50,7 +50,8 @@ from DrivingScenario import DrivingClient, MAX_STEPS_PER_FRAME, \
     OUTGOING_CAPACITY
 from DrivingSoak import cadence_stats
 from NetworkScenario import drive_join, drive_race, finish_capture, \
-    lan_inputs, read_connection, validate_lan_state, wait_state
+    lan_inputs, read_connection, REQUIRED_LAN_SCHEMA, \
+    validate_lan_state, wait_state
 from RestartScenario import write_json
 
 
@@ -443,14 +444,14 @@ def enter_lobby(peers, host, clients, checks, host_address,
     for role, peer in peers:
         assert peer.state["activeSlot"] == -1 \
             and peer.state["screen"] == "profiles", role
-        assert peer.hello.get("stateSchemaVersion") == 3, \
-            role + " did not advertise schema 3"
+        assert peer.hello.get("stateSchemaVersion") == REQUIRED_LAN_SCHEMA, \
+            role + " did not advertise schema %d" % REQUIRED_LAN_SCHEMA
         validate_lan_state(peer.state)
         peer.applied("profile.create", {"slot": 0, "language": "en"})
         peer.applied("ui.navigate", {"screen": "lan-browser"})
         assert peer.state["screen"] == "lan-browser", role
     checks.append("%d endpoints attached on the LAN browser "
-                  "(schema-3 slices)" % len(peers))
+                  "(schema-%d slices)" % (len(peers), REQUIRED_LAN_SCHEMA))
 
     result, _ = host.command("lan.host", {"port": 0})
     assert result["status"] == "applied", result

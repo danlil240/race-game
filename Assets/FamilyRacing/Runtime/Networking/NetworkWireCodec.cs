@@ -4,6 +4,7 @@ using System.Text;
 using FamilyRacing.Core.Driving;
 using FamilyRacing.Core.Networking;
 using FamilyRacing.Core.Racing;
+using Newtonsoft.Json.Linq;
 using UnityEngine;
 
 namespace FamilyRacing.Networking
@@ -166,6 +167,10 @@ namespace FamilyRacing.Networking
             packet = null;
             error = null;
             if (snapshot == null) { error = "invalidSnapshot"; return false; }
+            // A state without a racer list is malformed content — reject
+            // before the deep copy can dereference it.
+            if (snapshot.state != null && snapshot.state.racers == null)
+            { error = "malformed"; return false; }
             // The wire projection is a deep copy: racer.physics carries
             // the compact DTO and the diagnostic MotorState.physics is
             // stripped — the host's live authoritative state is never
@@ -180,6 +185,7 @@ namespace FamilyRacing.Networking
                 acks = snapshot.acks
             };
             if (wire.state != null)
+            {
                 foreach (var racer in wire.state.racers)
                 {
                     if (racer == null) continue;
@@ -188,6 +194,7 @@ namespace FamilyRacing.Networking
                     racer.physics = NetworkPhysicsState.FromMotor(motor);
                     if (motor != null) motor.physics = null;
                 }
+            }
             var json = JsonUtility.ToJson(wire);
             packet = Wrap(SnapshotTag, json);
             // Explicit failure on overflow — never truncate racer state.
@@ -204,6 +211,15 @@ namespace FamilyRacing.Networking
             string json;
             if (!Unwrap(packet, SnapshotTag, NetworkSettings.SnapshotCeilingBytes,
                     out json, out error)) return false;
+            // JsonUtility materializes an explicit JSON null on an object
+            // or list field as a fresh default instance — "state":null
+            // and "racers":null would decode as valid empty content
+            // rather than the malformed wire data they are. Inspect the
+            // payload itself before parsing: an absent field is caught
+            // by the semantic checks below, but an explicit null on a
+            // required structure rejects here.
+            if (HasStructuralNull(json))
+            { error = "malformed"; return false; }
             snapshot = Parse<NetworkSnapshot>(json, out error);
             if (snapshot == null || snapshot.state == null)
             { snapshot = null; if (error == null) error = "malformed"; return false; }
@@ -215,6 +231,12 @@ namespace FamilyRacing.Networking
             // outcome.
             if (snapshot.state.result != null && !snapshot.state.result.finalized)
                 snapshot.state.result = null;
+            // A snapshot without a racer list is malformed wire content,
+            // not a clean parse — reject before the fold can dereference
+            // it. (JsonUtility materializes "racers":null as a null
+            // list, so the guard must live above the enumeration.)
+            if (snapshot.state.racers == null)
+            { snapshot = null; error = "malformed"; return false; }
             // Fold each racer's compact physical DTO back onto the motor
             // atomically: one malformed physical payload rejects the
             // whole snapshot before any client state can observe a
@@ -226,6 +248,27 @@ namespace FamilyRacing.Networking
                 { snapshot = null; return false; }
             }
             return true;
+        }
+
+        // True when the snapshot body carries an explicit JSON null for a
+        // required structural field: state itself, or the racer list.
+        // Parse failures fall through — Parse<T> reports them as
+        // malformed on its own.
+        private static bool HasStructuralNull(string json)
+        {
+            JObject root;
+            try
+            {
+                root = JObject.Parse(json);
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+            var state = root["state"];
+            if (state != null && state.Type == JTokenType.Null) return true;
+            var racers = state != null ? state["racers"] : null;
+            return racers != null && racers.Type == JTokenType.Null;
         }
 
         // The DTO is the wire contract: when present it validates as a
