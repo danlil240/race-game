@@ -431,6 +431,9 @@ HARD_INCIDENTS = frozenset({
     "captureInvalid", "inputRejected", "outgoingQueueFull",
     "raceStartFailed", "rematchFailed", "resultLedger",
     "resultsTimeout", "teardownFailed",
+    # Physical soak only: a world/body/history counter that did not
+    # rebase on a rematch is a leak, not a soft note — the run fails.
+    "rematchBaseline",
 })
 
 

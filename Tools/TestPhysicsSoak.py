@@ -11,7 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from NetworkSoak import soak_inputs
+from NetworkSoak import soak_inputs, soak_status
 from PhysicsScenario import PhysicsContractError
 from PhysicsSoak import (HISTORY_BASELINE_MARGIN, MAX_HOLD_SECONDS,
                          MAX_HOLD_TICKS, LanPhysicsObserver,
@@ -387,6 +387,26 @@ class RematchBaselineTests(unittest.TestCase):
                  "historyTail": 900, "historyPeak": 900},
             ]))
         assert any("prediction history" in v for v in violations)
+
+    def test_baseline_incident_fails_the_soak_verdict(self):
+        """Round-2 review defect: a rematchBaseline incident used to be
+        recorded yet leave soak_status 'passed' because the kind was
+        missing from HARD_INCIDENTS — a real world/body/history leak
+        must fail the run, never annotate a pass."""
+        violations = verify_rematch_baselines(self._report(
+            host_races=[
+                {"bodiesFirst": 4, "bodiesTail": 4,
+                 "ticksFirst": 1, "ticksTail": 9000},
+                {"bodiesFirst": 4, "bodiesTail": 4,
+                 "ticksFirst": 9001, "ticksTail": 12000},
+            ],
+            client_races=[]))
+        assert violations, "fixture must produce a leak"
+        incidents = [{"kind": "rematchBaseline", "detail": v}
+                     for v in violations]
+        status, error = soak_status(set(), False, incidents)
+        assert status == "failed"
+        assert "rematchBaseline" in error
 
 
 class CliContractTests(unittest.TestCase):

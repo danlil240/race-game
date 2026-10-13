@@ -381,16 +381,23 @@ class PhysicsObserver:
         # A transient full-contact loss debounces through grounded=True:
         # contactLossSeconds > 0 at a boundary is the only published
         # evidence a loss began inside the interval, and its return to
-        # zero without an airborne span proves the regain — the complete
-        # episode bounded by one logical tick's window.
+        # zero proves the regain — but only when no airborne span
+        # overlaps the window. A loss that outlives the debounce becomes
+        # real flight, and the span's own evidence already covers it:
+        # counting it here would mint a "within-tick" episode that is
+        # really the takeoff/landing shadow of an airborne span.
         loss = physics["contactLossSeconds"]
         self.max_contact_loss = max(self.max_contact_loss, loss)
         if loss > 0.0 and self._contact_loss_start is None:
             self._contact_loss_start = tick
         elif loss <= 0.0 and self._contact_loss_start is not None:
-            self.contact_loss_episodes.append(
-                (self._contact_loss_start, tick))
+            start = self._contact_loss_start
             self._contact_loss_start = None
+            shadows_flight = any(
+                span[0] <= tick and span[1] >= start
+                for span in self.airborne_spans)
+            if not shadows_flight:
+                self.contact_loss_episodes.append((start, tick))
 
         epoch = physics["recoveryEpoch"]
         if self.prev_epoch is not None:

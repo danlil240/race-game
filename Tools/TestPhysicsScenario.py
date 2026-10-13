@@ -417,6 +417,32 @@ class PhysicsObserverTests(unittest.TestCase):
                                           for i in range(4)])))
         assert observer.contact_loss_episodes == [(2, 4)]
 
+    def test_contact_loss_overlapping_airtime_is_not_transient(self):
+        """The fix-2 review defect: a contact loss that began inside
+        the debounce window but outlived it into real flight is the
+        takeoff/landing shadow of an airborne span — the span's own
+        evidence covers it and NO transient episode may be minted
+        (live: 4 of 5 race-1 'episodes' mirrored airborneSpans)."""
+        observer = PhysicsObserver()
+        observer.apply(driving(tick=1, motor_physics=physics()))
+        # Loss begins inside the debounce window.
+        observer.apply(driving(
+            tick=2, motor_physics=physics(contactLossSeconds=0.02)))
+        # It outlives the debounce -> grounded drops -> real flight.
+        observer.apply(driving(
+            tick=3,
+            motor_physics=physics(grounded=False, airSeconds=0.1,
+                                  airPeakY=0.4,
+                                  contactLossSeconds=0.05,
+                                  wheels=[wheel(i, grounded=False)
+                                          for i in range(4)])))
+        # Landing: contactLossSeconds returns to 0 — the regain shares
+        # this boundary window with the airborne span, so it is not a
+        # within-tick transient.
+        observer.apply(driving(tick=4, motor_physics=physics()))
+        assert observer.airborne_spans == [(3, 4, 0.4)]
+        assert observer.contact_loss_episodes == []
+
 
 class RaceEventScopeTests(unittest.TestCase):
     """Race-scoped event predicates: a prior race's events must never
