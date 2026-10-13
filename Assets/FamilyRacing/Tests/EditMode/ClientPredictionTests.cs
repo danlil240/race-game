@@ -150,6 +150,82 @@ namespace FamilyRacing.Tests
             return (float)Math.Sqrt(dx * dx + dy * dy + dz * dz);
         }
 
+        // A recording IVehicleSimulation for the injected-sim seam: one
+        // deterministic toy step per Step call — enough to observe what
+        // the prediction loop restores and replays without PhysX. The
+        // toy's "forces" are a fixed z drift scaled by steering so the
+        // predicted pose still moves.
+        private sealed class RecordingSimulation : IVehicleSimulation
+        {
+            public int initializeCalls;
+            public int restoreCalls;
+            public int stepCalls;
+            public MotorState lastRestored;
+            public int eventsPerStep;
+
+            public void Initialize(IReadOnlyList<VehicleSpawn> vehicles)
+            {
+                initializeCalls++;
+            }
+
+            public IReadOnlyList<VehicleTickResult> Step(
+                IReadOnlyList<VehicleTickRequest> requests)
+            {
+                stepCalls++;
+                var list = new List<VehicleTickResult>();
+                if (requests == null) return list;
+                foreach (var request in requests)
+                {
+                    var state = request.rulesBefore != null
+                        ? request.rulesBefore.Copy()
+                        : new MotorState();
+                    state.z += request.input.Steering * 0.4f + 0.05f;
+                    var step = new MotorStepResult { state = state };
+                    for (var i = 0; i < eventsPerStep; i++)
+                        step.events.Add(new MotorEvent("contact", 0.5f + i));
+                    list.Add(new VehicleTickResult
+                    {
+                        participantId = request.participantId,
+                        step = step
+                    });
+                }
+                return list;
+            }
+
+            public void Restore(string participantId, MotorState state)
+            {
+                restoreCalls++;
+                lastRestored = state != null ? state.Copy() : null;
+            }
+
+            public MotorState Capture(string participantId)
+            {
+                return lastRestored != null ? lastRestored.Copy() : null;
+            }
+
+            public void Dispose() { }
+        }
+
+        // A physical-envelope spawn: legacy fields plus a full
+        // VehiclePhysicsState (four wheels, upright attitude, the given
+        // recovery epoch) so reconcile paths must carry angular and
+        // controller state, not just yaw.
+        private static MotorState PhysicalSpawn(long tick, long epoch)
+        {
+            var motor = Spawn(tick);
+            var physics = new VehiclePhysicsState
+            {
+                wheels = new WheelPhysicsState[4],
+                grounded = true,
+                recoveryEpoch = epoch
+            };
+            for (var i = 0; i < physics.wheels.Length; i++)
+                physics.wheels[i] = new WheelPhysicsState { index = i };
+            physics.TrySetAttitude(0f, 0f, 0f, 1f);
+            motor.physics = physics;
+            return motor;
+        }
+
         [Test]
         public void LocalInputChangesPoseBeforeRoundTrip()
         {
@@ -351,6 +427,231 @@ namespace FamilyRacing.Tests
                 Tuning, World);
             Assert.That(prediction.PendingCount, Is.EqualTo(0),
                 "post-reset samples reconcile without stale history");
+        }
+
+        // --- Task 10: physical prediction surface -------------------------
+
+        [Test]
+        public void RestoreIncludesAngularAndControllerState()
+        {
+            var prediction = new ClientPrediction("p1");
+            var sim = new RecordingSimulation();
+            prediction.SetSimulation(sim);
+            prediction.Reconcile(
+                Snapshot(1, "race-1", PhysicalSpawn(10, 0), 0), Tuning, World);
+            prediction.Predict(Frame(1, 0.5f), Tuning, World);
+            Assert.That(sim.initializeCalls, Is.GreaterThanOrEqualTo(1));
+
+            // The authoritative boundary carries the full replay surface:
+            // attitude, angular velocity, controller histories and wheel
+            // damper history. A yaw-only restore would silently drop
+            // every one of them.
+            var authoritative = PhysicalSpawn(12, 0);
+            authoritative.physics.angularVelocityY = 1.4f;
+            authoritative.physics.angularVelocityX = 0.3f;
+            authoritative.physics.filteredSteering = 0.22f;
+            authoritative.physics.balancePrevError = -0.11f;
+            authoritative.physics.filteredLeanTarget = 0.07f;
+            authoritative.physics.filteredRollRate = 0.4f;
+            authoritative.physics.driftAmount = 0.5f;
+            authoritative.physics.wheels[0].compression = 0.09f;
+            authoritative.physics.wheels[0].previousCompression = 0.07f;
+            authoritative.physics.wheels[0].contactValid = true;
+            // A modest roll/yaw (~24 degrees) — under the 45-degree
+            // snap bound, so this stays an ORDINARY correction: the
+            // full attitude restores AND valid suspension/controller
+            // history survives (a snap boundary would invalidate it).
+            authoritative.physics.TrySetAttitude(0.05f, 0.2f, -0.04f, 0.975f);
+            prediction.Predict(Frame(2, 0.5f), Tuning, World);
+            prediction.Reconcile(
+                Snapshot(2, "race-1", authoritative, 1), Tuning, World);
+
+            var restored = sim.lastRestored;
+            Assert.That(restored, Is.Not.Null);
+            Assert.That(restored.physics, Is.Not.Null,
+                "the injected simulation must be restored with the full "
+                + "physical state, not the legacy yaw envelope");
+            var p = restored.physics;
+            Assert.That(p.angularVelocityY, Is.EqualTo(1.4f).Within(1e-4f));
+            Assert.That(p.angularVelocityX, Is.EqualTo(0.3f).Within(1e-4f));
+            Assert.That(p.filteredSteering, Is.EqualTo(0.22f).Within(1e-4f));
+            Assert.That(p.balancePrevError, Is.EqualTo(-0.11f).Within(1e-4f));
+            Assert.That(p.filteredLeanTarget, Is.EqualTo(0.07f).Within(1e-4f));
+            Assert.That(p.filteredRollRate, Is.EqualTo(0.4f).Within(1e-4f));
+            Assert.That(p.driftAmount, Is.EqualTo(0.5f).Within(1e-4f));
+            Assert.That(p.wheels[0].compression, Is.EqualTo(0.09f).Within(1e-4f));
+            Assert.That(p.wheels[0].previousCompression,
+                Is.EqualTo(0.07f).Within(1e-4f),
+                "valid suspension history survives a prediction restore");
+            Assert.That(p.wheels[0].contactValid, Is.True);
+            var norm = p.attitudeX * p.attitudeX + p.attitudeY * p.attitudeY
+                + p.attitudeZ * p.attitudeZ + p.attitudeW * p.attitudeW;
+            Assert.That(norm, Is.EqualTo(1f).Within(0.001f),
+                "the restored attitude stays unit-length");
+            Assert.That(p.attitudeY, Is.GreaterThan(0.15f),
+                "the full attitude, not just yaw-derived, was restored");
+            Assert.That(prediction.LastCorrectionSnap, Is.False,
+                "a sub-45-degree correction restores history intact, "
+                + "never through the snap path");
+        }
+
+        [Test]
+        public void ReplayNeverPublishesGameplayEvents()
+        {
+            var prediction = new ClientPrediction("p1");
+            // Two synthetic contact events per replayed step: contact,
+            // landing and boost facts are authoritative host facts —
+            // prediction consumes and counts them, never republishes.
+            var sim = new RecordingSimulation { eventsPerStep = 2 };
+            prediction.SetSimulation(sim);
+            prediction.Reconcile(Snapshot(1, "race-1", Spawn(0), 0),
+                Tuning, World);
+            prediction.Predict(Frame(1, 0.5f), Tuning, World);
+            prediction.Predict(Frame(2, -0.5f), Tuning, World);
+            prediction.Reconcile(Snapshot(2, "race-1", Spawn(2), 0),
+                Tuning, World);
+            Assert.That(prediction.SuppressedMotorEvents,
+                Is.GreaterThanOrEqualTo(6),
+                "replayed steps produce motor events internally — they "
+                + "are counted and suppressed, never re-emitted");
+            Assert.That(prediction.Predicted, Is.Not.Null);
+            Assert.That(prediction.Predicted.recovering, Is.False,
+                "prediction never manufactures a recovery boundary");
+        }
+
+        [Test]
+        public void RecoveryAndOwnershipClearHistory()
+        {
+            var prediction = new ClientPrediction("p1");
+            prediction.SetSimulation(new RecordingSimulation());
+            prediction.Reconcile(
+                Snapshot(1, "race-1", PhysicalSpawn(0, 0), 0), Tuning, World);
+            for (var seq = 1; seq <= 4; seq++)
+                prediction.Predict(Frame(seq, 0.5f), Tuning, World);
+            Assert.That(prediction.HistoryCount, Is.GreaterThan(0));
+
+            // Recovery teleports and bumps the epoch: pre-respawn history
+            // can never steer the replay — the correction snaps and only
+            // post-restore entries remain.
+            var recovered = PhysicalSpawn(12, 1);
+            recovered.x = 5f;
+            recovered.z = 30f;
+            recovered.recovering = true;
+            prediction.Reconcile(
+                Snapshot(2, "race-1", recovered, 2), Tuning, World);
+            Assert.That(prediction.LastCorrectionSnap, Is.True,
+                "recovery must snap, never blend across the teleport");
+            Assert.That(prediction.PendingCount, Is.EqualTo(2),
+                "unacknowledged samples still replay from the respawn");
+            Assert.That(prediction.HistoryCount,
+                Is.EqualTo(prediction.LastReplayCount),
+                "pre-recovery history is dead — only replayed entries remain");
+
+            // A new race/ownership identity clears the whole backlog too.
+            prediction.Reconcile(
+                Snapshot(1, "race-2", PhysicalSpawn(0, 0), 0), Tuning, World);
+            Assert.That(prediction.PendingCount, Is.EqualTo(0),
+                "old-race inputs can never steer the new identity");
+            Assert.That(prediction.HistoryCount, Is.EqualTo(0));
+            Assert.That(prediction.LastCorrectionSnap, Is.True);
+        }
+
+        [Test]
+        public void OldSnapshotsCannotUndoRecovery()
+        {
+            var prediction = new ClientPrediction("p1");
+            prediction.SetSimulation(new RecordingSimulation());
+            prediction.Reconcile(
+                Snapshot(1, "race-1", PhysicalSpawn(0, 0), 0), Tuning, World);
+            prediction.Predict(Frame(1, 0.5f), Tuning, World);
+
+            // Snapshot 2 commits recovery epoch 3.
+            var recovered = PhysicalSpawn(6, 3);
+            recovered.recovering = true;
+            prediction.Reconcile(
+                Snapshot(2, "race-1", recovered, 1), Tuning, World);
+            Assert.That(prediction.Predicted.physics.recoveryEpoch,
+                Is.EqualTo(3));
+
+            // Snapshot 3 has a HIGHER wire sequence but an OLDER recovery
+            // epoch — a pre-respawn boundary reordered past the respawn.
+            // Epoch ordering fences it: an old snapshot can never undo a
+            // recovery the player already saw.
+            var stale = PhysicalSpawn(5, 2);
+            prediction.Reconcile(
+                Snapshot(3, "race-1", stale, 1), Tuning, World);
+            Assert.That(prediction.Predicted.physics.recoveryEpoch,
+                Is.EqualTo(3),
+                "an older recovery epoch must never roll back the respawn");
+            Assert.That(prediction.StaleSnapshots, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void HistoryOverflowRequestsResync()
+        {
+            var prediction = new ClientPrediction("p1");
+            prediction.SetSimulation(new RecordingSimulation());
+            prediction.Reconcile(Snapshot(1, "race-1", Spawn(0), 0),
+                Tuning, World);
+            for (var seq = 1; seq <= 130; seq++)
+                prediction.Predict(Frame(seq, 0.3f), Tuning, World);
+            Assert.That(prediction.ResyncRequested, Is.True,
+                "crossing the 120-input retained bound resynchronizes");
+            Assert.That(prediction.ResyncCount, Is.EqualTo(1));
+            Assert.That(prediction.LastResyncReason,
+                Is.EqualTo("historyOverflow"));
+            Assert.That(prediction.PendingCount,
+                Is.LessThan(NetworkSettings.PredictionInputCapacity));
+        }
+
+        [Test]
+        public void ReplayBudgetNeverExceedsTwelveTicks()
+        {
+            var prediction = new ClientPrediction("p1");
+            prediction.SetSimulation(new RecordingSimulation());
+            prediction.Reconcile(Snapshot(1, "race-1", Spawn(0), 0),
+                Tuning, World);
+            for (var seq = 1; seq <= 10; seq++)
+                prediction.Predict(Frame(seq, 0.4f), Tuning, World);
+
+            // One rendered frame's correction budget is 12 replayed
+            // logical ticks TOTAL, shared by every correction the frame
+            // processes — a packet burst cannot multiply it.
+            prediction.BeginFrame();
+            prediction.Reconcile(Snapshot(2, "race-1", Spawn(5), 5),
+                Tuning, World);
+            Assert.That(prediction.LastReplayCount, Is.EqualTo(5));
+            Assert.That(prediction.FrameReplayTicks, Is.EqualTo(5));
+
+            // The second correction in the same frame needs 9 replays but
+            // only 7 budget ticks remain: no partial replay — prediction
+            // holds the fresh authoritative pose and resynchronizes.
+            for (var seq = 11; seq <= 14; seq++)
+                prediction.Predict(Frame(seq, 0.4f), Tuning, World);
+            prediction.Reconcile(Snapshot(3, "race-1", Spawn(6), 5),
+                Tuning, World);
+            Assert.That(prediction.ResyncRequested, Is.True);
+            Assert.That(prediction.LastResyncReason,
+                Is.EqualTo("replayBudget"));
+            Assert.That(prediction.LastReplayCount, Is.EqualTo(0),
+                "a budget-exceeding correction never replays partway");
+            Assert.That(prediction.FrameReplayTicks, Is.EqualTo(5));
+            Assert.That(prediction.PendingCount, Is.EqualTo(0));
+            Assert.That(prediction.Predicted.tick, Is.EqualTo(6),
+                "the presented pose is the fresh authoritative boundary, "
+                + "not a partially replayed world");
+
+            // The next rendered frame restores the whole budget. The
+            // ack lands on a sequence whose predicted record still
+            // exists — an unmeasurable boundary would snap instead.
+            prediction.BeginFrame();
+            prediction.ClearResyncRequest();
+            for (var seq = 15; seq <= 17; seq++)
+                prediction.Predict(Frame(seq, 0.4f), Tuning, World);
+            prediction.Reconcile(Snapshot(4, "race-1", Spawn(8), 15),
+                Tuning, World);
+            Assert.That(prediction.LastReplayCount, Is.EqualTo(2));
+            Assert.That(prediction.FrameReplayTicks, Is.EqualTo(2));
         }
 
         // --- RemoteInterpolation ------------------------------------------

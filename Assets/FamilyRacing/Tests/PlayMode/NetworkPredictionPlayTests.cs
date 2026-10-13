@@ -602,6 +602,7 @@ namespace FamilyRacing.Tests
                 int pendingMax = 0, pendingSum = 0, pendingSamples = 0;
                 int staleSamples = 0, remoteSamples = 0;
                 int bufferMax = 0, bufferMin = int.MaxValue;
+                int replayMax = 0;
                 float errorMax = 0f, errorSum = 0f;
                 int errorSamples = 0;
                 long ackLagMax = 0;
@@ -633,6 +634,8 @@ namespace FamilyRacing.Tests
                             facts.pendingInputCount);
                         pendingSum += facts.pendingInputCount;
                         pendingSamples++;
+                        replayMax = Math.Max(replayMax,
+                            facts.lastReplayCount);
                         if (facts.lastErrorMeasured)
                         {
                             errorMax = Math.Max(errorMax,
@@ -706,6 +709,10 @@ namespace FamilyRacing.Tests
                     Is.LessThanOrEqualTo(
                         NetworkSettings.PredictionInputCapacity),
                     "pending buffer exceeded the replay bound");
+                Assert.That(replayMax,
+                    Is.LessThanOrEqualTo(
+                        NetworkSettings.PredictionReplayTicksPerFrame),
+                    "a reconcile replayed past the per-frame tick budget");
                 Assert.That(bufferMax,
                     Is.LessThanOrEqualTo(
                         NetworkSettings.InterpolationBufferCapacity));

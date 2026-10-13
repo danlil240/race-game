@@ -198,5 +198,17 @@ namespace FamilyRacing.Core.Networking
         public const float CorrectionSnapMeters = 3f;
         public const double CorrectionBlendSeconds = 0.1;
         public const float CorrectionEpsilonMeters = 0.01f;
+        // Task 10: the orientation leg of the same policy — full-attitude
+        // errors past CorrectionSnapDegrees snap, under
+        // CorrectionEpsilonDegrees they are PhysX-approximation noise.
+        public const float CorrectionSnapDegrees = 45f;
+        public const float CorrectionEpsilonDegrees = 0.5f;
+        // Replay work budget per rendered frame: at most this many
+        // logical ticks are replayed across EVERY correction the frame
+        // processes — a packet burst can never multiply a PhysX replay
+        // burst. A correction that would exceed the remaining budget
+        // holds the fresh authoritative pose and resynchronizes instead
+        // of spreading a partially replayed world across later frames.
+        public const int PredictionReplayTicksPerFrame = 12;
     }
 }

@@ -99,6 +99,29 @@ namespace FamilyRacing
                 ? (IVehicleSimulation)new ArcadeVehicleSimulation(motorWorld)
                 : null;
         }
+
+        // The client prediction world's provider (Task 10): same backend
+        // mapping as CreateSimulation, but the physical path returns a
+        // PhysicsPredictionSimulation — a separate collision-only scene
+        // that structurally holds exactly one local body. Remote display
+        // vehicles are never collision here; host racer contacts stay
+        // authoritative and arrive as corrections.
+        public IVehicleSimulation CreatePredictionSimulation(
+            DrivingContentCatalog content)
+        {
+            var backend = content != null
+                ? content.SimulationBackend : VehicleSimulationBackend.Arcade;
+            if (backend == VehicleSimulationBackend.PhysicalAssisted)
+            {
+                var physicsWorld = coursePrefab != null
+                    ? PhysicsCourseWorld.Create("PredictionPhysics", coursePrefab)
+                    : PhysicsCourseWorld.Create("PredictionPhysics");
+                return new Networking.PhysicsPredictionSimulation(physicsWorld);
+            }
+            return motorWorld != null
+                ? (IVehicleSimulation)new ArcadeVehicleSimulation(motorWorld)
+                : null;
+        }
         // The validated tutorial definition for FoundationService and the
         // authored asset for the presenter's clip slots. Tutorial stays
         // optional content: without it the races still load and

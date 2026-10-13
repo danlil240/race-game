@@ -49,6 +49,14 @@ namespace FamilyRacing.Networking
         // with the race they served.
         internal Func<DrivingContentCatalog, IVehicleSimulation>
             SimulationProvider;
+        // Task 10: the client prediction world provider — the physical
+        // backend supplies a PhysicsPredictionSimulation over its own
+        // collision-only scene (exactly one local body; remote racers
+        // are display-only and never collide there). When unset the
+        // prediction world falls back to SimulationProvider (a single-
+        // body roster seeds it identically), then to the arcade adapter.
+        internal Func<DrivingContentCatalog, IVehicleSimulation>
+            PredictionSimulationProvider;
 
         // --- host -------------------------------------------------------
         private NetworkRace race;
@@ -112,6 +120,11 @@ namespace FamilyRacing.Networking
         // second authoritative world.
         private IVehicleSimulation predictionSimulation;
         private IMotorWorld predictionWorld;
+        // Newest accepted snapshot awaiting reconcile this frame. A
+        // packet burst coalesces to the newest boundary — replay runs
+        // once per frame against it, never once per delivered packet,
+        // so the shared 12-tick replay budget is honest.
+        private NetworkSnapshot pendingReconcile;
         private readonly RemoteInterpolation interpolation =
             new RemoteInterpolation();
         // Visual smoothing is deliberately separate from sim correction:
@@ -535,11 +548,13 @@ namespace FamilyRacing.Networking
             }
             if (predictionSimulation != null) return predictionSimulation;
             predictionWorld = clientWorld;
-            predictionSimulation = SimulationProvider != null
-                ? SimulationProvider(content)
-                : (clientWorld != null
-                    ? (IVehicleSimulation)new ArcadeVehicleSimulation(clientWorld)
-                    : null);
+            predictionSimulation = PredictionSimulationProvider != null
+                ? PredictionSimulationProvider(content)
+                : (SimulationProvider != null
+                    ? SimulationProvider(content)
+                    : (clientWorld != null
+                        ? (IVehicleSimulation)new ArcadeVehicleSimulation(clientWorld)
+                        : null));
             return predictionSimulation;
         }
 
@@ -924,6 +939,7 @@ namespace FamilyRacing.Networking
                 latestSnapshotSeq = -1;
                 latestSnapshot = null;
                 recentOut.Clear();
+                pendingReconcile = null;
                 if (prediction != null)
                 {
                     prediction.SetSimulation(null);
@@ -932,6 +948,19 @@ namespace FamilyRacing.Networking
                 interpolation.Reset();
                 ResetPresentation();
                 ReleasePredictionSimulation();
+            }
+            // One rendered-frame boundary: the shared replay budget
+            // resets here, then the newest coalesced snapshot of the
+            // frame reconciles exactly once — a packet burst can never
+            // multiply the frame's PhysX replay work.
+            if (prediction != null) prediction.BeginFrame();
+            if (pendingReconcile != null && prediction != null)
+            {
+                var snapshot = pendingReconcile;
+                pendingReconcile = null;
+                BindPredictionSimulation();
+                prediction.Reconcile(snapshot, LocalTuning(), clientWorld);
+                BlendCorrection();
             }
         }
 
@@ -1079,19 +1108,16 @@ namespace FamilyRacing.Networking
             }
             latestSnapshotSeq = snapshot.snapshotSequence;
             latestSnapshot = snapshot;
-            // Task 6: every accepted snapshot feeds remote interpolation
-            // and reconciles the local prediction against the ack it
-            // carries — restore authoritative, replay unacknowledged.
+            // Every accepted snapshot feeds remote interpolation now and
+            // queues a local-prediction reconcile for the frame boundary:
+            // a burst coalesces to the newest authoritative boundary —
+            // restore authoritative, replay unacknowledged — exactly
+            // once per frame inside the shared replay budget.
             lastSnapshotHostTick = snapshot.state != null
                 ? snapshot.state.hostTick : 0;
             lastSnapshotReceivedAt = NowSeconds();
             interpolation.Push(snapshot);
-            if (prediction != null)
-            {
-                BindPredictionSimulation();
-                prediction.Reconcile(snapshot, LocalTuning(), clientWorld);
-                BlendCorrection();
-            }
+            pendingReconcile = snapshot;
         }
 
         private void AdoptRace(string newRaceId, int ordinal)
@@ -1280,6 +1306,7 @@ namespace FamilyRacing.Networking
             appliedRaceOrdinal = -1;
             latestSnapshotSeq = -1;
             recentOut.Clear();
+            pendingReconcile = null;
             pendingActions.Clear();
             pendingActionOrder.Clear();
             seenEventIds.Clear();

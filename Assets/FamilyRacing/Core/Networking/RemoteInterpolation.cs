@@ -203,13 +203,39 @@ namespace FamilyRacing.Core.Networking
             return state;
         }
 
-        // Bounded velocity projection: forward + lateral + vertical
-        // displacement over `seconds`, heading and flags held from the
-        // source pose. Honest motion only — no collisions, no events.
+        // Bounded velocity projection over `seconds` — at most the 100 ms
+        // extrapolation cap — with flags held from the source pose.
+        // Physical samples project the body through its SI linear
+        // velocity and integrate the attitude by the SI angular velocity
+        // (first-order quaternion step, normalized); legacy samples
+        // project through the heading-decomposed speed fields. Honest
+        // motion only — no collisions, no events.
         private static MotorState Extrapolate(MotorState motor, double seconds)
         {
             var dt = (float)seconds;
             var copy = motor.Copy();
+            var physics = motor.physics;
+            if (physics != null && copy.physics != null)
+            {
+                copy.x += physics.velocityX * dt;
+                copy.y += physics.velocityY * dt;
+                copy.z += physics.velocityZ * dt;
+                // q' = q + dt * (1/2 * ω̃ ⊗ q), then renormalize through
+                // TrySetAttitude. ω̃ = (ωx, ωy, ωz, 0) in world frame.
+                var hx = physics.angularVelocityX * 0.5f * dt;
+                var hy = physics.angularVelocityY * 0.5f * dt;
+                var hz = physics.angularVelocityZ * 0.5f * dt;
+                var qx = physics.attitudeX;
+                var qy = physics.attitudeY;
+                var qz = physics.attitudeZ;
+                var qw = physics.attitudeW;
+                copy.physics.TrySetAttitude(
+                    qx + (hx * qw + hy * qz - hz * qy),
+                    qy + (-hx * qz + hy * qw + hz * qx),
+                    qz + (hx * qy - hy * qx + hz * qw),
+                    qw + (-hx * qx - hy * qy - hz * qz));
+                return copy;
+            }
             var fx = (float)Math.Sin(motor.heading);
             var fz = (float)Math.Cos(motor.heading);
             var rx = fz;
@@ -222,6 +248,9 @@ namespace FamilyRacing.Core.Networking
 
         // Pose interpolation: continuous kinematic fields lerp (heading
         // along the shortest arc); discrete flags follow the newer entry.
+        // Physical samples additionally slerp the full attitude along the
+        // shortest arc and lerp the SI linear/angular velocities — roll
+        // and pitch ride the buffer, not just yaw.
         private static MotorState Lerp(MotorState a, MotorState b, float alpha)
         {
             var copy = b.Copy();
@@ -237,7 +266,69 @@ namespace FamilyRacing.Core.Networking
                 + (b.lateralSpeed - a.lateralSpeed) * alpha;
             copy.verticalSpeed = a.verticalSpeed
                 + (b.verticalSpeed - a.verticalSpeed) * alpha;
+            var pa = a.physics;
+            var pb = b.physics;
+            if (pa != null && pb != null && copy.physics != null)
+            {
+                SlerpAttitude(pa, pb, alpha, copy.physics);
+                var pc = copy.physics;
+                pc.velocityX = pa.velocityX
+                    + (pb.velocityX - pa.velocityX) * alpha;
+                pc.velocityY = pa.velocityY
+                    + (pb.velocityY - pa.velocityY) * alpha;
+                pc.velocityZ = pa.velocityZ
+                    + (pb.velocityZ - pa.velocityZ) * alpha;
+                pc.angularVelocityX = pa.angularVelocityX
+                    + (pb.angularVelocityX - pa.angularVelocityX) * alpha;
+                pc.angularVelocityY = pa.angularVelocityY
+                    + (pb.angularVelocityY - pa.angularVelocityY) * alpha;
+                pc.angularVelocityZ = pa.angularVelocityZ
+                    + (pb.angularVelocityZ - pa.angularVelocityZ) * alpha;
+            }
             return copy;
+        }
+
+        // Shortest-arc quaternion slerp between two attitudes, written
+        // into `dst` through the normalizing setter. A negative dot
+        // flips one endpoint so the blend never takes the long way —
+        // required for full-attitude interpolation past 180 degrees.
+        private static void SlerpAttitude(VehiclePhysicsState a,
+            VehiclePhysicsState b, float alpha, VehiclePhysicsState dst)
+        {
+            var ax = a.attitudeX;
+            var ay = a.attitudeY;
+            var az = a.attitudeZ;
+            var aw = a.attitudeW;
+            var bx = b.attitudeX;
+            var by = b.attitudeY;
+            var bz = b.attitudeZ;
+            var bw = b.attitudeW;
+            var dot = ax * bx + ay * by + az * bz + aw * bw;
+            if (dot < 0f)
+            {
+                dot = -dot;
+                bx = -bx; by = -by; bz = -bz; bw = -bw;
+            }
+            float wa, wb;
+            if (dot > 0.9995f)
+            {
+                // Nearly parallel: nlerp is exact enough and avoids the
+                // acos/sin singularity.
+                wa = 1f - alpha;
+                wb = alpha;
+            }
+            else
+            {
+                var theta = Math.Acos(dot);
+                var sinTheta = (float)Math.Sin(theta);
+                wa = (float)Math.Sin((1f - alpha) * theta) / sinTheta;
+                wb = (float)Math.Sin(alpha * theta) / sinTheta;
+            }
+            dst.TrySetAttitude(
+                wa * ax + wb * bx,
+                wa * ay + wb * by,
+                wa * az + wb * bz,
+                wa * aw + wb * bw);
         }
     }
 

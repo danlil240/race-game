@@ -154,6 +154,10 @@ namespace FamilyRacing
             {
                 service.SetDrivingSimulationFactory(drivingWorld.CreateSimulation);
                 raceBridge.SimulationProvider = drivingWorld.CreateSimulation;
+                // Task 10: the client's prediction world is a separate
+                // single-body scene — never the host's shared roster.
+                raceBridge.PredictionSimulationProvider =
+                    drivingWorld.CreatePredictionSimulation;
             }
             driverInput?.Bind(this);
             shell?.Bind(this);
