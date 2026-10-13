@@ -20,6 +20,15 @@ namespace FamilyRacing.EditorTools
             Debug.Log("FoundationProjectSetup: done");
         }
 
+        [MenuItem("FamilyRacing/Physics Lab Setup")]
+        public static void PhysicsLabSetup()
+        {
+            VehiclePhysicsSetup.Create();
+            Debug.Log("VehiclePhysicsSetup: done — open " +
+                "Assets/FamilyRacing/Generated/Physics/PhysicsLab.unity " +
+                "to drive the physical car laboratory.");
+        }
+
         public static void Windows()
         {
             FoundationProjectSetup.Create();

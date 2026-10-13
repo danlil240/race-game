@@ -1,0 +1,57 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5e4416178ea92f043a39551e3eb48e27, type: 3}
+  m_Name: car-physics-01
+  m_EditorClassIdentifier: FamilyRacing.Runtime::FamilyRacing.VehiclePhysicsTuningAsset
+  massKg: 1200
+  comOffset: {x: 0, y: -0.15, z: 0}
+  chassisSize: {x: 1.8, y: 1.1, z: 3.2}
+  inertiaMultipliers: {x: 1, y: 1, z: 1}
+  wheels:
+  - mount: {x: -0.8, y: -0.1, z: 1.2}
+    radius: 0.32
+    steerable: 1
+    driven: 1
+  - mount: {x: 0.8, y: -0.1, z: 1.2}
+    radius: 0.32
+    steerable: 1
+    driven: 1
+  - mount: {x: -0.8, y: -0.1, z: -1.2}
+    radius: 0.32
+    steerable: 0
+    driven: 1
+  - mount: {x: 0.8, y: -0.1, z: -1.2}
+    radius: 0.32
+    steerable: 0
+    driven: 1
+  suspensionRestLength: 0.35
+  suspensionExtraDroop: 0.1
+  springRatePerWheel: 40000
+  damperPerWheel: 3500
+  maxNormalLoadPerWheel: 20000
+  frictionCoefficient: 1.1
+  peakDriveForce: 7200
+  peakBrakeForce: 12000
+  cruiseSpeed: 18
+  boostSpeed: 26
+  dragCoefficient: 0.4
+  rollingResistance: 0.01
+  steerMaxRadians: 0.5236
+  steerHighSpeedRadians: 0.12
+  steerReferenceSpeed: 20
+  steerRateRadiansPerSecond: 4
+  antiRollRate: 0
+  rollDamping: 1500
+  assistMaxLeanRadians: 0.7854
+  assistFallAngleRadians: 1.2217
+  balanceGain: 0
+  balanceDamping: 0

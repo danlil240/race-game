@@ -35,6 +35,7 @@ namespace FamilyRacing.EditorTools
             EnsureSceneInBuild();
             DrivingPrototypeSetup.Create();
             NetworkPrototypeSetup.Create();
+            VehiclePhysicsSetup.Create();
             ApplyPlayerSettings();
             EnableInputSystem();
             AssetDatabase.SaveAssets();
