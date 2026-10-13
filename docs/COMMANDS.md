@@ -153,7 +153,17 @@ auto-recovers — `race.recovered` detail reports `"beached"` versus the
 wall-pin `"stuck"` and the input-initiated `"manual"`.
 `input.set` is available on `sandbox`, `driving`, and `lan-race` screens
 only; a `gadget` sample is rejected with `unavailable` while a race is
-active.
+active. Two optional held demands extend the sample: `brake` (decimal,
+`[0,1]`) slows the vehicle without reversing it, and `throttle`
+(decimal, `[0,1]`) overrides the automatic acceleration — an omitted
+`throttle` keeps automatic throttle (effective `1`), while an explicit
+`0` is a deliberate coast. Malformed or out-of-range `throttle`/`brake`
+values reject the whole sample atomically before any state changes.
+On the LAN wire these ride `NetworkInputFrame.brake`,
+`hasThrottleOverride`, and `throttle`; the host rejects non-finite or
+out-of-range demands (`nonFiniteInput`/`outOfRangeInput`) before a
+sample is accepted, and a frame from an older peer without the new
+fields decodes as automatic throttle with no brake.
 Holding `boost` auto-fires: whenever `boostCharge` refills past
 `boostMinCharge` a new burst begins without a release (the meter drains
 in bursts as it refills); `driving.motor.boostLatched` reports whether
@@ -166,14 +176,14 @@ pause=true` sample; `pause.toggle` resume cancels queued actions instead
 
 `tutorial.start` takes `vehicleId` and needs a selected profile plus
 validated tutorial content; it opens the ordered onboarding (steering →
-drift → boost → jump → recovery lessons inside the free-drive event,
-then the unlocked one-lap `intro-01` trial). `tutorial.replay`
+brake → drift → boost → jump → recovery lessons inside the free-drive
+event, then the unlocked one-lap `intro-01` trial). `tutorial.replay`
 re-announces the current cue without any progression; `tutorial.exit`
 abandons the session. There is intentionally no `tutorial.complete` or
 checkpoint-teleport action — lessons and the graduation lap advance only
 from genuine driving events (`motor.driftStart`, `motor.boostStart`,
-`motor.landed`, `race.recovered`, `race.finished`, held-steering
-boundaries). `race.restart` inside a tutorial retries the current stage
+`motor.landed`, `race.recovered`, `race.finished`, held-steering and
+held-brake simulated boundaries). `race.restart` inside a tutorial retries the current stage
 without losing completed lessons; `race.exit` and profile switches end
 the session-local tutorial state. `driving.tutorial` in the state slice
 is `null` unless a tutorial is active; when active it is a `TutorialState`

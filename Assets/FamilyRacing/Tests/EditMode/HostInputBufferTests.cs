@@ -14,8 +14,9 @@ namespace FamilyRacing.Tests
     // Validation order is part of the contract; the tests pin it:
     //   invalidFrame -> noRace -> staleSession -> staleRace ->
     //   unknownConnection -> foreignOwnership -> unknownParticipant ->
-    //   staleEpoch -> nonFiniteInput -> tooManyActions -> badActionId ->
-    //   duplicateSequence -> futureSequence -> bufferOverflow
+    //   staleEpoch -> nonFiniteInput -> outOfRangeInput -> tooManyActions
+    //   -> badActionId -> duplicateSequence -> futureSequence ->
+    //   bufferOverflow
     public sealed class HostInputBufferTests
     {
         private const string SessionId = "sess-1";
@@ -36,7 +37,8 @@ namespace FamilyRacing.Tests
             float steering = 0f, long epoch = 1, string raceId = RaceId,
             string sessionId = SessionId, long clientTick = 0,
             bool drift = false, bool boost = false, bool recover = false,
-            string[] actionIds = null)
+            string[] actionIds = null, float brake = 0f,
+            bool hasThrottleOverride = false, float throttle = 0f)
         {
             var frame = new NetworkInputFrame
             {
@@ -49,7 +51,10 @@ namespace FamilyRacing.Tests
                 steering = steering,
                 drift = drift,
                 boost = boost,
-                recover = recover
+                recover = recover,
+                brake = brake,
+                hasThrottleOverride = hasThrottleOverride,
+                throttle = throttle
             };
             if (actionIds != null) frame.actionIds.AddRange(actionIds);
             return frame;
@@ -175,6 +180,76 @@ namespace FamilyRacing.Tests
                 "p-guest", out error), Is.True, error);
             var consumed = buffer.Consume("p-guest", 1);
             Assert.That(consumed.Steering, Is.EqualTo(1f));
+        }
+
+        // Task 7: brake and throttle ride the same bounded wire contract —
+        // non-finite values fail at the same gate as steering, and
+        // out-of-range unit demands are rejected outright rather than
+        // clamped, because a hostile "200% brake" is malformed input.
+        [Test]
+        public void NonFiniteBrakeAndThrottleRejected()
+        {
+            string error;
+            foreach (var bad in new[] { float.NaN, float.PositiveInfinity,
+                         float.NegativeInfinity })
+            {
+                Assert.That(Enqueue(buffer, Frame("p-guest", 1, brake: bad),
+                    "p-guest", out error), Is.False, "brake " + bad);
+                Assert.That(error, Is.EqualTo("nonFiniteInput"));
+                Assert.That(Enqueue(buffer, Frame("p-guest", 1, throttle: bad,
+                        hasThrottleOverride: true), "p-guest", out error),
+                    Is.False, "throttle " + bad);
+                Assert.That(error, Is.EqualTo("nonFiniteInput"));
+            }
+            Assert.That(buffer.QueueDepth("p-guest"), Is.EqualTo(0));
+        }
+
+        [Test]
+        public void OutOfRangeBrakeAndThrottleRejected()
+        {
+            string error;
+            foreach (var bad in new[] { -0.01f, 1.01f, 4f })
+            {
+                Assert.That(Enqueue(buffer, Frame("p-guest", 1, brake: bad),
+                    "p-guest", out error), Is.False, "brake " + bad);
+                Assert.That(error, Is.EqualTo("outOfRangeInput"));
+            }
+            Assert.That(Enqueue(buffer, Frame("p-guest", 1,
+                    hasThrottleOverride: true, throttle: 1.5f),
+                "p-guest", out error), Is.False);
+            Assert.That(error, Is.EqualTo("outOfRangeInput"));
+            // An absent override carries no throttle meaning, so its raw
+            // field is never range-gated — only finiteness applies.
+            Assert.That(Enqueue(buffer, Frame("p-guest", 1,
+                    hasThrottleOverride: false, throttle: 0f),
+                "p-guest", out error), Is.True, error);
+        }
+
+        [Test]
+        public void BrakeAndThrottleSurviveValidationAndHold()
+        {
+            Assert.That(Enqueue(buffer, Frame("p-guest", 1, brake: 0.7f,
+                    hasThrottleOverride: true, throttle: 0.25f),
+                "p-guest", out var error), Is.True, error);
+            var held = buffer.Consume("p-guest", 1);
+            Assert.That(held.Brake, Is.EqualTo(0.7f).Within(0.0001f));
+            Assert.That(held.HasThrottleOverride, Is.True);
+            Assert.That(held.Throttle, Is.EqualTo(0.25f).Within(0.0001f));
+
+            // The held sample persists across silent host ticks inside the
+            // staleness bound — the race keeps braking/coasting honestly.
+            held = buffer.Consume("p-guest", 2);
+            Assert.That(held.Brake, Is.EqualTo(0.7f).Within(0.0001f));
+            Assert.That(held.HasThrottleOverride, Is.True);
+
+            // A neutral frame without an override restores automatic
+            // throttle and releases the brake — never an ambiguous zero.
+            Assert.That(Enqueue(buffer, Frame("p-guest", 2),
+                "p-guest", out error), Is.True, error);
+            held = buffer.Consume("p-guest", 3);
+            Assert.That(held.Brake, Is.EqualTo(0f));
+            Assert.That(held.HasThrottleOverride, Is.False);
+            Assert.That(held.Throttle, Is.EqualTo(1f));
         }
 
         [Test]

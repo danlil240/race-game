@@ -306,6 +306,7 @@ namespace FamilyRacing
                         state.input.steering.ToString("0.00");
                 SetLed("drift", state.input.drift);
                 SetLed("boost", state.input.boost);
+                SetLed("brake", state.input.brake > 0f);
                 SetLed("gadget", state.input.gadget);
                 SetLed("recover", state.input.recover);
             }

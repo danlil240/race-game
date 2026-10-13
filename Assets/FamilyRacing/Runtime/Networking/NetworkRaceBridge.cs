@@ -771,7 +771,12 @@ namespace FamilyRacing.Networking
                 gadget = localInput.Gadget,
                 recover = localInput.Recover,
                 changeCamera = localInput.ChangeCamera,
-                pause = localInput.Pause
+                pause = localInput.Pause,
+                brake = localInput.Brake,
+                hasThrottleOverride = localInput.HasThrottleOverride,
+                throttle = localInput.HasThrottleOverride
+                    ? localInput.Throttle
+                    : 0f
             };
             // The host rejects the whole frame past MaxFrameActionIds, so
             // a deeper backlog would deadlock the input stream — every

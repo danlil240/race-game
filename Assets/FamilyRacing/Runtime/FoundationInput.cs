@@ -16,7 +16,7 @@ namespace FamilyRacing
         private const int HoldRefreshSecondsNumerator = 500; // ms between hold refresh dispatches
 
         private FoundationApp app;
-        private bool touchLeft, touchRight, touchDrift, touchBoost;
+        private bool touchLeft, touchRight, touchDrift, touchBoost, touchBrake;
         private bool pendingGadget, pendingRecover;
         private DriverInput lastSent = new DriverInput(0f, false, false, false, false, false, false);
         private bool sentNeutral = true;
@@ -31,19 +31,21 @@ namespace FamilyRacing
         public void Bind(FoundationApp owner) { app = owner; }
 
         public bool PhysicalActive =>
-            touchLeft || touchRight || touchDrift || touchBoost || !sentNeutral;
+            touchLeft || touchRight || touchDrift || touchBoost || touchBrake
+            || !sentNeutral;
 
         // Touch button hooks called by FoundationShell pointer handlers.
         public void TouchLeft(bool held) { touchLeft = held; }
         public void TouchRight(bool held) { touchRight = held; }
         public void TouchDrift(bool held) { touchDrift = held; }
         public void TouchBoost(bool held) { touchBoost = held; }
+        public void TouchBrake(bool held) { touchBrake = held; }
         public void TouchGadget() { pendingGadget = true; }
         public void TouchRecover() { pendingRecover = true; }
 
         public void ResetPhysical()
         {
-            touchLeft = touchRight = touchDrift = touchBoost = false;
+            touchLeft = touchRight = touchDrift = touchBoost = touchBrake = false;
             pendingGadget = pendingRecover = false;
         }
 
@@ -105,7 +107,7 @@ namespace FamilyRacing
 
             var keyboard = Keyboard.current;
             float keySteer = 0f;
-            bool keyDrift = false, keyBoost = false;
+            bool keyDrift = false, keyBoost = false, keyBrake = false;
             bool keyGadget = false, keyRecover = false;
             if (keyboard != null)
             {
@@ -113,6 +115,9 @@ namespace FamilyRacing
                 if (keyboard.rightArrowKey.isPressed || keyboard.dKey.isPressed) keySteer += 1f;
                 keyDrift = keyboard.spaceKey.isPressed;
                 keyBoost = keyboard.shiftKey.isPressed || keyboard.leftShiftKey.isPressed;
+                // S / Down is the held brake demand — the same control the
+                // touch brake button drives, composed by max.
+                keyBrake = keyboard.sKey.isPressed || keyboard.downArrowKey.isPressed;
                 keyGadget = keyboard.eKey.wasPressedThisFrame;
                 keyRecover = keyboard.rKey.wasPressedThisFrame;
                 // Camera and pause stay immediate application actions,
@@ -138,19 +143,23 @@ namespace FamilyRacing
                 pausedSeen = false;
                 rearmRequired = true;
             }
-            var keyInput = new DriverInput(keySteer, keyDrift, keyBoost, keyGadget, keyRecover, false, false);
+            var keyInput = new DriverInput(keySteer, keyDrift, keyBoost,
+                keyGadget, keyRecover, false, false, null, keyBrake ? 1f : 0f);
             // Opposing touches cancel rather than preferring one side.
             var touchInput = new DriverInput(
                 (touchRight ? 1f : 0f) - (touchLeft ? 1f : 0f),
-                touchDrift, touchBoost, pendingGadget, pendingRecover, false, false);
+                touchDrift, touchBoost, pendingGadget, pendingRecover,
+                false, false, null, touchBrake ? 1f : 0f);
             pendingGadget = pendingRecover = false;
             var composed = DriverInputComposer.Compose(keyInput, touchInput);
 
             if (rearmRequired)
             {
-                var neutral = keySteer == 0f && !keyDrift && !keyBoost && !keyGadget && !keyRecover
+                var neutral = keySteer == 0f && !keyDrift && !keyBoost
+                    && !keyBrake && !keyGadget && !keyRecover
                     && !touchLeft && !touchRight && !touchDrift && !touchBoost
-                    && composed.Steering == 0f;
+                    && !touchBrake && composed.Steering == 0f
+                    && composed.Brake == 0f;
                 if (!neutral) return; // swallow until every control releases
                 rearmRequired = false;
             }
@@ -160,7 +169,9 @@ namespace FamilyRacing
             if (unchanged && (sentNeutral || now < nextRefresh)) return;
             DispatchInput(composed);
             lastSent = composed;
-            var neutralSent = composed.Steering == 0f && !composed.Drift && !composed.Boost;
+            var neutralSent = composed.Steering == 0f && !composed.Drift
+                && !composed.Boost && composed.Brake == 0f
+                && !composed.HasThrottleOverride;
             sentNeutral = neutralSent;
             nextRefresh = now + HoldRefreshSecondsNumerator;
         }
@@ -175,6 +186,16 @@ namespace FamilyRacing
             parameters["recover"] = input.Recover ? "true" : "false";
             parameters["changeCamera"] = "false";
             parameters["pause"] = "false";
+            parameters["brake"] = input.Brake.ToString("0.###",
+                System.Globalization.CultureInfo.InvariantCulture);
+            // An absent throttle key keeps automatic throttle — only an
+            // explicit override is serialized, and the stale key from an
+            // earlier dispatch must be removed so it cannot linger.
+            if (input.HasThrottleOverride)
+                parameters["throttle"] = input.Throttle.ToString("0.###",
+                    System.Globalization.CultureInfo.InvariantCulture);
+            else
+                parameters.Remove("throttle");
             parameters["durationTicks"] = "30";
             app.Dispatch("input.set", parameters);
         }

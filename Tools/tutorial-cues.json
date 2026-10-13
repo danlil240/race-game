@@ -14,6 +14,10 @@
       "en": "Hold left or right to steer!",
       "he": "החזיקו שמאלה או ימינה כדי לפנות!"
     },
+    "brake": {
+      "en": "Hold the brake to slow down before a turn!",
+      "he": "החזיקו בלימה כדי להאט לפני פנייה!"
+    },
     "drift": {
       "en": "Hold drift while turning to slide!",
       "he": "החזיקו דריפט בזמן הפניה כדי להחליק!"
@@ -27,8 +31,8 @@
       "he": "נסעו על הרמפה וקפצו באוויר!"
     },
     "recovery": {
-      "en": "Stuck? Press recovery to get back on track!",
-      "he": "נתקעתם? לחצו על חזרה למסלול!"
+      "en": "Stuck or fell off? Press recovery to get back on track!",
+      "he": "נתקעתם או נפלתם? לחצו על חזרה למסלול!"
     },
     "trial": {
       "en": "Great job! Now drive one whole lap to finish!",

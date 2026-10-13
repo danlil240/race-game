@@ -34,19 +34,30 @@ namespace FamilyRacing.Core.Networking
         public bool recover;
         public bool changeCamera;
         public bool pause;
+        // Task 7 wire additions. `brake` is a raw held demand in [0,1];
+        // `throttle` is meaningful only when `hasThrottleOverride` is true —
+        // an absent override means automatic throttle, never an ambiguous
+        // zero. Finiteness/range stay host gates like steering.
+        public float brake;
+        public bool hasThrottleOverride;
+        public float throttle;
         // One-shot action identities awaiting host acknowledgment (applied
         // or cancelled). Clients retry them across packets and across
         // reconnect; the host deduplicates them independently of held
         // input so a resent id can never fire twice.
         public List<string> actionIds = new List<string>();
 
-        // The bounded DriverInput a validated sample contributes.
+        // The bounded DriverInput a validated sample contributes. The
+        // throttle override reconstructs only when its presence flag is
+        // set, so a default/zero frame (e.g. an older peer or neutral
+        // sample) keeps automatic-throttle semantics.
         public DriverInput input
         {
             get
             {
                 return new DriverInput(steering, drift, boost, gadget,
-                    recover, changeCamera, pause);
+                    recover, changeCamera, pause,
+                    hasThrottleOverride ? (float?)throttle : null, brake);
             }
         }
 

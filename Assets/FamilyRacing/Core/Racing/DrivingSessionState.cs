@@ -142,7 +142,10 @@ namespace FamilyRacing.Core.Racing
                     gadget = input.gadget,
                     recover = input.recover,
                     changeCamera = input.changeCamera,
-                    pause = input.pause
+                    pause = input.pause,
+                    brake = input.brake,
+                    hasThrottleOverride = input.hasThrottleOverride,
+                    throttle = input.throttle
                 },
                 camera = camera != null ? camera.Copy() : null,
                 tutorial = tutorial != null ? tutorial.Copy() : null

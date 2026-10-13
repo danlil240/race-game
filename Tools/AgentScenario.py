@@ -453,12 +453,19 @@ def settings(language="he", camera="chase"):
 
 
 def inputs(steering=0, duration=10, drift=False, boost=False, gadget=False,
-           recover=False, change_camera=False):
-    return {
+           recover=False, change_camera=False, brake=None, throttle=None):
+    params = {
         "steering": steering, "drift": drift, "boost": boost, "gadget": gadget,
         "recover": recover, "changeCamera": change_camera, "pause": False,
         "durationTicks": duration,
     }
+    # Optional Task-7 demands: absent throttle means automatic throttle;
+    # an explicit 0 is a deliberate coast.
+    if brake is not None:
+        params["brake"] = brake
+    if throttle is not None:
+        params["throttle"] = throttle
+    return params
 
 
 def run(connection, evidence):
@@ -612,8 +619,18 @@ def run(connection, evidence):
                     and client.state.get("driving")
                     and client.state["driving"].get("tutorial")
                     and client.state["driving"]["tutorial"]["lessonId"]
-                    == "drift", timeout=60)
+                    == "brake", timeout=60)
         checks.append("steering lesson completes on genuine held steering")
+
+        # The brake lesson is next in the authored order and completes
+        # only on a real held brake demand through input.set.
+        client.applied("input.set", inputs(brake=0.8, duration=60))
+        client.wait(lambda event: event.get("type") in BOUNDARY_TYPES
+                    and client.state.get("driving")
+                    and client.state["driving"].get("tutorial")
+                    and client.state["driving"]["tutorial"]["lessonId"]
+                    == "drift", timeout=60)
+        checks.append("brake lesson completes on genuine held brake")
 
         exited, _ = client.applied("tutorial.exit")
         state = client.action_state(exited["commandId"])

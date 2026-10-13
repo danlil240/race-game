@@ -12,8 +12,9 @@ namespace FamilyRacing.Core.Networking
     // Validation order is part of the contract (tests pin the codes):
     //   invalidFrame -> noRace -> staleSession -> staleRace ->
     //   unknownConnection -> foreignOwnership -> unknownParticipant ->
-    //   staleEpoch -> nonFiniteInput -> tooManyActions -> badActionId ->
-    //   duplicateSequence -> futureSequence -> bufferOverflow
+    //   staleEpoch -> nonFiniteInput -> outOfRangeInput -> tooManyActions
+    //   -> badActionId -> duplicateSequence -> futureSequence ->
+    //   bufferOverflow
     //
     // Consumption is bounded by policy: at most one new sample per racer
     // per host tick (bursts grant no extra steps), held input neutralizes
@@ -189,8 +190,19 @@ namespace FamilyRacing.Core.Networking
             { error = "unknownParticipant"; return false; }
             if (frame.ownershipEpoch != lane.expectedEpoch)
             { error = "staleEpoch"; return false; }
-            if (float.IsNaN(frame.steering) || float.IsInfinity(frame.steering))
+            if (float.IsNaN(frame.steering) || float.IsInfinity(frame.steering)
+                || float.IsNaN(frame.brake) || float.IsInfinity(frame.brake)
+                || float.IsNaN(frame.throttle) || float.IsInfinity(frame.throttle))
             { error = "nonFiniteInput"; return false; }
+            // Bounded-unit demands are semantic wire values, not
+            // clamp-and-continue like steering: a peer asking for 200%
+            // brake is malformed, not enthusiastic. The throttle range
+            // binds only when the override flag is set — an absent
+            // override carries no throttle meaning.
+            if (frame.brake < 0f || frame.brake > 1f
+                || (frame.hasThrottleOverride
+                    && (frame.throttle < 0f || frame.throttle > 1f)))
+            { error = "outOfRangeInput"; return false; }
             var actions = frame.actionIds;
             if (actions != null)
             {

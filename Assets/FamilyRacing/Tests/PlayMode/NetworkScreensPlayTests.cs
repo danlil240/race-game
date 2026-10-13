@@ -573,6 +573,7 @@ namespace FamilyRacing.Tests
             var controls = Widget<VisualElement>("lan.controls");
             Assert.That(controls.languageDirection,
                 Is.EqualTo(LanguageDirection.LTR));
+            Assert.That(Widget<Button>("lan.race.brake"), Is.Not.Null);
             Assert.That(Widget<Button>("lan.race.drift"), Is.Not.Null);
             Assert.That(Widget<Button>("lan.race.boost"), Is.Not.Null);
             Assert.That(Widget<Button>("lan.race.recover"), Is.Not.Null);
@@ -597,6 +598,17 @@ namespace FamilyRacing.Tests
             PointerUpOn(right);
             driverInput.Pump(false, "lan-race");
             Assert.That(Snapshot().input.steering, Is.EqualTo(0f));
+
+            // The brake is a held demand like steering: pointer-down
+            // holds it, pointer-up releases it, and release dispatches
+            // through the same input.set the steering row uses.
+            var brake = Widget<Button>("lan.race.brake");
+            PointerDownOn(brake);
+            driverInput.Pump(false, "lan-race");
+            Assert.That(Snapshot().input.brake, Is.EqualTo(1f));
+            PointerUpOn(brake);
+            driverInput.Pump(false, "lan-race");
+            Assert.That(Snapshot().input.brake, Is.EqualTo(0f));
         }
 
         [UnityTest]

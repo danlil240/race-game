@@ -34,12 +34,15 @@ namespace FamilyRacing
         {
             public string lessonId = "";
             [Tooltip("event = count driving events; steerTicks = simulated " +
-                "boundaries holding real steering input.")]
+                "boundaries holding real steering input; brakeTicks = " +
+                "simulated boundaries holding real brake demand.")]
             public string rule = "event";
             public string eventKind = "";
             public int requiredCount = 1;
             public int requiredSteerTicks = 30;
             public float minSteering = 0.25f;
+            public int requiredBrakeTicks = 20;
+            public float minBrake = 0.5f;
             public Cue cue = new Cue();
         }
 
@@ -82,6 +85,8 @@ namespace FamilyRacing
                         requiredCount = lesson.requiredCount,
                         requiredSteerTicks = lesson.requiredSteerTicks,
                         minSteering = lesson.minSteering,
+                        requiredBrakeTicks = lesson.requiredBrakeTicks,
+                        minBrake = lesson.minBrake,
                         cue = ConvertCue(lesson.cue)
                     });
                 }

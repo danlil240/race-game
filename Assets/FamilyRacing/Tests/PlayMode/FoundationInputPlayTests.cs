@@ -236,6 +236,94 @@ namespace FamilyRacing.Tests
         }
 
         [Test]
+        public void SAndDownArrowHoldBrake()
+        {
+            GoToSandbox();
+            Press(keyboard.sKey);
+            PumpSandbox();
+            Assert.That(Snapshot().input.brake, Is.EqualTo(1f).Within(0.001f),
+                "A held S must produce brake 1 through input.set.");
+            Assert.That(driverInput.PhysicalActive, Is.True);
+
+            Release(keyboard.sKey);
+            PumpSandbox();
+            Assert.That(Snapshot().input.brake, Is.EqualTo(0f).Within(0.001f),
+                "Releasing S must release the held brake demand.");
+
+            Press(keyboard.downArrowKey);
+            PumpSandbox();
+            Assert.That(Snapshot().input.brake, Is.EqualTo(1f).Within(0.001f),
+                "Down Arrow is the brake alias.");
+            Release(keyboard.downArrowKey);
+            PumpSandbox();
+            Assert.That(Snapshot().input.brake, Is.EqualTo(0f).Within(0.001f));
+            Assert.That(driverInput.PhysicalActive, Is.False);
+        }
+
+        [Test]
+        public void TouchBrakeHoldsAndReleasesLikeARealButton()
+        {
+            GoToSandbox();
+            driverInput.TouchBrake(true);
+            PumpSandbox();
+            Assert.That(Snapshot().input.brake, Is.EqualTo(1f).Within(0.001f),
+                "The touch brake button must hold brake through input.set.");
+            Assert.That(driverInput.PhysicalActive, Is.True);
+
+            driverInput.TouchBrake(false);
+            PumpSandbox();
+            Assert.That(Snapshot().input.brake, Is.EqualTo(0f).Within(0.001f),
+                "Releasing the touch brake must dispatch the release.");
+
+            // ResetPhysical (focus loss / ownership handoff) must drop a
+            // held touch brake like every other held control.
+            driverInput.TouchBrake(true);
+            Assert.That(driverInput.PhysicalActive, Is.True);
+            driverInput.ResetPhysical();
+            Assert.That(driverInput.PhysicalActive, Is.False);
+        }
+
+        [Test]
+        public void HeldBrakeCannotRearmUntilReleasedAfterPause()
+        {
+            GoToSandbox();
+            Press(keyboard.sKey);
+            PumpSandbox();
+            Assert.That(Snapshot().input.brake, Is.EqualTo(1f).Within(0.001f));
+
+            // Pause with S still held: held input neutralizes.
+            Press(keyboard.escapeKey);
+            PumpSandbox();
+            Assert.That(Snapshot().paused, Is.True);
+            Assert.That(Snapshot().input.brake, Is.EqualTo(0f).Within(0.001f));
+            Release(keyboard.escapeKey);
+            NextFrame();
+
+            // Resume while S is STILL held: the hold must not rearm.
+            Press(keyboard.escapeKey);
+            PumpSandbox();
+            Assert.That(Snapshot().paused, Is.False);
+            Release(keyboard.escapeKey);
+            NextFrame();
+            for (var i = 0; i < 3; i++)
+            {
+                PumpSandbox();
+                NextFrame();
+            }
+            Assert.That(Snapshot().input.brake, Is.EqualTo(0f).Within(0.001f),
+                "A brake key held since before the pause must not rearm.");
+
+            // A real release re-arms it.
+            Release(keyboard.sKey);
+            PumpSandbox();
+            Press(keyboard.sKey);
+            PumpSandbox();
+            Assert.That(Snapshot().input.brake, Is.EqualTo(1f).Within(0.001f),
+                "After a real release the brake key must drive again.");
+            Release(keyboard.sKey);
+        }
+
+        [Test]
         public void GadgetAndRecoverKeysPulseForOneDispatch()
         {
             GoToSandbox();

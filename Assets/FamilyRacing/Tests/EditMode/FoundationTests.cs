@@ -986,7 +986,8 @@ namespace FamilyRacing.Tests
         private static bool Neutral(InputState input)
         {
             return input.steering == 0f && !input.drift && !input.boost && !input.gadget
-                && !input.recover && !input.changeCamera && !input.pause;
+                && !input.recover && !input.changeCamera && !input.pause
+                && input.brake == 0f && !input.hasThrottleOverride;
         }
 
         private static bool Available(IReadOnlyList<CommandDescriptor> descriptors, string action)

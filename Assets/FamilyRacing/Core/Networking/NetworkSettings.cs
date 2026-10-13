@@ -67,6 +67,21 @@ namespace FamilyRacing.Core.Networking
         public const float AiDriftMinSpeed = 5f;
         public const float AiBoostMinCharge = 0.9f;
         public const float AiBoostMaxSteer = 0.2f;
+        // Task 7 cornering lookahead: the AI scans the authored route
+        // ahead — this many seconds of travel at the current speed plus
+        // a fixed floor — and brakes toward each vertex's yaw-limited
+        // cornering speed (a turn of angle θ over arc s is followable
+        // at |v| ≤ classSteeringRate·s/θ). The demand is the ordinary
+        // held brake a human presses, scaled by overspeed.
+        public const float AiBrakeLookaheadSeconds = 1.4f;
+        public const float AiBrakeMinLookaheadMeters = 8f;
+        // Brake demand ramps linearly across this overspeed above the
+        // corner target, so a barely-fast approach feathers instead of
+        // slamming.
+        public const float AiBrakeOverspeedSpan = 6f;
+        // Safety factor on the yaw-limited cornering speed — turning
+        // harder than the limit understeers off the route.
+        public const float AiCorneringMargin = 0.8f;
         // A grounded near-stopped streak this long requests the ordinary
         // recover input — the same one-shot a human presses.
         public const float AiRecoverStuckSpeed = 0.75f;

@@ -29,6 +29,7 @@ namespace FamilyRacing.Tests
             "input.steering",
             "input.drift",
             "input.boost",
+            "input.brake",
             "input.gadget",
             "input.recovery",
             "input.pause",

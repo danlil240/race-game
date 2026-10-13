@@ -45,12 +45,17 @@ namespace FamilyRacing.Core.Foundation
             internal string Name;
             internal string Type;
             internal string[] AllowedValues;
+            // Optional parameters may be omitted entirely; when present
+            // they still validate by type before the command may apply.
+            internal bool Optional;
 
-            internal ParameterSpec(string name, string type, string[] allowedValues)
+            internal ParameterSpec(string name, string type, string[] allowedValues,
+                bool optional = false)
             {
                 Name = name;
                 Type = type;
                 AllowedValues = allowedValues;
+                Optional = optional;
             }
         }
 
@@ -136,7 +141,12 @@ namespace FamilyRacing.Core.Foundation
                 Param("steering", "decimal", null), Param("drift", "boolean", Bools),
                 Param("boost", "boolean", Bools), Param("gadget", "boolean", Bools),
                 Param("recover", "boolean", Bools), Param("changeCamera", "boolean", Bools),
-                Param("pause", "boolean", Bools), Param("durationTicks", "integer", null)),
+                Param("pause", "boolean", Bools), Param("durationTicks", "integer", null),
+                // Optional held demands (Task 7): absent throttle means
+                // automatic throttle — never an ambiguous zero — while an
+                // explicit 0 is a deliberate coast. Brake defaults to 0.
+                OptionalParam("throttle", "decimal", null),
+                OptionalParam("brake", "decimal", null)),
             Schema("input.clear"),
             Schema("camera.toggle"),
             Schema("pause.toggle"),
@@ -491,7 +501,7 @@ namespace FamilyRacing.Core.Foundation
                     {
                         name = spec.Name,
                         type = spec.Type,
-                        required = true,
+                        required = !spec.Optional,
                         allowedValues = spec.AllowedValues == null
                             ? null
                             : new List<string>(spec.AllowedValues)
@@ -517,6 +527,8 @@ namespace FamilyRacing.Core.Foundation
             var steering = 0f;
             var drift = false;
             var boost = false;
+            var brake = 0f;
+            float? throttle = null;
             if (holdTicksRemaining > 0)
             {
                 holdTicksRemaining--;
@@ -525,9 +537,14 @@ namespace FamilyRacing.Core.Foundation
                     steering = input.Steering;
                     drift = input.Drift;
                     boost = input.Boost;
+                    brake = input.Brake;
+                    throttle = input.HasThrottleOverride
+                        ? (float?)input.Throttle
+                        : null;
                 }
             }
-            input = new DriverInput(steering, drift, boost, false, false, false, false);
+            input = new DriverInput(steering, drift, boost, false, false,
+                false, false, throttle, brake);
             // The session phase owns the LAN screens: connecting lives on
             // the browser, racing on the race screen, and teardown drops a
             // stranded phase screen back onto the browser on this boundary.
@@ -811,6 +828,26 @@ namespace FamilyRacing.Core.Foundation
             var duration = ParseInt(command.Parameters["durationTicks"]);
             if (duration < 1 || duration > MaxDurationTicks)
                 return Result(command, CommandResult.Rejected, "invalidParameter");
+            // Optional held demands are parsed and range-checked before any
+            // mutation — a malformed mixed sample must fail atomically,
+            // never queue a recovery, toggle pause, or clobber held input.
+            float? throttle = null;
+            string throttleText;
+            if (command.Parameters.TryGetValue("throttle", out throttleText))
+            {
+                var requested = ParseDecimal(throttleText);
+                if (!InUnitRange(requested))
+                    return Result(command, CommandResult.Rejected, "invalidParameter");
+                throttle = requested;
+            }
+            var brake = 0f;
+            string brakeText;
+            if (command.Parameters.TryGetValue("brake", out brakeText))
+            {
+                brake = ParseDecimal(brakeText);
+                if (!InUnitRange(brake))
+                    return Result(command, CommandResult.Rejected, "invalidParameter");
+            }
             var drift = IsTrue(command.Parameters["drift"]);
             var boost = IsTrue(command.Parameters["boost"]);
             var gadget = IsTrue(command.Parameters["gadget"]);
@@ -851,7 +888,7 @@ namespace FamilyRacing.Core.Foundation
                 // submits recover as a one-shot action carrying this
                 // command's identity (see FoundationApp.ExecuteAndEmit).
                 input = new DriverInput(steering, drift, boost, false,
-                    false, changeCamera, pausePulse);
+                    false, changeCamera, pausePulse, throttle, brake);
                 holdTicksRemaining = duration;
                 if (changeCamera && WritableSelected())
                 {
@@ -860,7 +897,8 @@ namespace FamilyRacing.Core.Foundation
                 }
                 return Result(command, CommandResult.Applied, "");
             }
-            input = new DriverInput(steering, drift, boost, gadget, recover, changeCamera, pausePulse);
+            input = new DriverInput(steering, drift, boost, gadget, recover,
+                changeCamera, pausePulse, throttle, brake);
             holdTicksRemaining = duration;
             // Gadget/recover/changeCamera/pause are one-tick pulses. A camera
             // pulse also toggles a writable draft camera; a pause pulse
@@ -1361,8 +1399,12 @@ namespace FamilyRacing.Core.Foundation
             }
             foreach (var spec in schema)
             {
-                if (!command.Parameters.ContainsKey(spec.Name)) return "missingParameter";
-                var value = command.Parameters[spec.Name];
+                string value;
+                if (!command.Parameters.TryGetValue(spec.Name, out value))
+                {
+                    if (spec.Optional) continue;
+                    return "missingParameter";
+                }
                 switch (spec.Type)
                 {
                     case "integer":
@@ -1499,6 +1541,11 @@ namespace FamilyRacing.Core.Foundation
         private static ParameterSpec Param(string name, string type, string[] allowedValues)
         {
             return new ParameterSpec(name, type, allowedValues);
+        }
+
+        private static ParameterSpec OptionalParam(string name, string type, string[] allowedValues)
+        {
+            return new ParameterSpec(name, type, allowedValues, true);
         }
 
         private static Dictionary<string, ParameterSpec[]> BuildSchemaMap()

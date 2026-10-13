@@ -184,6 +184,14 @@ namespace FamilyRacing.Tests
                     },
                     new TutorialLesson
                     {
+                        lessonId = "brake",
+                        rule = "brakeTicks",
+                        requiredBrakeTicks = 15,
+                        minBrake = 0.5f,
+                        cue = Cue("tutorial.cue.brake", "!", "brake-en", "brake-he")
+                    },
+                    new TutorialLesson
+                    {
                         lessonId = "drift",
                         rule = "event",
                         eventKind = "motor.driftStart",
@@ -261,7 +269,8 @@ namespace FamilyRacing.Tests
         }
 
         private CommandResult Drive(float steering, bool drift = false,
-            bool boost = false, bool recover = false, int ticks = 5)
+            bool boost = false, bool recover = false, int ticks = 5,
+            float brake = 0f)
         {
             var result = service.Execute(Cmd("input.set",
                 P("steering", steering.ToString("0.###", CultureInfo.InvariantCulture),
@@ -270,6 +279,7 @@ namespace FamilyRacing.Tests
                     "gadget", "false",
                     "recover", recover ? "true" : "false",
                     "changeCamera", "false", "pause", "false",
+                    "brake", brake.ToString("0.###", CultureInfo.InvariantCulture),
                     "durationTicks", ticks.ToString(CultureInfo.InvariantCulture))));
             if (result.status == CommandResult.Applied) Boundary(ticks);
             return result;
@@ -419,7 +429,7 @@ namespace FamilyRacing.Tests
             Assert.That(tutorial.phase, Is.EqualTo("lessons"));
             Assert.That(tutorial.lessonId, Is.EqualTo("steering"));
             Assert.That(tutorial.lessonIndex, Is.EqualTo(0));
-            Assert.That(tutorial.lessonTotal, Is.EqualTo(5));
+            Assert.That(tutorial.lessonTotal, Is.EqualTo(6));
             Assert.That(tutorial.objective, Is.EqualTo("tutorial.cue.steering"));
             Assert.That(tutorial.cueId, Is.EqualTo("steering"));
             Assert.That(tutorial.graduated, Is.False);
@@ -463,11 +473,21 @@ namespace FamilyRacing.Tests
             Assert.That(Tutorial().lessonId, Is.EqualTo("steering"),
                 "partial steering does not complete the lesson");
             Drive(0.8f, ticks: 10);
-            Assert.That(Tutorial().lessonId, Is.EqualTo("drift"));
+            Assert.That(Tutorial().lessonId, Is.EqualTo("brake"));
             Assert.That(Tutorial().completedLessons,
                 Is.EquivalentTo(new[] { "steering" }));
 
-            // Drift: a real driftStart at speed.
+            // Braking: sustained real brake demand for the required
+            // ticks — the same held control a child holds on touch or S.
+            Drive(0f, brake: 0.8f, ticks: 10);
+            Assert.That(Tutorial().lessonId, Is.EqualTo("brake"),
+                "a partial brake hold does not complete the lesson");
+            Drive(0f, brake: 0.8f, ticks: 5);
+            Assert.That(Tutorial().lessonId, Is.EqualTo("drift"));
+
+            // Drift: a real driftStart at speed. The brake lesson left
+            // the car slow, so build speed again before leaning in.
+            Drive(0f, ticks: 40);
             Drive(0.9f, drift: true, ticks: 30);
             Assert.That(Tutorial().lessonId, Is.EqualTo("boost"),
                 "drift lesson must advance on a genuine driftStart");
@@ -526,13 +546,24 @@ namespace FamilyRacing.Tests
             Drive(0f, ticks: 40);
             Drive(0.9f, drift: true, ticks: 10);
             Drive(0f, boost: true, ticks: 10);
+            Drive(0f, brake: 0.8f, ticks: 10);
             Assert.That(Tutorial().lessonId, Is.EqualTo("steering"),
-                "drift/boost must not skip the ordered steering lesson");
+                "drift/boost/brake must not skip the ordered steering lesson");
             Drive(0.8f, ticks: 10);
-            Assert.That(Tutorial().lessonId, Is.EqualTo("drift"),
+            Assert.That(Tutorial().lessonId, Is.EqualTo("brake"),
                 "steering completes on its own merits");
+            // The earlier brake hold was ignored too: tick progress does
+            // not bank, so 14 ticks short of the requirement stays
+            // incomplete and only the full fresh hold advances.
+            Drive(0f, brake: 0.8f, ticks: 14);
+            Assert.That(Tutorial().lessonId, Is.EqualTo("brake"),
+                "early brake ticks must not bank for the brake lesson");
+            Drive(0f, brake: 0.8f, ticks: 1);
+            Assert.That(Tutorial().lessonId, Is.EqualTo("drift"));
             // The earlier driftStart was ignored: a fresh one is required.
-            Drive(0.9f, drift: true, ticks: 15);
+            // The brake lesson left the car slow, so rebuild speed first.
+            Drive(0f, ticks: 40);
+            Drive(0.9f, drift: true, ticks: 30);
             Assert.That(Tutorial().lessonId, Is.EqualTo("boost"));
             // The earlier boostStart was ignored too.
             Drive(0f, boost: true, ticks: 10);
@@ -561,7 +592,7 @@ namespace FamilyRacing.Tests
             Assert.That(cues.Count, Is.EqualTo(3));
             // The lesson still completes normally afterwards.
             Drive(0.8f, ticks: 20);
-            Assert.That(Tutorial().lessonId, Is.EqualTo("drift"));
+            Assert.That(Tutorial().lessonId, Is.EqualTo("brake"));
         }
 
         [Test]
@@ -570,7 +601,7 @@ namespace FamilyRacing.Tests
             CreateProfile();
             StartTutorialRunning();
             Drive(0.8f, ticks: 20); // steering done
-            Assert.That(Tutorial().lessonId, Is.EqualTo("drift"));
+            Assert.That(Tutorial().lessonId, Is.EqualTo("brake"));
 
             var firstRace = service.Snapshot().driving.raceId;
             var restarted = service.Execute(Cmd("race.restart", null));
@@ -580,7 +611,7 @@ namespace FamilyRacing.Tests
             Assert.That(state.eventId, Is.EqualTo("tutorial-test"),
                 "retry stays inside the tutorial free-drive");
             Assert.That(state.tutorial, Is.Not.Null);
-            Assert.That(state.tutorial.lessonId, Is.EqualTo("drift"),
+            Assert.That(state.tutorial.lessonId, Is.EqualTo("brake"),
                 "completed lessons are kept across retry");
             Assert.That(state.tutorial.completedLessons,
                 Is.EquivalentTo(new[] { "steering" }));
@@ -588,7 +619,7 @@ namespace FamilyRacing.Tests
             // Indefinite: another retry keeps the same guarantee.
             var again = service.Execute(Cmd("race.restart", null));
             Assert.That(again.status, Is.EqualTo(CommandResult.Applied));
-            Assert.That(Tutorial().lessonId, Is.EqualTo("drift"));
+            Assert.That(Tutorial().lessonId, Is.EqualTo("brake"));
         }
 
         [Test]
@@ -597,6 +628,8 @@ namespace FamilyRacing.Tests
             CreateProfile();
             StartTutorialRunning();
             Drive(0.8f, ticks: 20);
+            Drive(0f, brake: 0.8f, ticks: 15);
+            Drive(0f, ticks: 40); // rebuild speed after braking
             Drive(0.9f, drift: true, ticks: 30);
             Drive(0f, boost: true, ticks: 10);
             CompleteJumpLesson();
@@ -723,6 +756,8 @@ namespace FamilyRacing.Tests
             CreateProfile();
             StartTutorialRunning();
             Drive(0.8f, ticks: 20);
+            Drive(0f, brake: 0.8f, ticks: 15);
+            Drive(0f, ticks: 40); // rebuild speed after braking
             Drive(0.9f, drift: true, ticks: 30);
             Drive(0f, boost: true, ticks: 10);
             CompleteJumpLesson();
@@ -771,7 +806,8 @@ namespace FamilyRacing.Tests
             Assert.That(tutorial.objective, Is.EqualTo("tutorial.cue.steering"));
             // Every cue resolves in both locales; Hebrew stays logical-order.
             foreach (var key in new[]
-                { "tutorial.cue.steering", "tutorial.cue.drift", "tutorial.cue.boost",
+                { "tutorial.cue.steering", "tutorial.cue.brake",
+                  "tutorial.cue.drift", "tutorial.cue.boost",
                   "tutorial.cue.jump", "tutorial.cue.recovery", "tutorial.cue.trial",
                   "tutorial.done" })
             {
@@ -780,8 +816,66 @@ namespace FamilyRacing.Tests
             }
             Boundary(2);
             Drive(0.8f, ticks: 20);
-            Assert.That(Tutorial().lessonId, Is.EqualTo("drift"),
+            Assert.That(Tutorial().lessonId, Is.EqualTo("brake"),
                 "lessons advance identically under Hebrew");
+        }
+
+        [Test]
+        public void BrakeTicksCountsHeldBrakePerBoundary()
+        {
+            // Unit-level rule check: brakeTicks accumulates only on fresh
+            // simulated boundaries while running, only when the published
+            // input holds brake at or above minBrake — a stale tick or a
+            // feather touch never advances the lesson.
+            var def = TestTutorial();
+            var steering = def.lessons[0];
+            var brake = def.lessons[1];
+            var tutorial = new DrivingTutorial(def);
+            var state = new DrivingSessionState
+            {
+                phase = "running",
+                simulationTick = 1,
+                input = new InputState { brake = 0.8f }
+            };
+            // Lesson 0 is steering: brake input does not count for it.
+            var advance = tutorial.Advance(state, null);
+            Assert.That(advance.completedLessonId, Is.Null);
+
+            // Complete steering, then exercise the brake lesson directly.
+            state.input.steering = 0.8f;
+            state.input.brake = 0f;
+            for (var t = 0; t < steering.requiredSteerTicks; t++)
+            {
+                state.simulationTick++;
+                advance = tutorial.Advance(state, null);
+            }
+            Assert.That(advance.completedLessonId, Is.EqualTo("steering"));
+            Assert.That(tutorial.CurrentLessonId, Is.EqualTo("brake"));
+
+            state.input.steering = 0f;
+            // Below the threshold does not count.
+            state.input.brake = brake.minBrake - 0.01f;
+            for (var t = 0; t < brake.requiredBrakeTicks; t++)
+            {
+                state.simulationTick++;
+                advance = tutorial.Advance(state, null);
+                Assert.That(advance.completedLessonId, Is.Null);
+            }
+            // A re-presented boundary (same tick) counts at most once:
+            // the first advance on a fresh tick counts, the repeat does not.
+            state.input.brake = brake.minBrake;
+            state.simulationTick++;
+            advance = tutorial.Advance(state, null);
+            advance = tutorial.Advance(state, null);
+            Assert.That(advance.completedLessonId, Is.Null,
+                "re-advancing the same tick must not double-count");
+            for (var t = 1; t < brake.requiredBrakeTicks; t++)
+            {
+                state.simulationTick++;
+                advance = tutorial.Advance(state, null);
+            }
+            Assert.That(advance.completedLessonId, Is.EqualTo("brake"));
+            Assert.That(tutorial.CurrentLessonId, Is.EqualTo("drift"));
         }
 
         [Test]
@@ -803,6 +897,19 @@ namespace FamilyRacing.Tests
             var rule = TestTutorial();
             rule.lessons[0].rule = "magic";
             Assert.That(rule.Validate(out var bad), Is.False);
+
+            // brakeTicks obeys the same fail-closed validation as
+            // steerTicks: a non-positive requirement or an out-of-unit
+            // threshold can never author a lesson.
+            var noTicks = TestTutorial();
+            noTicks.lessons[1].requiredBrakeTicks = 0;
+            Assert.That(noTicks.lessons[1].rule, Is.EqualTo("brakeTicks"));
+            Assert.That(noTicks.Validate(out var ticks), Is.False);
+            Assert.That(ticks, Does.Contain("requiredBrakeTicks"));
+            var badMin = TestTutorial();
+            badMin.lessons[1].minBrake = 1.5f;
+            Assert.That(badMin.Validate(out var min), Is.False);
+            Assert.That(min, Does.Contain("minBrake"));
 
             var empty = TestTutorial();
             empty.lessons.Clear();
@@ -901,6 +1008,8 @@ namespace FamilyRacing.Tests
             CreateProfile();
             StartTutorialRunning();
             Drive(0.8f, ticks: 20);
+            Drive(0f, brake: 0.8f, ticks: 15);
+            Drive(0f, ticks: 40); // rebuild speed after braking
             Drive(0.9f, drift: true, ticks: 30);
             Drive(0f, boost: true, ticks: 10);
             CompleteJumpLesson();

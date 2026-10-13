@@ -174,6 +174,90 @@ namespace FamilyRacing.Tests
             }
         }
 
+        // Task 7: brake and throttle are semantic wire values — the
+        // round trip must preserve a partial brake demand and the
+        // absent-vs-explicit-zero throttle distinction, because the host
+        // reconstructs DriverInput from the decoded frame fields.
+        [Test]
+        public void InputBatchRoundTripPreservesBrakeAndThrottle()
+        {
+            var frames = new List<NetworkInputFrame>
+            {
+                new NetworkInputFrame
+                {
+                    sessionId = "s", raceId = "r", participantId = "p",
+                    ownershipEpoch = 2, inputSequence = 41, clientTick = 40,
+                    steering = -0.5f, drift = true, boost = false,
+                    recover = false, changeCamera = false, pause = false,
+                    brake = 0.6f,
+                    hasThrottleOverride = true, throttle = 0f
+                },
+                new NetworkInputFrame
+                {
+                    sessionId = "s", raceId = "r", participantId = "p",
+                    ownershipEpoch = 2, inputSequence = 42, clientTick = 41,
+                    steering = 0f, brake = 0f,
+                    hasThrottleOverride = false, throttle = 0f
+                }
+            };
+            byte[] packet;
+            string error;
+            Assert.That(NetworkWireCodec.TryEncodeInputBatch(frames,
+                out packet, out error), Is.True, error);
+            List<NetworkInputFrame> decoded;
+            Assert.That(NetworkWireCodec.TryDecodeInputBatch(packet,
+                out decoded, out error), Is.True, error);
+            Assert.That(decoded.Count, Is.EqualTo(2));
+
+            var first = decoded[0];
+            Assert.That(first.brake, Is.EqualTo(0.6f).Within(0.0001f));
+            Assert.That(first.hasThrottleOverride, Is.True);
+            Assert.That(first.throttle, Is.EqualTo(0f).Within(0.0001f));
+            // Explicit zero decodes as a real coast — not automatic.
+            Assert.That(first.input.HasThrottleOverride, Is.True);
+            Assert.That(first.input.Throttle, Is.EqualTo(0f));
+            Assert.That(first.input.Brake, Is.EqualTo(0.6f).Within(0.0001f));
+
+            // A frame without an override restores automatic throttle.
+            var second = decoded[1];
+            Assert.That(second.hasThrottleOverride, Is.False);
+            Assert.That(second.input.HasThrottleOverride, Is.False);
+            Assert.That(second.input.Throttle, Is.EqualTo(1f));
+            Assert.That(second.input.Brake, Is.EqualTo(0f));
+        }
+
+        // A peer running a Task-5 build emits frames without the new
+        // fields — decode defaults keep automatic throttle and no brake
+        // rather than manufacturing an ambiguous zero override.
+        [Test]
+        public void LegacyInputFrameDecodesWithAutomaticThrottle()
+        {
+            var json = "{\"frames\":[{\"sessionId\":\"s\",\"raceId\":\"r\"," +
+                "\"participantId\":\"p\",\"ownershipEpoch\":1," +
+                "\"inputSequence\":1,\"clientTick\":1,\"steering\":0.25," +
+                "\"drift\":false,\"boost\":true,\"gadget\":false," +
+                "\"recover\":false,\"changeCamera\":false,\"pause\":false," +
+                "\"actionIds\":[]}]}";
+            var body = Encoding.UTF8.GetBytes(json);
+            var packet = new byte[NetworkWireCodec.HeaderBytes + body.Length];
+            var tag = Encoding.ASCII.GetBytes(NetworkWireCodec.TagInputBatch);
+            for (var i = 0; i < tag.Length; i++) packet[i] = tag[i];
+            System.Buffer.BlockCopy(body, 0, packet,
+                NetworkWireCodec.HeaderBytes, body.Length);
+            List<NetworkInputFrame> decoded;
+            string error;
+            Assert.That(NetworkWireCodec.TryDecodeInputBatch(packet,
+                out decoded, out error), Is.True, error);
+            Assert.That(decoded.Count, Is.EqualTo(1));
+            var frame = decoded[0];
+            Assert.That(frame.hasThrottleOverride, Is.False);
+            Assert.That(frame.brake, Is.EqualTo(0f));
+            Assert.That(frame.input.HasThrottleOverride, Is.False);
+            Assert.That(frame.input.Throttle, Is.EqualTo(1f));
+            Assert.That(frame.input.Brake, Is.EqualTo(0f));
+            Assert.That(frame.input.Steering, Is.EqualTo(0.25f).Within(0.001f));
+        }
+
         // JsonUtility materializes a null object field as an empty
         // instance; decode normalizes a non-finalized result back to
         // null so clients can never observe a phantom outcome.

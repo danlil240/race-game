@@ -592,5 +592,161 @@ namespace FamilyRacing.Tests
             Assert.That(recovered, Is.False,
                 "a cancelled queue must never recover on resume");
         }
+
+        // --- optional brake / throttle override (vehicle-physics Task 7) ------
+
+        [Test]
+        public void InputSetCarriesOptionalBrakeAndThrottle()
+        {
+            CreateProfile();
+            StartRunning();
+            var set = service.Execute(Cmd("input.set",
+                P("steering", "0", "drift", "false", "boost", "false",
+                  "gadget", "false", "recover", "false", "changeCamera", "false",
+                  "pause", "false", "durationTicks", "30",
+                  "brake", "0.6", "throttle", "0.4")));
+            Assert.That(set.status, Is.EqualTo(CommandResult.Applied), set.code);
+            var input = service.Snapshot().input;
+            Assert.That(input.brake, Is.EqualTo(0.6f).Within(0.001f));
+            Assert.That(input.hasThrottleOverride, Is.True);
+            Assert.That(input.throttle, Is.EqualTo(0.4f).Within(0.001f));
+
+            // The held lease keeps carrying the new controls across
+            // boundaries until it expires — they must not silently drop.
+            Boundary(3);
+            var held = service.Snapshot().input;
+            Assert.That(held.brake, Is.EqualTo(0.6f).Within(0.001f));
+            Assert.That(held.hasThrottleOverride, Is.True);
+            Assert.That(held.throttle, Is.EqualTo(0.4f).Within(0.001f));
+
+            for (var i = 0; i < 30; i++) Boundary(1);
+            var expired = service.Snapshot().input;
+            Assert.That(expired.brake, Is.EqualTo(0f));
+            Assert.That(expired.hasThrottleOverride, Is.False,
+                "an expired hold restores automatic throttle");
+            Assert.That(expired.throttle, Is.EqualTo(1f));
+        }
+
+        [Test]
+        public void InputSetAbsentThrottleMeansAutomatic()
+        {
+            CreateProfile();
+            StartRunning();
+            var set = service.Execute(Cmd("input.set",
+                P("steering", "0.2", "drift", "false", "boost", "false",
+                  "gadget", "false", "recover", "false", "changeCamera", "false",
+                  "pause", "false", "durationTicks", "10")));
+            Assert.That(set.status, Is.EqualTo(CommandResult.Applied), set.code);
+            var input = service.Snapshot().input;
+            Assert.That(input.hasThrottleOverride, Is.False,
+                "a missing throttle must stay automatic, not coast");
+            Assert.That(input.throttle, Is.EqualTo(1f));
+            Assert.That(input.brake, Is.EqualTo(0f));
+        }
+
+        [Test]
+        public void InputSetExplicitZeroThrottleCoasts()
+        {
+            CreateProfile();
+            StartRunning();
+            var set = service.Execute(Cmd("input.set",
+                P("steering", "0", "drift", "false", "boost", "false",
+                  "gadget", "false", "recover", "false", "changeCamera", "false",
+                  "pause", "false", "durationTicks", "20",
+                  "throttle", "0")));
+            Assert.That(set.status, Is.EqualTo(CommandResult.Applied), set.code);
+            var input = service.Snapshot().input;
+            Assert.That(input.hasThrottleOverride, Is.True,
+                "explicit 0 is a deliberate coast, distinct from absent");
+            Assert.That(input.throttle, Is.EqualTo(0f));
+        }
+
+        [Test]
+        public void InputClearRestoresAutomaticThrottleAndZeroBrake()
+        {
+            CreateProfile();
+            StartRunning();
+            service.Execute(Cmd("input.set",
+                P("steering", "0", "drift", "false", "boost", "false",
+                  "gadget", "false", "recover", "false", "changeCamera", "false",
+                  "pause", "false", "durationTicks", "30",
+                  "brake", "1", "throttle", "0")));
+            var cleared = service.Execute(Cmd("input.clear", null));
+            Assert.That(cleared.status, Is.EqualTo(CommandResult.Applied));
+            var input = service.Snapshot().input;
+            Assert.That(input.brake, Is.EqualTo(0f));
+            Assert.That(input.hasThrottleOverride, Is.False);
+            Assert.That(input.throttle, Is.EqualTo(1f));
+        }
+
+        [Test]
+        public void InputSetRejectsMalformedBrakeThrottleAtomically()
+        {
+            CreateProfile();
+            StartRunning();
+            // Marker hold the rejected commands must never clobber.
+            var marker = service.Execute(Cmd("input.set",
+                P("steering", "0.5", "drift", "false", "boost", "false",
+                  "gadget", "false", "recover", "false", "changeCamera", "false",
+                  "pause", "false", "durationTicks", "30")));
+            Assert.That(marker.status, Is.EqualTo(CommandResult.Applied));
+
+            var recoverablePause = service.Snapshot().paused;
+            foreach (var bad in new[] { "-0.2", "1.5", "NaN", "Infinity" })
+            {
+                var brake = service.Execute(Cmd("input.set",
+                    P("steering", "-1", "drift", "true", "boost", "false",
+                      "gadget", "false", "recover", "false", "changeCamera",
+                      "false", "pause", "false", "durationTicks", "5",
+                      "brake", bad)));
+                Assert.That(brake.status, Is.EqualTo(CommandResult.Rejected),
+                    "brake=" + bad);
+                Assert.That(brake.code, Is.EqualTo("invalidParameter"));
+                var throttle = service.Execute(Cmd("input.set",
+                    P("steering", "-1", "drift", "true", "boost", "false",
+                      "gadget", "false", "recover", "false", "changeCamera",
+                      "false", "pause", "false", "durationTicks", "5",
+                      "throttle", bad)));
+                Assert.That(throttle.status, Is.EqualTo(CommandResult.Rejected),
+                    "throttle=" + bad);
+                Assert.That(throttle.code, Is.EqualTo("invalidParameter"));
+            }
+            var input = service.Snapshot().input;
+            Assert.That(input.steering, Is.EqualTo(0.5f).Within(0.001f),
+                "a rejected sample must not partially mutate held input");
+            Assert.That(input.drift, Is.False);
+            Assert.That(input.brake, Is.EqualTo(0f));
+            Assert.That(input.hasThrottleOverride, Is.False);
+            Assert.That(service.Snapshot().paused, Is.EqualTo(recoverablePause),
+                "rejected input.set must not toggle pause state");
+            Assert.That(service.Snapshot().driving.pendingActions, Is.Empty,
+                "rejected input.set must not queue a recovery");
+        }
+
+        [Test]
+        public void InputSetDiscoveryAdvertisesOptionalBrakeThrottle()
+        {
+            var descriptor = Descriptor(service, "input.set");
+            foreach (var parameter in descriptor.parameters)
+            {
+                if (parameter.name == "brake" || parameter.name == "throttle")
+                {
+                    Assert.That(parameter.type, Is.EqualTo("decimal"));
+                    Assert.That(parameter.required, Is.False,
+                        parameter.name + " must be optional — absent means "
+                        + "no brake / automatic throttle");
+                }
+                else
+                {
+                    Assert.That(parameter.required, Is.True,
+                        parameter.name + " stays a required legacy parameter");
+                }
+            }
+            var names = new List<string>();
+            foreach (var parameter in descriptor.parameters)
+                names.Add(parameter.name);
+            Assert.That(names, Does.Contain("brake"));
+            Assert.That(names, Does.Contain("throttle"));
+        }
     }
 }

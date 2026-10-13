@@ -270,6 +270,99 @@ namespace FamilyRacing.Tests
 
         // --- the six binding tests -----------------------------------------
 
+        // Task 7: cornering lookahead. A tight 10 m square asks the car's
+        // 2.6 rad/s steering for 90° turns — followable near ~13 m/s, so a
+        // full-speed approach must brake through the ordinary held
+        // control before the vertex, not after the heading error grows.
+        private static CourseDefinition TightSquareCourse()
+        {
+            var course = new CourseDefinition { id = "corner-tight" };
+            course.route.Add(Wp(0f, 0f));
+            course.route.Add(Wp(0f, 10f));
+            course.route.Add(Wp(10f, 10f));
+            course.route.Add(Wp(10f, 0f));
+            return course;
+        }
+
+        // The same 90° corners spread over 60 m arcs are followable at
+        // full speed — the honest straight-line control case.
+        private static CourseDefinition WideSquareCourse()
+        {
+            var course = new CourseDefinition { id = "corner-wide" };
+            course.route.Add(Wp(0f, 0f));
+            course.route.Add(Wp(0f, 60f));
+            course.route.Add(Wp(60f, 60f));
+            course.route.Add(Wp(60f, 0f));
+            return course;
+        }
+
+        private static DrivingSessionState RacerAt(float x, float z,
+            float heading, float speed, float boostCharge = 0f)
+        {
+            return new DrivingSessionState
+            {
+                phase = "running",
+                vehicleId = "car-01",
+                motor = new MotorState
+                {
+                    x = x, y = 0f, z = z,
+                    heading = heading, speed = speed, grounded = true,
+                    boostCharge = boostCharge
+                }
+            };
+        }
+
+        [Test]
+        public void AiBrakesBeforeTightCorner()
+        {
+            var ai = new AiDriver();
+            var course = TightSquareCourse();
+            // Approaching the first 90° vertex flat out: the lookahead
+            // covers the corner, so brake demand must be strong while
+            // steering is still nearly neutral — the slowdown precedes
+            // the turn, it does not react to it.
+            var fast = RacerAt(0f, 2f, 0f, 18f, boostCharge: 1f);
+            var sample = ai.Sample(fast, course);
+            Assert.That(sample.Brake, Is.GreaterThan(0.5f),
+                "a corner inside the lookahead must drive held brake");
+            Assert.That(Math.Abs(sample.Steering), Is.LessThan(0.3f),
+                "braking starts before the steering demand builds");
+            Assert.That(sample.Boost, Is.False,
+                "boost must never fire while the AI is braking");
+            Assert.That(sample.HasThrottleOverride, Is.False,
+                "the AI never claims a throttle override — braking is enough");
+
+            // Below the yaw-limited corner speed the same pose demands
+            // no brake at all — the control is honest, not a script.
+            var slow = new AiDriver();
+            var creeping = RacerAt(0f, 2f, 0f, 5f);
+            var eased = slow.Sample(creeping, course);
+            Assert.That(eased.Brake, Is.EqualTo(0f),
+                "a followable approach speed must not manufacture brake");
+        }
+
+        [Test]
+        public void AiBoostStaysAStraightLineAssist()
+        {
+            var ai = new AiDriver();
+            // Long arcs: followable at full speed, steering neutral —
+            // a charged meter may boost like a human on a straight.
+            var straight = RacerAt(0f, -10f, 0f, 15f, boostCharge: 1f);
+            var boosted = ai.Sample(straight, WideSquareCourse());
+            Assert.That(boosted.Brake, Is.EqualTo(0f));
+            Assert.That(boosted.Boost, Is.True,
+                "a charged straight is where the boost assist belongs");
+
+            // The same speed into the tight corner: brake suppresses the
+            // boost the way a human feathers off, and the AI stays off
+            // the wall instead of trading speed for control.
+            var cornering = new AiDriver();
+            var fast = RacerAt(0f, 2f, 0f, 18f, boostCharge: 1f);
+            var braked = cornering.Sample(fast, TightSquareCourse());
+            Assert.That(braked.Boost, Is.False,
+                "boost is gated away while braking into a turn");
+        }
+
         [Test]
         public void AiUsesOrderedCourseRoute()
         {

@@ -191,10 +191,11 @@ namespace FamilyRacing.EditorTools
             return asset;
         }
 
-        // The ordered onboarding: steering -> drift -> boost -> jump ->
-        // recovery, then the intro-01 one-lap trial. Completion rules are
-        // authored here as content; clip slots stay empty until licensed
-        // EN/HE recordings are bundled under Assets/FamilyRacing/Audio/Tutorial.
+        // The ordered onboarding: steering -> brake -> drift -> boost ->
+        // jump -> recovery, then the intro-01 one-lap trial. Completion
+        // rules are authored here as content; clip slots stay empty until
+        // licensed EN/HE recordings are bundled under
+        // Assets/FamilyRacing/Audio/Tutorial.
         private static TutorialDefinitionAsset EnsureTutorial()
         {
             // Distinct filename from the tutorial-01 free-drive *event*
@@ -208,6 +209,17 @@ namespace FamilyRacing.EditorTools
             {
                 Lesson("steering", "steerTicks", "", 0, 45, 0.3f,
                     "tutorial.cue.steering", "◀▶"),
+                // Brief held-brake lesson between steering and drift:
+                // ~0.8s of real brake demand teaches slowing before the
+                // sliding lessons arrive.
+                new TutorialDefinitionAsset.Lesson
+                {
+                    lessonId = "brake",
+                    rule = "brakeTicks",
+                    requiredBrakeTicks = 25,
+                    minBrake = 0.5f,
+                    cue = Cue("tutorial.cue.brake", "▼")
+                },
                 Lesson("drift", "event", "motor.driftStart", 1, 0, 0f,
                     "tutorial.cue.drift", "∿"),
                 Lesson("boost", "event", "motor.boostStart", 1, 0, 0f,

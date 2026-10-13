@@ -393,6 +393,26 @@ namespace FamilyRacing.Tests
         }
 
         [UnityTest]
+        public IEnumerator SandboxBrakeButtonHoldsAndCancels()
+        {
+            yield return GoToSandbox();
+            yield return WaitForWidget<Button>("input.brake");
+            var brake = Widget<Button>("input.brake");
+
+            PointerDownOn(brake);
+            PumpSandbox();
+            Assert.That(Snapshot().input.brake, Is.EqualTo(1f).Within(0.001f),
+                "Pointer down on input.brake must hold brake 1 through input.set.");
+            Assert.That(driverInput.PhysicalActive, Is.True);
+
+            PointerCancelOn(brake);
+            PumpSandbox();
+            Assert.That(Snapshot().input.brake, Is.EqualTo(0f).Within(0.001f),
+                "PointerCancelEvent must release the held brake.");
+            Assert.That(driverInput.PhysicalActive, Is.False);
+        }
+
+        [UnityTest]
         public IEnumerator SandboxGadgetButtonPressPulsesOnce()
         {
             yield return GoToSandbox();

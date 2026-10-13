@@ -31,6 +31,7 @@ namespace FamilyRacing.Core.Localization
             ["input.steering"] = new[] { "Steering", "היגוי" },
             ["input.drift"] = new[] { "Drift", "דריפט" },
             ["input.boost"] = new[] { "Boost", "האצה" },
+            ["input.brake"] = new[] { "Brake", "בלימה" },
             ["input.gadget"] = new[] { "Gadget", "גאדג'ט" },
             ["input.recovery"] = new[] { "Recovery", "חזרה למסלול" },
             ["input.pause"] = new[] { "Pause", "השהיה" },
@@ -46,10 +47,11 @@ namespace FamilyRacing.Core.Localization
             ["tutorial.replay"] = new[] { "Hear it again", "שמעו שוב" },
             ["tutorial.exit"] = new[] { "Exit lesson", "יציאה מהשיעור" },
             ["tutorial.cue.steering"] = new[] { "Hold ◀ or ▶ to steer!", "החזיקו ◀ או ▶ כדי לפנות!" },
+            ["tutorial.cue.brake"] = new[] { "Hold Brake to slow down before a turn!", "החזיקו בלימה כדי להאט לפני פנייה!" },
             ["tutorial.cue.drift"] = new[] { "Hold Drift while turning to slide!", "החזיקו דריפט בזמן הפניה כדי להחליק!" },
             ["tutorial.cue.boost"] = new[] { "Press Boost to zoom super fast!", "לחצו על האצה כדי לנסוע ממש מהר!" },
             ["tutorial.cue.jump"] = new[] { "Drive up the ramp and jump into the air!", "נסעו על הרמפה וקפצו באוויר!" },
-            ["tutorial.cue.recovery"] = new[] { "Stuck? Press Recovery to get back on track!", "נתקעתם? לחצו על חזרה למסלול!" },
+            ["tutorial.cue.recovery"] = new[] { "Stuck or fell off? Press Recovery to get back on track!", "נתקעתם או נפלתם? לחצו על חזרה למסלול!" },
             ["tutorial.cue.trial"] = new[] { "Great job! Now drive one whole lap to finish!", "כל הכבוד! עכשיו השלימו הקפה שלמה כדי לסיים!" },
             ["tutorial.done"] = new[] { "You did it! You are ready to race!", "עשיתם את זה! אתם מוכנים למירוץ!" },
             ["driving.exit"] = new[] { "Exit", "יציאה" },
@@ -66,8 +68,8 @@ namespace FamilyRacing.Core.Localization
             // Keyboard legend: key names stay Latin in both locales — they
             // name the physical key caps, not words to translate.
             ["hud.keys"] = new[] {
-                "Keys: ◀▶ steer · Space drift · Shift boost · R recover · C camera · Esc pause",
-                "מקשים: ◀▶ היגוי · Space דריפט · Shift האצה · R חזרה · C מצלמה · Esc השהיה" },
+                "Keys: ◀▶ steer · S/▼ brake · Space drift · Shift boost · R recover · C camera · Esc pause",
+                "מקשים: ◀▶ היגוי · S/▼ בלימה · Space דריפט · Shift האצה · R חזרה · C מצלמה · Esc השהיה" },
             ["action.back"] = new[] { "Back", "חזרה" },
             ["action.save"] = new[] { "Save", "שמירה" },
             ["status.saved"] = new[] { "Settings saved.", "ההגדרות נשמרו." },

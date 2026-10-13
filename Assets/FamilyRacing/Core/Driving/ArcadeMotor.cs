@@ -85,10 +85,33 @@ namespace FamilyRacing.Core.Driving
             }
 
             // --- forward speed (auto-acceleration, traction requires ground)
+            // Effective throttle scales the engine/boost drive force —
+            // automatic 1 by default, explicit 0 a deliberate coast — and
+            // any positive brake suppresses drive force entirely, the same
+            // suppression the physical backend's wheel solver applies.
+            var throttle = input.Brake > 0f ? 0f : input.Throttle;
             var speedLimit = state.boostActive ? tuning.boostMaxSpeed : tuning.maxSpeed;
             var accel = state.boostActive ? tuning.boostAcceleration : tuning.acceleration;
             if (state.grounded)
-                state.speed = MoveToward(state.speed, speedLimit, accel * dt);
+            {
+                if (throttle > 0f)
+                    state.speed = MoveToward(state.speed, speedLimit,
+                        accel * throttle * dt);
+                else if (state.speed > speedLimit)
+                    // Above the cap (e.g. boost expiring), drag still
+                    // bleeds the excess — coasting is not a free pass.
+                    state.speed = Math.Max(speedLimit, state.speed - accel * dt);
+                // Brake demand opposes travel proportional to the hold
+                // and is capped at |speed|, so it slows but can never
+                // reverse the vehicle within a step.
+                if (input.Brake > 0f)
+                {
+                    var removal = input.Brake * accel * dt;
+                    state.speed = state.speed > 0f
+                        ? Math.Max(0f, state.speed - removal)
+                        : Math.Min(0f, state.speed + removal);
+                }
+            }
             // Airborne: no traction; momentum carries.
 
             // --- lateral slip ---------------------------------------------

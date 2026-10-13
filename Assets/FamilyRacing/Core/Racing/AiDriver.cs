@@ -111,6 +111,12 @@ namespace FamilyRacing.Core.Racing
             var desired = (float)Math.Atan2(dx, dz);
             var steer = Clamp(WrapAngle(desired - motor.heading)
                 * NetworkSettings.AiSteeringGain, -1f, 1f);
+            // Task 7: brake before tight turns — the strictest corner
+            // inside the speed-scaled lookahead sets the target speed,
+            // and the held brake ramps with the overshoot. This is the
+            // ordinary brake control a human presses, not a privileged
+            // slowdown: the backend's brake force decides what it does.
+            var brake = CornerBrake(racer, course);
             // Drift is a normal input: real steering demand at speed, so
             // DriftEligible's ordinary gates (grounded, min speed,
             // threshold) decide whether it actually engages.
@@ -119,8 +125,10 @@ namespace FamilyRacing.Core.Racing
                 && motor.speed >= NetworkSettings.AiDriftMinSpeed;
             // Boost is held on straights with a charged meter — the same
             // hold-to-fire semantics a human uses; the motor's charge and
-            // duration rules bound it.
-            var boost = Math.Abs(steer) <= NetworkSettings.AiBoostMaxSteer
+            // duration rules bound it. Boosting while braking or leaning
+            // hard is suppressed the way a human would feather off.
+            var boost = brake <= 0f
+                && Math.Abs(steer) <= NetworkSettings.AiBoostMaxSteer
                 && motor.boostCharge >= NetworkSettings.AiBoostMinCharge;
 
             // A grounded near-stopped streak requests the ordinary
@@ -138,7 +146,91 @@ namespace FamilyRacing.Core.Racing
             {
                 stuckTicks = 0;
             }
-            return new DriverInput(steer, drift, boost, false, recover, false, false);
+            return new DriverInput(steer, drift, boost, false, recover,
+                false, false, null, brake);
+        }
+
+        // The full-authority yaw rate of the racer's class (rad/s), from
+        // the same normalized presets the race loads — the AI never reads
+        // claimed upgrades. Unknown classes use the slowest known rate so
+        // braking errs early rather than late.
+        private static float ClassYawRate(string vehicleId)
+        {
+            var car = VehicleTuning.Car01().steeringRate;
+            var moto = VehicleTuning.Motorcycle01().steeringRate;
+            switch (VehicleTuning.ClassIdOf(vehicleId))
+            {
+                case "car": return car;
+                case "motorcycle": return moto;
+                default: return Math.Min(car, moto);
+            }
+        }
+
+        // Scan the route from the current follow index: every vertex's
+        // turn angle over its arc length bounds the followable speed at
+        // steeringRate·margin·arc/θ, and the strictest corner inside the
+        // lookahead window sets the target. Brake demand is the overshoot
+        // ratio clamped to [0,1] — zero when the upcoming route is
+        // followable at the current speed.
+        private float CornerBrake(DrivingSessionState racer,
+            CourseDefinition course)
+        {
+            var route = course.route;
+            if (route == null || route.Count < 3) return 0f;
+            var motor = racer.motor;
+            var speed = motor.speed;
+            if (!Finite(speed) || speed <= 0.1f) return 0f;
+            var yawRate = ClassYawRate(racer.vehicleId);
+            if (yawRate <= 0f) return 0f;
+            var lookahead = speed * NetworkSettings.AiBrakeLookaheadSeconds
+                + NetworkSettings.AiBrakeMinLookaheadMeters;
+
+            var current = route[routeIndex];
+            if (current == null) return 0f;
+            var travelled = Distance(motor.x - current.x, motor.z - current.z);
+            var target = float.MaxValue;
+            var i = routeIndex;
+            var visited = 0;
+            while (travelled <= lookahead && visited < route.Count)
+            {
+                var prev = route[(i - 1 + route.Count) % route.Count];
+                var cur = route[i];
+                var next = route[(i + 1) % route.Count];
+                visited++;
+                if (cur != null && prev != null && next != null)
+                {
+                    var inX = cur.x - prev.x;
+                    var inZ = cur.z - prev.z;
+                    var outX = next.x - cur.x;
+                    var outZ = next.z - cur.z;
+                    var inLen = Distance(inX, inZ);
+                    var outLen = Distance(outX, outZ);
+                    if (inLen > 0.001f && outLen > 0.001f)
+                    {
+                        var turn = Math.Abs(WrapAngle(
+                            (float)Math.Atan2(outX, outZ)
+                            - (float)Math.Atan2(inX, inZ)));
+                        if (turn > 0.01f)
+                        {
+                            var arc = (inLen + outLen) * 0.5f;
+                            var cornerSpeed = yawRate
+                                * NetworkSettings.AiCorneringMargin
+                                * arc / turn;
+                            if (cornerSpeed < target) target = cornerSpeed;
+                        }
+                    }
+                    travelled += outLen;
+                }
+                i = (i + 1) % route.Count;
+            }
+            if (target == float.MaxValue || speed <= target) return 0f;
+            return Clamp((speed - target) / NetworkSettings.AiBrakeOverspeedSpan,
+                0f, 1f);
+        }
+
+        private static float Distance(float x, float z)
+        {
+            return (float)Math.Sqrt((double)x * x + (double)z * z);
         }
 
         // Nearest route point by ground-plane distance. Deterministic:

@@ -22,9 +22,24 @@ MonoBehaviour:
     requiredCount: 1
     requiredSteerTicks: 45
     minSteering: 0.3
+    requiredBrakeTicks: 20
+    minBrake: 0.5
     cue:
       textKey: tutorial.cue.steering
       icon: "\u25C0\u25B6"
+      english: {fileID: 0}
+      hebrew: {fileID: 0}
+  - lessonId: brake
+    rule: brakeTicks
+    eventKind: 
+    requiredCount: 1
+    requiredSteerTicks: 30
+    minSteering: 0.25
+    requiredBrakeTicks: 25
+    minBrake: 0.5
+    cue:
+      textKey: tutorial.cue.brake
+      icon: "\u25BC"
       english: {fileID: 0}
       hebrew: {fileID: 0}
   - lessonId: drift
@@ -33,6 +48,8 @@ MonoBehaviour:
     requiredCount: 1
     requiredSteerTicks: 30
     minSteering: 0.25
+    requiredBrakeTicks: 20
+    minBrake: 0.5
     cue:
       textKey: tutorial.cue.drift
       icon: "\u223F"
@@ -44,6 +61,8 @@ MonoBehaviour:
     requiredCount: 1
     requiredSteerTicks: 30
     minSteering: 0.25
+    requiredBrakeTicks: 20
+    minBrake: 0.5
     cue:
       textKey: tutorial.cue.boost
       icon: "\xBB"
@@ -55,6 +74,8 @@ MonoBehaviour:
     requiredCount: 1
     requiredSteerTicks: 30
     minSteering: 0.25
+    requiredBrakeTicks: 20
+    minBrake: 0.5
     cue:
       textKey: tutorial.cue.jump
       icon: "\u2303"
@@ -66,6 +87,8 @@ MonoBehaviour:
     requiredCount: 1
     requiredSteerTicks: 30
     minSteering: 0.25
+    requiredBrakeTicks: 20
+    minBrake: 0.5
     cue:
       textKey: tutorial.cue.recovery
       icon: "\u21BB"

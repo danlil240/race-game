@@ -163,10 +163,15 @@ namespace FamilyRacing.Tests
                 a.tutorialId = "tutorial-play";
                 a.freeDriveEventId = "tutorial-01";
                 a.trialEventId = "intro-01";
+                var brakeLesson = Lesson("brake", "brakeTicks", "", 0, 0f,
+                    "tutorial.cue.brake", "!");
+                brakeLesson.requiredBrakeTicks = 20;
+                brakeLesson.minBrake = 0.5f;
                 a.lessons = new[]
                 {
                     Lesson("steering", "steerTicks", "", 25, 0.25f,
                         "tutorial.cue.steering", "<>"),
+                    brakeLesson,
                     Lesson("drift", "event", "motor.driftStart", 0, 0f,
                         "tutorial.cue.drift", "~"),
                     Lesson("boost", "event", "motor.boostStart", 0, 0f,
@@ -251,7 +256,8 @@ namespace FamilyRacing.Tests
         }
 
         private CommandResult Drive(float steering, bool drift = false,
-            bool boost = false, bool recover = false, int durationTicks = 5)
+            bool boost = false, bool recover = false, int durationTicks = 5,
+            float brake = 0f)
         {
             var result = service.Execute(Command("input.set",
                 P("steering", steering.ToString("0.###",
@@ -261,6 +267,8 @@ namespace FamilyRacing.Tests
                     "gadget", "false",
                     "recover", recover ? "true" : "false",
                     "changeCamera", "false", "pause", "false",
+                    "brake", brake.ToString("0.###",
+                        System.Globalization.CultureInfo.InvariantCulture),
                     "durationTicks", durationTicks.ToString(
                         System.Globalization.CultureInfo.InvariantCulture))));
             Assert.That(result.status, Is.EqualTo(CommandResult.Applied),
@@ -319,12 +327,19 @@ namespace FamilyRacing.Tests
 
             // Steering: real held steering through the command path.
             Drive(0.8f, durationTicks: 25);
-            Assert.That(Tutorial().lessonId, Is.EqualTo("drift"),
+            Assert.That(Tutorial().lessonId, Is.EqualTo("brake"),
                 "held steering must satisfy the first lesson");
 
-            // Drift: a real drift engagement at speed.
-            Drive(0f, durationTicks: 40); // straighten and reach drift speed
-            Drive(0.9f, drift: true, durationTicks: 30);
+            // Brake: a real held brake demand through the command path —
+            // the same wire the S key and the touch button drive.
+            Drive(0f, brake: 0.9f, durationTicks: 20);
+            Assert.That(Tutorial().lessonId, Is.EqualTo("drift"),
+                "held brake must satisfy the brake lesson");
+
+            // Drift: a real drift engagement at speed — the brake lesson
+            // slowed the car, so rebuild speed before leaning in.
+            Drive(0f, durationTicks: 60);
+            Drive(0.9f, drift: true, durationTicks: 40);
             Assert.That(Tutorial().lessonId, Is.EqualTo("boost"));
 
             // Boost: a real boost firing.

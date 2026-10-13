@@ -44,11 +44,14 @@ namespace FamilyRacing.Core.Tutorial
     // from real simulation output — never from commands:
     //   "event"      — count driving events of `eventKind` while running;
     //   "steerTicks" — accumulate simulation boundaries that hold real
-    //                  steering input at or above `minSteering`.
+    //                  steering input at or above `minSteering`;
+    //   "brakeTicks" — accumulate simulation boundaries that hold real
+    //                  brake demand at or above `minBrake`.
     public sealed class TutorialLesson
     {
         public const string RuleEvent = "event";
         public const string RuleSteerTicks = "steerTicks";
+        public const string RuleBrakeTicks = "brakeTicks";
 
         public string lessonId = "";
         public string rule = RuleEvent;
@@ -56,24 +59,34 @@ namespace FamilyRacing.Core.Tutorial
         public int requiredCount = 1;
         public int requiredSteerTicks = 30;
         public float minSteering = 0.25f;
+        public int requiredBrakeTicks = 20;
+        public float minBrake = 0.5f;
         public TutorialCue cue = new TutorialCue();
 
         public bool Validate(out string error)
         {
             error = null;
             if (string.IsNullOrEmpty(lessonId)) { error = "lessonId"; return false; }
-            if (rule != RuleEvent && rule != RuleSteerTicks) { error = "rule"; return false; }
+            if (rule != RuleEvent && rule != RuleSteerTicks
+                && rule != RuleBrakeTicks) { error = "rule"; return false; }
             if (rule == RuleEvent)
             {
                 if (string.IsNullOrEmpty(eventKind)) { error = "eventKind"; return false; }
                 if (requiredCount < 1) { error = "requiredCount"; return false; }
             }
-            else
+            else if (rule == RuleSteerTicks)
             {
                 if (requiredSteerTicks < 1) { error = "requiredSteerTicks"; return false; }
                 if (float.IsNaN(minSteering) || float.IsInfinity(minSteering)
                     || minSteering <= 0f || minSteering > 1f)
                 { error = "minSteering"; return false; }
+            }
+            else
+            {
+                if (requiredBrakeTicks < 1) { error = "requiredBrakeTicks"; return false; }
+                if (float.IsNaN(minBrake) || float.IsInfinity(minBrake)
+                    || minBrake <= 0f || minBrake > 1f)
+                { error = "minBrake"; return false; }
             }
             if (cue == null || !cue.Validate(out error)) { error = "cue." + error; return false; }
             return true;
@@ -89,6 +102,8 @@ namespace FamilyRacing.Core.Tutorial
                 requiredCount = requiredCount,
                 requiredSteerTicks = requiredSteerTicks,
                 minSteering = minSteering,
+                requiredBrakeTicks = requiredBrakeTicks,
+                minBrake = minBrake,
                 cue = cue == null ? null : cue.Copy()
             };
         }
@@ -272,6 +287,12 @@ namespace FamilyRacing.Core.Tutorial
                     && Math.Abs(state.input.steering) >= lesson.minSteering)
                     progress++;
             }
+            else if (lesson.rule == TutorialLesson.RuleBrakeTicks)
+            {
+                if (tickAdvanced && state.input != null
+                    && state.input.brake >= lesson.minBrake)
+                    progress++;
+            }
             else if (events != null)
             {
                 foreach (var ev in events)
@@ -281,7 +302,9 @@ namespace FamilyRacing.Core.Tutorial
 
             var required = lesson.rule == TutorialLesson.RuleSteerTicks
                 ? lesson.requiredSteerTicks
-                : lesson.requiredCount;
+                : lesson.rule == TutorialLesson.RuleBrakeTicks
+                    ? lesson.requiredBrakeTicks
+                    : lesson.requiredCount;
             if (progress >= required)
             {
                 result.completedLessonId = lesson.lessonId;

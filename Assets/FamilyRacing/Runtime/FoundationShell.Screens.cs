@@ -179,11 +179,13 @@ namespace FamilyRacing
             steeringLabel.name = "indicator.steering";
             AddLed(indicators, "drift", T("input.drift", state));
             AddLed(indicators, "boost", T("input.boost", state));
+            AddLed(indicators, "brake", T("input.brake", state));
             AddLed(indicators, "gadget", T("input.gadget", state));
             AddLed(indicators, "recover", T("input.recovery", state));
             var controls = Row(root);
             AddHoldButton(controls, "◀", Ocean, held => app.Input.TouchLeft(held), "input.left");
             AddHoldButton(controls, "▶", Ocean, held => app.Input.TouchRight(held), "input.right");
+            AddHoldButton(controls, T("input.brake", state), Deep, held => app.Input.TouchBrake(held), "input.brake");
             AddHoldButton(controls, T("input.drift", state), Seafoam, held => app.Input.TouchDrift(held), "input.drift");
             AddHoldButton(controls, T("input.boost", state), Coral, held => app.Input.TouchBoost(held), "input.boost");
             foreach (var held in controls.Children()) ApplyAvailability(held, "input.set");

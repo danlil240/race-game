@@ -798,7 +798,7 @@ namespace FamilyRacing.Tests
             app.Dispatch("ui.navigate", new Dictionary<string, string>
                 { ["screen"] = "sandbox" });
             foreach (var name in new[] { "input.left", "input.right",
-                         "input.drift", "input.boost" })
+                         "input.drift", "input.boost", "input.brake" })
                 yield return WaitFor(() =>
                     doc.rootVisualElement.Q<VisualElement>(name) != null, 5f);
             // Disable/re-enable detaches the root: the shell must rebuild

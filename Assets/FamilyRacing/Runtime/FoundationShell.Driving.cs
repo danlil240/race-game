@@ -154,6 +154,8 @@ namespace FamilyRacing
                 held => app.Input.TouchLeft(held), "driving.steerLeft");
             AddHoldButton(controls, "▶", Ocean,
                 held => app.Input.TouchRight(held), "driving.steerRight");
+            AddHoldButton(controls, T("input.brake", state), Deep,
+                held => app.Input.TouchBrake(held), "driving.brake");
             AddHoldButton(controls, T("input.drift", state), Seafoam,
                 held => app.Input.TouchDrift(held), "driving.drift");
             AddHoldButton(controls, T("input.boost", state), Coral,

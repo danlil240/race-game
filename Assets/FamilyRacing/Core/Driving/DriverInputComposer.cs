@@ -30,10 +30,12 @@ namespace FamilyRacing.Core.Driving
                 throttle, brake);
         }
 
-        public static DriverInput FromButtons(bool left, bool right, bool drift, bool boost, bool gadget)
+        public static DriverInput FromButtons(bool left, bool right, bool drift,
+            bool boost, bool gadget, bool brake = false)
         {
             var steering = (right ? 1f : 0f) - (left ? 1f : 0f);
-            return new DriverInput(steering, drift, boost, gadget, false, false, false);
+            return new DriverInput(steering, drift, boost, gadget, false,
+                false, false, null, brake ? 1f : 0f);
         }
     }
 }
