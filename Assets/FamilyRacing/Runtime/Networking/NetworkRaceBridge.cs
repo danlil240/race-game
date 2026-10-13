@@ -75,8 +75,9 @@ namespace FamilyRacing.Networking
         private readonly List<NetworkInputFrame> recentOut =
             new List<NetworkInputFrame>();
         // One-shot ids awaiting a host apply/cancel acknowledgment; they
-        // ride every outbound frame until an event batch confirms them —
-        // they survive replay and reconnect boundaries.
+        // ride outbound frames in submission order — windowed to the
+        // host's per-frame bound — until an event batch confirms them,
+        // and they survive replay and reconnect boundaries.
         private readonly HashSet<string> pendingActions =
             new HashSet<string>(StringComparer.Ordinal);
         private readonly List<string> pendingActionOrder = new List<string>();
@@ -288,8 +289,9 @@ namespace FamilyRacing.Networking
         }
 
         /// <summary>Queue a one-shot action (e.g. recover) for the local
-        /// racer. The id rides every outbound frame until the host's
-        /// action.queued/consumed/cancelled event acknowledges it —
+        /// racer. The id rides outbound frames — at most
+        /// MaxFrameActionIds oldest ids per frame — until the host's
+        /// action.queued/consumed/cancelled event acknowledges it;
         /// retried across packet loss and reconnect, never applied twice.
         /// The host's own actions take the identical path.</summary>
         public void SubmitAction(string actionId)
@@ -687,7 +689,16 @@ namespace FamilyRacing.Networking
                 changeCamera = localInput.ChangeCamera,
                 pause = localInput.Pause
             };
-            foreach (var id in pendingActionOrder) frame.actionIds.Add(id);
+            // The host rejects the whole frame past MaxFrameActionIds, so
+            // a deeper backlog would deadlock the input stream — every
+            // frame would fail tooManyActions and no id could ever be
+            // acknowledged. Send only the oldest window per frame; each
+            // id keeps riding until the host confirms it by event, then
+            // the window slides forward to the next ids.
+            var actionWindow = Math.Min(pendingActionOrder.Count,
+                NetworkSettings.MaxFrameActionIds);
+            for (var i = 0; i < actionWindow; i++)
+                frame.actionIds.Add(pendingActionOrder[i]);
             return frame;
         }
 

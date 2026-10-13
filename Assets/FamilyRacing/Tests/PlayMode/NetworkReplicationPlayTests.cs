@@ -746,5 +746,72 @@ namespace FamilyRacing.Tests
                 client.Dispose();
             }
         }
+
+        // Regression: a pending one-shot backlog deeper than
+        // MaxFrameActionIds must window onto outbound frames — the oldest
+        // bound's worth per frame — instead of copying the whole list
+        // into every frame. Before windowing, a >MaxFrameActionIds
+        // backlog made every frame trip the host's tooManyActions
+        // rejection: the client's whole input stream was refused, the
+        // backlog could never be acknowledged, and the deadlock was
+        // permanent. Submit MaxFrameActionIds + 4 ids; the stream must
+        // stay valid (never tooManyActions) and the backlog must drain
+        // to zero across multiple frames with a terminal event per id.
+        [UnityTest]
+        public IEnumerator OversizedOneShotBacklogWindowsAndDrains()
+        {
+            var host = new Rig("p-host", new StubNetworkAccess());
+            var client = new Rig("p-guest", new StubNetworkAccess());
+            var clientEvents = new List<DrivingEvent>();
+            try
+            {
+                yield return StartTwoPlayerRace(host, client);
+                var ids = new List<string>();
+                for (var i = 0; i < NetworkSettings.MaxFrameActionIds + 4;
+                     i++)
+                    ids.Add("win-" + i);
+                foreach (var id in ids) client.Bridge.SubmitAction(id);
+                for (var i = 0; i < 30; i++)
+                {
+                    Tick(host, client, Neutral, Neutral, null, clientEvents);
+                    if (i % 4 == 0) yield return null;
+                }
+                // The backlog must drain entirely: acknowledged ids slide
+                // out of the send window so the next ids reach the host
+                // on later frames — it must not wedge at 8+.
+                yield return PumpUntil(() =>
+                {
+                    clientEvents.AddRange(client.Bridge.DrainRaceEvents());
+                    return client.Bridge.PendingOneShotCount == 0;
+                }, host, client);
+                // No frame ever carried more than MaxFrameActionIds —
+                // the host's most recent validation error would be
+                // pinned to tooManyActions (it recurs every frame) if
+                // any oversized list had reached the wire.
+                Assert.That(host.Bridge.LastInputError,
+                    Is.Not.EqualTo("tooManyActions"),
+                    "an oversized actionIds list must never reach the wire");
+                // Every submitted id resolves to a terminal
+                // acknowledgment — applied or explicitly cancelled —
+                // and the client retires it rather than retrying forever.
+                var resolved = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var ev in clientEvents)
+                    if (ev.commandId != null
+                        && ev.commandId.StartsWith("win-",
+                            StringComparison.Ordinal)
+                        && (ev.kind == "action.queued"
+                            || ev.kind == "action.consumed"
+                            || ev.kind == "action.cancelled"))
+                        resolved.Add(ev.commandId);
+                foreach (var id in ids)
+                    Assert.That(resolved.Contains(id), Is.True,
+                        "one-shot id never acknowledged: " + id);
+            }
+            finally
+            {
+                host.Dispose();
+                client.Dispose();
+            }
+        }
     }
 }

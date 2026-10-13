@@ -18,7 +18,10 @@ namespace FamilyRacing
     public sealed class FoundationApp : MonoBehaviour
     {
         public const int ProtocolVersion = ValidationBridge.ProtocolVersion;
-        public const float TickRate = 30f;
+        // The local logical step cadence is the network simulation rate:
+        // the same loop drives both solo sessions and raceBridge.StepTick.
+        public const float TickRate =
+            (float)Core.Networking.NetworkSettings.SimulationTicksPerSecond;
         // Catch-up work per frame is bounded; unsimulated backlog is kept
         // (never dropped) and reported through presentation diagnostics.
         private const int MaxStepsPerFrame = 8;

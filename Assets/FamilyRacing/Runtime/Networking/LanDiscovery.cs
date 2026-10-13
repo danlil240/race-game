@@ -4,6 +4,7 @@ using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Text;
+using LanSettings = FamilyRacing.Core.Networking.NetworkSettings;
 
 namespace FamilyRacing.Networking
 {
@@ -34,8 +35,9 @@ namespace FamilyRacing.Networking
     /// </summary>
     public sealed class LanDiscovery : IDisposable
     {
-        /// <summary>Default discovery UDP port.</summary>
-        public const ushort DefaultDiscoveryPort = 47778;
+        /// <summary>Default discovery UDP port — the single definition
+        /// lives in Core; this alias keeps the public API callers use.</summary>
+        public const ushort DefaultDiscoveryPort = LanSettings.DefaultDiscoveryPort;
 
         /// <summary>Hard ceiling for any query or response datagram.</summary>
         public const int MaxDatagramBytes = 1024;

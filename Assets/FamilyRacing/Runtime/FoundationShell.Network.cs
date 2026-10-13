@@ -505,7 +505,9 @@ namespace FamilyRacing
                 if (lanPhaseLabel != null)
                     lanPhaseLabel.text =
                         race.phase == "countdown" && race.countdownTicksRemaining > 0
-                            ? ((race.countdownTicksRemaining + 29) / 30).ToString()
+                            ? ((race.countdownTicksRemaining
+                                    + NetworkSettings.SimulationTicksPerSecond - 1)
+                                / NetworkSettings.SimulationTicksPerSecond).ToString()
                             : (race.phase == "finished" ? T("hud.finished", state) : "");
                 if (lanStandingsLabel != null && race.racers != null)
                 {

@@ -221,11 +221,14 @@ namespace FamilyRacing.Core.Racing
                 // simulated boundary.
                 if (input.Recover && !racer.recoverHeld)
                 {
-                    string recoverError;
+                    // The wire-held recover carries a synthetic per-tick
+                    // id, not a client-submitted one-shot — there is no
+                    // acknowledgment contract to satisfy, so a declined
+                    // queue is an intentional silent drop.
                     racer.session.QueuePending("recover",
                         raceId + "-r" + slot + "-rc"
                             + hostTick.ToString(CultureInfo.InvariantCulture),
-                        out recoverError);
+                        out _);
                 }
                 racer.recoverHeld = input.Recover;
                 var contact = contacts.ForParticipant(racer.participantId);
