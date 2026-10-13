@@ -68,6 +68,11 @@ namespace FamilyRacing
             var store = new ProfileStore(profilesDir, new UnityProfileSerializer());
             runId = Guid.NewGuid().ToString("N");
             service = new FoundationService(store, "en", runId);
+            // Focus-loss cleanup rearms the physical input pump through
+            // the Core-side hook: the app.focusLost command and the
+            // Unity OnApplicationFocus/OnApplicationPause callbacks
+            // share exactly this one path.
+            service.FocusCleanupHook = () => driverInput?.RequireRearm();
             // Load and validate driving content before the bridge opens so
             // race.start availability and record contentVersion are honest
             // from sequence 1. A validation failure leaves no catalog and
@@ -450,11 +455,13 @@ namespace FamilyRacing
 
         // Focus-loss input cleanup goes through the shared command path so
         // the trace shows a real action boundary, not a silent mutation.
+        // app.focusLost carries the whole cleanup (held input + queued
+        // actions + physical-input rearm via FocusCleanupHook), so the OS
+        // callback and the agent command exercise identical code.
         private void ObserveInputCleanup()
         {
             if (service == null) return;
-            Dispatch("input.clear", EmptyParameters.Value);
-            driverInput?.RequireRearm();
+            Dispatch("app.focusLost", EmptyParameters.Value);
         }
 
         private void OnApplicationQuit()

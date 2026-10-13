@@ -680,6 +680,32 @@ namespace FamilyRacing.Tests
         }
 
         [Test]
+        public void AppFocusLostClearsHeldInputAndInvokesRearmHook()
+        {
+            CreateProfile();
+            StartRunning();
+            service.Execute(Cmd("input.set",
+                P("steering", "0.8", "drift", "true", "boost", "false",
+                  "gadget", "false", "recover", "false", "changeCamera", "false",
+                  "pause", "false", "durationTicks", "30",
+                  "brake", "0.5", "throttle", "0")));
+            // The runtime wires FocusCleanupHook to the physical input
+            // pump's RequireRearm; Core proves the hook fires through
+            // the same path OnApplicationFocus dispatches.
+            var rearmed = 0;
+            service.FocusCleanupHook = () => rearmed++;
+            var result = service.Execute(Cmd("app.focusLost", null));
+            Assert.That(result.status, Is.EqualTo(CommandResult.Applied));
+            var input = service.Snapshot().input;
+            Assert.That(input.steering, Is.EqualTo(0f));
+            Assert.That(input.drift, Is.False);
+            Assert.That(input.brake, Is.EqualTo(0f));
+            Assert.That(input.hasThrottleOverride, Is.False);
+            Assert.That(input.throttle, Is.EqualTo(1f));
+            Assert.That(rearmed, Is.EqualTo(1));
+        }
+
+        [Test]
         public void InputSetRejectsMalformedBrakeThrottleAtomically()
         {
             CreateProfile();

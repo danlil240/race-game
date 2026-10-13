@@ -723,6 +723,32 @@ namespace FamilyRacing.Tests
         }
 
         [UnityTest]
+        public IEnumerator AppFocusLostThroughCommandPathClearsHeldInput()
+        {
+            yield return ToRunning();
+            // The exact cleanup OnApplicationFocus/OnApplicationPause
+            // dispatch, exercised through the command surface — headless
+            // and test runs can never lose OS focus on their own.
+            var held = app.Dispatch("input.set", Params(
+                ("steering", "0.8"), ("drift", "false"), ("boost", "false"),
+                ("gadget", "false"), ("recover", "false"),
+                ("changeCamera", "false"), ("pause", "false"),
+                ("durationTicks", "90")));
+            Assert.That(held.status, Is.EqualTo("applied"));
+            Assert.That(Snapshot().input.steering,
+                Is.EqualTo(0.8f).Within(0.001f));
+
+            var lost = app.Dispatch("app.focusLost",
+                new Dictionary<string, string>(0));
+            Assert.That(lost.status, Is.EqualTo("applied"));
+            var input = Snapshot().input;
+            Assert.That(input.steering, Is.EqualTo(0f).Within(0.001f),
+                "focus-loss cleanup neutralizes held steering");
+            Assert.That(input.drift, Is.False);
+            Assert.That(input.brake, Is.EqualTo(0f).Within(0.001f));
+        }
+
+        [UnityTest]
         public IEnumerator CameraToggleDuringHeldSteerKeepsTheHold()
         {
             yield return ToRunning();

@@ -316,6 +316,13 @@ class PhysicsObserver:
         self._air_peak = 0.0
         self.prev_airborne = False
         self.max_overturned = 0.0
+        # Sub-boundary contact evidence: the debounce counter publishes
+        # a contact loss that began and ended inside a boundary interval
+        # without ever flipping a grounded flag — a real loss+regain the
+        # per-wheel transition ledger cannot see.
+        self.max_contact_loss = 0.0
+        self.contact_loss_episodes = []    # (startTick, endTick)
+        self._contact_loss_start = None
         self.epochs = []
         self.prev_epoch = None
         self.recoveries = []            # (reason, epoch, simTick)
@@ -371,6 +378,20 @@ class PhysicsObserver:
         self.max_overturned = max(self.max_overturned,
                                   physics["overturnedSeconds"])
 
+        # A transient full-contact loss debounces through grounded=True:
+        # contactLossSeconds > 0 at a boundary is the only published
+        # evidence a loss began inside the interval, and its return to
+        # zero without an airborne span proves the regain — the complete
+        # episode bounded by one logical tick's window.
+        loss = physics["contactLossSeconds"]
+        self.max_contact_loss = max(self.max_contact_loss, loss)
+        if loss > 0.0 and self._contact_loss_start is None:
+            self._contact_loss_start = tick
+        elif loss <= 0.0 and self._contact_loss_start is not None:
+            self.contact_loss_episodes.append(
+                (self._contact_loss_start, tick))
+            self._contact_loss_start = None
+
         epoch = physics["recoveryEpoch"]
         if self.prev_epoch is not None:
             assert epoch >= self.prev_epoch, \
@@ -406,6 +427,9 @@ class PhysicsObserver:
             "maxNormalLoad": round(self.max_normal_load, 1),
             "airborneSpans": [list(span) for span in self.airborne_spans],
             "maxOverturnedSeconds": round(self.max_overturned, 3),
+            "maxContactLossSeconds": round(self.max_contact_loss, 4),
+            "contactLossEpisodes": [list(e) for e in
+                                    self.contact_loss_episodes],
             "recoveryEpochs": sorted(set(self.epochs)),
             "recoveries": [
                 {"reason": r, "epoch": e, "tick": t}
@@ -733,10 +757,26 @@ def await_recovery(client, reason=None, timeout=20.0):
                          " within %.0f s" % timeout)
 
 
-def overturned_event(client):
-    """The newest overturned recovery already on the ledger, or None."""
+def race_events_of(client, kind, race_id):
+    """Events of `kind` belonging to THIS race identity only.
+
+    client.driving_events accumulates across the whole run, so an
+    unscoped lookup lets a previous race's events satisfy a later leg's
+    predicate — a car race's `motor.landed` must never prove the bike
+    race jumped. Event ids carry the `<race>-e<seq>` prefix (solo) or
+    `<session>-r<race>-r<slot>-e<seq>` (LAN), so scoping by
+    `<race_id>-` prefix is exact."""
+    prefix = (race_id or "") + "-"
+    return [entry for entry in client.driving_events.values()
+            if entry.get("kind") == kind
+            and str(entry.get("id") or "").startswith(prefix)]
+
+
+def overturned_event(client, race_id):
+    """The newest overturned recovery THIS race's ledger holds, or
+    None."""
     found = None
-    for entry in client.events_of("race.recovered"):
+    for entry in race_events_of(client, "race.recovered", race_id):
         reason, _ = parse_recovery_detail(entry.get("detail"))
         if reason == "overturned":
             found = entry
@@ -771,17 +811,19 @@ def drive_into_wall(client, tx, tz, timeout=40.0):
                          "recovery within %.0f s" % timeout)
 
 
-def _attempt_rollover(client, driver, label):
+def _attempt_rollover(client, driver, label, race_id):
     """Bounded ordinary-control rollover attempts: full-lock + drift
     turns at speed and an off-axis ramp-crest launch. Reads the live
     observer's accumulated peaks — a roll that does not happen is
     recorded, never faked, and a completed overturned recovery resets
-    the boundary's episode counters while the observer keeps the peak."""
+    the boundary's episode counters while the observer keeps the peak.
+    Event predicates are scoped to `race_id`: a prior race's overturned
+    event must never satisfy this leg."""
     result = {"attempts": 0, "rolled": False, "maneuvers": []}
 
     def rolled():
         return client.observer.max_overturned >= ROLLOVER_SECONDS \
-            or overturned_event(client) is not None
+            or overturned_event(client, race_id) is not None
 
     # Maneuver 1: build speed on the start straight, then held
     # full-lock + drift — the classic untripped roll attempt.
@@ -840,6 +882,10 @@ def run_physical_car(client, driver, checks, trials):
     trials["fingerprint"] = fingerprint
     assert driving["vehicleId"] == "car-physics-01"
     assert driving["eventId"] == "physics-01"
+    # Every event predicate in this leg is fenced to this race identity
+    # — the run's event ledger accumulates across races, so a later leg
+    # must never satisfy a check with a prior race's evidence.
+    race_id = driving["raceId"]
     wait_phase(client, "running", timeout=30)
     checks.append("car: physics-01 entered on physicalAssisted with the "
                   "canonical fingerprint bound")
@@ -927,12 +973,12 @@ def run_physical_car(client, driver, checks, trials):
                      throttle=0.6, stop_at=True, note="ramp approach")
     driver.drive_leg(-60.0, 50.0, radius=6.0, timeout=60,
                      throttle=0.6,
-                     until=lambda state: bool(
-                         client.events_of("motor.landed")),
+                     until=lambda state: bool(race_events_of(
+                         client, "motor.landed", race_id)),
                      note="ramp crest")
-    client.boundary(lambda state: bool(
-        client.events_of("motor.landed")), timeout=15)
-    assert client.events_of("motor.becameAirborne"), \
+    client.boundary(lambda state: bool(race_events_of(
+        client, "motor.landed", race_id)), timeout=15)
+    assert race_events_of(client, "motor.becameAirborne", race_id), \
         "the ramp never produced a becameAirborne event"
     assert client.observer.airborne_spans, \
         "physics episodes recorded no airborne span"
@@ -952,10 +998,10 @@ def run_physical_car(client, driver, checks, trials):
                   "becameAirborne + landed in stable order)" % peak)
 
     # --- rollover attempts (honest: observed, not forced) ------------------
-    rolled = _attempt_rollover(client, driver, "car")
+    rolled = _attempt_rollover(client, driver, "car", race_id)
     trials["carRollover"] = rolled
     if rolled["rolled"]:
-        found = overturned_event(client)
+        found = overturned_event(client, race_id)
         if found is None:
             _, _, _ = await_recovery(client, "overturned", timeout=30)
         checks.append("car: rollover produced an overturned automatic "
@@ -969,7 +1015,7 @@ def run_physical_car(client, driver, checks, trials):
     driver.drive_leg(40.0, -60.0, radius=8.0, timeout=45,
                      throttle=0.6, stop_at=True,
                      note="open parking spot")
-    parked_start = len(client.events_of("race.recovered"))
+    parked_start = len(race_events_of(client, "race.recovered", race_id))
     # MaxDurationTicks is 150 (~5 s at 30 Hz): refresh the brake hold
     # across the authored beached window so the demand stays honest
     # rather than relying on a stale leased sample.
@@ -978,7 +1024,8 @@ def run_physical_car(client, driver, checks, trials):
         client.applied("input.set", inputs(steering=0.0, duration=150,
                                            throttle=0, brake=0.4))
         pump(client, PARKED_HOLD_SECONDS / parked_refreshes)
-    assert len(client.events_of("race.recovered")) == parked_start, \
+    assert len(race_events_of(client, "race.recovered", race_id)) \
+        == parked_start, \
         "a parked, brake-held car triggered an automatic recovery"
     client.applied("input.clear")
     checks.append("car: intentional parking held %.0f s without an "
@@ -1032,6 +1079,28 @@ def run_physical_car(client, driver, checks, trials):
     client.boundary(lambda state: state["paused"] is False, timeout=10)
     checks.append("car: pause froze sim and world counters; queued "
                   "recover consumed after resume")
+
+    # --- focus-loss input cleanup ----------------------------------------
+    # app.focusLost runs the exact cleanup OnApplicationFocus and
+    # OnApplicationPause dispatch (held input + queued actions + the
+    # physical pump's RequireRearm via the same code path), so this is
+    # real focus-loss coverage driven through the command surface —
+    # headless players never lose OS focus on their own.
+    client.applied("input.set", inputs(steering=0.8, duration=150,
+                                       brake=0.3))
+    client.boundary(
+        lambda state: (state.get("input") or {}).get("steering")
+        == 0.8 and (state.get("input") or {}).get("brake") == 0.3,
+        timeout=10)
+    client.applied("app.focusLost")
+    client.boundary(
+        lambda state: (state.get("input") or {}).get("steering") == 0.0
+        and (state.get("input") or {}).get("brake") == 0.0
+        and (state.get("input") or {}).get("drift") is False,
+        timeout=10)
+    checks.append("car: app.focusLost cleared held steering/brake "
+                  "through the same cleanup path an OS focus loss "
+                  "dispatches")
     return True
 
 
@@ -1041,6 +1110,10 @@ def run_physical_bike(client, driver, checks, trials):
     driving = client.state["driving"]
     assert driving["vehicleId"] == "motorcycle-physics-01"
     assert driving["simulationBackend"] == "physicalAssisted"
+    # Same per-race fencing as the car leg: the bike race runs under a
+    # fresh raceId, and none of its checks may consume the car race's
+    # stale event evidence.
+    race_id = driving["raceId"]
     wait_phase(client, "running", timeout=30)
     client.boundary(
         lambda state: (state["driving"]["motor"].get("physics") or {})
@@ -1078,12 +1151,12 @@ def run_physical_bike(client, driver, checks, trials):
                      throttle=0.6, stop_at=True, note="ramp approach")
     driver.drive_leg(-60.0, 50.0, radius=6.0, timeout=60,
                      throttle=0.6,
-                     until=lambda state: bool(
-                         client.events_of("motor.landed")),
+                     until=lambda state: bool(race_events_of(
+                         client, "motor.landed", race_id)),
                      note="ramp crest")
-    client.boundary(lambda state: bool(
-        client.events_of("motor.landed")), timeout=15)
-    assert client.events_of("motor.becameAirborne")
+    client.boundary(lambda state: bool(race_events_of(
+        client, "motor.landed", race_id)), timeout=15)
+    assert race_events_of(client, "motor.becameAirborne", race_id)
     checks.append("bike: landmark ramp launched and landed")
 
     # Manual recovery carries the same epoch fencing on the bike.
@@ -1095,10 +1168,10 @@ def run_physical_bike(client, driver, checks, trials):
     assert epoch is not None and epoch > epoch_before
     checks.append("bike: manual recovery with epoch bump to %d" % epoch)
 
-    rolled = _attempt_rollover(client, driver, "bike")
+    rolled = _attempt_rollover(client, driver, "bike", race_id)
     trials["bikeRollover"] = rolled
     if rolled["rolled"]:
-        found = overturned_event(client)
+        found = overturned_event(client, race_id)
         if found is None:
             _, _, _ = await_recovery(client, "overturned", timeout=30)
         checks.append("bike: rollover produced an overturned automatic "
@@ -1161,8 +1234,8 @@ def run(connection, evidence):
             lambda event: event.get("type") == "discovery")
         actions = {entry["action"] for entry in discovery["commands"]}
         assert {"race.start", "race.restart", "race.exit", "input.set",
-                "input.clear", "camera.toggle", "pause.toggle"} \
-            <= actions, actions
+                "input.clear", "camera.toggle", "pause.toggle",
+                "app.focusLost"} <= actions, actions
         checks.append("discovery lists the driving command set")
 
         created, _ = client.applied("profile.create",

@@ -5,6 +5,7 @@ contract before any live build is trusted with it."""
 import json
 import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 
@@ -12,7 +13,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from PhysicsScenario import (PhysicsObserver, body_up_dot,
                              envelope_consistent, finite,
+                             overturned_event,
                              parse_recovery_detail,
+                             race_events_of,
                              validate_physics_state,
                              validate_simulation_diagnostics,
                              validate_substep_path,
@@ -372,6 +375,85 @@ class PhysicsObserverTests(unittest.TestCase):
         observer.apply(driving(race="race-2", tick=1,
                                motor_physics=physics(recoveryEpoch=0)))
         assert observer.epochs == [0]
+
+    def test_within_tick_contact_loss_and_regain(self):
+        """A tire contact loss that begins and ends inside one logical
+        tick: every boundary shows the body grounded with all wheels in
+        contact, so the per-wheel transition ledger sees nothing — the
+        debounce counter's rise and fall is the only published evidence,
+        and the episode is bounded to a single boundary window."""
+        observer = PhysicsObserver()
+        observer.apply(driving(tick=1, motor_physics=physics()))
+        observer.apply(driving(
+            tick=2,
+            motor_physics=physics(contactLossSeconds=0.028)))
+        observer.apply(driving(tick=3, motor_physics=physics()))
+        assert observer.contact_loss_episodes == [(2, 3)]
+        assert observer.max_contact_loss == 0.028
+        # No grounded flag ever flipped and no airborne span minted —
+        # the loss+regain lived entirely below boundary granularity.
+        assert observer.contact_transitions == []
+        assert observer.airborne_spans == []
+
+    def test_contact_loss_episode_spanning_boundaries(self):
+        """A loss held across two boundaries records one episode whose
+        regain tick is honest — never split into per-boundary noise."""
+        observer = PhysicsObserver()
+        observer.apply(driving(tick=1, motor_physics=physics()))
+        observer.apply(driving(
+            tick=2, motor_physics=physics(contactLossSeconds=0.01)))
+        observer.apply(driving(
+            tick=3, motor_physics=physics(contactLossSeconds=0.02)))
+        observer.apply(driving(tick=4, motor_physics=physics()))
+        assert observer.contact_loss_episodes == [(2, 4)]
+        # A loss that outlasts the debounce becomes real airtime and is
+        # not double-counted as a transient episode.
+        observer.apply(driving(
+            tick=5,
+            motor_physics=physics(grounded=False, airSeconds=0.1,
+                                  airPeakY=0.4,
+                                  contactLossSeconds=0.05,
+                                  wheels=[wheel(i, grounded=False)
+                                          for i in range(4)])))
+        assert observer.contact_loss_episodes == [(2, 4)]
+
+
+class RaceEventScopeTests(unittest.TestCase):
+    """Race-scoped event predicates: a prior race's events must never
+    satisfy a leg running under a new race identity — the stale-event
+    bug that let the car race's landed event 'prove' the bike jump."""
+
+    def _client(self, events):
+        return types.SimpleNamespace(
+            driving_events={entry["id"]: entry for entry in events})
+
+    def test_scopes_to_current_race_only(self):
+        client = self._client([
+            {"id": "race-1-e1", "kind": "motor.landed", "tick": 10},
+            {"id": "race-1-e2", "kind": "race.recovered",
+             "detail": "stuck#1", "tick": 20},
+            {"id": "race-2-e1", "kind": "motor.landed", "tick": 30},
+        ])
+        assert [e["id"] for e in race_events_of(
+            client, "motor.landed", "race-2")] == ["race-2-e1"]
+        assert len(race_events_of(
+            client, "race.recovered", "race-2")) == 0
+
+    def test_prefix_never_matches_longer_race_ids(self):
+        client = self._client([
+            {"id": "race-1-e1", "kind": "motor.landed", "tick": 1},
+            {"id": "race-10-e1", "kind": "motor.landed", "tick": 2},
+        ])
+        assert [e["id"] for e in race_events_of(
+            client, "motor.landed", "race-1")] == ["race-1-e1"]
+
+    def test_overturned_event_ignores_other_races(self):
+        client = self._client([
+            {"id": "race-1-e4", "kind": "race.recovered",
+             "detail": "overturned#2", "tick": 12},
+        ])
+        assert overturned_event(client, "race-2") is None
+        assert overturned_event(client, "race-1")["id"] == "race-1-e4"
 
 
 class RecoveryLedgerTests(unittest.TestCase):

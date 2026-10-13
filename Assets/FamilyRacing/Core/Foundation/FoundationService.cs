@@ -148,6 +148,7 @@ namespace FamilyRacing.Core.Foundation
                 OptionalParam("throttle", "decimal", null),
                 OptionalParam("brake", "decimal", null)),
             Schema("input.clear"),
+            Schema("app.focusLost"),
             Schema("camera.toggle"),
             Schema("pause.toggle"),
             Schema("race.start",
@@ -579,6 +580,23 @@ namespace FamilyRacing.Core.Foundation
             }
         }
 
+        // Runtime-only callback the app wires to its physical input
+        // pump's RequireRearm — focus-loss cleanup rearms held physical
+        // input exactly the way OnApplicationFocus does, while Core
+        // stays free of the presentation-layer dependency.
+        public Action FocusCleanupHook;
+
+        // Focus-loss cleanup is a first-class command so agent-driven
+        // runs can drive the exact path OnApplicationFocus and
+        // OnApplicationPause take: neutralize held input, cancel queued
+        // driving actions, then rearm the physical input pump.
+        private CommandResult ApplicationFocusLost(GameCommand command)
+        {
+            ClearInput();
+            FocusCleanupHook?.Invoke();
+            return Result(command, CommandResult.Applied, "");
+        }
+
         public void SetCaptureFailure(string code)
         {
             captureValid = false;
@@ -628,6 +646,7 @@ namespace FamilyRacing.Core.Foundation
                     case "settings.save": return SaveSettings(command);
                     case "input.set": return SetInput(command);
                     case "input.clear": ClearInput(); return Result(command, CommandResult.Applied, "");
+                    case "app.focusLost": return ApplicationFocusLost(command);
                     case "camera.toggle": return ToggleCamera(command);
                     case "pause.toggle": return TogglePause(command);
                     case "race.start": return RaceStart(command);

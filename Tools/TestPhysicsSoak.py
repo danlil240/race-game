@@ -13,9 +13,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from NetworkSoak import soak_inputs
 from PhysicsScenario import PhysicsContractError
-from PhysicsSoak import (MAX_HOLD_SECONDS, MAX_HOLD_TICKS,
-                         LanPhysicsObserver, PHYSICS_CLASS_EVENTS,
-                         run_soak, verify_physics_lan_trace)
+from PhysicsSoak import (HISTORY_BASELINE_MARGIN, MAX_HOLD_SECONDS,
+                         MAX_HOLD_TICKS, LanPhysicsObserver,
+                         PHYSICS_CLASS_EVENTS, run_soak,
+                         verify_physics_lan_trace,
+                         verify_rematch_baselines)
 from TestPhysicsScenario import (diagnostics, physics, substep_path,
                                  wheel)
 
@@ -51,10 +53,13 @@ def racer(pid, backend="physicalAssisted", motor_physics=None,
 
 
 def lan_state(racers, phase="racing", race_id="lan-race-1",
-              events=(), tick=5):
+              events=(), tick=5, prediction=None):
+    # The published wire shape: NetworkRaceBridge clears
+    # networkRace.events before emission, so race events ride the
+    # top-level drivingEvents window — the fixture mirrors that.
     return {"stateSchemaVersion": 4, "tick": tick,
             "captureValid": True, "driving": None,
-            "drivingEvents": [], "droppedDrivingEvents": 0,
+            "drivingEvents": list(events), "droppedDrivingEvents": 0,
             "network": {"role": "client", "phase": phase,
                         "localParticipantId": "local",
                         "participants": [], "paused": False,
@@ -63,9 +68,8 @@ def lan_state(racers, phase="racing", race_id="lan-race-1",
                         "results": [],
                         "descriptor": {"sessionId": "sess-1"}},
             "networkRace": {"sessionId": "sess-1", "raceId": race_id,
-                            "phase": "running", "racers": racers,
-                            "events": list(events)},
-            "prediction": None, "remotePresentation": None,
+                            "phase": "running", "racers": racers},
+            "prediction": prediction, "remotePresentation": None,
             "networkLink": None}
 
 
@@ -162,6 +166,9 @@ class LanPhysicsObserverTests(unittest.TestCase):
                       motor_physics=physics())]))
 
     def test_recovery_events_harvested_with_epochs(self):
+        # Race events ride the top-level drivingEvents window — the
+        # bridge clears networkRace.events before publishing, so only
+        # this source can ever produce a nonzero recovery ledger.
         observer = LanPhysicsObserver(is_host=True)
         observer.apply(lan_state(racers=[
             racer("p0", motor_physics=physics())],
@@ -169,6 +176,57 @@ class LanPhysicsObserverTests(unittest.TestCase):
                      "detail": "stuck#3", "participantId": "p0",
                      "tick": 5}]))
         assert observer.recoveries == [("p0", "stuck", 3)]
+
+    def test_recovery_event_without_epoch_is_a_contract_error(self):
+        observer = LanPhysicsObserver(is_host=True)
+        with self.assertRaises(PhysicsContractError):
+            observer.apply(lan_state(racers=[
+                racer("p0", motor_physics=physics())],
+                events=[{"id": "e1", "kind": "race.recovered",
+                         "detail": "manual", "participantId": "p0",
+                         "tick": 5}]))
+
+    def test_duplicate_event_never_double_counts_recovery(self):
+        # The bounded window re-publishes surviving events on later
+        # boundaries — dedupe by id so the ledger counts once.
+        observer = LanPhysicsObserver(is_host=True)
+        state = lan_state(racers=[
+            racer("p0", motor_physics=physics())],
+            events=[{"id": "e1", "kind": "race.recovered",
+                     "detail": "stuck#3", "participantId": "p0",
+                     "tick": 5}])
+        observer.apply(state)
+        observer.apply(state)
+        assert observer.recoveries == [("p0", "stuck", 3)]
+
+    def test_host_records_body_and_tick_baselines(self):
+        observer = LanPhysicsObserver(is_host=True)
+        observer.apply(lan_state(racers=[
+            racer("p0", motor_physics=physics(),
+                  simulation=diagnostics(ticks=10, bodies=4))]))
+        observer.apply(lan_state(racers=[
+            racer("p0", motor_physics=physics(),
+                  simulation=diagnostics(ticks=20, bodies=4))]))
+        metrics = observer.metrics()
+        assert metrics["bodiesFirst"] == 4
+        assert metrics["bodiesTail"] == 4
+        assert metrics["ticksFirst"] == 10
+        assert metrics["ticksTail"] == 20
+
+    def test_client_records_prediction_history_baseline(self):
+        observer = LanPhysicsObserver(is_host=False)
+        observer.apply(lan_state(
+            racers=[racer("p0", motor_physics=physics(),
+                          wire_present=True)],
+            prediction={"historyCount": 2}))
+        observer.apply(lan_state(
+            racers=[racer("p0", motor_physics=physics(),
+                          wire_present=True)],
+            prediction={"historyCount": 17}))
+        metrics = observer.metrics()
+        assert metrics["historyFirst"] == 2
+        assert metrics["historyTail"] == 17
+        assert metrics["historyPeak"] == 17
 
     def test_reset_rebaselines_epochs_per_race(self):
         observer = LanPhysicsObserver(is_host=True)
@@ -270,6 +328,65 @@ class VerifyPhysicsLanTraceTests(unittest.TestCase):
             with self.assertRaises(PhysicsContractError):
                 verify_physics_lan_trace(directory, LAN_INFO,
                                          is_host=True)
+
+
+class RematchBaselineTests(unittest.TestCase):
+    """World/body/history counters must rebase on every rematch — a
+    persistent world or accumulating prediction history is a leak, not
+    a warm cache."""
+
+    def _report(self, host_races, client_races):
+        return {"host": {"races": host_races},
+                "client-0": {"races": client_races}}
+
+    def test_clean_rematches_pass(self):
+        violations = verify_rematch_baselines(self._report(
+            host_races=[
+                {"bodiesFirst": 4, "bodiesTail": 4,
+                 "ticksFirst": 1, "ticksTail": 9000},
+                {"bodiesFirst": 4, "bodiesTail": 4,
+                 "ticksFirst": 3, "ticksTail": 8000},
+            ],
+            client_races=[
+                {"historyFirst": 2, "historyTail": 500,
+                 "historyPeak": 600},
+                {"historyFirst": 4, "historyTail": 480,
+                 "historyPeak": 590},
+            ]))
+        assert violations == []
+
+    def test_body_growth_across_rematches_fails(self):
+        violations = verify_rematch_baselines(self._report(
+            host_races=[
+                {"bodiesFirst": 4, "bodiesTail": 4,
+                 "ticksFirst": 1, "ticksTail": 9000},
+                {"bodiesFirst": 5, "bodiesTail": 5,
+                 "ticksFirst": 2, "ticksTail": 8000},
+            ],
+            client_races=[]))
+        assert any("roster grew" in v for v in violations)
+
+    def test_world_ticks_not_restarting_fails(self):
+        violations = verify_rematch_baselines(self._report(
+            host_races=[
+                {"bodiesFirst": 4, "bodiesTail": 4,
+                 "ticksFirst": 1, "ticksTail": 9000},
+                {"bodiesFirst": 4, "bodiesTail": 4,
+                 "ticksFirst": 9001, "ticksTail": 12000},
+            ],
+            client_races=[]))
+        assert any("did not restart" in v for v in violations)
+
+    def test_history_accumulating_across_rematches_fails(self):
+        violations = verify_rematch_baselines(self._report(
+            host_races=[],
+            client_races=[
+                {"historyFirst": 2, "historyTail": 500,
+                 "historyPeak": 600},
+                {"historyFirst": 500 + HISTORY_BASELINE_MARGIN,
+                 "historyTail": 900, "historyPeak": 900},
+            ]))
+        assert any("prediction history" in v for v in violations)
 
 
 class CliContractTests(unittest.TestCase):

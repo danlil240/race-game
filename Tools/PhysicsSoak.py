@@ -108,8 +108,15 @@ class LanPhysicsObserver:
     recovery-epoch monotonicity, full-vs-wire physics by endpoint role,
     and the local-diagnostics exclusion on clients. reset() re-baselines
     on every new race identity — epoch history is per-race."""
-    def __init__(self, is_host):
+    def __init__(self, is_host, seen_ids=None):
         self.is_host = is_host
+        # Event ids are globally unique per session, so the seen set
+        # survives reset() — and a trace replay shares one set across
+        # per-race observers: a straggler event re-published on the
+        # boundary where the race identity flips can never double-count
+        # into the next race's recovery ledger.
+        self._seen_event_ids = seen_ids if seen_ids is not None \
+            else set()
         self.reset()
 
     def reset(self):
@@ -121,9 +128,18 @@ class LanPhysicsObserver:
         self.airborne_peaks = {}     # participantId -> peak airPeakY
         self.recoveries = []         # (participantId, reason, epoch)
         self.prev_reasons = {}       # participantId -> last published reason
-        self.events = {}             # event id -> entry
+        self.events = {}             # event id -> entry (this race)
         self.diagnostics_seen = 0
         self.physics_racers = 0
+        # Counters the rematch baseline check reads: host world roster
+        # first/last, client prediction-history first/peak/last.
+        self.bodies_first = None
+        self.bodies_tail = None
+        self.ticks_first = None
+        self.ticks_tail = None
+        self.history_first = None
+        self.history_tail = None
+        self.history_peak = 0
 
     def apply(self, state, label="networkRace"):
         # Every contract failure — whatever validator surfaced it — is a
@@ -140,14 +156,27 @@ class LanPhysicsObserver:
         race = state.get("networkRace")
         if not isinstance(race, dict):
             return False
-        for entry in race.get("events") or []:
-            if isinstance(entry, dict) and entry.get("id"):
-                self.events[entry["id"]] = entry
-                if entry.get("kind") == "race.recovered":
-                    reason, epoch = parse_recovery_detail(
-                        entry.get("detail"))
-                    self.recoveries.append(
-                        (entry.get("participantId"), reason, epoch))
+        # Race events ride the top-level drivingEvents window —
+        # NetworkRaceBridge clears the internal race.events list before
+        # publishing, so harvesting networkRace.events would record
+        # nothing (the reason recoveryEvents read 0 on passing runs).
+        for entry in state.get("drivingEvents") or []:
+            if not isinstance(entry, dict):
+                continue
+            event_id = entry.get("id")
+            if not event_id or event_id in self._seen_event_ids:
+                continue
+            self._seen_event_ids.add(event_id)
+            self.events[event_id] = entry
+            if entry.get("kind") == "race.recovered":
+                reason, epoch = parse_recovery_detail(
+                    entry.get("detail"))
+                PhysicsContractError._raise_if(
+                    epoch is None,
+                    label + ": physical race.recovered without the "
+                    "reason#epoch detail on " + repr(event_id))
+                self.recoveries.append(
+                    (entry.get("participantId"), reason, epoch))
         self.boundaries += 1
         for racer in race.get("racers") or []:
             session = racer.get("session") or {}
@@ -180,6 +209,16 @@ class LanPhysicsObserver:
                         diagnostics, label + ".simulation",
                         "physicalAssisted")
                     self.diagnostics_seen += 1
+                    # World/body counters for the rematch baseline: a
+                    # fresh world on each race must show the same body
+                    # roster and restarted tick accounting — a leaking
+                    # world would grow bodies or keep counting ticks.
+                    if self.bodies_first is None:
+                        self.bodies_first = diagnostics["bodies"]
+                        self.ticks_first = \
+                            diagnostics["ticksSimulated"]
+                    self.bodies_tail = diagnostics["bodies"]
+                    self.ticks_tail = diagnostics["ticksSimulated"]
                 if physics is not None:
                     validate_physics_state(
                         physics, label + ".motor.physics")
@@ -230,6 +269,19 @@ class LanPhysicsObserver:
             reason = session.get("lastRecoveryReason") or ""
             if pid and reason != self.prev_reasons.get(pid, ""):
                 self.prev_reasons[pid] = reason
+        if not self.is_host:
+            # Client-side replay history is the rematch-baseline mirror
+            # of the host's body counter: a fresh prediction per race
+            # must start near zero rather than accumulating stale
+            # snapshots across rematches.
+            prediction = state.get("prediction")
+            if isinstance(prediction, dict) \
+                    and type(prediction.get("historyCount")) is int:
+                history = prediction["historyCount"]
+                if self.history_first is None:
+                    self.history_first = history
+                self.history_tail = history
+                self.history_peak = max(self.history_peak, history)
         return True
 
     def metrics(self):
@@ -241,8 +293,18 @@ class LanPhysicsObserver:
             "overturnedPeaks": self.overturned_peaks,
             "airbornePeaks": self.airborne_peaks,
             "recoveryEvents": len(self.recoveries),
+            "recoveries": [
+                {"participantId": pid, "reason": reason, "epoch": epoch}
+                for pid, reason, epoch in self.recoveries],
             "diagnosticsSeen": self.diagnostics_seen,
             "physicsRacerSamples": self.physics_racers,
+            "bodiesFirst": self.bodies_first,
+            "bodiesTail": self.bodies_tail,
+            "ticksFirst": self.ticks_first,
+            "ticksTail": self.ticks_tail,
+            "historyFirst": self.history_first,
+            "historyTail": self.history_tail,
+            "historyPeak": self.history_peak,
         }
 
 
@@ -277,6 +339,67 @@ class PhysicsSoakClient(LanSoakClient):
         if self.observer.boundaries:
             metrics.append(self.observer.metrics())
         return metrics
+
+
+# First-observed prediction history can lag a few seconds of snapshot
+# backlog on a rematch boundary; a leaking accumulator at race N is
+# hundreds of entries by then, so the baseline margin stays tight.
+HISTORY_BASELINE_MARGIN = 60
+
+
+def verify_rematch_baselines(physics_report):
+    """World/body/history counters must return to baseline across
+    rematches. Host: the body roster is stable inside each race and
+    never grows past the first race's, and each new world's tick
+    counter restarts below the previous world's tail (a persistent
+    world would keep counting). Client: prediction history restarts
+    near zero — accumulating snapshots across rematches is a leak.
+    Returns violation strings; empty means every counter rebased."""
+    violations = []
+    for role, section in physics_report.items():
+        races = section.get("races") or []
+        if role == "host":
+            roster = None
+            for index, race in enumerate(races):
+                first = race.get("bodiesFirst")
+                tail = race.get("bodiesTail")
+                if first is None or tail is None:
+                    continue
+                if first != tail:
+                    violations.append(
+                        "%s race %d: body roster drifted inside the "
+                        "race (%s -> %s)" % (role, index, first, tail))
+                if roster is None:
+                    roster = tail
+                elif tail > roster:
+                    violations.append(
+                        "%s race %d: body roster grew past the "
+                        "baseline %s -> %s" % (role, index, roster,
+                                               tail))
+            for index in range(1, len(races)):
+                prev_tail = races[index - 1].get("ticksTail")
+                first = races[index].get("ticksFirst")
+                if prev_tail is not None and first is not None \
+                        and first > prev_tail:
+                    violations.append(
+                        "%s race %d: world tick counter did not "
+                        "restart on rematch (first %s after a %s-tick "
+                        "world)" % (role, index, first, prev_tail))
+        else:
+            baseline = None
+            for index, race in enumerate(races):
+                first = race.get("historyFirst")
+                if first is None:
+                    continue
+                if baseline is None:
+                    baseline = first
+                elif first > baseline + HISTORY_BASELINE_MARGIN:
+                    violations.append(
+                        "%s race %d: prediction history did not "
+                        "restart near baseline (first %s vs %s+%d)"
+                        % (role, index, first, baseline,
+                           HISTORY_BASELINE_MARGIN))
+    return violations
 
 
 def drive_physics_race(host, clients, class_id, checks):
@@ -504,7 +627,8 @@ def verify_physics_lan_trace(directory, info, is_host):
     outcome = verify_lan_trace(directory, info)
     reconstructor = StateReconstructor()
     observers = []
-    observer = LanPhysicsObserver(is_host)
+    seen_ids = set()
+    observer = LanPhysicsObserver(is_host, seen_ids)
     active_race = None
     trace = directory / "state.ndjson"
     with trace.open(encoding="utf-8-sig") as source:
@@ -519,7 +643,7 @@ def verify_physics_lan_trace(directory, info, is_host):
             if race_id != active_race:
                 if observer.boundaries:
                     observers.append(observer)
-                observer = LanPhysicsObserver(is_host)
+                observer = LanPhysicsObserver(is_host, seen_ids)
                 active_race = race_id
             if isinstance(race, dict):
                 observer.apply(state, str(directory))
@@ -793,6 +917,21 @@ def run_soak(connection_paths, evidence, minutes, host_address=None,
                     role + " produced no stream boundaries"
                 assert peer.max_backlog_steps < MAX_STEPS_PER_FRAME, \
                     role + " backlog stayed saturated"
+
+        # Rematch baseline: bodies, world ticks and prediction history
+        # must all rebase on each new race identity — growth is a leak.
+        baseline_violations = verify_rematch_baselines(
+            report["physics"])
+        for violation in baseline_violations:
+            report["incidents"].append({
+                "kind": "rematchBaseline", "detail": violation})
+        if not baseline_violations:
+            total_races = sum(
+                len((report["physics"][role] or {}).get("races") or [])
+                for role in report["physics"])
+            checks.append("rematch baseline: bodies/ticks/history "
+                          "counters rebased across %d observed race "
+                          "identities" % total_races)
 
         status, error = soak_status(lost, dishonest_delivery,
                                     report["incidents"])
