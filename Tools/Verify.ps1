@@ -18,13 +18,28 @@
 #                          so validation endpoints are compiled out.
 #   -Mode Android          Export Android, then build with bundled Gradle
 #                          --offline. Missing dependencies fail without download.
+#   -Mode VisualBenchmarkSetup
+#                          Run FoundationProjectSetup + VisualBenchmarkSetup:
+#                          create/validate the visual-1 benchmark scene and
+#                          definition under Generated\VisualBenchmark.
+#   -Mode WindowsVisualBenchmark
+#                          Windows Mono development player of the benchmark
+#                          scene -> Builds\Windows-VisualBenchmark.
+#   -Mode WindowsVisualBenchmarkOrdinary
+#                          Same benchmark content without the development
+#                          flag -> Builds\Windows-VisualBenchmark-Ordinary.
+#   -Mode AndroidVisualBenchmark / -Mode AndroidVisualBenchmarkOrdinary
+#                          Offline wrapper with -Presentation VisualBenchmark;
+#                          output under Builds\Android-VisualBenchmark[-Ordinary].
 #
 # All Unity modes use the pinned editor only; each writes its own log under
 # Logs\ and propagates failures. Android keeps distinct export/build logs
 # and a result.json under Logs\android-offline\<run-id>.
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet("CoreOffline", "Core", "CheckEnvironment", "Setup", "EditMode", "PlayMode", "Windows", "WindowsOrdinary", "Android")]
+    [ValidateSet("CoreOffline", "Core", "CheckEnvironment", "Setup", "EditMode", "PlayMode", "Windows", "WindowsOrdinary", "Android",
+        "VisualBenchmarkSetup", "WindowsVisualBenchmark", "WindowsVisualBenchmarkOrdinary",
+        "AndroidVisualBenchmark", "AndroidVisualBenchmarkOrdinary")]
     [string]$Mode,
 
     [string]$EditorRoot = "C:\Program Files\Unity\Hub\Editor",
@@ -49,6 +64,13 @@ switch ($Mode) {
         exit $LASTEXITCODE
     }
 
+    { $_ -in "AndroidVisualBenchmark", "AndroidVisualBenchmarkOrdinary" } {
+        $configuration = if ($Mode -eq "AndroidVisualBenchmarkOrdinary") { "Ordinary" } else { "Development" }
+        & (Join-Path $repo "Tools\Build-AndroidOffline.ps1") -ProjectPath $repo -EditorRoot $EditorRoot `
+            -Presentation VisualBenchmark -Configuration $configuration
+        exit $LASTEXITCODE
+    }
+
     "CoreOffline" {
         $runnerArgs = @{ EditorRoot = $EditorRoot }
         if ($NunitFrameworkPath) { $runnerArgs.NunitFrameworkPath = $NunitFrameworkPath }
@@ -63,7 +85,8 @@ switch ($Mode) {
         exit $LASTEXITCODE
     }
 
-    { $_ -in "Setup", "EditMode", "PlayMode", "Windows", "WindowsOrdinary" } {
+    { $_ -in "Setup", "EditMode", "PlayMode", "Windows", "WindowsOrdinary",
+        "VisualBenchmarkSetup", "WindowsVisualBenchmark", "WindowsVisualBenchmarkOrdinary" } {
         $editorExe = Join-Path $EditorRoot "$PinnedEditorVersion\Editor\Unity.exe"
         if (-not (Test-Path $editorExe)) {
             Write-Error "Pinned editor $PinnedEditorVersion not found at $editorExe."
@@ -82,6 +105,15 @@ switch ($Mode) {
             }
             "WindowsOrdinary" {
                 $unityArgs += "-executeMethod", "FamilyRacing.EditorTools.FoundationBuild.WindowsOrdinary", "-quit"
+            }
+            "VisualBenchmarkSetup" {
+                $unityArgs += "-executeMethod", "FamilyRacing.EditorTools.FoundationBuild.VisualBenchmarkSetup", "-quit"
+            }
+            "WindowsVisualBenchmark" {
+                $unityArgs += "-executeMethod", "FamilyRacing.EditorTools.FoundationBuild.WindowsVisualBenchmark", "-quit"
+            }
+            "WindowsVisualBenchmarkOrdinary" {
+                $unityArgs += "-executeMethod", "FamilyRacing.EditorTools.FoundationBuild.WindowsVisualBenchmarkOrdinary", "-quit"
             }
             "EditMode" {
                 $unityArgs += "-runTests", "-testPlatform", "EditMode",

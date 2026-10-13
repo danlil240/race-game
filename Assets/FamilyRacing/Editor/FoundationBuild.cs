@@ -72,6 +72,51 @@ namespace FamilyRacing.EditorTools
             Report(report, "Windows Mono physics development build");
         }
 
+        // Visual benchmark (M4): repeatable benchmark scene + definition,
+        // then build flavors for the measurement matrix. The benchmark
+        // scene is passed as an explicit scene override so it never has
+        // to join EditorBuildSettings — the graybox bootstrap stays the
+        // default player scene.
+        public static void VisualBenchmarkSetup()
+        {
+            FoundationProjectSetup.Create();
+            FamilyRacing.EditorTools.VisualBenchmarkSetup.Create();
+            Debug.Log("VisualBenchmarkSetup: done — benchmark scene at " +
+                FamilyRacing.EditorTools.VisualBenchmarkSetup.ScenePath);
+        }
+
+        public static void WindowsVisualBenchmark()
+        {
+            FoundationProjectSetup.Create();
+            FamilyRacing.EditorTools.VisualBenchmarkSetup.Create();
+            NetworkPrototypeSetup.VerifyBuildConfiguration(BuildTarget.StandaloneWindows64);
+            var report = Build("Builds/Windows-VisualBenchmark/FamilyRacing.exe",
+                BuildTarget.StandaloneWindows64, BuildOptions.Development,
+                BenchmarkScenes());
+            Report(report, "Windows Mono visual-benchmark development build");
+        }
+
+        // Ordinary benchmark build: same visual-1 content and backend,
+        // no development flag — validation endpoints are compiled out.
+        public static void WindowsVisualBenchmarkOrdinary()
+        {
+            FoundationProjectSetup.Create();
+            FamilyRacing.EditorTools.VisualBenchmarkSetup.Create();
+            NetworkPrototypeSetup.VerifyBuildConfiguration(BuildTarget.StandaloneWindows64);
+            var report = Build("Builds/Windows-VisualBenchmark-Ordinary/FamilyRacing.exe",
+                BuildTarget.StandaloneWindows64, BuildOptions.None,
+                BenchmarkScenes());
+            Report(report, "Windows Mono visual-benchmark ordinary build (no validation)");
+        }
+
+        private static string[] BenchmarkScenes()
+        {
+            return new[]
+            {
+                FamilyRacing.EditorTools.VisualBenchmarkSetup.ScenePath
+            };
+        }
+
         public static void Android()
         {
             // Retain the old entry point, but never implicitly invoke online
@@ -80,6 +125,34 @@ namespace FamilyRacing.EditorTools
         }
 
         public static void ExportAndroid()
+        {
+            ExportAndroid("Android", development: true, visualBenchmark: false);
+        }
+
+        // Ordinary graybox export: same content without the development
+        // flag — the previously documented-but-unautomated ordinary
+        // Android path, now reachable through the offline wrapper.
+        public static void ExportAndroidOrdinary()
+        {
+            ExportAndroid("Android-Ordinary", development: false, visualBenchmark: false);
+        }
+
+        public static void ExportAndroidVisualBenchmark()
+        {
+            ExportAndroid("Android-VisualBenchmark", development: true, visualBenchmark: true);
+        }
+
+        // Ordinary benchmark export: visual-1 content with the
+        // development flag removed, so the validation bridge/listener is
+        // compiled out of the APK exactly like the ordinary Windows
+        // player.
+        public static void ExportAndroidVisualBenchmarkOrdinary()
+        {
+            ExportAndroid("Android-VisualBenchmark-Ordinary", development: false, visualBenchmark: true);
+        }
+
+        private static void ExportAndroid(string flavor, bool development,
+            bool visualBenchmark)
         {
             var args = Environment.GetCommandLineArgs();
             string exportPath = null;
@@ -94,9 +167,9 @@ namespace FamilyRacing.EditorTools
                 throw new ArgumentException("Use Tools/Verify.ps1 -Mode Android to export and build offline.");
             exportPath = Path.GetFullPath(exportPath);
             var root = Path.GetFullPath(Path.Combine(Application.dataPath,
-                "../Builds/Android/offline")) + Path.DirectorySeparatorChar;
+                "../Builds/" + flavor + "/offline")) + Path.DirectorySeparatorChar;
             if (!exportPath.StartsWith(root, StringComparison.OrdinalIgnoreCase))
-                throw new ArgumentException("Android export must stay under Builds/Android/offline.");
+                throw new ArgumentException("Android export must stay under Builds/" + flavor + "/offline.");
             if (Directory.Exists(exportPath) || File.Exists(exportPath))
                 throw new IOException("Android export directory must be new: " + exportPath);
             if (!BuildPipeline.IsBuildTargetSupported(BuildTargetGroup.Android, BuildTarget.Android))
@@ -109,10 +182,17 @@ namespace FamilyRacing.EditorTools
                 EditorUserBuildSettings.exportAsGoogleAndroidProject = true;
                 EditorUserBuildSettings.buildAppBundle = false;
                 FoundationProjectSetup.Create();
+                if (visualBenchmark)
+                    FamilyRacing.EditorTools.VisualBenchmarkSetup.Create();
                 NetworkPrototypeSetup.VerifyBuildConfiguration(BuildTarget.Android);
                 var report = Build(exportPath, BuildTarget.Android,
-                    BuildOptions.Development | BuildOptions.AcceptExternalModificationsToPlayer);
-                Report(report, "Android Gradle export (APK build runs separately offline)");
+                    (development ? BuildOptions.Development : BuildOptions.None)
+                        | BuildOptions.AcceptExternalModificationsToPlayer,
+                    visualBenchmark ? BenchmarkScenes() : null);
+                Report(report, "Android Gradle export"
+                    + (development ? " (development" : " (ordinary")
+                    + (visualBenchmark ? ", visual-benchmark" : "")
+                    + "; APK build runs separately offline)");
             }
             finally
             {

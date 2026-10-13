@@ -15,7 +15,16 @@ function Check([string]$Name, [bool]$Condition, [string]$Detail = '') {
     else { $script:failed++; Write-Host "FAIL $Name ($Detail)" }
 }
 
-function Run-Case([string]$Name, [string]$Behavior = 'success', [string]$Missing = '') {
+function Flavor-For-Mode([string]$Mode) {
+    switch ($Mode) {
+        'AndroidVisualBenchmark'         { return 'Android-VisualBenchmark' }
+        'AndroidVisualBenchmarkOrdinary' { return 'Android-VisualBenchmark-Ordinary' }
+        'AndroidOrdinary'                { return 'Android-Ordinary' }
+        default                          { return 'Android' }
+    }
+}
+
+function Run-Case([string]$Name, [string]$Behavior = 'success', [string]$Missing = '', [string]$Mode = 'Android') {
     $project = Join-Path $fixtureRoot ($Name + ' [test] & spaces')
     $toolsDir = Join-Path $project 'Tools'
     New-Item -ItemType Directory -Path $toolsDir -Force | Out-Null
@@ -41,12 +50,12 @@ function Run-Case([string]$Name, [string]$Behavior = 'success', [string]$Missing
     Set-Content -LiteralPath (Join-Path $android 'NDK\ndk-build.cmd') -Value 'fixture'
     Set-Content -LiteralPath (Join-Path $editor 'behavior.txt') -Value $Behavior
     Set-Content -LiteralPath (Join-Path $android 'OpenJDK\bin\behavior.txt') -Value $Behavior
-    $published = Join-Path $project 'Builds\Android\FamilyRacing.apk'
+    $published = Join-Path $project ('Builds\' + (Flavor-For-Mode $Mode) + '\FamilyRacing.apk')
     New-Item -ItemType Directory -Path (Split-Path $published) -Force | Out-Null
     Set-Content -LiteralPath $published -Value 'old APK remains on failure' -NoNewline
     $oldPreference = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $toolsDir 'Verify.ps1') -Mode Android -EditorRoot $editorRoot 2>&1 | Out-String
+    $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $toolsDir 'Verify.ps1') -Mode $Mode -EditorRoot $editorRoot 2>&1 | Out-String
     $code = $LASTEXITCODE
     $ErrorActionPreference = $oldPreference
     $results = @(Get-ChildItem -LiteralPath (Join-Path $project 'Logs') -Filter result.json -Recurse -File -ErrorAction SilentlyContinue)
@@ -71,6 +80,39 @@ try {
     $expectedJar = Join-Path $ok.Android 'Tools\gradle\lib\gradle-launcher-9.3.1.jar'
     Check 'Gradle uses bundled launcher JAR as one intact argument' ($javaArguments -contains $expectedJar)
     Check 'export and Gradle logs are distinct and preserved' ($null -ne $ok.Result -and $ok.Result.exportLog -ne $ok.Result.gradleLog -and (Test-Path -LiteralPath $ok.Result.exportLog) -and (Test-Path -LiteralPath $ok.Result.gradleLog))
+    # The visual-benchmark flavors must not move the defaults: -Mode Android
+    # still selects the graybox development export under Builds\Android.
+    $defaultUnityArgs = @()
+    if (Test-Path -LiteralPath (Join-Path $ok.Project 'unity-arguments.txt')) {
+        $defaultUnityArgs = @(Get-Content -LiteralPath (Join-Path $ok.Project 'unity-arguments.txt'))
+    }
+    $defaultMethodIndex = [array]::IndexOf($defaultUnityArgs, '-executeMethod')
+    Check 'default Android mode keeps the graybox development export entry point' ($defaultMethodIndex -ge 0 -and $defaultMethodIndex + 1 -lt $defaultUnityArgs.Count -and $defaultUnityArgs[$defaultMethodIndex + 1] -eq 'FamilyRacing.EditorTools.FoundationBuild.ExportAndroid') ($defaultUnityArgs -join ' ')
+    $defaultExportIndex = [array]::IndexOf($defaultUnityArgs, '--android-export-dir')
+    Check 'default export dir stays under Builds\Android\offline' ($defaultExportIndex -ge 0 -and $defaultExportIndex + 1 -lt $defaultUnityArgs.Count -and $defaultUnityArgs[$defaultExportIndex + 1].Replace('/', '\').StartsWith((Join-Path $ok.Project 'Builds\Android\offline') + '\')) ($defaultUnityArgs -join ' ')
+    Check 'default run records graybox development defaults' ($null -ne $ok.Result -and $ok.Result.presentation -eq 'Graybox' -and $ok.Result.configuration -eq 'Development') ($ok.Result | ConvertTo-Json -Compress)
+
+    # Visual-benchmark flavors: matching export entry points, ordinary
+    # flag carried by the entry point name, flavor-scoped offline roots
+    # and published APK paths.
+    foreach ($case in @(
+        @{ Name = 'vb-dev'; Mode = 'AndroidVisualBenchmark';         Method = 'FamilyRacing.EditorTools.FoundationBuild.ExportAndroidVisualBenchmark';         Flavor = 'Android-VisualBenchmark';         Configuration = 'Development' },
+        @{ Name = 'vb-ord'; Mode = 'AndroidVisualBenchmarkOrdinary'; Method = 'FamilyRacing.EditorTools.FoundationBuild.ExportAndroidVisualBenchmarkOrdinary'; Flavor = 'Android-VisualBenchmark-Ordinary'; Configuration = 'Ordinary' })) {
+        $vb = Run-Case $case.Name 'success' '' $case.Mode
+        Check "$($case.Mode) completes export and offline build" ($vb.ExitCode -eq 0) $vb.Output
+        Check "$($case.Mode) publishes fresh APK under Builds\$($case.Flavor)" ($vb.Published -eq (Join-Path $vb.Project ('Builds\' + $case.Flavor + '\FamilyRacing.apk')) -and (Get-Content -LiteralPath $vb.Published -Raw) -eq 'fresh fixture APK') ("published=" + $vb.Published)
+        $vbUnityArgs = @()
+        if (Test-Path -LiteralPath (Join-Path $vb.Project 'unity-arguments.txt')) {
+            $vbUnityArgs = @(Get-Content -LiteralPath (Join-Path $vb.Project 'unity-arguments.txt'))
+        }
+        $vbMethodIndex = [array]::IndexOf($vbUnityArgs, '-executeMethod')
+        Check "$($case.Mode) selects $($case.Method)" ($vbMethodIndex -ge 0 -and $vbMethodIndex + 1 -lt $vbUnityArgs.Count -and $vbUnityArgs[$vbMethodIndex + 1] -eq $case.Method) ($vbUnityArgs -join ' ')
+        $vbExportIndex = [array]::IndexOf($vbUnityArgs, '--android-export-dir')
+        Check "$($case.Mode) export dir stays under Builds\$($case.Flavor)\offline" ($vbExportIndex -ge 0 -and $vbExportIndex + 1 -lt $vbUnityArgs.Count -and $vbUnityArgs[$vbExportIndex + 1].Replace('/', '\').StartsWith((Join-Path $vb.Project ('Builds\' + $case.Flavor + '\offline')) + '\')) ($vbUnityArgs -join ' ')
+        Check "$($case.Mode) result records VisualBenchmark/$($case.Configuration)" ($null -ne $vb.Result -and $vb.Result.presentation -eq 'VisualBenchmark' -and $vb.Result.configuration -eq $case.Configuration) ($vb.Result | ConvertTo-Json -Compress)
+    }
+    $vbFail = Run-Case 'vb-export-failure' 'export-failure' '' 'AndroidVisualBenchmark'
+    Check 'benchmark export failure propagates exit and keeps stale APK' ($vbFail.ExitCode -eq 29 -and (Get-Content -LiteralPath $vbFail.Published -Raw) -eq 'old APK remains on failure') ("exit=" + $vbFail.ExitCode)
 
     foreach ($missing in @('editor', 'java', 'gradle')) {
         $case = Run-Case ('missing-' + $missing) 'success' $missing

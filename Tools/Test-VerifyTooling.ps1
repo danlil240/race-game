@@ -60,6 +60,51 @@ $output = & $pwsh -NoProfile -File $RunnerScript -NunitFrameworkPath $missingDll
 Check "invalid explicit NUnit path exits nonzero" ($LASTEXITCODE -ne 0) "exit=$LASTEXITCODE"
 Check "suite not run on invalid NUnit path" ($output -notmatch "RESULT:") "suite ran anyway"
 
+# 5. Visual-benchmark setup/Windows modes dispatch to their matching
+#    FoundationBuild methods. The external-process fixture stands in for
+#    Unity.exe and records the exact argument list it was launched with;
+#    behavior "incomplete-export" makes it exit 0 after recording.
+$fixtureSrc = Join-Path (Split-Path -Parent $VerifyScript) 'Tests\AndroidToolFixture.cs'
+$compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
+$fixtureExe = Join-Path $temp 'ToolFixture.exe'
+& $compiler /nologo /target:exe "/out:$fixtureExe" $fixtureSrc
+Check "external-process fixture compiles" ($LASTEXITCODE -eq 0) "csc exit=$LASTEXITCODE"
+if ($LASTEXITCODE -eq 0) {
+    Copy-Item -LiteralPath $fixtureExe -Destination (Join-Path $editorDir 'Editor\Unity.exe') -Force
+    Set-Content -LiteralPath (Join-Path $editorDir 'Editor\behavior.txt') -Value 'incomplete-export'
+    $repoRoot = (Resolve-Path -LiteralPath (Join-Path (Split-Path -Parent $VerifyScript) '..')).Path
+    $argumentsFile = Join-Path $repoRoot 'unity-arguments.txt'
+    try {
+        foreach ($case in @(
+            @{ Mode = 'VisualBenchmarkSetup';           Method = 'FamilyRacing.EditorTools.FoundationBuild.VisualBenchmarkSetup' },
+            @{ Mode = 'WindowsVisualBenchmark';         Method = 'FamilyRacing.EditorTools.FoundationBuild.WindowsVisualBenchmark' },
+            @{ Mode = 'WindowsVisualBenchmarkOrdinary'; Method = 'FamilyRacing.EditorTools.FoundationBuild.WindowsVisualBenchmarkOrdinary' })) {
+            Remove-Item -LiteralPath $argumentsFile -Force -ErrorAction SilentlyContinue
+            $output = & $pwsh -NoProfile -File $VerifyScript -Mode $case.Mode -EditorRoot $editorRoot 2>&1 | Out-String
+            $code = $LASTEXITCODE
+            $arguments = @()
+            if (Test-Path -LiteralPath $argumentsFile) { $arguments = @(Get-Content -LiteralPath $argumentsFile) }
+            $index = [array]::IndexOf($arguments, '-executeMethod')
+            Check "$($case.Mode) dispatches to $($case.Method)" `
+                ($index -ge 0 -and $index + 1 -lt $arguments.Count -and $arguments[$index + 1] -eq $case.Method) `
+                ("exit=$code args=" + ($arguments -join ' '))
+        }
+    }
+    finally {
+        Remove-Item -LiteralPath $argumentsFile -Force -ErrorAction SilentlyContinue
+    }
+
+    # 6. Android benchmark modes reach the offline wrapper: with no editor
+    #    they fail at the prerequisite stage (proving dispatch happened);
+    #    full offline behavior is covered by Test-AndroidOffline.ps1.
+    foreach ($mode in @('AndroidVisualBenchmark', 'AndroidVisualBenchmarkOrdinary')) {
+        $output = & $pwsh -NoProfile -File $VerifyScript -Mode $mode -EditorRoot (Join-Path $temp 'no-editor') 2>&1 | Out-String
+        Check "$mode dispatches to the offline Android wrapper" `
+            ($LASTEXITCODE -ne 0 -and $output -notmatch 'Cannot validate argument' -and $output -match 'Pinned Unity editor') `
+            ("exit=$LASTEXITCODE output=$output")
+    }
+}
+
 Remove-Item $temp -Recurse -Force -ErrorAction SilentlyContinue
 Write-Host ""
 Write-Host "RESULT: $passed passed, $failed failed."

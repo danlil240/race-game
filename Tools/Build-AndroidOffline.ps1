@@ -1,8 +1,17 @@
 # Export with the pinned Unity editor, then invoke its bundled Gradle/JDK.
 # Missing cache entries fail under --offline; this script never retries online.
+# -Presentation selects the content flavor (Graybox default = the bootstrap
+# scene; VisualBenchmark = the M4 benchmark scene); -Configuration selects
+# Development (validation endpoints in) or Ordinary (compiled out). The
+# flavor decides the export entry point and every output directory, so a
+# benchmark run can never overwrite the graybox APK or mix export roots.
 param(
     [string]$ProjectPath = (Join-Path $PSScriptRoot '..'),
-    [string]$EditorRoot = 'C:\Program Files\Unity\Hub\Editor'
+    [string]$EditorRoot = 'C:\Program Files\Unity\Hub\Editor',
+    [ValidateSet('Graybox', 'VisualBenchmark')]
+    [string]$Presentation = 'Graybox',
+    [ValidateSet('Development', 'Ordinary')]
+    [string]$Configuration = 'Development'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -11,11 +20,32 @@ $editorVersion = '6000.3.26f1'
 $editor = Join-Path $EditorRoot "$editorVersion\Editor\Unity.exe"
 $android = Join-Path $EditorRoot "$editorVersion\Editor\Data\PlaybackEngines\AndroidPlayer"
 $java = Join-Path $android 'OpenJDK\bin\java.exe'
+$flavor = "$Presentation-$Configuration"
+$buildFlavor = switch ($flavor) {
+    'Graybox-Development'         { 'Android' }
+    'Graybox-Ordinary'            { 'Android-Ordinary' }
+    'VisualBenchmark-Development' { 'Android-VisualBenchmark' }
+    'VisualBenchmark-Ordinary'    { 'Android-VisualBenchmark-Ordinary' }
+    default { throw "Unsupported presentation/configuration: $flavor" }
+}
+$exportMethod = switch ($buildFlavor) {
+    'Android'                            { 'FamilyRacing.EditorTools.FoundationBuild.ExportAndroid' }
+    'Android-Ordinary'                   { 'FamilyRacing.EditorTools.FoundationBuild.ExportAndroidOrdinary' }
+    'Android-VisualBenchmark'            { 'FamilyRacing.EditorTools.FoundationBuild.ExportAndroidVisualBenchmark' }
+    'Android-VisualBenchmark-Ordinary'   { 'FamilyRacing.EditorTools.FoundationBuild.ExportAndroidVisualBenchmarkOrdinary' }
+}
 $runId = [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss') + '-' + [guid]::NewGuid().ToString('N')
-$runDirectory = Join-Path $project "Builds\Android\offline\$runId"
+$runDirectory = Join-Path $project "Builds\$buildFlavor\offline\$runId"
 $logs = Join-Path $project "Logs\android-offline\$runId"
 $export = Join-Path $runDirectory 'gradle'
-$published = Join-Path $project 'Builds\Android\FamilyRacing.apk'
+$published = Join-Path $project "Builds\$buildFlavor\FamilyRacing.apk"
+# CMake/ninja enforce the classic 260-char path limit and the mandated
+# Builds\<flavor>\offline\<runId>\gradle root can exceed it once the .cxx
+# prefab tree nests inside (observed on Android-VisualBenchmark-Ordinary).
+# Gradle therefore runs through a short TEMP junction: the real export
+# stays under Builds\..., native tooling sees a path short enough to work.
+$buildAlias = Join-Path ([IO.Path]::GetTempPath()) ('aob-' + $runId.Substring(16, 8))
+$gradleProjectDir = $export
 New-Item -ItemType Directory -Path $logs -Force | Out-Null
 $resultPath = Join-Path $logs 'result.json'
 $result = [ordered]@{
@@ -26,6 +56,10 @@ $result = [ordered]@{
     offline = $true
     startedUtc = [DateTime]::UtcNow.ToString('o')
     finishedUtc = $null
+    presentation = $Presentation
+    configuration = $Configuration
+    buildFlavor = $buildFlavor
+    exportMethod = $exportMethod
     editorVersion = $editorVersion
     editorPath = $editor
     exportPath = $export
@@ -35,6 +69,7 @@ $result = [ordered]@{
     builtApk = $null
     publishedApk = $null
     apkSha256 = $null
+    gradleProjectDir = $export
     exitCode = 1
     error = ''
 }
@@ -95,7 +130,7 @@ try {
     $result.stage = 'export'
     Write-Host "Android: exporting Gradle project; log: $($result.exportLog)"
     $unityArguments = @('-batchmode', '-quit', '-projectPath', $project,
-        '-buildTarget', 'Android', '-executeMethod', 'FamilyRacing.EditorTools.FoundationBuild.ExportAndroid',
+        '-buildTarget', 'Android', '-executeMethod', $exportMethod,
         '-logFile', $result.exportLog, '--android-export-dir', $export)
     $code = Invoke-BuildProcess $editor $unityArguments $project $result.exportProcessLog
     if ($code -ne 0) {
@@ -107,12 +142,21 @@ try {
     }
 
     $result.stage = 'gradle'
+    try {
+        if (Test-Path -LiteralPath $buildAlias) { [IO.Directory]::Delete($buildAlias) }
+        New-Item -ItemType Junction -Path $buildAlias -Target $export | Out-Null
+        $gradleProjectDir = $buildAlias
+    }
+    catch {
+        Write-Host "Android: TEMP junction unavailable ($($_.Exception.Message)); building at the real export path."
+    }
+    $result.gradleProjectDir = $gradleProjectDir
     Write-Host "Android: building with bundled Gradle --offline; log: $($result.gradleLog)"
     $gradleArguments = @('-classpath', $launchers[0].FullName, 'org.gradle.launcher.GradleMain',
         '-Dorg.gradle.jvmargs=-Xmx4096m', '-Dorg.gradle.java.installations.auto-download=false',
         '-Pandroid.builder.sdkDownload=false', '--offline', '--no-daemon', '--console=plain',
-        '--project-dir', $export, ':launcher:assembleDebug')
-    $code = Invoke-BuildProcess $java $gradleArguments $export $result.gradleLog
+        '--project-dir', $gradleProjectDir, ':launcher:assembleDebug')
+    $code = Invoke-BuildProcess $java $gradleArguments $gradleProjectDir $result.gradleLog
     if ($code -ne 0) {
         $result.exitCode = $code
         throw "Offline Gradle exited $code. Missing cached dependencies require a separate authorized setup; no online retry was attempted. See $($result.gradleLog)."
@@ -136,6 +180,10 @@ catch {
     Write-Host "Android offline build failed during $($result.stage): $($result.error)"
 }
 finally {
+    if (Test-Path -LiteralPath $buildAlias) {
+        # Removes the junction only; the real export under Builds\ is untouched.
+        [IO.Directory]::Delete($buildAlias)
+    }
     $result.finishedUtc = [DateTime]::UtcNow.ToString('o')
     $result | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $resultPath -Encoding UTF8
     Write-Host "Android build evidence: $resultPath"

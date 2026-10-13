@@ -1,0 +1,195 @@
+# Visual Benchmark Runbook
+
+Milestone 4 builds a separate "Sunny Island" visual-benchmark scene on the
+proven `graybox-01` course under content version `visual-1`, measured on an
+A7 Lite tablet and a Windows PC. This runbook is the reproducible command
+surface for the benchmark content: setup, all four build flavors, and the
+evidence each build must record. Spec authority: `GAME_PLAN.md` §2–5;
+milestone plan: `docs/superpowers/plans/2026-10-13-visual-benchmark.md`.
+
+## Baseline record (Task 1, recorded 2026-10-13)
+
+| Fact | Value |
+|---|---|
+| Branch | `fix/driving-playtest-1` |
+| Baseline commit | `25d39d416d300cd902ee7ee897a0b9ecce3ad455` (`25d39d4`) |
+| Working tree at task start | **clean** — `git status --porcelain` empty; zero dirty files, so no dirty-file hashes exist to record |
+| Physics qualification source edits | **retained and committed** — the physics qualification work (commits through `def1b78`/`e67fde7`/`19c332c`) is entirely inside baseline `25d39d4`. Controller ruling: preserve the tree as-is; nothing was reset or reverted |
+| Pinned editor | Unity `6000.3.26f1` at `C:\Program Files\Unity\Hub\Editor` |
+| Render pipeline | URP 17.3.0, render scale 0.75 (enforced by `FoundationProjectSetup.EnsureUrp`) |
+
+### Known gate outcomes and failures carried into M4
+
+Source: `docs/tasks/vehicle-physics-report.md` and `docs/NETWORK_TEST_RUNBOOK.md`.
+
+- EditMode at baseline report time: 652/653 passed, 1 skipped
+  (`SkippedCheckpointCannotFinish`, pre-existing skip).
+- PlayMode: 245/247 passed, 2 environment-blocked failures —
+  `NetworkPredictionPlayTests.ImpairedLinkExercisesPredictionAndInterpolation`
+  and `PhysicsPredictionPlayTests.ImpairedLanPhysicalCorrections`
+  (impaired UTP session never establishes in this environment; not product
+  failures).
+- Open gates (all `notVerified`): impaired-LAN correction targets,
+  cross-device LAN reachability, A7 Lite device matrix, ordinary-build
+  performance, human handling acceptance, rendered frame times, Android
+  on-device behavior, IL2CPP Windows build, 3-consecutive-lap solo
+  acceptance, solo motorcycle rollover episode.
+- Ordinary Windows precedent (2026-10-13): ordinary player launched with
+  `--validation-dir` produced no `connection.json`, no token dir, no
+  listening validation socket (`Logs/run-t12-ordinary-check*`).
+- `ps4Passcode` auto-fill in `ProjectSettings.asset` is a secret-like
+  value: never committed; revert the hunk if Unity re-adds it.
+
+## Commands
+
+All Unity modes use the pinned editor and write logs under `Logs\`.
+
+| Command | Effect |
+|---|---|
+| `Tools\Verify.ps1 -Mode VisualBenchmarkSetup` | Run `FoundationProjectSetup` then `VisualBenchmarkSetup.Create` — creates missing benchmark scaffolding and validates references |
+| `Tools\Verify.ps1 -Mode WindowsVisualBenchmark` | Windows Mono **development** player of `Generated/VisualBenchmark/VisualBenchmark.unity` → `Builds\Windows-VisualBenchmark\` |
+| `Tools\Verify.ps1 -Mode WindowsVisualBenchmarkOrdinary` | Windows Mono **ordinary** player (no `DEVELOPMENT_BUILD`; validation endpoints compiled out) → `Builds\Windows-VisualBenchmark-Ordinary\` |
+| `Tools\Verify.ps1 -Mode AndroidVisualBenchmark` | Export benchmark Gradle project + offline Gradle build → `Builds\Android-VisualBenchmark\` |
+| `Tools\Verify.ps1 -Mode AndroidVisualBenchmarkOrdinary` | Same with the ordinary export entry point (no development flag) → `Builds\Android-VisualBenchmark-Ordinary\` |
+
+The Android wrapper also composes directly:
+`Tools\Build-AndroidOffline.ps1 -Presentation Graybox|VisualBenchmark -Configuration Development|Ordinary`.
+Defaults are `Graybox`/`Development`, preserving the pre-M4 behavior of
+`-Mode Android` (`Builds\Android\FamilyRacing.apk`). `Graybox`+`Ordinary`
+maps to `Builds\Android-Ordinary\` (the previously undocumented ordinary
+Android path from `docs/NETWORK_TEST_RUNBOOK.md`, now automated).
+
+### What setup guarantees
+
+`VisualBenchmarkSetup.Create()` is repeatable and non-destructive:
+
+- Creates `Assets/FamilyRacing/Generated/VisualBenchmark/`,
+  `visual-benchmark-01.asset` (`VisualBenchmarkDefinitionAsset`) and
+  `VisualBenchmark.unity` only when missing.
+- The definition carries `presentationVersion = "visual-1"`, the visible
+  `courseVisualPrefab`, and `sourceTrack` (the shared `graybox-01` track —
+  course, gates, route and recovery rules stay the single gameplay source).
+- Repairs only missing/mismatched contract references on the scene's
+  `DrivingWorld` (vehicles, track, events, tutorial, `coursePrefab`,
+  `contentVersion`). It never regenerates authored meshes, materials,
+  scene dressing or baked lighting — Task 3 owns those.
+- Throws `InvalidDataException` when a required reference cannot be
+  resolved, so builds fail honestly instead of producing partial content.
+
+## Build evidence
+
+Produced 2026-10-13/14 from the working tree at baseline `25d39d4` plus
+the uncommitted Task-1 slice (files listed in the task report). Every
+flavor builds `Generated/VisualBenchmark/VisualBenchmark.unity` only —
+the graybox `Foundation.unity` stays the default player scene.
+
+| Identity | Value |
+|---|---|
+| Scene | `Assets/FamilyRacing/Generated/VisualBenchmark/VisualBenchmark.unity` |
+| Content version | `visual-1` (player `connection.json` confirms) |
+| Track | `graybox-01` (`Generated/Driving/graybox-01.asset`) — shared, not copied |
+| Application id | `com.daniel.familyracing` (both APKs; unchanged from ProjectSettings) |
+| Save compatibility | unchanged — no PlayerSettings/profile schema changes in this slice |
+
+### `Builds\Windows-VisualBenchmark\` (Mono, development)
+
+| Item | Value |
+|---|---|
+| `FamilyRacing.exe` SHA256 | `B7CCA8B82003185F22644D0EE1C23B3640DE1B996802D4F5D0501E287011AFA6` |
+| `FamilyRacing.Core.dll` SHA256 | `AD07C53E8A1CE755E59BA8E23C9FB56485EBC74281E951928D2D2010CA4C12F9` |
+| `FamilyRacing.Runtime.dll` SHA256 | `EBC5B860D2B66BDD1CB3FDAC6D309DC79072B20EAABC346BA984996223C898A3` |
+| `level0` (scene content) SHA256 | `5229CCA9A139CF6F86FA2FA8F97DE58D9D163CC9A8E3A23811DAD6BB4C5A947D` |
+| Build result | `result=Succeeded errors=0` (~237 MB) |
+
+### `Builds\Windows-VisualBenchmark-Ordinary\` (Mono, ordinary)
+
+| Item | Value |
+|---|---|
+| `FamilyRacing.exe` SHA256 | `EB143EAD6441B6DD9D7D145ADB85410E9389FB3878899AE537E8C9869CCE38FA` |
+| `FamilyRacing.Core.dll` SHA256 | `9B58B3095E04C7886B8973D2E664C7FB81244C642C780E4174458FECF7FF44FC` |
+| `FamilyRacing.Runtime.dll` SHA256 | `7FDAD6E7F63D1692549657117D440D279FB60FC40CE64BBE87E48133DF44DF78` |
+| `level0` (scene content) SHA256 | `10C2FE6503744E3799497A0F5727FFA5C4495AD5C5693F7502B61A94BBD61606` |
+| Build result | `result=Succeeded errors=0` (~168 MB) |
+
+### `Builds\Android-VisualBenchmark\FamilyRacing.apk` (IL2CPP, development)
+
+| Item | Value |
+|---|---|
+| APK SHA256 | `E89EAC5D75883DA553952CF65D6D4B1EF9E75037BAF38FEAD360967EA08A6072` |
+| Size | 51,314,971 bytes |
+| Export entry point | `FoundationBuild.ExportAndroidVisualBenchmark` |
+| Evidence | `Logs\android-offline\20261013-214852-679d1fc30429446e96c0c7e9f282de7c\result.json` |
+
+### `Builds\Android-VisualBenchmark-Ordinary\FamilyRacing.apk` (IL2CPP, ordinary)
+
+| Item | Value |
+|---|---|
+| APK SHA256 | `DA8C47CFFBC578EF8C9838841865335101AFC230E978124D253C692EEAA97E02` |
+| Size | 45,316,579 bytes |
+| Export entry point | `FoundationBuild.ExportAndroidVisualBenchmarkOrdinary` |
+| Evidence | `Logs\android-offline\20261013-215330-a69ecdcc350b4107bec3b60ea287d769\result.json` |
+
+### Validation-endpoint absence, observed 2026-10-14
+
+- Ordinary player launched 25 s with `--validation-dir <new-empty-dir>`:
+  directory stayed **empty** — no `connection.json`, no `profiles\`, no
+  trace files — and `netstat` showed **zero listeners** owned by the
+  process (`Logs\vb-ordinary-check\val-ordinary`, run log
+  `ordinary-player.log`).
+- Positive control, same steps against the development player:
+  `connection.json` (`"contentVersion":"visual-1"`, protocol 1,
+  schema 4), `profiles\`, `capture-status.json`, `state.ndjson`, and a
+  `127.0.0.1` validation listener all appeared — the check discriminates.
+- Android ordinary: `ExportAndroidVisualBenchmarkOrdinary` omits
+  `BuildOptions.Development`, so `DEVELOPMENT_BUILD` is undefined and the
+  bridge/listener block compiles out (same mechanism as the ordinary
+  Windows player). Device-side confirmation is `notVerified` until the
+  A7 Lite is available.
+
+### Windows-path note (fixed in Task 1)
+
+CMake/ninja enforce the 260-char path limit; `Android-VisualBenchmark-Ordinary`'s
+`Builds\<flavor>\offline\<runId>\gradle\unityLibrary\.cxx\...` tree exceeded it.
+The wrapper now runs Gradle through a short TEMP junction
+(`gradleProjectDir` in `result.json`); artifacts still land under the
+mandated `Builds\<flavor>\offline\<runId>\gradle` export root.
+
+## Ordinary-build validation absence
+
+Ordinary builds must never open a validation endpoint. Check, per player:
+
+```
+$dir = "<new-empty-dir>"
+& "Builds\Windows-VisualBenchmark-Ordinary\FamilyRacing.exe" --validation-dir $dir
+# after ~20 s: $dir must contain no connection.json and no listener must
+# appear; the player log records "--validation-dir ignored ... disabled".
+```
+
+A development build run through the same steps must produce
+`connection.json` — the positive control proving the check discriminates.
+Agent runs on development players should use isolated synthetic profiles:
+`--validation-dir <dir> --validation-profile-dir <dir>\profiles`
+(the default is already `<dir>\profiles`; never pass the real user store
+except through the explicit `--validation-normal-profiles` opt-in).
+
+Android ordinary cannot be driven this way without a device; its check is
+the export entry point (`ExportAndroidVisualBenchmarkOrdinary` omits
+`BuildOptions.Development`, so `DEVELOPMENT_BUILD` is undefined and the
+bridge/listener code compiles out) plus a device-side check when hardware
+is available — recorded as `notVerified` until then.
+
+## Task-1 verification results (2026-10-14)
+
+| Check | Result |
+|---|---|
+| `Verify.ps1 -Mode VisualBenchmarkSetup` | clean run; scene wiring matches `Foundation.unity` exactly except `contentVersion: visual-1` |
+| `Verify.ps1 -Mode EditMode` | 654/655 passed, 0 failed, 1 skipped (`EveryCueHasWiredClipForBothLocales`, pre-existing `[Ignore]` — voice clips pending `AZURE_SPEECH_KEY`) |
+| `Tools\Test-VerifyTooling.ps1` | 18/18 passed |
+| `Tools\Test-AndroidOffline.ps1` | 30/30 passed |
+| `SetupTwicePreservesAuthoredAssets` / `BenchmarkSceneUsesExistingRules` | 2/2 passed — same GUIDs and byte-identical files across re-run; identical rules under `visual-1` |
+| All four build flavors | succeeded (hashes above) |
+| Ordinary validation absence | verified on Windows player; Android compiles-out by construction, device check open |
+
+Not run (environment): PlayMode suite, A7 Lite device matrix, rendered
+frame capture, on-device Android launch. The two impaired-LAN PlayMode
+failures carried from the physics report remain environment-blocked.
