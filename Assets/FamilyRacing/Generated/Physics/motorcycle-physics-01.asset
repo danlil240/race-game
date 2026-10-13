@@ -1,0 +1,49 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5e4416178ea92f043a39551e3eb48e27, type: 3}
+  m_Name: motorcycle-physics-01
+  m_EditorClassIdentifier: FamilyRacing.Runtime::FamilyRacing.VehiclePhysicsTuningAsset
+  massKg: 220
+  comOffset: {x: 0, y: -0.1, z: 0}
+  chassisSize: {x: 0.5, y: 0.9, z: 2.2}
+  inertiaMultipliers: {x: 1, y: 1, z: 1}
+  wheels:
+  - mount: {x: 0, y: -0.1, z: 0.725}
+    radius: 0.3
+    steerable: 1
+    driven: 0
+  - mount: {x: 0, y: -0.1, z: -0.725}
+    radius: 0.3
+    steerable: 0
+    driven: 1
+  suspensionRestLength: 0.3
+  suspensionExtraDroop: 0.3
+  springRatePerWheel: 18000
+  damperPerWheel: 1500
+  maxNormalLoadPerWheel: 8000
+  frictionCoefficient: 1.3
+  peakDriveForce: 1760
+  peakBrakeForce: 2200
+  cruiseSpeed: 20
+  boostSpeed: 28
+  dragCoefficient: 0.5
+  rollingResistance: 0.01
+  steerMaxRadians: 0.4363
+  steerHighSpeedRadians: 0.15
+  steerReferenceSpeed: 22
+  steerRateRadiansPerSecond: 5
+  antiRollRate: 0
+  rollDamping: 0
+  assistMaxLeanRadians: 0.7854
+  assistFallAngleRadians: 1.2217
+  balanceGain: 2500
+  balanceDamping: 800

@@ -56,8 +56,10 @@ namespace FamilyRacing
         // as airborne: a settle bounce or patchy contact can drop every
         // wheel ray for a substep or two — that is flicker, not takeoff.
         // Landing is never debounced; a formed contact is a fact.
+        // The running total lives on the persisted physics state
+        // (contactLossSeconds) so a restore replays the same debounce
+        // window instead of minting a phantom takeoff.
         private const float ContactLossDebounceSeconds = 0.05f;
-        private float unsupportedSeconds;
 
         // Injected test forces (oracle isolation): applied every substep
         // until cleared. World-frame force, optionally at a body-local
@@ -196,12 +198,14 @@ namespace FamilyRacing
                 physics.filteredSteering = source.filteredSteering;
                 physics.filteredRollRate = source.filteredRollRate;
                 physics.balancePrevError = source.balancePrevError;
+                physics.filteredLeanTarget = source.filteredLeanTarget;
                 physics.driftAmount = source.driftAmount;
                 physics.grounded = source.grounded;
                 physics.airSeconds = source.airSeconds;
                 physics.airPeakY = source.airPeakY;
                 physics.airWallContact = source.airWallContact;
                 physics.overturnedSeconds = source.overturnedSeconds;
+                physics.contactLossSeconds = source.contactLossSeconds;
                 physics.lastContact = source.lastContact ?? "none";
                 physics.recoveryEpoch = source.recoveryEpoch;
                 // Prediction restore: preserve a valid wheel history —
@@ -269,12 +273,13 @@ namespace FamilyRacing
             physics.filteredSteering = 0f;
             physics.filteredRollRate = 0f;
             physics.balancePrevError = 0f;
+            physics.filteredLeanTarget = 0f;
             physics.driftAmount = 0f;
             physics.airSeconds = 0f;
             physics.airPeakY = live.y;
             physics.airWallContact = false;
             physics.overturnedSeconds = 0f;
-            unsupportedSeconds = 0f;
+            physics.contactLossSeconds = 0f;
         }
 
         private void SyncBodyFromState()
@@ -323,10 +328,12 @@ namespace FamilyRacing
             // grounded->airborne edge only fires once contact loss has
             // proved real airtime, so suspension flicker mints no
             // becameAirborne/landed pair.
-            unsupportedSeconds = supported ? 0f : unsupportedSeconds + dt;
+            p.contactLossSeconds = supported
+                ? 0f
+                : p.contactLossSeconds + dt;
             var grounded = supported
                 || (wasGrounded
-                    && unsupportedSeconds < ContactLossDebounceSeconds);
+                    && p.contactLossSeconds < ContactLossDebounceSeconds);
             p.grounded = grounded;
             if (!grounded && wasGrounded)
                 becameAirborneThisTick = true;

@@ -293,11 +293,20 @@ namespace FamilyRacing.Core.Driving
                         radius = 0.30f, steerable = false, driven = true },
                 },
                 suspensionRestLength = 0.30f,
-                suspensionExtraDroop = 0.10f,
+                // Deep droop: the rays run along -bodyUp, so a leaned
+                // bike needs reach*cos(lean) to still touch — 0.90 m of
+                // reach keeps both contacts valid through the authored
+                // 45-degree lean bound (cuts out again past ~50 deg, so
+                // a real fall is still a fall).
+                suspensionExtraDroop = 0.30f,
                 springRatePerWheel = 18000f,
                 damperPerWheel = 1500f,
                 maxNormalLoadPerWheel = 8000f,
-                frictionCoefficient = 1.0f,
+                // Sport-tire grip: a max-lean turn demands ~1.2 g of
+                // lateral accel, so mu below ~1.3 pins the bike on the
+                // traction circle — the yaw saturates, the lean pulses,
+                // and the turn stalls in one-second cycles.
+                frictionCoefficient = 1.3f,
                 peakDriveForce = 1760f,
                 peakBrakeForce = 2200f,
                 cruiseSpeed = 20f,
@@ -310,7 +319,7 @@ namespace FamilyRacing.Core.Driving
                 assistMaxLeanRadians = 0.7854f,     // 45 degrees
                 assistFallAngleRadians = 1.2217f,   // 70 degrees
                 balanceGain = 2500f,
-                balanceDamping = 400f
+                balanceDamping = 800f
             };
         }
     }

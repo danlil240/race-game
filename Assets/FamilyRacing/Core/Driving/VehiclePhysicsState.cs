@@ -68,6 +68,11 @@ namespace FamilyRacing.Core.Driving
         public float filteredSteering;      // rate-limited steering applied (rad)
         public float filteredRollRate;      // damped roll-rate estimate (rad/s)
         public float balancePrevError;      // bike balance controller's last error (rad)
+        // Slew-limited lean target the bike balance PD actually tracks
+        // (rad). The raw atan(v*yawRate/g) demand bangs with the weave
+        // mode's yaw wobble; the persisted slew limiter keeps the PD's
+        // demand smooth AND makes the lag replayable.
+        public float filteredLeanTarget;
         // Progressive drift engagement in [0,1]: ramps up while drift
         // demand is held and back down on release, so rear lateral grip
         // eases off progressively instead of stepping.
@@ -79,6 +84,11 @@ namespace FamilyRacing.Core.Driving
         public float airPeakY;              // highest body y this airborne episode
         public bool airWallContact;         // airborne episode clipped a barrier
         public float overturnedSeconds;     // continuous inverted-support time (s)
+        // Continuous time without ANY contact support (s) — the
+        // grounded->airborne debounce window. Restored so a replayed
+        // boundary cannot mint or swallow a takeoff the original run
+        // did not see.
+        public float contactLossSeconds;
         public string lastContact = "none"; // "none"|"ground"|"wall"|"obstacle"|"vehicle"
         // Bumped on every recovery; restore/prediction key on it so stale
         // replicas can never undo a recovery.
@@ -101,12 +111,14 @@ namespace FamilyRacing.Core.Driving
                 filteredSteering = filteredSteering,
                 filteredRollRate = filteredRollRate,
                 balancePrevError = balancePrevError,
+                filteredLeanTarget = filteredLeanTarget,
                 driftAmount = driftAmount,
                 grounded = grounded,
                 airSeconds = airSeconds,
                 airPeakY = airPeakY,
                 airWallContact = airWallContact,
                 overturnedSeconds = overturnedSeconds,
+                contactLossSeconds = contactLossSeconds,
                 lastContact = lastContact,
                 recoveryEpoch = recoveryEpoch
             };
@@ -176,7 +188,8 @@ namespace FamilyRacing.Core.Driving
                 { error = "wheels.compression"; return false; }
             }
             if (!Finite(filteredSteering) || !Finite(filteredRollRate)
-                || !Finite(balancePrevError) || !Finite(driftAmount)
+                || !Finite(balancePrevError) || !Finite(filteredLeanTarget)
+                || !Finite(driftAmount)
                 || driftAmount < 0f || driftAmount > 1f)
             { error = "controller"; return false; }
             if (!Finite(airSeconds) || airSeconds < 0f)
@@ -184,6 +197,8 @@ namespace FamilyRacing.Core.Driving
             if (!Finite(airPeakY)) { error = "airPeakY"; return false; }
             if (!Finite(overturnedSeconds) || overturnedSeconds < 0f)
             { error = "overturnedSeconds"; return false; }
+            if (!Finite(contactLossSeconds) || contactLossSeconds < 0f)
+            { error = "contactLossSeconds"; return false; }
             if (lastContact == null) { error = "lastContact"; return false; }
             if (recoveryEpoch < 0) { error = "recoveryEpoch"; return false; }
             return true;

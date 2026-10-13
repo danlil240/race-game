@@ -25,7 +25,9 @@ namespace FamilyRacing.EditorTools
             EnsureFolder("Assets/FamilyRacing/Generated", "Physics");
             var carTuning = EnsureCarTuning();
             EnsureHighComTuning();
+            var bikeTuning = EnsureBikeTuning();
             EnsureVehicle(carTuning);
+            EnsureBikeVehicle(bikeTuning);
             var course = EnsureCoursePrefab();
             EnsureLabScene(course, carTuning);
             AssetDatabase.SaveAssets();
@@ -71,6 +73,19 @@ namespace FamilyRacing.EditorTools
             return asset;
         }
 
+        // Motorcycle preset: same authored-source convention — the asset
+        // is rewritten from VehiclePhysicsTuning.Motorcycle01() so the
+        // combined bike/rider tune (balance gains included) can never
+        // drift from the Core preset.
+        private static VehiclePhysicsTuningAsset EnsureBikeTuning()
+        {
+            var asset = EnsureAsset<VehiclePhysicsTuningAsset>(
+                "motorcycle-physics-01.asset");
+            asset.ApplyPreset(VehiclePhysicsTuning.Motorcycle01());
+            EditorUtility.SetDirty(asset);
+            return asset;
+        }
+
         // Physical vehicle definition: same authored VehicleTuning as
         // car-01 but selecting the opt-in PhysicalAssisted backend.
         private static void EnsureVehicle(VehiclePhysicsTuningAsset tuning)
@@ -87,6 +102,29 @@ namespace FamilyRacing.EditorTools
             asset.leanDegrees = 4f;
             asset.bodyScale = new Vector3(1.8f, 1.1f, 3.2f);
             asset.bodyColor = new Color(0.42f, 0.62f, 0.91f);
+            EditorUtility.SetDirty(asset);
+        }
+
+        // Physical motorcycle definition: the arcade-era motorcycle
+        // envelope values selecting PhysicalAssisted, paired with the
+        // motorcycle physics tuning asset. Cosmetic leanDegrees stays 0 —
+        // the physical chassis roll is real and the presentation layer
+        // must not double-apply it (Task 8 owns that visual path).
+        private static void EnsureBikeVehicle(
+            VehiclePhysicsTuningAsset tuning)
+        {
+            var asset = EnsureAsset<VehicleDefinitionAsset>(
+                "motorcycle-physics-01-vehicle.asset");
+            var preset = VehicleTuning.Motorcycle01();
+            preset.vehicleId = "motorcycle-physics-01";
+            preset.simulationBackend = VehicleSimulationBackend.PhysicalAssisted;
+            asset.ApplyPreset(preset);
+            asset.simulationBackend = VehicleSimulationBackend.PhysicalAssisted;
+            asset.physicsTuning = tuning;
+            asset.silhouette = "motorcycle";
+            asset.leanDegrees = 0f;
+            asset.bodyScale = new Vector3(0.5f, 0.9f, 2.2f);
+            asset.bodyColor = new Color(0.50f, 0.78f, 0.70f);
             EditorUtility.SetDirty(asset);
         }
 

@@ -284,6 +284,11 @@ namespace FamilyRacing
                     -tuning.rollDamping * 3f, tuning.rollDamping * 3f);
                 body.AddTorque(bodyForward * torque, ForceMode.Force);
             }
+            // The two-inline-contact layout is a motorcycle: the bounded
+            // PD lean/balance controller applies torque here — contact-
+            // aware, capped, cut past the authored fall angle, and
+            // carrying all history on the persisted physics state.
+            MotorcycleBalanceController.Apply(vehicle, input, tuning, dt);
 
             // Injected test forces last so oracles stay pure.
             if (vehicle.debugForceActive)
