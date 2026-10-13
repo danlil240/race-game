@@ -265,15 +265,32 @@ namespace FamilyRacing
                         // Ordered transient events: chassis contact first
                         // (stable record order collapsed to the peak new
                         // contact), then the airborne transition, then
-                        // the landing transition — arcade parity.
+                        // the landing transition — arcade parity. A
+                        // landing that qualifies (real airtime, real
+                        // drop, no barrier clip) emits cleanLanding
+                        // first carrying the authored credit; the rule
+                        // layer applies it so a flagged boundary can
+                        // never mint charge.
                         if (entry.body.newContactThisTick)
                             step.events.Add(new MotorEvent("contact",
                                 entry.body.peakContactSpeed));
                         if (entry.body.becameAirborneThisTick)
                             step.events.Add(new MotorEvent("becameAirborne"));
                         if (entry.body.landedThisTick)
+                        {
+                            var envelope = entry.body.envelope;
+                            if (envelope != null
+                                && entry.body.landedAirSeconds
+                                    >= envelope.landingMinAirSeconds
+                                && entry.body.landedPeakDrop
+                                    >= envelope.landingMinDrop
+                                && !entry.body.landedWallContact)
+                                step.events.Add(new MotorEvent(
+                                    "cleanLanding",
+                                    envelope.cleanLandingCredit));
                             step.events.Add(new MotorEvent("landed",
                                 entry.body.landedAirSeconds));
+                        }
                         result.path = new VehiclePathSample[3];
                         for (var s = 0; s < 3; s++)
                             result.path[s] = new VehiclePathSample

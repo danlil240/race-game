@@ -186,10 +186,17 @@ namespace FamilyRacing.Core.Racing
             this.contentVersion = contentVersion ?? "";
             countdownRemaining = evt.countdownTicks;
             if (countdownRemaining <= 0) phase = PhaseRunning;
+            // Authored poses carry surface height; the physical backend
+            // spawns the body its own settled lift above the surface so
+            // one authored pose serves every vehicle class. The legacy
+            // envelope's y is the body centre for this backend.
+            var physical = tuning.simulationBackend
+                == VehicleSimulationBackend.PhysicalAssisted
+                && tuning.physics != null;
             motor = new MotorState
             {
                 x = spawn.x,
-                y = spawn.y,
+                y = spawn.y + (physical ? tuning.physics.SettledLift() : 0f),
                 z = spawn.z,
                 heading = spawn.heading,
                 grounded = true
@@ -209,6 +216,12 @@ namespace FamilyRacing.Core.Racing
         public string Phase { get { return phase; } }
         public long SimulationTick { get { return simulationTick; } }
         public string ParticipantId { get { return participantId; } }
+
+        // Occupancy probe the coordinator installs: answers true when
+        // another racer's committed body blocks a candidate respawn
+        // pose. Null means "no peers" (solo/lab) — every candidate
+        // reads clear.
+        public Func<MotorPose, bool> PoseOccupied;
 
         // Latch a one-shot action until a simulated boundary consumes it.
         // Rejecting returns an error code and changes nothing — callers rely
@@ -378,6 +391,13 @@ namespace FamilyRacing.Core.Racing
                 motor = step.state;
                 motor.tick = simulationTick;
                 motor.recovering = false;
+                var physical = tuning.simulationBackend
+                    == VehicleSimulationBackend.PhysicalAssisted;
+                // The physical backend owns motion; the rule layer owns
+                // the drift/boost economy. A recovery-flagged boundary
+                // grants nothing, exactly like the arcade flagged step.
+                if (physical && !recoveryFlagged)
+                    AdvancePhysicalEconomy(request.input, step);
                 foreach (var motorEvent in step.events)
                 {
                     var detail = motorEvent.value != 0f
@@ -419,7 +439,14 @@ namespace FamilyRacing.Core.Racing
                 }
                 else
                 {
-                    var reason = recovery.Evaluate(motor, evt.recovery, StepSeconds);
+                    // The physical evaluator reads real contact episodes,
+                    // authored bounds and driver demand; the arcade
+                    // overload is preserved for the legacy backend.
+                    var reason = physical
+                        ? recovery.Evaluate(motor, request.input, course,
+                            evt.recovery, StepSeconds)
+                        : recovery.Evaluate(motor, evt.recovery,
+                            StepSeconds);
                     if (reason != null)
                     {
                         // Rule-requested recovery: the session commits the
@@ -510,28 +537,172 @@ namespace FamilyRacing.Core.Racing
             return CompleteStep(result);
         }
 
-        // Respawn at the last accepted safe pose: velocity and held motion
-        // (drift, active boost) reset, the existing boost charge is
-        // preserved (recovery never creates charge), the boundary is
-        // flagged `recovering` so progress/landing evaluation skips it,
-        // and the race clock keeps running via the elapsedTicks increment
-        // the caller already applied.
-        private void ApplyRecovery(string reason, string commandId,
-            VehicleTickRequest request)
+        // Drift/boost economy for the physical backend, mirroring
+        // ArcadeMotor's committed-step semantics: the shared
+        // DriftBoostRules decide flag engagement and charge flow; the
+        // forces those flags request are demands the wheel solver bounds
+        // next boundary. Physical-only differences: boost activation is
+        // refused while braking or airborne (a demand that cannot
+        // deliver must not consume the latch), and the clean-landing
+        // credit arrives as a sim-emitted event the charge applies here.
+        private void AdvancePhysicalEconomy(DriverInput input,
+            MotorStepResult step)
         {
-            var charge = motor.boostCharge;
-            motor = new MotorState
+            var wantDrift = DriftBoostRules.DriftEligible(input, motor,
+                tuning);
+            if (wantDrift && !motor.drifting)
             {
-                x = lastSafePose.x,
-                y = lastSafePose.y,
-                z = lastSafePose.z,
-                heading = lastSafePose.heading,
+                motor.drifting = true;
+                motor.driftSign = input.Steering >= 0f ? 1 : -1;
+                Emit("motor.driftStart", "", "");
+            }
+            else if (!wantDrift && motor.drifting)
+            {
+                motor.drifting = false;
+                motor.driftSign = 0;
+                Emit("motor.driftEnd", "", "");
+            }
+            if (!input.Boost) motor.boostLatched = false;
+            if (DriftBoostRules.CanStartBoostPhysical(motor, input, tuning))
+            {
+                motor.boostActive = true;
+                motor.boostLatched = true;
+                motor.boostSecondsRemaining = tuning.boostDurationSeconds;
+                Emit("motor.boostStart", "", "");
+            }
+            if (motor.boostActive)
+            {
+                motor.boostSecondsRemaining -= StepSeconds;
+                motor.boostCharge = Clamp01(motor.boostCharge
+                    - tuning.boostDrainPerSecond * StepSeconds);
+                if (DriftBoostRules.MustEndBoost(motor, input))
+                {
+                    motor.boostActive = false;
+                    motor.boostLatched = false;
+                    motor.boostSecondsRemaining = 0f;
+                    Emit("motor.boostEnd", "", "");
+                }
+            }
+            else if (motor.boostCharge < 1f)
+            {
+                motor.boostCharge = Clamp01(motor.boostCharge
+                    + DriftBoostRules.ChargeGained(motor, tuning,
+                        StepSeconds));
+            }
+            // The physical sim emits cleanLanding with the tuning credit
+            // as its value; recovery-flagged movement never reaches this
+            // path, so a respawn can never mint a landing credit.
+            if (step != null && step.events != null)
+                foreach (var ev in step.events)
+                    if (ev.kind == "cleanLanding" && ev.value > 0f)
+                        motor.boostCharge = Clamp01(
+                            motor.boostCharge + ev.value);
+        }
+
+        private static float Clamp01(float value)
+        {
+            return value < 0f ? 0f : value > 1f ? 1f : value;
+        }
+
+        // The respawn target: the last accepted safe pose unless another
+        // racer's committed body occupies it, in which case the authored
+        // course.safePoses candidates are tried in authored order and
+        // the first clear one wins. Every-candidate-blocked falls back
+        // to the primary pose — a respawn never strands the racer
+        // mid-course.
+        private MotorPose SelectRecoveryPose()
+        {
+            var probe = PoseOccupied;
+            if (probe == null || !probe(lastSafePose)) return lastSafePose;
+            if (course.safePoses != null)
+                foreach (var candidate in course.safePoses)
+                {
+                    if (!Finite(candidate.x) || !Finite(candidate.y)
+                        || !Finite(candidate.z) || !Finite(candidate.heading))
+                        continue;
+                    if (!probe(candidate)) return candidate;
+                }
+            return lastSafePose;
+        }
+
+        // The full controller reset a physical recovery carries: zero
+        // linear/angular velocity, invalidated wheel contact/damper
+        // history, cleared steering/roll/balance/drift histories and
+        // episode clocks, upright yaw attitude at the safe heading, and
+        // the bumped recovery epoch a stale replica can never undo.
+        private MotorState BuildPhysicalResetState(MotorPose pose,
+            float charge, long epoch)
+        {
+            var physics = new VehiclePhysicsState
+            {
+                wheels = new WheelPhysicsState[tuning.physics.wheels.Length],
+                grounded = true,
+                airPeakY = pose.y,
+                lastContact = "ground",
+                recoveryEpoch = epoch
+            };
+            for (var i = 0; i < physics.wheels.Length; i++)
+                physics.wheels[i] = new WheelPhysicsState { index = i };
+            var half = pose.heading * 0.5f;
+            physics.TrySetAttitude(0f, (float)Math.Sin(half), 0f,
+                (float)Math.Cos(half));
+            return new MotorState
+            {
+                x = pose.x,
+                // Authored respawn poses are surface height; restore the
+                // body its settled lift above them (per-vehicle).
+                y = pose.y + tuning.physics.SettledLift(),
+                z = pose.z,
+                heading = pose.heading,
                 grounded = true,
                 recovering = true,
                 lastContact = "ground",
                 boostCharge = charge,
-                tick = simulationTick
+                tick = simulationTick,
+                physics = physics
             };
+        }
+
+        // Respawn at the last accepted safe pose (or the first clear
+        // authored candidate when it is occupied): velocity and held
+        // motion (drift, active boost) reset, the existing boost charge
+        // is preserved (recovery never creates charge), the boundary is
+        // flagged `recovering` so progress/landing evaluation skips it,
+        // and the race clock keeps running via the elapsedTicks increment
+        // the caller already applied. The physical backend additionally
+        // resets every controller history and bumps the recovery epoch;
+        // its event detail carries the epoch after the reason.
+        private void ApplyRecovery(string reason, string commandId,
+            VehicleTickRequest request)
+        {
+            var charge = motor.boostCharge;
+            var pose = SelectRecoveryPose();
+            var detail = reason ?? "";
+            if (tuning.simulationBackend
+                    == VehicleSimulationBackend.PhysicalAssisted
+                && tuning.physics != null && tuning.physics.wheels != null)
+            {
+                var epoch = (motor.physics != null
+                    ? motor.physics.recoveryEpoch : 0L) + 1L;
+                motor = BuildPhysicalResetState(pose, charge, epoch);
+                detail = detail + "#" + epoch.ToString(
+                    System.Globalization.CultureInfo.InvariantCulture);
+            }
+            else
+            {
+                motor = new MotorState
+                {
+                    x = pose.x,
+                    y = pose.y,
+                    z = pose.z,
+                    heading = pose.heading,
+                    grounded = true,
+                    recovering = true,
+                    lastContact = "ground",
+                    boostCharge = charge,
+                    tick = simulationTick
+                };
+            }
             recovery.Reset();
             if (request != null)
             {
@@ -544,7 +715,7 @@ namespace FamilyRacing.Core.Racing
                     state = motor.Copy()
                 };
             }
-            Emit("race.recovered", commandId ?? "", reason ?? "");
+            Emit("race.recovered", commandId ?? "", detail);
         }
 
         // At most one pending action is consumed per simulated boundary.
@@ -584,7 +755,10 @@ namespace FamilyRacing.Core.Racing
                     gadget = lastInput.Gadget,
                     recover = lastInput.Recover,
                     changeCamera = lastInput.ChangeCamera,
-                    pause = lastInput.Pause
+                    pause = lastInput.Pause,
+                    brake = lastInput.Brake,
+                    hasThrottleOverride = lastInput.HasThrottleOverride,
+                    throttle = lastInput.Throttle
                 },
                 pendingActions = new List<PendingActionState>(),
                 checkpoints = new List<CheckpointMark>(),

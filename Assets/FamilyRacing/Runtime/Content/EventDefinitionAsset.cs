@@ -26,6 +26,9 @@ namespace FamilyRacing
         public float stuckSpeed = 0.75f;
         public float stuckSeconds = 3f;
         public float beachedSeconds = 8f;
+        [Header("Recovery (physical backend)")]
+        public float overturnedSeconds = 2f;
+        public float outsideBoundsSeconds = 1.5f;
 
         public EventDefinition ToEvent(out string error)
         {
@@ -47,7 +50,9 @@ namespace FamilyRacing
                     minCourseY = minCourseY,
                     stuckSpeed = stuckSpeed,
                     stuckSeconds = stuckSeconds,
-                    beachedSeconds = beachedSeconds
+                    beachedSeconds = beachedSeconds,
+                    overturnedSeconds = overturnedSeconds,
+                    outsideBoundsSeconds = outsideBoundsSeconds
                 },
                 completionCoins = completionCoins
             };

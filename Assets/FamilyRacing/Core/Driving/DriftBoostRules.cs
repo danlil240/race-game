@@ -64,6 +64,20 @@ namespace FamilyRacing.Core.Driving
                 && state.boostCharge >= tuning.boostMinCharge;
         }
 
+        // Physical-backend activation: the ordinary charge/held gates plus
+        // the physical eligibility rules — activation is refused while
+        // braking (the demand would be suppressed anyway, so it must not
+        // consume the latch) and while airborne (no traction). Refusal
+        // consumes nothing: the same held input fires once the demand is
+        // legal again.
+        public static bool CanStartBoostPhysical(MotorState state,
+            DriverInput input, VehicleTuning tuning)
+        {
+            return CanStartBoost(state, input, tuning)
+                && input.Brake <= 0f
+                && state.grounded;
+        }
+
         // A running boost ends on release, empty charge, or its bounded
         // duration — whichever comes first.
         public static bool MustEndBoost(MotorState state, DriverInput input)

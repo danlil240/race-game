@@ -95,7 +95,12 @@ namespace FamilyRacing
                 steering += 1f;
             var input = new DriverInput(steering,
                 Input.GetKey(KeyCode.Space), false, false,
-                Input.GetKeyDown(KeyCode.R), false, false, null, brake);
+                false, false, false, null, brake);
+            // R is a once-per-press recovery: the lab has no rule layer,
+            // so the press edge lands the same full controller reset the
+            // session applies (cleared histories, bumped epoch).
+            if (Input.GetKeyDown(KeyCode.R))
+                RequestRecovery();
             while (accumulator >= Tick)
             {
                 sim.Step(new List<VehicleTickRequest>
@@ -125,6 +130,41 @@ namespace FamilyRacing
                 followCamera.transform.LookAt(visual.transform.position
                     + Vector3.up * 1.2f);
             }
+        }
+
+        // The lab's manual recovery: respawn at the authored spawn with a
+        // fully reset controller — the same shape the session's physical
+        // reset builds (zero velocities, invalidated wheel/damper and
+        // controller histories, upright attitude, bumped epoch).
+        private void RequestRecovery()
+        {
+            if (sim == null || tuning == null) return;
+            var current = sim.Capture("lab");
+            var epoch = current != null && current.physics != null
+                ? current.physics.recoveryEpoch + 1L : 1L;
+            var physics = new VehiclePhysicsState
+            {
+                wheels = new WheelPhysicsState[tuning.wheels.Length],
+                grounded = true,
+                airPeakY = spawnPosition.y,
+                lastContact = "ground",
+                recoveryEpoch = epoch
+            };
+            for (var i = 0; i < physics.wheels.Length; i++)
+                physics.wheels[i] = new WheelPhysicsState { index = i };
+            var halfYaw = spawnHeadingDegrees * Mathf.Deg2Rad * 0.5f;
+            physics.TrySetAttitude(0f, Mathf.Sin(halfYaw), 0f,
+                Mathf.Cos(halfYaw));
+            sim.Restore("lab", new MotorState
+            {
+                x = spawnPosition.x,
+                y = spawnPosition.y,
+                z = spawnPosition.z,
+                heading = spawnHeadingDegrees * Mathf.Deg2Rad,
+                grounded = true,
+                lastContact = "ground",
+                physics = physics
+            });
         }
 
         private void OnDestroy()

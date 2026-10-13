@@ -21,6 +21,10 @@ namespace FamilyRacing
 
         public readonly string participantId;
         public readonly VehiclePhysicsTuning tuning;
+        // The whole vehicle envelope: physical tuning above is the force
+        // authority; this carries the rule-economy fields (landing
+        // credit thresholds, boost charge) the sim consults for events.
+        public readonly VehicleTuning envelope;
         public readonly Rigidbody body;
         public readonly BoxCollider chassis;
         public readonly PhysicsContactProbe probe;
@@ -38,6 +42,11 @@ namespace FamilyRacing
         // ordered "landed" event by the sim once per Step).
         public bool landedThisTick;
         public float landedAirSeconds;
+        // Facts captured at the landing transition for clean-landing
+        // qualification: the airborne episode's peak-to-landing drop and
+        // whether it clipped a barrier in flight.
+        public float landedPeakDrop;
+        public bool landedWallContact;
         // Grounded->airborne transition observed this tick (emitted as the
         // ordered "becameAirborne" event — arcade parity).
         public bool becameAirborneThisTick;
@@ -70,6 +79,7 @@ namespace FamilyRacing
         {
             participantId = spawn.participantId;
             tuning = spawn.tuning.physics;
+            envelope = spawn.tuning;
             var go = new GameObject("PhysicsBody-" + participantId);
             go.layer = PhysicsCourseWorld.VehicleLayer;
             chassis = go.AddComponent<BoxCollider>();
@@ -180,6 +190,7 @@ namespace FamilyRacing
                 physics.filteredSteering = source.filteredSteering;
                 physics.filteredRollRate = source.filteredRollRate;
                 physics.balancePrevError = source.balancePrevError;
+                physics.driftAmount = source.driftAmount;
                 physics.grounded = source.grounded;
                 physics.airSeconds = source.airSeconds;
                 physics.airPeakY = source.airPeakY;
@@ -252,6 +263,7 @@ namespace FamilyRacing
             physics.filteredSteering = 0f;
             physics.filteredRollRate = 0f;
             physics.balancePrevError = 0f;
+            physics.driftAmount = 0f;
             physics.airSeconds = 0f;
             physics.airPeakY = live.y;
             physics.airWallContact = false;
@@ -306,6 +318,10 @@ namespace FamilyRacing
             {
                 landedThisTick = true;
                 landedAirSeconds = priorAir;
+                // Capture the episode facts before the airborne
+                // bookkeeping clears them below.
+                landedPeakDrop = p.airPeakY - body.position.y;
+                landedWallContact = p.airWallContact;
             }
             if (grounded)
             {

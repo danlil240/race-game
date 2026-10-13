@@ -69,9 +69,45 @@ namespace FamilyRacing.Core.Racing
         }
     }
 
+    // One authored axis-aligned permitted volume for the physical
+    // backend's outside-bounds recovery. Everything inside a volume is
+    // legal space — ground, permitted jump airspace, the ramp — and any
+    // pose outside EVERY volume accrues the authored outside-bounds
+    // grace before the auto-recovery fires. The kill height
+    // (recovery.minCourseY) still applies inside a volume.
+    [Serializable]
+    public sealed class RecoveryVolume
+    {
+        public float minX;
+        public float minY;
+        public float minZ;
+        public float maxX;
+        public float maxY;
+        public float maxZ;
+
+        public bool Contains(float x, float y, float z)
+        {
+            return x >= minX && x <= maxX
+                && y >= minY && y <= maxY
+                && z >= minZ && z <= maxZ;
+        }
+
+        public RecoveryVolume Copy()
+        {
+            return (RecoveryVolume)MemberwiseClone();
+        }
+    }
+
     // Unity-free course data: the shared graybox definition both vehicles
     // drive. Geometry lives in the generated prefab; this record carries
     // the sim-facing facts (spawn, ordered checkpoints).
+    // `recoveryBounds` authors the permitted space the physical backend
+    // judges outside-bounds recovery against — including the airspace a
+    // designed jump traverses, so a real flight is never a failure.
+    // `safePoses` authors the deterministic fallback respawn candidates
+    // tried, in order, when the last accepted safe pose is occupied by
+    // another racer; they are candidates only — the primary target stays
+    // the checkpoint-derived safe pose.
     // `spawnSlots` optionally authors a multiplayer starting grid — the
     // network race coordinator seats slot N at spawnSlots[N]; solo play
     // keeps using spawnX/Y/Z/Heading and never reads them. When present
@@ -94,6 +130,8 @@ namespace FamilyRacing.Core.Racing
         public List<CheckpointGate> checkpoints = new List<CheckpointGate>();
         public List<MotorPose> spawnSlots = new List<MotorPose>();
         public List<RouteWaypoint> route = new List<RouteWaypoint>();
+        public List<RecoveryVolume> recoveryBounds = new List<RecoveryVolume>();
+        public List<MotorPose> safePoses = new List<MotorPose>();
 
         public bool Validate(out string error)
         {
@@ -149,6 +187,26 @@ namespace FamilyRacing.Core.Racing
                     if (!Finite(waypoint.radius) || waypoint.radius < 0f)
                     { error = "route.radius"; return false; }
                 }
+            if (recoveryBounds != null)
+                foreach (var volume in recoveryBounds)
+                {
+                    if (volume == null
+                        || !Finite(volume.minX) || !Finite(volume.maxX)
+                        || !Finite(volume.minY) || !Finite(volume.maxY)
+                        || !Finite(volume.minZ) || !Finite(volume.maxZ)
+                        // An inverted axis can never contain a pose.
+                        || volume.minX >= volume.maxX
+                        || volume.minY >= volume.maxY
+                        || volume.minZ >= volume.maxZ)
+                    { error = "recoveryBounds"; return false; }
+                }
+            if (safePoses != null)
+                foreach (var pose in safePoses)
+                {
+                    if (!Finite(pose.x) || !Finite(pose.y)
+                        || !Finite(pose.z) || !Finite(pose.heading))
+                    { error = "safePoses"; return false; }
+                }
             return true;
         }
 
@@ -183,6 +241,25 @@ namespace FamilyRacing.Core.Racing
                 copy.route = new List<RouteWaypoint>();
                 foreach (var waypoint in route)
                     copy.route.Add(waypoint == null ? null : waypoint.Copy());
+            }
+            if (recoveryBounds != null)
+            {
+                copy.recoveryBounds = new List<RecoveryVolume>();
+                foreach (var volume in recoveryBounds)
+                    copy.recoveryBounds.Add(
+                        volume == null ? null : volume.Copy());
+            }
+            if (safePoses != null)
+            {
+                copy.safePoses = new List<MotorPose>();
+                foreach (var pose in safePoses)
+                    copy.safePoses.Add(new MotorPose
+                    {
+                        x = pose.x,
+                        y = pose.y,
+                        z = pose.z,
+                        heading = pose.heading
+                    });
             }
             return copy;
         }

@@ -38,6 +38,14 @@ namespace FamilyRacing.Core.Racing
             internal long finishTicks;
         }
 
+        // A candidate respawn pose closer than this to a committed peer
+        // body (ground-plane distance, and vertically — a mid-jump car
+        // overhead does not block a ground spawn) is occupied. Matches
+        // the authored minimum spawn separation so a respawn can never
+        // interpenetrate a chassis.
+        private const float RecoveryOccupancyMeters
+            = CourseDefinition.MinSpawnSeparationMeters;
+
         private readonly string sessionId;
         private readonly string raceId;
         private readonly DrivingContentCatalog content;
@@ -94,6 +102,31 @@ namespace FamilyRacing.Core.Racing
                     attribution = attribution,
                     ai = attribution == "ai" ? new AiDriver(LaneFor(slot)) : null,
                     session = session
+                };
+                // Recovery placement must never overlap a peer body:
+                // the session asks this probe before choosing between
+                // the primary safe pose and the authored candidates.
+                // Committed poses only — deterministic in slot order.
+                var occupiedSlot = slot;
+                session.PoseOccupied = pose =>
+                {
+                    for (var other = 0; other < racers.Length; other++)
+                    {
+                        var peer = racers[other];
+                        if (peer == null || other == occupiedSlot
+                            || peer.session == null) continue;
+                        var motor = peer.session.Snapshot().motor;
+                        if (motor == null) continue;
+                        var dx = motor.x - pose.x;
+                        var dz = motor.z - pose.z;
+                        if (dx * dx + dz * dz
+                                < RecoveryOccupancyMeters
+                                    * RecoveryOccupancyMeters
+                            && Math.Abs(motor.y - pose.y)
+                                < RecoveryOccupancyMeters)
+                            return true;
+                    }
+                    return false;
                 };
             }
             // Per-racer "race.started" events are already staged by the

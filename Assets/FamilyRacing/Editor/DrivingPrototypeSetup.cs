@@ -126,8 +126,42 @@ namespace FamilyRacing.EditorTools
                 Gate("gate-3", 95f, 0f, 0f, -1f),
                 Gate("gate-4", 50f, -55f, -1f, 0f)
             };
+            // The permitted space for the physical backend's
+            // outside-bounds recovery: the whole walled arena plus the
+            // ramp's jump airspace, so a designed flight is never a
+            // failure. Falling below the slab still hits minCourseY.
+            asset.recoveryBounds = new[]
+            {
+                new TrackDefinitionAsset.BoundsVolume
+                {
+                    min = new Vector3(-125f, -2f, -85f),
+                    max = new Vector3(125f, 30f, 85f)
+                }
+            };
+            // Deterministic respawn fallbacks beside the gate recover
+            // points, tried in order when the primary safe pose is
+            // occupied by another racer.
+            asset.safePoses = new[]
+            {
+                SafePose(4.5f, -63f, 0f),
+                SafePose(-4.5f, -63f, 0f),
+                SafePose(5f, 22f, 0f),
+                SafePose(52f, 50.5f, 90f),
+                SafePose(90.5f, -5f, 180f),
+                SafePose(55f, -52f, -90f)
+            };
             EditorUtility.SetDirty(asset);
             return asset;
+        }
+
+        private static TrackDefinitionAsset.SpawnSlot SafePose(
+            float x, float z, float headingDegrees)
+        {
+            return new TrackDefinitionAsset.SpawnSlot
+            {
+                position = new Vector3(x, 0f, z),
+                headingDegrees = headingDegrees
+            };
         }
 
         private static TrackDefinitionAsset.Gate Gate(

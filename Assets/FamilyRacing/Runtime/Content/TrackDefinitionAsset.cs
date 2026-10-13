@@ -48,12 +48,28 @@ namespace FamilyRacing
             public float radius;
         }
 
+        // One authored axis-aligned permitted volume for the physical
+        // backend's outside-bounds recovery. Author ground, ramps and
+        // permitted jump airspace inside a volume — airtime inside one
+        // is never a failure.
+        [Serializable]
+        public sealed class BoundsVolume
+        {
+            public Vector3 min;
+            public Vector3 max;
+        }
+
         public string courseId = "graybox-01";
         public Vector3 spawnPosition = new Vector3(0f, 0f, -60f);
         public float spawnHeadingDegrees;
         public Gate[] gates = new Gate[0];
         public SpawnSlot[] spawnSlots = new SpawnSlot[0];
         public RoutePoint[] aiRoute = new RoutePoint[0];
+        [Header("Physical recovery")]
+        public BoundsVolume[] recoveryBounds = new BoundsVolume[0];
+        // Deterministic fallback respawn candidates tried in order when
+        // the checkpoint-derived safe pose is occupied.
+        public SpawnSlot[] safePoses = new SpawnSlot[0];
 
         public CourseDefinition ToCourse(out string error)
         {
@@ -106,6 +122,32 @@ namespace FamilyRacing
                         x = point.x,
                         z = point.z,
                         radius = point.radius
+                    });
+                }
+            if (recoveryBounds != null)
+                foreach (var volume in recoveryBounds)
+                {
+                    if (volume == null) continue;
+                    course.recoveryBounds.Add(new RecoveryVolume
+                    {
+                        minX = volume.min.x,
+                        minY = volume.min.y,
+                        minZ = volume.min.z,
+                        maxX = volume.max.x,
+                        maxY = volume.max.y,
+                        maxZ = volume.max.z
+                    });
+                }
+            if (safePoses != null)
+                foreach (var candidate in safePoses)
+                {
+                    if (candidate == null) continue;
+                    course.safePoses.Add(new MotorPose
+                    {
+                        x = candidate.position.x,
+                        y = candidate.position.y,
+                        z = candidate.position.z,
+                        heading = candidate.headingDegrees * Mathf.Deg2Rad
                     });
                 }
             if (!course.Validate(out error))

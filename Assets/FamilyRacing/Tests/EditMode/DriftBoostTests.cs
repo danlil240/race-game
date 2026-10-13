@@ -993,6 +993,194 @@ namespace FamilyRacing.Tests
             return null;
         }
 
+        // --- physical-backend economy (session-owned) ---------------------
+        // For the physical backend the rule layer — not a motor step —
+        // advances the drift/boost economy each committed boundary: the
+        // same charge/activation/duration/credit semantics as the arcade
+        // motor, plus the physical rule that boost activation is refused
+        // while braking. The fake simulation below returns an honest
+        // physics-envelope state so the session runs its physical path
+        // without Unity.
+
+        private sealed class FakePhysicalSimulation : IVehicleSimulation
+        {
+            internal float speed = 12f;
+            internal bool grounded = true;
+
+            public void Initialize(IReadOnlyList<VehicleSpawn> vehicles) { }
+
+            public IReadOnlyList<VehicleTickResult> Step(
+                IReadOnlyList<VehicleTickRequest> requests)
+            {
+                var results = new List<VehicleTickResult>();
+                if (requests == null) return results;
+                foreach (var request in requests)
+                {
+                    var state = request.rulesBefore != null
+                        ? request.rulesBefore.Copy()
+                        : new MotorState();
+                    if (request.simulateMotion)
+                    {
+                        if (state.physics == null)
+                            state.physics = Physics();
+                        state.speed = speed;
+                        state.grounded = grounded;
+                        state.physics.grounded = grounded;
+                        state.z += speed * Dt;
+                    }
+                    var pose = state.Pose;
+                    results.Add(new VehicleTickResult
+                    {
+                        participantId = request.participantId,
+                        step = new MotorStepResult { state = state },
+                        path = new[]
+                        {
+                            new VehiclePathSample
+                                { offsetSeconds = 0f, pose = pose },
+                            new VehiclePathSample
+                                { offsetSeconds = 1f / 60f, pose = pose },
+                            new VehiclePathSample
+                                { offsetSeconds = 1f / 30f, pose = pose }
+                        }
+                    });
+                }
+                return results;
+            }
+
+            public void Restore(string participantId, MotorState state) { }
+            public MotorState Capture(string participantId) { return null; }
+            public void Dispose() { }
+
+            private static VehiclePhysicsState Physics()
+            {
+                var physics = new VehiclePhysicsState
+                {
+                    wheels = new WheelPhysicsState[4]
+                };
+                for (var i = 0; i < physics.wheels.Length; i++)
+                    physics.wheels[i] = new WheelPhysicsState { index = i };
+                return physics;
+            }
+        }
+
+        private static VehicleTuning PhysicalCar()
+        {
+            var tuning = VehicleTuning.Car01();
+            tuning.simulationBackend = VehicleSimulationBackend.PhysicalAssisted;
+            tuning.physics = VehiclePhysicsTuning.Car01();
+            return tuning;
+        }
+
+        private static DrivingSession NewPhysicalSession()
+        {
+            return NewSession(StraightCourse(), PhysicalCar());
+        }
+
+        private static DriverInput BrakeBoostInput()
+        {
+            return new DriverInput(0f, false, true, false, false, false,
+                false, null, 1f);
+        }
+
+        // The coordinator boundary the session and simulation share.
+        private static DrivingStepResult Tick(DrivingSession session,
+            IVehicleSimulation sim, DriverInput input)
+        {
+            var request = session.PrepareStep(input);
+            if (request == null) return session.CompleteStep(null);
+            if (request.reset != null)
+                sim.Restore(request.reset.participantId, request.reset.state);
+            var results = sim.Step(new[] { request });
+            var result = session.CompleteStep(
+                results != null && results.Count > 0 ? results[0] : null);
+            if (result != null && result.reset != null)
+                sim.Restore(result.reset.participantId, result.reset.state);
+            return result;
+        }
+
+        [Test]
+        public void PhysicalBoostActivatesDrainsAndEnds()
+        {
+            var session = NewPhysicalSession();
+            var sim = new FakePhysicalSimulation();
+            var sawStart = false;
+            var sawEnd = false;
+            for (var i = 0; i < 300; i++)
+            {
+                var result = Tick(session, sim, Input(0f, false, true));
+                sawStart |= CountEvent(result.events, "motor.boostStart") > 0;
+                sawEnd |= CountEvent(result.events, "motor.boostEnd") > 0;
+            }
+            var motor = session.Snapshot().motor;
+            Assert.That(sawStart, Is.True,
+                "a held boost with charge must fire on the physical "
+                + "backend too");
+            Assert.That(sawEnd, Is.True,
+                "the bounded duration must end the boost");
+            Assert.That(motor.boostCharge, Is.LessThan(1f),
+                "the boost drained real charge");
+            Assert.That(motor.boostActive, Is.False);
+        }
+
+        [Test]
+        public void PhysicalBoostActivationRefusedWhileBraking()
+        {
+            var session = NewPhysicalSession();
+            var sim = new FakePhysicalSimulation();
+            var starts = 0;
+            for (var i = 0; i < 60; i++)
+            {
+                var result = Tick(session, sim, BrakeBoostInput());
+                starts += CountEvent(result.events, "motor.boostStart");
+                Assert.That(session.Snapshot().motor.boostActive, Is.False,
+                    "boost activation is refused while braking");
+            }
+            Assert.That(starts, Is.Zero);
+            // Releasing the brake with boost still held lets the same
+            // charge fire — refusal is not a consumption.
+            var released = Tick(session, sim, Input(0f, false, true));
+            Assert.That(CountEvent(released.events, "motor.boostStart"),
+                Is.EqualTo(1));
+        }
+
+        [Test]
+        public void PhysicalDriftFlagFollowsArcadeEligibility()
+        {
+            var session = NewPhysicalSession();
+            var sim = new FakePhysicalSimulation { speed = 12f };
+            var result = Tick(session, sim, Input(1f, true, false));
+            Assert.That(CountEvent(result.events, "motor.driftStart"),
+                Is.EqualTo(1),
+                "held drift + steering at speed must engage the flag");
+            Assert.That(session.Snapshot().motor.drifting, Is.True);
+            result = Tick(session, sim, Neutral());
+            Assert.That(CountEvent(result.events, "motor.driftEnd"),
+                Is.EqualTo(1));
+            Assert.That(session.Snapshot().motor.drifting, Is.False);
+        }
+
+        [Test]
+        public void PhysicalDriftChargesBoostMeter()
+        {
+            var seeded = NewPhysicalSession();
+            var sim = new FakePhysicalSimulation { speed = 12f };
+            // Drain the full starting meter to a known low charge.
+            DriverInput boost = Input(0f, false, true);
+            for (var i = 0; i < 200
+                && seeded.Snapshot().motor.boostCharge > 0.2f; i++)
+                Tick(seeded, sim, boost);
+            var before = seeded.Snapshot().motor.boostCharge;
+            Assert.That(before, Is.LessThan(0.9f),
+                "setup: the boost must have drained the meter");
+            for (var i = 0; i < 60; i++)
+                Tick(seeded, sim, Input(1f, true, false));
+            Assert.That(seeded.Snapshot().motor.drifting, Is.True);
+            Assert.That(seeded.Snapshot().motor.boostCharge,
+                Is.GreaterThan(before + 0.1f),
+                "held physical drift charges the meter at the authored "
+                + "rate");
+        }
+
         // --- vehicle class parity ----------------------------------------------
 
         [Test]

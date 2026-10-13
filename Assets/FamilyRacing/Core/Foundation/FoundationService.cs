@@ -433,7 +433,10 @@ namespace FamilyRacing.Core.Foundation
                     gadget = input.Gadget,
                     recover = input.Recover,
                     changeCamera = input.ChangeCamera,
-                    pause = input.Pause
+                    pause = input.Pause,
+                    brake = input.Brake,
+                    hasThrottleOverride = input.HasThrottleOverride,
+                    throttle = input.Throttle
                 },
                 slots = new List<SlotState>(),
                 savedProfile = CopyProfile(savedProfile),

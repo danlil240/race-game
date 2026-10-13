@@ -24,3 +24,5 @@ MonoBehaviour:
   stuckSpeed: 0.75
   stuckSeconds: 3
   beachedSeconds: 8
+  overturnedSeconds: 2
+  outsideBoundsSeconds: 1.5

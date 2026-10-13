@@ -28,9 +28,11 @@ namespace FamilyRacing
         // Below this longitudinal contact speed the brake hold may cancel
         // gravity along the slope within the grip budget.
         private const float BrakeHoldMaxSpeed = 0.6f;
-        // Drift progressively unloads rear lateral grip — a demand scale,
-        // never a sideways velocity kick.
+        // Drift progressively unloads rear lateral grip — a demand scale
+        // that ramps in over DriftRampSeconds, never a sideways velocity
+        // kick. Release ramps the grip back the same way.
         private const float DriftRearLateralScale = 0.35f;
+        private const float DriftRampSeconds = 0.5f;
         // Rolling resistance never acts below this speed: a stopped car
         // must not creep.
         private const float RollingResistanceMinSpeed = 0.4f;
@@ -165,7 +167,13 @@ namespace FamilyRacing
             var cruiseTarget = boost ? tuning.boostSpeed : tuning.cruiseSpeed;
             // Any positive brake suppresses engine/boost drive force.
             var throttle = braking ? 0f : input.Throttle;
-            var drifting = input.Drift;
+            // Drift engagement is a progressive ramp on the persisted
+            // state: the first instants of a held drift keep most of the
+            // rear axle's bite, so the slide builds instead of kicking.
+            physics.driftAmount = Mathf.Clamp01(physics.driftAmount
+                + (input.Drift ? dt : -dt) / DriftRampSeconds);
+            var rearLateralScale = Mathf.Lerp(1f, DriftRearLateralScale,
+                physics.driftAmount);
             var gravity = -VehiclePhysicsTuning.StandardGravity;
             for (var i = 0; i < specs.Length; i++)
             {
@@ -216,8 +224,8 @@ namespace FamilyRacing
                 // Lateral demand arrests contact slide within one step;
                 // the friction ellipse below bounds what is delivered.
                 var lateral = -vehicle.wheelLatSpeed[i] * supportedMass / dt;
-                if (drifting && !spec.steerable)
-                    lateral *= DriftRearLateralScale;
+                if (!spec.steerable)
+                    lateral *= rearLateralScale;
                 var tire = VehicleForceModel.LimitTireForces(
                     longitudinal, lateral, normalLoad,
                     tuning.frictionCoefficient);
@@ -249,10 +257,19 @@ namespace FamilyRacing
                         * totalNormal), ForceMode.Force);
                 }
             }
+            // Ground assists are contact-governed and cut at the authored
+            // fall angle: past it the vehicle is falling/rolling and the
+            // recovery rules own the outcome — assist torque must never
+            // hold a fallen pose.
+            var groundAssist = VehicleAssistRules.CanApplyGroundAssist(
+                    physics)
+                && Vector3.Dot(bodyUp, Vector3.up)
+                    >= Mathf.Cos(tuning.assistFallAngleRadians);
             // Optional anti-roll spring coupling left/right compression on
             // each axle — assists never author attitude and stay off
             // unless authored (antiRollRate > 0).
-            if (tuning.antiRollRate > 0f && specs.Length == 4)
+            if (tuning.antiRollRate > 0f && specs.Length == 4
+                && groundAssist)
             {
                 ApplyAntiRollPair(vehicle, 0, 1);
                 ApplyAntiRollPair(vehicle, 2, 3);
@@ -260,7 +277,7 @@ namespace FamilyRacing
             // Bounded roll damping: torque opposing the roll-rate
             // component of angular velocity, capped so it can never
             // prevent every rollover.
-            if (tuning.rollDamping > 0f)
+            if (tuning.rollDamping > 0f && groundAssist)
             {
                 var rollRate = Vector3.Dot(body.angularVelocity, bodyForward);
                 var torque = Mathf.Clamp(-rollRate * tuning.rollDamping,

@@ -509,6 +509,510 @@ namespace FamilyRacing.Tests
             Assert.That(session.Snapshot().phase, Is.EqualTo("countdown"));
         }
 
+        // --- physical-mode recovery evaluator ---------------------------------
+        // The physical backend evaluates recovery from real contact
+        // episodes (wheel/body contacts, bounds volumes, overturned
+        // support) and driver demand — never from raw airtime or a
+        // stopped pose alone. These rules are Unity-free so they run in
+        // the Core harness; the integrated PhysX cases live in
+        // PhysicsRecoveryPlayTests.
+
+        private static MotorState PhysicalMotor(bool grounded = true,
+            float speed = 0.1f, string lastContact = "ground")
+        {
+            var motor = new MotorState
+            {
+                grounded = grounded,
+                speed = speed,
+                lastContact = lastContact
+            };
+            var physics = new VehiclePhysicsState
+            {
+                wheels = new WheelPhysicsState[4]
+            };
+            for (var i = 0; i < 4; i++)
+                physics.wheels[i] = new WheelPhysicsState { index = i };
+            physics.grounded = grounded;
+            motor.physics = physics;
+            return motor;
+        }
+
+        private static DriverInput BrakeHeld()
+        {
+            return new DriverInput(0f, false, false, false, false, false,
+                false, null, 1f);
+        }
+
+        private static DriverInput Coasting()
+        {
+            // Explicit throttle override of 0 = deliberate coast.
+            return new DriverInput(0f, false, false, false, false, false,
+                false, 0f, 0f);
+        }
+
+        private static CourseDefinition BoundedCourse()
+        {
+            var course = StraightCourse();
+            course.recoveryBounds.Add(new RecoveryVolume
+            {
+                minX = -120f, minY = -4f, minZ = -120f,
+                maxX = 120f, maxY = 40f, maxZ = 120f
+            });
+            return course;
+        }
+
+        [Test]
+        public void RecoverySettingsCarryPhysicalThresholds()
+        {
+            var settings = new RecoverySettings();
+            Assert.That(settings.overturnedSeconds, Is.EqualTo(2f),
+                "auto-recovery after 2 s continuous overturned contact");
+            Assert.That(settings.outsideBoundsSeconds, Is.EqualTo(1.5f),
+                "1.5 s authored-bounds grace");
+            string error;
+            Assert.That(settings.Validate(out error), Is.True, error);
+            var copy = settings.Copy();
+            Assert.That(copy.overturnedSeconds, Is.EqualTo(2f));
+            Assert.That(copy.outsideBoundsSeconds, Is.EqualTo(1.5f));
+        }
+
+        [Test]
+        public void PhysicalBrakeHeldForTenSecondsDoesNotRecover()
+        {
+            var rules = new RecoveryRules();
+            var settings = new RecoverySettings();
+            var motor = PhysicalMotor();
+            var brake = BrakeHeld();
+            var recoveries = 0;
+            for (var i = 0; i < 300; i++) // 10 s at 30 Hz
+            {
+                if (rules.Evaluate(motor, brake, StraightCourse(),
+                        settings, Dt) != null)
+                    recoveries++;
+            }
+            Assert.That(recoveries, Is.Zero,
+                "deliberately braking to a stop must never trigger "
+                + "beached recovery");
+        }
+
+        [Test]
+        public void PhysicalCoastingParkDoesNotRecover()
+        {
+            var rules = new RecoveryRules();
+            var settings = new RecoverySettings();
+            var motor = PhysicalMotor();
+            var coast = Coasting();
+            var recoveries = 0;
+            for (var i = 0; i < 300; i++)
+            {
+                if (rules.Evaluate(motor, coast, StraightCourse(),
+                        settings, Dt) != null)
+                    recoveries++;
+            }
+            Assert.That(recoveries, Is.Zero,
+                "an explicit throttle-zero coast to a stop is deliberate "
+                + "parking, not a beached vehicle");
+        }
+
+        [Test]
+        public void PhysicalStuckRequiresDriveDemandAndBlockedProgress()
+        {
+            var rules = new RecoveryRules();
+            var settings = new RecoverySettings
+            {
+                stuckSeconds = 0.5f,
+                beachedSeconds = 0.5f
+            };
+            // Auto-throttle held against open ground: drive is requested
+            // but nothing moves — the beached fallback still fires.
+            var motor = PhysicalMotor(lastContact: "ground");
+            string reason = null;
+            for (var i = 0; i < 300 && reason == null; i++)
+                reason = rules.Evaluate(motor, Neutral(), StraightCourse(),
+                    settings, Dt);
+            Assert.That(reason, Is.EqualTo("beached"),
+                "drive requested with progress blocked on open ground "
+                + "is still a recovery");
+
+            rules.Reset();
+            // The same stopped pose against a wall is "stuck".
+            motor = PhysicalMotor(lastContact: "wall");
+            reason = null;
+            for (var i = 0; i < 300 && reason == null; i++)
+                reason = rules.Evaluate(motor, Neutral(), StraightCourse(),
+                    settings, Dt);
+            Assert.That(reason, Is.EqualTo("stuck"));
+        }
+
+        [Test]
+        public void PhysicalInvertedSupportedForTwoSecondsRecoversOnce()
+        {
+            var rules = new RecoveryRules();
+            var settings = new RecoverySettings();
+            var motor = PhysicalMotor();
+            var before = 0;
+            // 1.9 s of continuous overturned support: no recovery yet.
+            for (var i = 0; i < 57; i++)
+            {
+                motor.physics.overturnedSeconds += Dt;
+                if (rules.Evaluate(motor, Neutral(), StraightCourse(),
+                        settings, Dt) != null)
+                    before++;
+            }
+            Assert.That(before, Is.Zero,
+                "overturned contact under 2 s must not recover");
+            motor.physics.overturnedSeconds = 2f;
+            Assert.That(rules.Evaluate(motor, Neutral(), StraightCourse(),
+                    settings, Dt), Is.EqualTo("overturned"));
+        }
+
+        [Test]
+        public void PhysicalValidTwoSecondJumpDoesNotRecover()
+        {
+            var rules = new RecoveryRules();
+            var settings = new RecoverySettings();
+            var course = BoundedCourse();
+            // A real jump inside the permitted volume: 2 s of airtime is
+            // longer than the arcade offCourseSeconds window and must
+            // still not be a failure.
+            var motor = PhysicalMotor(grounded: false, speed: 15f,
+                lastContact: "none");
+            motor.y = 12f;
+            var recoveries = 0;
+            for (var i = 0; i < 75; i++) // 2.5 s airborne, inside bounds
+            {
+                motor.physics.airSeconds += Dt;
+                motor.airSeconds = motor.physics.airSeconds;
+                if (rules.Evaluate(motor, Neutral(), course, settings,
+                        Dt) != null)
+                    recoveries++;
+            }
+            Assert.That(recoveries, Is.Zero,
+                "airtime inside the permitted jump volume is not a "
+                + "failure");
+        }
+
+        [Test]
+        public void PhysicalOutsideBoundsGraceThenRecovers()
+        {
+            var rules = new RecoveryRules();
+            var settings = new RecoverySettings();
+            var course = BoundedCourse();
+            var motor = PhysicalMotor(speed: 15f, lastContact: "ground");
+            motor.x = 200f; // outside every authored volume
+            var recoveries = 0;
+            for (var i = 0; i < 44; i++) // 1.47 s outside: inside grace
+            {
+                if (rules.Evaluate(motor, Neutral(), course, settings,
+                        Dt) != null)
+                    recoveries++;
+            }
+            Assert.That(recoveries, Is.Zero,
+                "the authored-bounds grace is 1.5 s, not instant");
+            string reason = null;
+            for (var i = 0; i < 10 && reason == null; i++)
+                reason = rules.Evaluate(motor, Neutral(), course,
+                    settings, Dt);
+            Assert.That(reason, Is.EqualTo("outsideBounds"));
+            // Re-entering the volume clears the episode timer.
+            rules.Reset();
+            motor.x = 0f;
+            Assert.That(rules.Evaluate(motor, Neutral(), course,
+                settings, Dt), Is.Null);
+            motor.x = 200f;
+            for (var i = 0; i < 44; i++)
+                Assert.That(rules.Evaluate(motor, Neutral(), course,
+                    settings, Dt), Is.Null,
+                    "the outside-bounds timer restarts after re-entry");
+        }
+
+        [Test]
+        public void PhysicalKillHeightStillRecovers()
+        {
+            var rules = new RecoveryRules();
+            var settings = new RecoverySettings { minCourseY = -5f };
+            var motor = PhysicalMotor(grounded: false, speed: 10f,
+                lastContact: "none");
+            motor.y = -6f;
+            Assert.That(rules.Evaluate(motor, Neutral(), BoundedCourse(),
+                settings, Dt), Is.EqualTo("offCourse"),
+                "the kill height remains an immediate recovery even "
+                + "inside the horizontal bounds volume");
+        }
+
+        [Test]
+        public void CourseRecoveryBoundsAndSafePosesValidateAndCopy()
+        {
+            var course = StraightCourse();
+            course.recoveryBounds.Add(new RecoveryVolume
+            {
+                minX = -10f, minY = -2f, minZ = -10f,
+                maxX = 10f, maxY = 5f, maxZ = 10f
+            });
+            course.safePoses.Add(new MotorPose { x = 3f, z = -50f });
+            string error;
+            Assert.That(course.Validate(out error), Is.True, error);
+
+            var copy = course.Copy();
+            Assert.That(copy.recoveryBounds.Count, Is.EqualTo(1));
+            Assert.That(copy.safePoses.Count, Is.EqualTo(1));
+            copy.recoveryBounds[0].minX = -999f;
+            var moved = copy.safePoses[0];
+            moved.x = 42f;
+            copy.safePoses[0] = moved;
+            Assert.That(course.recoveryBounds[0].minX, Is.EqualTo(-10f),
+                "copied bounds must not alias the original");
+            Assert.That(course.safePoses[0].x, Is.EqualTo(3f));
+
+            // An inverted volume can never be authored.
+            var broken = StraightCourse();
+            broken.recoveryBounds.Add(new RecoveryVolume
+            {
+                minX = 10f, maxX = -10f, minY = -1f, maxY = 1f,
+                minZ = -1f, maxZ = 1f
+            });
+            Assert.That(broken.Validate(out error), Is.False,
+                "min > max bounds must fail validation");
+            Assert.That(error, Is.EqualTo("recoveryBounds"));
+        }
+
+        // A minimal physical IVehicleSimulation for CoreOffline session
+        // tests: returns the prepared rulesBefore plus an attached
+        // physics envelope, advancing z and the overturned clock when
+        // inverted so the session's recovery and economy paths run end
+        // to end without Unity.
+        private sealed class FakePhysicalSimulation : IVehicleSimulation
+        {
+            internal float speed = 10f;
+            internal bool inverted;
+            internal int restoreCalls;
+
+            public void Initialize(IReadOnlyList<VehicleSpawn> vehicles) { }
+
+            public IReadOnlyList<VehicleTickResult> Step(
+                IReadOnlyList<VehicleTickRequest> requests)
+            {
+                var results = new List<VehicleTickResult>();
+                if (requests == null) return results;
+                foreach (var request in requests)
+                {
+                    var state = request.rulesBefore != null
+                        ? request.rulesBefore.Copy()
+                        : new MotorState();
+                    if (request.simulateMotion)
+                    {
+                        if (state.physics == null)
+                            state.physics = Physics();
+                        state.speed = speed;
+                        state.grounded = true;
+                        state.physics.grounded = true;
+                        state.z += speed * Dt;
+                        if (inverted)
+                            state.physics.overturnedSeconds += Dt;
+                        else
+                            state.physics.overturnedSeconds = 0f;
+                    }
+                    var pose = state.Pose;
+                    results.Add(new VehicleTickResult
+                    {
+                        participantId = request.participantId,
+                        step = new MotorStepResult { state = state },
+                        path = new[]
+                        {
+                            new VehiclePathSample
+                                { offsetSeconds = 0f, pose = pose },
+                            new VehiclePathSample
+                                { offsetSeconds = 1f / 60f, pose = pose },
+                            new VehiclePathSample
+                                { offsetSeconds = 1f / 30f, pose = pose }
+                        }
+                    });
+                }
+                return results;
+            }
+
+            public void Restore(string participantId, MotorState state)
+            {
+                restoreCalls++;
+                // The body's reset clears the episode clocks a real
+                // restore would: an uprighted car is no longer inverted.
+                inverted = false;
+            }
+
+            public MotorState Capture(string participantId)
+            {
+                return null;
+            }
+
+            public void Dispose() { }
+
+            internal static VehiclePhysicsState Physics()
+            {
+                var physics = new VehiclePhysicsState
+                {
+                    wheels = new WheelPhysicsState[4]
+                };
+                for (var i = 0; i < physics.wheels.Length; i++)
+                    physics.wheels[i] = new WheelPhysicsState { index = i };
+                return physics;
+            }
+        }
+
+        private static VehicleTuning PhysicalCar()
+        {
+            var tuning = VehicleTuning.Car01();
+            tuning.simulationBackend = VehicleSimulationBackend.PhysicalAssisted;
+            tuning.physics = VehiclePhysicsTuning.Car01();
+            return tuning;
+        }
+
+        private static DrivingSession NewPhysicalSession(
+            CourseDefinition course, RecoverySettings recovery = null)
+        {
+            var evt = new EventDefinition
+            {
+                id = "e",
+                courseId = course.id,
+                laps = 1,
+                countdownTicks = 0,
+                vehicleIds = new List<string> { "car-01" },
+                recovery = recovery ?? new RecoverySettings()
+            };
+            return new DrivingSession("race-1", PhysicalCar(), course, evt,
+                "v", "start-cmd");
+        }
+
+        // The coordinator boundary the session + simulation share:
+        // prepare -> pending reset -> one batch -> complete ->
+        // rule-requested reset — the same shape NetworkRace and the solo
+        // service run.
+        private static DrivingStepResult Tick(DrivingSession session,
+            IVehicleSimulation sim, DriverInput input)
+        {
+            var request = session.PrepareStep(input);
+            if (request == null) return session.CompleteStep(null);
+            if (request.reset != null)
+                sim.Restore(request.reset.participantId, request.reset.state);
+            var results = sim.Step(new[] { request });
+            var result = session.CompleteStep(
+                results != null && results.Count > 0 ? results[0] : null);
+            if (result != null && result.reset != null)
+                sim.Restore(result.reset.participantId, result.reset.state);
+            return result;
+        }
+
+        [Test]
+        public void PhysicalSessionInvertedForTwoSecondsRecoversOnce()
+        {
+            var session = NewPhysicalSession(StraightCourse());
+            var sim = new FakePhysicalSimulation { inverted = true };
+            var before2Seconds = 0;
+            var after = 0;
+            for (var i = 0; i < 120; i++) // 4 s at 30 Hz
+            {
+                var result = Tick(session, sim, Neutral());
+                if (Find(result.events, "race.recovered") != null)
+                {
+                    if (i < 58) before2Seconds++;
+                    else after++;
+                }
+            }
+            Assert.That(before2Seconds, Is.Zero,
+                "no recovery before 2 s of continuous overturned support");
+            Assert.That(after, Is.EqualTo(1),
+                "exactly one recovery once the threshold is crossed — "
+                + "the reset clears the overturned clock");
+            Assert.That(session.Snapshot().motor.physics.recoveryEpoch,
+                Is.EqualTo(1), "the recovery bumped the epoch");
+            Assert.That(sim.restoreCalls, Is.GreaterThanOrEqualTo(1),
+                "the rule-requested reset reached the body");
+        }
+
+        [Test]
+        public void PhysicalRecoveryClearsMotionAndControllerHistories()
+        {
+            var session = NewPhysicalSession(StraightCourse());
+            var sim = new FakePhysicalSimulation { speed = 12f };
+            Tick(session, sim, Neutral());
+            var committed = session.Snapshot().motor;
+            Assert.That(committed.physics, Is.Not.Null,
+                "the physical backend commits a physics envelope");
+            var chargeBefore = committed.boostCharge;
+
+            session.QueuePending("recover", "cmd-rec", out _);
+            Tick(session, sim, Neutral());
+            var motor = session.Snapshot().motor;
+            Assert.That(motor.speed, Is.EqualTo(0f));
+            Assert.That(motor.lateralSpeed, Is.EqualTo(0f));
+            Assert.That(motor.drifting, Is.False);
+            Assert.That(motor.boostActive, Is.False);
+            Assert.That(motor.boostCharge,
+                Is.EqualTo(chargeBefore).Within(0.001f),
+                "recovery preserves, never creates, boost charge");
+            Assert.That(motor.physics, Is.Not.Null);
+            Assert.That(motor.physics.recoveryEpoch, Is.EqualTo(1));
+            Assert.That(motor.physics.velocityX, Is.EqualTo(0f));
+            Assert.That(motor.physics.velocityY, Is.EqualTo(0f));
+            Assert.That(motor.physics.velocityZ, Is.EqualTo(0f));
+            Assert.That(motor.physics.angularVelocityX, Is.EqualTo(0f));
+            Assert.That(motor.physics.filteredSteering, Is.EqualTo(0f));
+            Assert.That(motor.physics.filteredRollRate, Is.EqualTo(0f));
+            Assert.That(motor.physics.driftAmount, Is.EqualTo(0f));
+            Assert.That(motor.physics.overturnedSeconds, Is.EqualTo(0f));
+            foreach (var wheel in motor.physics.wheels)
+                Assert.That(wheel.contactValid, Is.False,
+                    "damper history is invalidated on recovery");
+        }
+
+        [Test]
+        public void OccupiedSafePoseUsesClearCandidate()
+        {
+            var course = StraightCourse();
+            // Deterministic authored fallbacks behind the spawn.
+            course.safePoses.Add(new MotorPose { x = 4f, z = -50f });
+            course.safePoses.Add(new MotorPose { x = 8f, z = -50f });
+            var world = new TestWorld();
+            var session = NewSession(course);
+            // Another racer blocks the spawn and the first candidate —
+            // the occupancy probe answers "occupied" for both.
+            session.PoseOccupied = pose =>
+                (System.Math.Abs(pose.x - 0f) < 2f
+                    && System.Math.Abs(pose.z + 50f) < 2f)
+                || (System.Math.Abs(pose.x - 4f) < 2f
+                    && System.Math.Abs(pose.z + 50f) < 2f);
+            StepN(session, world, 10);
+            session.QueuePending("recover", "cmd-occ", out _);
+            var step = session.Step(Neutral(), world);
+            Assert.That(Find(step.events, "race.recovered"), Is.Not.Null);
+            var motor = session.Snapshot().motor;
+            Assert.That(motor.x, Is.EqualTo(8f).Within(0.01f),
+                "the first UNBLOCKED authored candidate wins");
+            Assert.That(motor.z, Is.EqualTo(-50f).Within(0.01f));
+        }
+
+        [Test]
+        public void PhysicalRecoveryTeleportEarnsNoGateOrCharge()
+        {
+            var session = NewPhysicalSession(StraightCourse());
+            var sim = new FakePhysicalSimulation { speed = 12f };
+            Tick(session, sim, Neutral());
+            var before = session.Snapshot();
+            var chargeBefore = before.motor.boostCharge;
+
+            session.QueuePending("recover", "cmd-rec", out _);
+            var result = Tick(session, sim, Neutral());
+            var checkpointsAddedByTeleport = 0;
+            foreach (var ev in result.events)
+                if (ev.kind == "checkpoint.crossed")
+                    checkpointsAddedByTeleport++;
+            Assert.That(checkpointsAddedByTeleport, Is.Zero,
+                "the teleport is excluded from checkpoint evaluation");
+            var chargeAfterRecovery = session.Snapshot().motor.boostCharge;
+            Assert.That(chargeAfterRecovery,
+                Is.EqualTo(chargeBefore).Within(0.001f),
+                "recovery preserves the existing charge");
+        }
+
         // --- command-path integration -----------------------------------------
 
         private sealed class TestJsonSerializer : IProfileSerializer

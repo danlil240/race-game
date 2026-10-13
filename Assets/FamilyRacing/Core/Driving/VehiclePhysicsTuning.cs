@@ -171,6 +171,35 @@ namespace FamilyRacing.Core.Driving
             return true;
         }
 
+        // Body-origin height above the contact surface when the vehicle
+        // rests settled on its suspension: wheel radius + rest travel -
+        // static load compression - mount depth, plus a small margin so
+        // struts settle down onto the road instead of starting
+        // pre-loaded. Authored spawn/recover/safe poses carry SURFACE
+        // height; the physical backend adds this per-vehicle lift so one
+        // authored pose serves every vehicle class.
+        public float SettledLift()
+        {
+            var wheelCount = wheels != null ? wheels.Length : 0;
+            var lowestMount = 0f;
+            var radius = 0f;
+            if (wheels != null)
+                foreach (var wheel in wheels)
+                {
+                    if (wheel == null) continue;
+                    if (wheel.mountY < lowestMount)
+                        lowestMount = wheel.mountY;
+                    if (wheel.radius > radius) radius = wheel.radius;
+                }
+            var staticCompression = wheelCount > 0
+                && springRatePerWheel > 0f
+                ? massKg * StandardGravity
+                    / (wheelCount * springRatePerWheel)
+                : 0f;
+            return radius + suspensionRestLength - staticCompression
+                - lowestMount + 0.05f;
+        }
+
         public VehiclePhysicsTuning Copy()
         {
             var copy = (VehiclePhysicsTuning)MemberwiseClone();

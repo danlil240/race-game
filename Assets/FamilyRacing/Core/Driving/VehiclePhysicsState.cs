@@ -68,6 +68,10 @@ namespace FamilyRacing.Core.Driving
         public float filteredSteering;      // rate-limited steering applied (rad)
         public float filteredRollRate;      // damped roll-rate estimate (rad/s)
         public float balancePrevError;      // bike balance controller's last error (rad)
+        // Progressive drift engagement in [0,1]: ramps up while drift
+        // demand is held and back down on release, so rear lateral grip
+        // eases off progressively instead of stepping.
+        public float driftAmount;
 
         // Airborne/contact episode bookkeeping for recovery and events.
         public bool grounded;               // any wheel or body contact supports us
@@ -97,6 +101,7 @@ namespace FamilyRacing.Core.Driving
                 filteredSteering = filteredSteering,
                 filteredRollRate = filteredRollRate,
                 balancePrevError = balancePrevError,
+                driftAmount = driftAmount,
                 grounded = grounded,
                 airSeconds = airSeconds,
                 airPeakY = airPeakY,
@@ -171,7 +176,8 @@ namespace FamilyRacing.Core.Driving
                 { error = "wheels.compression"; return false; }
             }
             if (!Finite(filteredSteering) || !Finite(filteredRollRate)
-                || !Finite(balancePrevError))
+                || !Finite(balancePrevError) || !Finite(driftAmount)
+                || driftAmount < 0f || driftAmount > 1f)
             { error = "controller"; return false; }
             if (!Finite(airSeconds) || airSeconds < 0f)
             { error = "airSeconds"; return false; }

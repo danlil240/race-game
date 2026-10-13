@@ -57,6 +57,23 @@ namespace FamilyRacing.Core.Driving
             return Math.Clamp(target, -maxLeanRadians, maxLeanRadians);
         }
 
+        // Ground-assist eligibility: bounded help (steering authority,
+        // anti-roll coupling, roll damping) applies only while the
+        // vehicle is contact-supported and not past the physical
+        // "clearly fallen" limit — governed by contacts and the body's
+        // own up axis, never by steering-triggered flip logic. The
+        // up-axis test is analytic over the stored attitude quaternion:
+        // up.y of a unit quaternion's rotated (0,1,0) is 1 - 2(x² + z²).
+        // An overturned vehicle fails this and the recovery rules own
+        // it; assists must never fight gravity to hold a fallen pose.
+        public static bool CanApplyGroundAssist(VehiclePhysicsState state)
+        {
+            if (state == null || !state.grounded) return false;
+            var upDot = 1f - 2f * (state.attitudeX * state.attitudeX
+                + state.attitudeZ * state.attitudeZ);
+            return Finite(upDot) && upDot > 0f;
+        }
+
         private static bool Finite(float value)
         {
             return !float.IsNaN(value) && !float.IsInfinity(value);

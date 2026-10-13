@@ -104,6 +104,15 @@ namespace FamilyRacing.Core.Foundation
         public bool recover;
         public bool changeCamera;
         public bool pause;
+        // Held brake demand in [0,1] — 0 on every pre-brake build since
+        // the field is additive and absent defaults to zero.
+        public float brake;
+        // True only when a control source explicitly requested a
+        // throttle level; then `throttle` is the held demand. Absent
+        // means automatic throttle — the distinction must stay
+        // observable, not collapse into an ambiguous zero.
+        public bool hasThrottleOverride;
+        public float throttle = 1f;
     }
 
     [Serializable]
