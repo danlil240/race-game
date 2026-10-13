@@ -36,6 +36,19 @@ namespace FamilyRacing.Core.Racing
             }
         }
 
+        // Task 9: the deterministic canonical fingerprint of the catalog's
+        // tuned data — every vehicle/course/event value that can change a
+        // simulation outcome — hashed to a 64-hex token. Unlike
+        // CompatibilityVersion (the human-readable identity a designer
+        // bumps deliberately), the fingerprint detects ANY canonical
+        // delta — a drifting tuning value fences two builds before a
+        // slot is dealt. Computed on read so post-load tuning edits are
+        // always bound; version strings and dictionary order are not.
+        public string CompatibilityFingerprint
+        {
+            get { return ContentFingerprint.Compute(this); }
+        }
+
         public static DrivingContentCatalog Create(string version,
             IEnumerable<VehicleTuning> vehicles,
             IEnumerable<CourseDefinition> courses,

@@ -8,7 +8,7 @@ using UnityEngine;
 namespace FamilyRacing.Networking
 {
     /// <summary>
-    /// Task-5 replication spine: the authoritative Task-3
+    /// Task-9 replication spine (protocol 2): the authoritative Task-3
     /// <see cref="NetworkRace"/> on the host, replicated over the Task-1
     /// transport's two channels under Task-2 session/ownership policy.
     ///
@@ -23,11 +23,19 @@ namespace FamilyRacing.Networking
     /// full four-racer snapshot on every second tick; on a client it
     /// emits one input sample carrying up to the last four frames.
     ///
-    /// Security posture: the host accepts only N5IB input batches from
+    /// Physical races run every seated racer through one shared injected
+    /// simulation world (<see cref="SimulationProvider"/>) — collisions
+    /// between racers are resolved by that single authoritative world,
+    /// and snapshots carry each racer's compact versioned physical state
+    /// (NetworkPhysicsState) so a client's prediction can reconcile its
+    /// own racer while remote poses ride the shared envelope.
+    ///
+    /// Security posture: the host accepts only P1IB input batches from
     /// clients, resolves the owning participant from the authenticated
     /// connection (never the payload), and validates each frame through
     /// <see cref="HostInputBuffer"/>. Clients cannot submit race progress,
-    /// results, or rewards — the wire vocabulary cannot express them.
+    /// results, contacts, or rewards — the wire vocabulary cannot
+    /// express them.
     /// </summary>
     public sealed class NetworkRaceBridge : IDisposable
     {
@@ -52,7 +60,7 @@ namespace FamilyRacing.Networking
         private int raceOrdinal;
         private long snapshotSequence;
         private long eventBatchSequence;
-        // A client's upstream resend request (N5RS) forces the next host
+        // A client's upstream resend request (P1RS) forces the next host
         // tick to publish rather than waiting for the snapshot cadence.
         private bool snapshotRequested;
         private readonly List<DrivingEvent> stagedEvents = new List<DrivingEvent>();
@@ -1246,7 +1254,7 @@ namespace FamilyRacing.Networking
 
         private void OnReliableMessage(ulong connectionId, byte[] payload)
         {
-            // Shared reliable channel: FRN1 text belongs to the session
+            // Shared reliable channel: FRN2 text belongs to the session
             // protocol (LanSessionLink); only gameplay envelopes apply here.
             if (!NetworkWireCodec.IsGameplayPacket(payload)) return;
             if (NetworkWireCodec.TagOf(payload) == NetworkWireCodec.TagEventBatch

@@ -923,7 +923,7 @@ namespace FamilyRacing.Tests
             { error = ""; return true; }
             public void StopSearch() { }
             public bool StartResponder(ushort gamePort, string hostName,
-                out string error)
+                string compat, out string error)
             { error = ""; return true; }
             public void StopResponder() { }
             public IReadOnlyList<LanDiscoveredHost> Entries =>

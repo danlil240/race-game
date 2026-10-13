@@ -6,18 +6,24 @@ namespace FamilyRacing.Core.Networking
     public static class NetworkSettings
     {
         // LAN wire protocol spoken by NetworkProtocol messages. Exact
-        // equality is required to share a session.
-        public const int LanProtocolVersion = 1;
+        // equality is required to share a session. Protocol 2 is the
+        // physical replication epoch: typed P1 gameplay packets, compact
+        // versioned physical state inside snapshots, and fingerprint-bound
+        // admission — a protocol-1 peer is fenced before slot allocation.
+        public const int LanProtocolVersion = 2;
 
         // Observation schema emitted by FoundationState once the network
         // slice exists. Profile schema (1 -> 2 in a later task) is a
-        // separate version and stays in Core/Profiles.
-        public const int StateSchemaVersion = 3;
+        // separate version and stays in Core/Profiles. Schema 4 adds the
+        // physical-state surfaces: racer DTOs may carry the compact
+        // NetworkPhysicsState projection and host descriptors the content
+        // fingerprint.
+        public const int StateSchemaVersion = 4;
 
         // Compatibility fingerprint for gameplay rules: peers must report
         // the exact same value before a slot is allocated. Content version
         // comes from the DrivingContentCatalog and is checked separately.
-        public const string GameplayVersion = "gameplay-1";
+        public const string GameplayVersion = "gameplay-2";
 
         // Four racers total; AI fills slots without a human (Task 4).
         public const int ParticipantCapacity = 4;

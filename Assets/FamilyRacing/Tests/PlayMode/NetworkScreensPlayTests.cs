@@ -91,7 +91,7 @@ namespace FamilyRacing.Tests
             }
 
             public bool StartResponder(ushort gamePort, string hostName,
-                out string error)
+                string compat, out string error)
             {
                 error = "";
                 return true;
@@ -449,10 +449,14 @@ namespace FamilyRacing.Tests
             Assert.That(probe.SearchStarts, Is.EqualTo(1));
             Assert.That(Snapshot().network.phase, Is.EqualTo("discovering"));
 
-            // A discovered host renders a card that joins its address.
+            // A discovered host renders a card that joins its address —
+            // and only a same-compat advertisement may join at all.
+            var advertised = Catalog();
             probe.Hosts.Add(new LanDiscoveredHost
             {
-                address = "192.168.1.50", port = 47777, hostName = "peer"
+                address = "192.168.1.50", port = 47777, hostName = "peer",
+                compat = "gameplay-test|" + advertised.CompatibilityVersion
+                    + "|" + advertised.CompatibilityFingerprint
             });
             Refresh();
             yield return WaitForWidget<Button>("lan.discovered.0.join");

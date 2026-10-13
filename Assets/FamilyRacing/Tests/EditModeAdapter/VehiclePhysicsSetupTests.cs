@@ -380,7 +380,7 @@ namespace FamilyRacing.Tests
                     defs.Add(def);
                 }
                 var catalog = Core.Racing.DrivingContentCatalog.Create(
-                    "physics-0.1", tunings, new[] { course }, defs,
+                    "physics-1", tunings, new[] { course }, defs,
                     VehicleSimulationBackend.PhysicalAssisted);
                 Assert.That(catalog.SimulationBackend, Is.EqualTo(
                         VehicleSimulationBackend.PhysicalAssisted));

@@ -1,25 +1,30 @@
 using System;
 using System.Collections.Generic;
 using System.Text;
+using FamilyRacing.Core.Driving;
 using FamilyRacing.Core.Networking;
+using FamilyRacing.Core.Racing;
 using UnityEngine;
 
 namespace FamilyRacing.Networking
 {
     /// <summary>
-    /// Bounded typed codec for the Task-5 gameplay wire. Every packet is a
-    /// 4-byte ASCII tag followed by a UTF-8 JSON body produced by
-    /// JsonUtility against the serializable Core DTOs:
+    /// Bounded typed codec for the Task-9 gameplay wire (protocol 2).
+    /// Every packet is a 4-byte ASCII tag followed by a UTF-8 JSON body
+    /// produced by JsonUtility against the serializable Core DTOs:
     ///
-    ///   N5IB  client→host, sequenced-unreliable channel: a batch of up to
+    ///   P1IB  client→host, sequenced-unreliable channel: a batch of up to
     ///         InputPacketSampleCapacity recent NetworkInputFrames.
-    ///   N5SS  host→client, sequenced-unreliable channel: one full
+    ///   P1SS  host→client, sequenced-unreliable channel: one full
     ///         NetworkSnapshot. Hard ceiling SnapshotCeilingBytes — encode
-    ///         fails explicitly instead of truncating racer state.
-    ///   N5EB  host→client, reliable-ordered channel: one
+    ///         fails explicitly instead of truncating racer state. Each
+    ///         racer's physical state travels as the compact versioned
+    ///         NetworkPhysicsState DTO on racer.physics; the diagnostic
+    ///         MotorState.physics view never crosses the wire.
+    ///   P1EB  host→client, reliable-ordered channel: one
     ///         NetworkEventBatch of transient authoritative events with
     ///         stable event identities.
-    ///   N5RS  client→host, sequenced-unreliable channel: an explicit
+    ///   P1RS  client→host, sequenced-unreliable channel: an explicit
     ///         resend request — the client's prediction backlog
     ///         resynchronized and it asks the host to publish the next
     ///         authoritative snapshot immediately rather than waiting
@@ -28,14 +33,16 @@ namespace FamilyRacing.Networking
     /// Decode applies the same strict per-type limits before parsing, so
     /// an oversized packet is dropped before any field is read; semantic
     /// validation (ownership, race/epoch fencing, finiteness, sequencing)
-    /// lives in HostInputBuffer and NetworkRaceBridge.
+    /// lives in HostInputBuffer and NetworkRaceBridge. Physical-state
+    /// validation is atomic here: one malformed DTO or inline state
+    /// kills the whole snapshot before anything is applied.
     /// </summary>
     public static class NetworkWireCodec
     {
-        public const string TagInputBatch = "N5IB";
-        public const string TagSnapshot = "N5SS";
-        public const string TagEventBatch = "N5EB";
-        public const string TagResyncRequest = "N5RS";
+        public const string TagInputBatch = "P1IB";
+        public const string TagSnapshot = "P1SS";
+        public const string TagEventBatch = "P1EB";
+        public const string TagResyncRequest = "P1RS";
 
         public const int HeaderBytes = 4;
 
@@ -62,12 +69,15 @@ namespace FamilyRacing.Networking
         private static readonly byte[] EventTag = Encoding.ASCII.GetBytes(TagEventBatch);
         private static readonly byte[] ResyncTag = Encoding.ASCII.GetBytes(TagResyncRequest);
 
-        /// <summary>True when the packet carries a Task-5 gameplay tag —
-        /// used to split shared-channel traffic without parsing.</summary>
+        /// <summary>True when the packet carries a protocol-2 gameplay
+        /// tag — used to split shared-channel traffic without parsing.
+        /// Legacy N5** envelopes are not gameplay packets: they belong
+        /// to protocol 1 and are fenced here before any body is read.
+        /// </summary>
         public static bool IsGameplayPacket(byte[] packet)
         {
             return packet != null && packet.Length >= HeaderBytes
-                && packet[0] == (byte)'N' && packet[1] == (byte)'5';
+                && packet[0] == (byte)'P' && packet[1] == (byte)'1';
         }
 
         /// <summary>The 4-byte tag of a gameplay packet as text, or ""
@@ -156,7 +166,29 @@ namespace FamilyRacing.Networking
             packet = null;
             error = null;
             if (snapshot == null) { error = "invalidSnapshot"; return false; }
-            var json = JsonUtility.ToJson(snapshot);
+            // The wire projection is a deep copy: racer.physics carries
+            // the compact DTO and the diagnostic MotorState.physics is
+            // stripped — the host's live authoritative state is never
+            // mutated by serialization.
+            var wire = new NetworkSnapshot
+            {
+                sessionId = snapshot.sessionId,
+                raceId = snapshot.raceId,
+                raceOrdinal = snapshot.raceOrdinal,
+                snapshotSequence = snapshot.snapshotSequence,
+                state = snapshot.state != null ? snapshot.state.Copy() : null,
+                acks = snapshot.acks
+            };
+            if (wire.state != null)
+                foreach (var racer in wire.state.racers)
+                {
+                    if (racer == null) continue;
+                    var motor = racer.session != null
+                        ? racer.session.motor : null;
+                    racer.physics = NetworkPhysicsState.FromMotor(motor);
+                    if (motor != null) motor.physics = null;
+                }
+            var json = JsonUtility.ToJson(wire);
             packet = Wrap(SnapshotTag, json);
             // Explicit failure on overflow — never truncate racer state.
             if (packet.Length > NetworkSettings.SnapshotCeilingBytes)
@@ -183,7 +215,72 @@ namespace FamilyRacing.Networking
             // outcome.
             if (snapshot.state.result != null && !snapshot.state.result.finalized)
                 snapshot.state.result = null;
+            // Fold each racer's compact physical DTO back onto the motor
+            // atomically: one malformed physical payload rejects the
+            // whole snapshot before any client state can observe a
+            // partial application.
+            foreach (var racer in snapshot.state.racers)
+            {
+                if (racer == null) continue;
+                if (!FoldPhysicalState(racer, out error))
+                { snapshot = null; return false; }
+            }
             return true;
+        }
+
+        // The DTO is the wire contract: when present it validates as a
+        // whole, then rebuilds the motor's physical state through the
+        // same gate the authority uses. Without a DTO, any surviving
+        // inline MotorState.physics is out-of-contract content — a
+        // stripped artifact decodes as the empty instance and is
+        // normalized away, while a real payload must pass the authority
+        // validation or the packet is malformed.
+        private static bool FoldPhysicalState(NetworkRacerState racer,
+            out string error)
+        {
+            error = null;
+            var motor = racer.session != null ? racer.session.motor : null;
+            var dto = racer.physics;
+            if (dto != null && dto.present)
+            {
+                if (!dto.Validate(out error))
+                { error = "invalidPhysics"; return false; }
+                if (motor != null) motor.physics = dto.ToMotor().physics;
+                return true;
+            }
+            if (motor == null || motor.physics == null) return true;
+            if (IsEmptyWirePhysics(motor.physics))
+            { motor.physics = null; return true; }
+            string inlineError;
+            if (!motor.physics.Validate(out inlineError))
+            { error = "invalidPhysics"; return false; }
+            return true;
+        }
+
+        // True when a decoded MotorState.physics is the stripped-encode
+        // artifact rather than a sent payload: JsonUtility materializes
+        // an empty {} as an all-default instance — zero attitude, no
+        // wheels, no episode state, the default contact label.
+        private static bool IsEmptyWirePhysics(VehiclePhysicsState physics)
+        {
+            if (physics.wheels != null && physics.wheels.Length > 0) return false;
+            if (physics.attitudeX != 0f || physics.attitudeY != 0f
+                || physics.attitudeZ != 0f || physics.attitudeW != 0f) return false;
+            if (physics.velocityX != 0f || physics.velocityY != 0f
+                || physics.velocityZ != 0f) return false;
+            if (physics.angularVelocityX != 0f || physics.angularVelocityY != 0f
+                || physics.angularVelocityZ != 0f) return false;
+            if (physics.filteredSteering != 0f || physics.filteredRollRate != 0f
+                || physics.balancePrevError != 0f
+                || physics.filteredLeanTarget != 0f
+                || physics.driftAmount != 0f) return false;
+            if (physics.grounded || physics.airSeconds != 0f
+                || physics.airPeakY != 0f || physics.airWallContact
+                || physics.overturnedSeconds != 0f
+                || physics.contactLossSeconds != 0f
+                || physics.recoveryEpoch != 0) return false;
+            return string.IsNullOrEmpty(physics.lastContact)
+                || physics.lastContact == "none";
         }
 
         // --- event batch (host -> client, reliable ordered) ------------------

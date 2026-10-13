@@ -26,12 +26,16 @@ namespace FamilyRacing.Core.Networking
     }
 
     // Bounded discovery seam: searching for nearby hosts and advertising
-    // this process's own host socket.
+    // this process's own host socket. `compat` is the full compatibility
+    // token (gameplay | content | fingerprint) the responder advertises —
+    // a protocol-2 advertisement always carries it, so a discovered host
+    // whose token does not match exactly is fenced before any dial.
     public interface ILanDiscoveryProbe
     {
         bool StartSearch(out string error);
         void StopSearch();
-        bool StartResponder(ushort gamePort, string hostName, out string error);
+        bool StartResponder(ushort gamePort, string hostName,
+            string compat, out string error);
         void StopResponder();
         IReadOnlyList<LanDiscoveredHost> Entries { get; }
     }
@@ -457,6 +461,7 @@ namespace FamilyRacing.Core.Networking
                     "v", NetworkSettings.LanProtocolVersion.ToString(CultureInfo.InvariantCulture),
                     "gv", gameplayVersion,
                     "cv", ContentVersion(),
+                    "fp", ContentFingerprint(),
                     "pid", localParticipantId,
                     "av", localAvatar,
                     "ci", localColorIndex.ToString(CultureInfo.InvariantCulture),
@@ -639,7 +644,8 @@ namespace FamilyRacing.Core.Networking
                 hostPort = boundPort,
                 lanProtocol = NetworkSettings.LanProtocolVersion,
                 gameplayVersion = gameplayVersion,
-                contentVersion = ContentVersion()
+                contentVersion = ContentVersion(),
+                contentFingerprint = ContentFingerprint()
             };
             var host = slots[0];
             host.participantId = localParticipantId;
@@ -651,10 +657,13 @@ namespace FamilyRacing.Core.Networking
             host.ready = false;
             host.controlSource = ControlLocal;
             host.ownershipEpoch = 1;
-            // Advertise on discovery so nearby players see this host; a
-            // responder failure never blocks manual joins.
+            // Advertise on discovery so nearby players see this host —
+            // including the exact compatibility token a joiner must match
+            // before it may dial; a responder failure never blocks manual
+            // joins.
             if (discovery != null)
-                discovery.StartResponder(boundPort, localAvatar, out error);
+                discovery.StartResponder(boundPort, localAvatar,
+                    CompatToken(), out error);
             return Result(command, CommandResult.Applied, "");
         }
 
@@ -867,6 +876,26 @@ namespace FamilyRacing.Core.Networking
                 return Result(command, CommandResult.Rejected, "invalidParameter");
             if (!PendingCapacityOk())
                 return Result(command, CommandResult.Rejected, "pendingFull");
+            // Discovery fence: a host we can already see advertises its
+            // full compatibility token — a mismatch (or an absent token
+            // from a legacy advertisement) is a permanent rejection
+            // decided before a single datagram is dialed, so it surfaces
+            // as the join's own rejection, never a late disconnect.
+            if (discovery != null && discovery.Entries != null)
+            {
+                var expected = CompatToken();
+                foreach (var entry in discovery.Entries)
+                {
+                    if (entry == null) continue;
+                    if (!string.Equals(entry.address, address,
+                        StringComparison.OrdinalIgnoreCase)) continue;
+                    if (entry.port != port) continue;
+                    if (!string.Equals(entry.compat, expected,
+                        StringComparison.Ordinal))
+                        return Result(command, CommandResult.Rejected,
+                            "incompatible");
+                }
+            }
             if (phase == PhaseDiscovering) StopDiscovery();
             string error;
             if (!link.StartClient(address, (ushort)port, out error))
@@ -1412,9 +1441,11 @@ namespace FamilyRacing.Core.Networking
             Dictionary<string, string> fields)
         {
             string version, gameplay, contentVersion, participantId, credential;
+            string fingerprint;
             fields.TryGetValue("v", out version);
             fields.TryGetValue("gv", out gameplay);
             fields.TryGetValue("cv", out contentVersion);
+            fields.TryGetValue("fp", out fingerprint);
             fields.TryGetValue("pid", out participantId);
             fields.TryGetValue("cred", out credential);
             var commandId = Field(fields, "cid");
@@ -1426,10 +1457,15 @@ namespace FamilyRacing.Core.Networking
                 return;
             }
             // Exact compatibility is enforced before any allocation.
+            // `fp` is the canonical tuned-data fingerprint — the
+            // strongest fence: an absent field is itself an incompatible
+            // peer, and a hash mismatch means the catalogs differ
+            // somewhere a human-readable version cannot see.
             if (version != NetworkSettings.LanProtocolVersion.ToString(
                     CultureInfo.InvariantCulture)
                 || gameplay != gameplayVersion
-                || contentVersion != ContentVersion())
+                || contentVersion != ContentVersion()
+                || fingerprint != ContentFingerprint())
             {
                 SendJoinReject(connectionId, "incompatible", commandId);
                 return;
@@ -1615,6 +1651,7 @@ namespace FamilyRacing.Core.Networking
                 lanProtocol = NetworkSettings.LanProtocolVersion,
                 gameplayVersion = gameplayVersion,
                 contentVersion = ContentVersion(),
+                contentFingerprint = ContentFingerprint(),
                 eventId = Field(fields, "ev"),
                 classId = Field(fields, "cl")
             };
@@ -2037,6 +2074,25 @@ namespace FamilyRacing.Core.Networking
             // folds into the token so an arcade build can never silently
             // join a physical race.
             return content != null ? content.CompatibilityVersion : "none";
+        }
+
+        // The canonical tuned-data fingerprint of the local catalog —
+        // the admission token both sides must hold bit-identically. An
+        // absent catalog fingerprints empty, which is still a valid
+        // token: only peers whose content state matches exactly agree.
+        private string ContentFingerprint()
+        {
+            return content != null ? content.CompatibilityFingerprint : "";
+        }
+
+        // The whole discovery-advertised compatibility token in one
+        // string — the datagram schema already binds the protocol, so
+        // the token carries gameplay version, content version and the
+        // canonical fingerprint.
+        private string CompatToken()
+        {
+            return gameplayVersion + "|" + ContentVersion()
+                + "|" + ContentFingerprint();
         }
 
         private static bool PausePhase(string phase)

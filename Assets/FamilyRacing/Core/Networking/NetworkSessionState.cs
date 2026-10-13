@@ -47,12 +47,16 @@ namespace FamilyRacing.Core.Networking
     }
 
     // One host advertisement currently visible through bounded discovery.
+    // `compat` carries the responder's full compatibility token
+    // (gameplay | content | fingerprint) so a join can fence an
+    // incompatible build before a single datagram is dialed.
     [Serializable]
     public sealed class LanDiscoveredHost
     {
         public string address = "";
         public int port;
         public string hostName = "";
+        public string compat = "";
 
         public LanDiscoveredHost Copy()
         {

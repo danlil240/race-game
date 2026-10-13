@@ -22,7 +22,10 @@ namespace FamilyRacing.EditorTools
         private const string ScenePath = PhysicsDir + "/PhysicsLab.unity";
         private const string PrefabPath = PhysicsDir + "/PhysicsLabCourse.prefab";
         private const string RaceScenePath = PhysicsDir + "/PhysicsRace.unity";
-        private const string RaceContentVersion = "physics-0.1";
+        // Task 9 pins the physical content identity at "physics-1" —
+        // cataloged as "physics-1|sim=1" through CompatibilityVersion so
+        // an arcade build can never silently join a physical LAN race.
+        private const string RaceContentVersion = "physics-1";
 
         public static void Create()
         {

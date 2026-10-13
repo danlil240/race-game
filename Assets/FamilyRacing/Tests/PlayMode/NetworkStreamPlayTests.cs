@@ -204,10 +204,11 @@ namespace FamilyRacing.Tests
         }
 
         [Test]
-        public void BoundaryRecordsCarrySchema3IdentityAndSlices()
+        public void BoundaryRecordsCarrySchema4IdentityAndSlices()
         {
             stream.EmitDeltaBoundary(LanState(5), "cmd-9");
-            stream.EmitDiscovery(new JArray(), new JObject(), 5, 3);
+            stream.EmitDiscovery(new JArray(), new JObject(), 5,
+                NetworkSettings.StateSchemaVersion);
             var result = new CommandResult
             {
                 commandId = "cmd-9", action = "lan.host",
@@ -235,9 +236,10 @@ namespace FamilyRacing.Tests
             Assert.That((long)boundary["monotonicMs"], Is.GreaterThanOrEqualTo(0));
 
             var state = (JObject)boundary["state"];
-            Assert.That((int)state["stateSchemaVersion"], Is.EqualTo(3),
+            Assert.That((int)state["stateSchemaVersion"],
+                Is.EqualTo(NetworkSettings.StateSchemaVersion),
                 "The nested state marker must match the record schema");
-            // Schema-3 network slices ride the boundary state verbatim.
+            // Schema-3+ network slices ride the boundary state verbatim.
             Assert.That((string)state["network"]["role"], Is.EqualTo("host"));
             Assert.That((string)state["network"]["descriptor"]["sessionId"],
                 Is.EqualTo("s-1"));
@@ -250,7 +252,8 @@ namespace FamilyRacing.Tests
             // Discovery carries the negotiated schema too.
             var discovery = records[1];
             Assert.That((string)discovery["type"], Is.EqualTo("discovery"));
-            Assert.That((int)discovery["stateSchemaVersion"], Is.EqualTo(3));
+            Assert.That((int)discovery["stateSchemaVersion"],
+                Is.EqualTo(NetworkSettings.StateSchemaVersion));
             // Result records stay command-correlated.
             var emitted = records[2];
             Assert.That((string)emitted["type"], Is.EqualTo("result"));
@@ -361,8 +364,9 @@ namespace FamilyRacing.Tests
         {
             // The controller hello is negotiated by ValidationBridge, not
             // the stream — this pins the advertised schema constant so a
-            // silent downgrade is caught here.
-            Assert.That(NetworkSettings.StateSchemaVersion, Is.EqualTo(3));
+            // silent downgrade is caught here. Schema 4 is the Task-9
+            // physical replication epoch (protocol 2, FRN2, P1 tags).
+            Assert.That(NetworkSettings.StateSchemaVersion, Is.EqualTo(4));
         }
     }
 }

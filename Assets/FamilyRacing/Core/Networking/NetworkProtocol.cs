@@ -6,9 +6,9 @@ using FamilyRacing.Core.Racing;
 
 namespace FamilyRacing.Core.Networking
 {
-    // LAN session wire vocabulary (protocol 1) and its bounded codec.
+    // LAN session wire vocabulary (protocol 2) and its bounded codec.
     //
-    // A message is a single line:  FRN1|<type>|<key>=<value>|...
+    // A message is a single line:  FRN2|<type>|<key>=<value>|...
     // Values escape four characters with a backslash prefix so keys and
     // subfields can never be forged by crafted ids:
     //   \ -> \\   | -> \p   = -> \e   , -> \c
@@ -20,7 +20,7 @@ namespace FamilyRacing.Core.Networking
     {
         public const int LanProtocolVersion = NetworkSettings.LanProtocolVersion;
 
-        private const string Magic = "FRN1";
+        private const string Magic = "FRN2";
 
         // --- message types -------------------------------------------------
         // Client -> host.
@@ -41,7 +41,7 @@ namespace FamilyRacing.Core.Networking
         public const string MsgResultOffer = "result.offer";
 
         // --- field keys -----------------------------------------------------
-        // join.request: v, gv, cv, pid, av, ci, cid, cred
+        // join.request: v, gv, cv, fp, pid, av, ci, cid, cred
         // join.accept:  sid, ph, pid, slot, ev, cl, ep, cred, cid
         // join.reject:  code, cid
         // session.state: sid, ph, ev, cl, pd, pr, p0..p3

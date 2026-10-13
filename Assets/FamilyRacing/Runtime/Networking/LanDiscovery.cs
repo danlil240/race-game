@@ -16,6 +16,11 @@ namespace FamilyRacing.Networking
         public string Address { get; internal set; }
         public ushort Port { get; internal set; }
         public string HostName { get; internal set; }
+        /// <summary>The responder's full compatibility token
+        /// (gameplay | content | fingerprint) — a protocol-2
+        /// advertisement always carries it, so a mismatched token can
+        /// fence a join before any datagram is dialed.</summary>
+        public string Compat { get; internal set; }
         public DateTime LastSeenUtc { get; internal set; }
         public DateTime ExpiresUtc { get; internal set; }
     }
@@ -48,8 +53,12 @@ namespace FamilyRacing.Networking
         /// <summary>How long an unseen entry stays listed.</summary>
         public static readonly TimeSpan EntryLifetime = TimeSpan.FromSeconds(3);
 
-        private static readonly byte[] QueryMagic = Encoding.ASCII.GetBytes("FRLANQ01");
-        private static readonly byte[] ResponseMagic = Encoding.ASCII.GetBytes("FRLANR01");
+        // Datagram schema 2: the response payload gains a compatibility
+        // token, so the schema moves — a protocol-2 query is never
+        // answered by a schema-1 responder, which is exactly the fence a
+        // legacy host needs.
+        private static readonly byte[] QueryMagic = Encoding.ASCII.GetBytes("FRLANQ02");
+        private static readonly byte[] ResponseMagic = Encoding.ASCII.GetBytes("FRLANR02");
 
         private readonly ILanNetworkAccess access;
         private readonly List<LanHostEntry> entries = new List<LanHostEntry>(8);
@@ -83,7 +92,8 @@ namespace FamilyRacing.Networking
         /// Start answering queries on <paramref name="discoveryPort"/> with
         /// an advertisement for the given gameplay port.
         /// </summary>
-        public bool StartResponder(ushort discoveryPort, ushort gamePort, string hostName)
+        public bool StartResponder(ushort discoveryPort, ushort gamePort,
+            string hostName, string compat)
         {
             if (!CheckAccess()) return false;
             StopResponder();
@@ -95,7 +105,8 @@ namespace FamilyRacing.Networking
                     SocketOptionName.ReuseAddress, true);
                 socket.Client.Bind(new IPEndPoint(IPAddress.Any, discoveryPort));
                 responderSocket = socket;
-                responderPayload = BuildResponse(gamePort, hostName ?? "");
+                responderPayload = BuildResponse(gamePort, hostName ?? "",
+                    compat ?? "");
                 this.discoveryPort = discoveryPort;
                 LastError = "";
                 return true;
@@ -221,9 +232,11 @@ namespace FamilyRacing.Networking
                     datagram = querySocket.Receive(ref remote);
                 }
                 catch (Exception) { break; }
-                if (!TryParseResponse(datagram, out ushort gamePort, out string hostName))
+                if (!TryParseResponse(datagram, out ushort gamePort,
+                        out string hostName, out string compat))
                     continue;
-                Upsert(remote.Address.ToString(), gamePort, hostName, utcNow);
+                Upsert(remote.Address.ToString(), gamePort, hostName,
+                    compat, utcNow);
             }
         }
 
@@ -252,19 +265,20 @@ namespace FamilyRacing.Networking
         }
 
         private void Upsert(string address, ushort gamePort, string hostName,
-            DateTime utcNow)
+            string compat, DateTime utcNow)
         {
             var expiry = utcNow + EntryLifetime;
             foreach (var entry in entries)
             {
                 if (entry.Address != address || entry.Port != gamePort) continue;
-                if (entry.HostName == hostName)
+                if (entry.HostName == hostName && entry.Compat == compat)
                 {
                     entry.LastSeenUtc = utcNow;
                     entry.ExpiresUtc = expiry;
                     return;
                 }
                 entry.HostName = hostName;
+                entry.Compat = compat;
                 entry.LastSeenUtc = utcNow;
                 entry.ExpiresUtc = expiry;
                 EntriesChanged?.Invoke();
@@ -275,6 +289,7 @@ namespace FamilyRacing.Networking
                 Address = address,
                 Port = gamePort,
                 HostName = hostName,
+                Compat = compat,
                 LastSeenUtc = utcNow,
                 ExpiresUtc = expiry
             });
@@ -304,37 +319,58 @@ namespace FamilyRacing.Networking
         }
 
         // Response layout (all little-endian, total <= MaxDatagramBytes):
-        //   8 B magic | 2 B gameplay port | 1 B host-name length | host name UTF-8
-        private static byte[] BuildResponse(ushort gamePort, string hostName)
+        //   8 B magic | 2 B gameplay port | 1 B host-name length
+        //   | host name UTF-8 | 2 B compat-token length | compat UTF-8
+        private static byte[] BuildResponse(ushort gamePort, string hostName,
+            string compat)
         {
             var nameBytes = Encoding.UTF8.GetBytes(hostName);
             if (nameBytes.Length > 200) nameBytes = Truncate(nameBytes, 200);
-            var payload = new byte[ResponseMagic.Length + 3 + nameBytes.Length];
+            var compatBytes = Encoding.UTF8.GetBytes(compat);
+            // A compatibility token longer than the datagram budget can
+            // never be advertised; refuse to emit a truncated token a
+            // peer might mistake for the whole one.
+            if (compatBytes.Length > 500) compatBytes = new byte[0];
+            var payload = new byte[ResponseMagic.Length + 5
+                + nameBytes.Length + compatBytes.Length];
             Array.Copy(ResponseMagic, payload, ResponseMagic.Length);
             payload[ResponseMagic.Length] = (byte)(gamePort & 0xFF);
             payload[ResponseMagic.Length + 1] = (byte)(gamePort >> 8);
             payload[ResponseMagic.Length + 2] = (byte)nameBytes.Length;
-            Array.Copy(nameBytes, 0, payload, ResponseMagic.Length + 3, nameBytes.Length);
+            Array.Copy(nameBytes, 0, payload, ResponseMagic.Length + 3,
+                nameBytes.Length);
+            var compatOffset = ResponseMagic.Length + 3 + nameBytes.Length;
+            payload[compatOffset] = (byte)(compatBytes.Length & 0xFF);
+            payload[compatOffset + 1] = (byte)(compatBytes.Length >> 8);
+            Array.Copy(compatBytes, 0, payload, compatOffset + 2,
+                compatBytes.Length);
             return payload;
         }
 
         private static bool TryParseResponse(byte[] datagram, out ushort gamePort,
-            out string hostName)
+            out string hostName, out string compat)
         {
             gamePort = 0;
             hostName = null;
+            compat = null;
             if (datagram == null || datagram.Length > MaxDatagramBytes
-                || datagram.Length < ResponseMagic.Length + 3)
+                || datagram.Length < ResponseMagic.Length + 5)
                 return false;
             for (var i = 0; i < ResponseMagic.Length; i++)
                 if (datagram[i] != ResponseMagic[i]) return false;
             gamePort = (ushort)(datagram[ResponseMagic.Length]
                 | (datagram[ResponseMagic.Length + 1] << 8));
             var nameLength = datagram[ResponseMagic.Length + 2];
-            if (datagram.Length != ResponseMagic.Length + 3 + nameLength)
+            var compatOffset = ResponseMagic.Length + 3 + nameLength;
+            if (datagram.Length < compatOffset + 2) return false;
+            var compatLength = datagram[compatOffset]
+                | (datagram[compatOffset + 1] << 8);
+            if (datagram.Length != compatOffset + 2 + compatLength)
                 return false;
             hostName = Encoding.UTF8.GetString(datagram,
                 ResponseMagic.Length + 3, nameLength);
+            compat = Encoding.UTF8.GetString(datagram,
+                compatOffset + 2, compatLength);
             return true;
         }
 

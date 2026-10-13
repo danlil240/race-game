@@ -30,7 +30,10 @@ BOUNDARY_TYPES = {"snapshot", "state", "delta"}
 # treated as schema 1 (pre-driving baseline); anything outside the
 # supported set must be rejected before driving evidence is trusted.
 # Schema 3 adds the LAN session/race/prediction/interpolation slices.
-SUPPORTED_STATE_SCHEMAS = {1, 2, 3}
+# Schema 4 adds the protocol-2 physical surfaces: discovered hosts and
+# session descriptors carry the tuned-content fingerprint, and LAN race
+# snapshots may carry per-racer physical DTOs.
+SUPPORTED_STATE_SCHEMAS = {1, 2, 3, 4}
 
 
 def _remove_path(state, path):
@@ -162,6 +165,17 @@ def validate_state_schema(event, state):
             assert session.get("role") == "client" \
                 and state.get("networkRace") is not None, \
                 "prediction exists only on a client inside a LAN race"
+    if schema >= 4:
+        # Protocol-2 compatibility surfaces: a live session descriptor
+        # binds the canonical tuned-content fingerprint and every
+        # discovered host carries its advertised compat token.
+        descriptor = session.get("descriptor")
+        if descriptor is not None:
+            assert isinstance(descriptor.get("contentFingerprint"), str), \
+                "Schema-4 descriptor is missing contentFingerprint"
+        for host in session.get("discovered") or []:
+            assert isinstance(host, dict) and "compat" in host, \
+                "Schema-4 discovered host is missing compat"
 
 
 def validate_presentation(state, language):

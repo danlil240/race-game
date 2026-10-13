@@ -1,9 +1,12 @@
 using System.Collections.Generic;
 using System.Text;
+using FamilyRacing.Core.Driving;
+using FamilyRacing.Core.Foundation;
 using FamilyRacing.Core.Networking;
 using FamilyRacing.Core.Racing;
 using FamilyRacing.Networking;
 using NUnit.Framework;
+using UnityEngine;
 
 namespace FamilyRacing.Tests
 {
@@ -290,7 +293,7 @@ namespace FamilyRacing.Tests
             Assert.That(NetworkWireCodec.TryDecodeInputBatch(
                 new byte[] { 0, 1 }, out frames, out error), Is.False);
             Assert.That(error, Is.EqualTo("badPacket"));
-            var foreign = Tagged("FRN1", 8);
+            var foreign = Tagged("FRN2", 8);
             Assert.That(NetworkWireCodec.TryDecodeInputBatch(foreign,
                 out frames, out error), Is.False);
             Assert.That(error, Is.EqualTo("wrongType"));
@@ -306,6 +309,380 @@ namespace FamilyRacing.Tests
                 LanNetworkAccessState.Available;
             public string Detail => "stub";
             public void EnsureAccess() { }
+        }
+
+        // --- Task 9: versioned physical snapshots ----------------------------
+
+        // An airborne, upside-down-leaning physical state with live
+        // wheel/controller histories — the worst shape the compact wire
+        // DTO must round-trip.
+        private static MotorState PhysicalMotor()
+        {
+            var physics = new VehiclePhysicsState
+            {
+                velocityX = 0.5f, velocityY = 1.25f, velocityZ = 9.5f,
+                angularVelocityX = 0.4f, angularVelocityY = -0.2f,
+                angularVelocityZ = 0.1f,
+                filteredSteering = -0.12f, filteredRollRate = 0.03f,
+                balancePrevError = 0.01f, filteredLeanTarget = -0.05f,
+                driftAmount = 0.4f,
+                grounded = false, airSeconds = 0.4f, airPeakY = 3.4f,
+                airWallContact = true,
+                overturnedSeconds = 0.1f, contactLossSeconds = 0.05f,
+                lastContact = "vehicle", recoveryEpoch = 4,
+                wheels = new WheelPhysicsState[4]
+            };
+            physics.TrySetAttitude(0.5f, 0.2f, -0.3f, 0.8f);
+            for (var i = 0; i < physics.wheels.Length; i++)
+                physics.wheels[i] = new WheelPhysicsState
+                {
+                    index = i,
+                    grounded = i < 2,
+                    compression = 0.05f + i * 0.01f,
+                    previousCompression = 0.04f + i * 0.01f,
+                    contactValid = true,
+                    steering = i < 2 ? 0.2f : 0f,
+                    spin = 3f + i,
+                    // Diagnostic-only fields: populated to prove they
+                    // never reach the wire.
+                    normalLoad = 4000f + i,
+                    slipLongitudinal = 0.7f,
+                    slipLateral = -0.3f
+                };
+            return new MotorState
+            {
+                x = 1.5f, y = 2.8f, z = -3.25f, heading = 0.6f,
+                speed = 9.4f, lateralSpeed = -1.1f, verticalSpeed = 1.25f,
+                grounded = false, airSeconds = 0.4f,
+                drifting = true, driftSign = -1,
+                boostCharge = 0.6f, boostActive = true,
+                boostSecondsRemaining = 1.2f, boostLatched = true,
+                airWallContact = true, airPeakY = 3.4f,
+                recovering = false, lastContact = "vehicle", tick = 77,
+                physics = physics
+            };
+        }
+
+        private static NetworkRacerState PhysicalRacer(int slot,
+            int idChars)
+        {
+            return new NetworkRacerState
+            {
+                participantId = "p-" + slot
+                    + new string('q', idChars),
+                slot = slot,
+                vehicleId = "car-01" + new string('v', idChars),
+                attribution = "human",
+                position = slot + 1,
+                session = new DrivingSessionState
+                {
+                    raceId = "race-net",
+                    vehicleId = "car-01",
+                    eventId = "evt-net",
+                    courseId = "course-net",
+                    contentVersion = "physics-1|sim=1",
+                    phase = "running",
+                    motor = PhysicalMotor(),
+                    input = new InputState()
+                }
+            };
+        }
+
+        private static NetworkSnapshot PhysicalSnapshot(int racerCount,
+            int idChars = 8)
+        {
+            var snapshot = new NetworkSnapshot
+            {
+                sessionId = "lan-" + new string('s', idChars),
+                raceId = "race-" + new string('r', idChars),
+                raceOrdinal = 1,
+                snapshotSequence = 12,
+                state = new NetworkRaceState
+                {
+                    sessionId = "lan-" + new string('s', idChars),
+                    raceId = "race-" + new string('r', idChars),
+                    phase = "running",
+                    hostTick = 24,
+                    elapsedTicks = 22
+                }
+            };
+            for (var i = 0; i < racerCount; i++)
+                snapshot.state.racers.Add(PhysicalRacer(i, idChars));
+            return snapshot;
+        }
+
+        private static byte[] Wrap(string tag, string json)
+        {
+            var body = Encoding.UTF8.GetBytes(json);
+            var packet = new byte[NetworkWireCodec.HeaderBytes + body.Length];
+            var tagBytes = Encoding.ASCII.GetBytes(tag);
+            System.Buffer.BlockCopy(tagBytes, 0, packet, 0, tagBytes.Length);
+            System.Buffer.BlockCopy(body, 0, packet,
+                NetworkWireCodec.HeaderBytes, body.Length);
+            return packet;
+        }
+
+        [Test]
+        public void PhysicalSnapshotRoundTripsReplayState()
+        {
+            var snapshot = PhysicalSnapshot(2);
+            var source = snapshot.state.racers[1].session.motor;
+            byte[] packet;
+            string error;
+            Assert.That(NetworkWireCodec.TryEncodeSnapshot(snapshot,
+                out packet, out error), Is.True, error);
+            NetworkSnapshot decoded;
+            Assert.That(NetworkWireCodec.TryDecodeSnapshot(packet,
+                out decoded, out error), Is.True, error);
+
+            var restored = decoded.state.racers[1].session.motor;
+            Assert.That(restored, Is.Not.Null);
+            Assert.That(restored.physics, Is.Not.Null);
+            var expected = source.physics;
+            var actual = restored.physics;
+            Assert.That(actual.attitudeX,
+                Is.EqualTo(expected.attitudeX).Within(1e-4f));
+            Assert.That(actual.attitudeY,
+                Is.EqualTo(expected.attitudeY).Within(1e-4f));
+            Assert.That(actual.attitudeZ,
+                Is.EqualTo(expected.attitudeZ).Within(1e-4f));
+            Assert.That(actual.attitudeW,
+                Is.EqualTo(expected.attitudeW).Within(1e-4f));
+            Assert.That(actual.velocityZ,
+                Is.EqualTo(expected.velocityZ).Within(1e-4f));
+            Assert.That(actual.angularVelocityY,
+                Is.EqualTo(expected.angularVelocityY).Within(1e-4f));
+            Assert.That(actual.recoveryEpoch,
+                Is.EqualTo(expected.recoveryEpoch));
+            Assert.That(actual.filteredSteering,
+                Is.EqualTo(expected.filteredSteering).Within(1e-4f));
+            Assert.That(actual.driftAmount,
+                Is.EqualTo(expected.driftAmount).Within(1e-4f));
+            Assert.That(actual.airSeconds,
+                Is.EqualTo(expected.airSeconds).Within(1e-4f));
+            Assert.That(actual.lastContact,
+                Is.EqualTo(expected.lastContact));
+            Assert.That(actual.wheels.Length,
+                Is.EqualTo(expected.wheels.Length));
+            for (var i = 0; i < actual.wheels.Length; i++)
+            {
+                Assert.That(actual.wheels[i].index, Is.EqualTo(i));
+                Assert.That(actual.wheels[i].grounded,
+                    Is.EqualTo(expected.wheels[i].grounded));
+                Assert.That(actual.wheels[i].compression,
+                    Is.EqualTo(expected.wheels[i].compression)
+                        .Within(1e-4f));
+                Assert.That(actual.wheels[i].previousCompression,
+                    Is.EqualTo(expected.wheels[i].previousCompression)
+                        .Within(1e-4f));
+                Assert.That(actual.wheels[i].contactValid,
+                    Is.EqualTo(expected.wheels[i].contactValid));
+                Assert.That(actual.wheels[i].steering,
+                    Is.EqualTo(expected.wheels[i].steering).Within(1e-4f));
+                Assert.That(actual.wheels[i].spin,
+                    Is.EqualTo(expected.wheels[i].spin).Within(1e-4f));
+            }
+            // The decoded motor is valid input for the authoritative
+            // restore path.
+            string stateError;
+            Assert.That(actual.Validate(out stateError), Is.True,
+                stateError);
+        }
+
+        [Test]
+        public void PhysicalSnapshotWireCarriesCompactDtoOnly()
+        {
+            var snapshot = PhysicalSnapshot(2);
+            byte[] packet;
+            string error;
+            Assert.That(NetworkWireCodec.TryEncodeSnapshot(snapshot,
+                out packet, out error), Is.True, error);
+            var body = Encoding.UTF8.GetString(packet,
+                NetworkWireCodec.HeaderBytes,
+                packet.Length - NetworkWireCodec.HeaderBytes);
+            // The compact DTO rides `racer.physics`; diagnostic-only
+            // contact data must never reach the wire.
+            Assert.That(body, Does.Contain("\"physics\""));
+            Assert.That(body, Does.Not.Contain("normalLoad"));
+            Assert.That(body, Does.Not.Contain("slipLongitudinal"));
+            Assert.That(body, Does.Not.Contain("slipLateral"));
+            Assert.That(body, Does.Not.Contain("contactX"));
+            var wire = JsonUtility.FromJson<NetworkSnapshot>(body);
+            Assert.That(wire.state.racers[0].physics, Is.Not.Null);
+            Assert.That(wire.state.racers[0].physics.present, Is.True);
+            // The envelope stays on session.motor; its inline physics
+            // member is stripped for the wire.
+            Assert.That(wire.state.racers[0].session.motor, Is.Not.Null);
+            Assert.That(wire.state.racers[0].session.motor.boostCharge,
+                Is.EqualTo(0.6f).Within(1e-4f));
+            Assert.That(
+                wire.state.racers[0].session.motor.physics == null
+                    || wire.state.racers[0].session.motor.physics
+                        .wheels.Length == 0,
+                Is.True, "inline diagnostic physics stays off the wire");
+        }
+
+        [Test]
+        public void PhysicalSnapshotEncodeLeavesSourceUntouched()
+        {
+            var snapshot = PhysicalSnapshot(1);
+            byte[] packet;
+            string error;
+            Assert.That(NetworkWireCodec.TryEncodeSnapshot(snapshot,
+                out packet, out error), Is.True, error);
+            Assert.That(snapshot.state.racers[0].session.motor.physics,
+                Is.Not.Null,
+                "encoding must never strip the host's live physics state");
+            Assert.That(snapshot.state.racers[0].physics == null
+                || !snapshot.state.racers[0].physics.present,
+                Is.True);
+        }
+
+        [Test]
+        public void PhysicalSnapshotRejectsMalformedWireStateAtomically()
+        {
+            // One malformed racer DTO kills the whole packet — partial
+            // state must never be applied.
+            var wire = new NetworkSnapshot
+            {
+                sessionId = "s", raceId = "r", raceOrdinal = 1,
+                snapshotSequence = 1,
+                state = new NetworkRaceState
+                {
+                    sessionId = "s", raceId = "r", phase = "running",
+                    racers =
+                    {
+                        PhysicalRacer(0, 4),
+                        new NetworkRacerState
+                        {
+                            participantId = "bad-1",
+                            slot = 1,
+                            session = new DrivingSessionState
+                            {
+                                motor = new MotorState()
+                            },
+                            physics = new NetworkPhysicsState
+                            {
+                                present = true,
+                                attitudeW = 3f // non-unit quaternion
+                            }
+                        }
+                    }
+                }
+            };
+            // Strip the valid racer's inline physics so only the DTO
+            // distinguishes the two paths.
+            wire.state.racers[0].session.motor.physics = null;
+            var packet = Wrap(NetworkWireCodec.TagSnapshot,
+                JsonUtility.ToJson(wire));
+            NetworkSnapshot decoded;
+            string error;
+            Assert.That(NetworkWireCodec.TryDecodeSnapshot(packet,
+                out decoded, out error), Is.False);
+            Assert.That(decoded, Is.Null,
+                "a malformed physical DTO rejects the whole snapshot");
+        }
+
+        [Test]
+        public void PhysicalSnapshotRejectsMalformedInlineMotor()
+        {
+            // A snapshot still carrying an inline (non-DTO) physics
+            // state that fails validation is refused the same way.
+            var wire = PhysicalSnapshot(1);
+            wire.state.racers[0].session.motor.physics.driftAmount = 2f;
+            var packet = Wrap(NetworkWireCodec.TagSnapshot,
+                JsonUtility.ToJson(wire));
+            NetworkSnapshot decoded;
+            string error;
+            Assert.That(NetworkWireCodec.TryDecodeSnapshot(packet,
+                out decoded, out error), Is.False);
+            Assert.That(decoded, Is.Null);
+        }
+
+        [Test]
+        public void EmptyPhysicsDtoDecodesAsAbsent()
+        {
+            // JsonUtility materializes a missing/absent DTO as an empty
+            // instance; `present` is the explicit wire marker — an empty
+            // DTO must not fabricate a motor.
+            var wire = new NetworkSnapshot
+            {
+                sessionId = "s", raceId = "r", raceOrdinal = 1,
+                snapshotSequence = 1,
+                state = new NetworkRaceState
+                {
+                    sessionId = "s", raceId = "r", phase = "running",
+                    racers =
+                    {
+                        new NetworkRacerState
+                        {
+                            participantId = "arcade-1",
+                            slot = 0,
+                            session = new DrivingSessionState
+                            {
+                                motor = new MotorState { speed = 5f }
+                            }
+                            // physics absent -> {} -> present=false
+                        }
+                    }
+                }
+            };
+            var packet = Wrap(NetworkWireCodec.TagSnapshot,
+                JsonUtility.ToJson(wire));
+            NetworkSnapshot decoded;
+            string error;
+            Assert.That(NetworkWireCodec.TryDecodeSnapshot(packet,
+                out decoded, out error), Is.True, error);
+            var motor = decoded.state.racers[0].session.motor;
+            Assert.That(motor, Is.Not.Null);
+            Assert.That(motor.physics == null
+                || motor.physics.wheels.Length == 0, Is.True,
+                "an absent physical DTO must not mint physical state");
+        }
+
+        [Test]
+        public void FourRacerMaxIdentitySnapshotStaysUnderCeiling()
+        {
+            // Worst case: four physical racers at the 64-char identity
+            // bound with 60-char session/race ids — the compact DTO
+            // keeps the legal maximum well under 16 KiB.
+            var snapshot = PhysicalSnapshot(4, 56);
+            byte[] packet;
+            string error;
+            Assert.That(NetworkWireCodec.TryEncodeSnapshot(snapshot,
+                out packet, out error), Is.True, error);
+            Assert.That(packet.Length,
+                Is.LessThanOrEqualTo(NetworkSettings.SnapshotCeilingBytes));
+            NetworkSnapshot decoded;
+            Assert.That(NetworkWireCodec.TryDecodeSnapshot(packet,
+                out decoded, out error), Is.True, error);
+            Assert.That(decoded.state.racers.Count, Is.EqualTo(4));
+        }
+
+        [Test]
+        public void LegacyN5TagsAreNotGameplayPackets()
+        {
+            // Protocol 2 gameplay uses P1** tags; legacy N5** traffic is
+            // fenced at the envelope before any body is read.
+            Assert.That(NetworkWireCodec.IsGameplayPacket(
+                Tagged(NetworkWireCodec.TagSnapshot, 4)), Is.True);
+            Assert.That(NetworkWireCodec.TagSnapshot, Is.EqualTo("P1SS"));
+            Assert.That(NetworkWireCodec.TagInputBatch, Is.EqualTo("P1IB"));
+            Assert.That(NetworkWireCodec.TagEventBatch, Is.EqualTo("P1EB"));
+            Assert.That(NetworkWireCodec.TagResyncRequest,
+                Is.EqualTo("P1RS"));
+            var legacy = Tagged("N5SS", 8);
+            Assert.That(NetworkWireCodec.IsGameplayPacket(legacy),
+                Is.False);
+            NetworkSnapshot snapshot;
+            string error;
+            Assert.That(NetworkWireCodec.TryDecodeSnapshot(legacy,
+                out snapshot, out error), Is.False);
+            Assert.That(error, Is.EqualTo("wrongType"));
+            List<NetworkInputFrame> frames;
+            Assert.That(NetworkWireCodec.TryDecodeInputBatch(
+                Tagged("N5IB", 8), out frames, out error), Is.False);
+            Assert.That(error, Is.EqualTo("wrongType"));
         }
     }
 }

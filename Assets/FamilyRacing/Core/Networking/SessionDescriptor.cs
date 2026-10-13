@@ -15,6 +15,10 @@ namespace FamilyRacing.Core.Networking
         public int lanProtocol = NetworkSettings.LanProtocolVersion;
         public string gameplayVersion = "";
         public string contentVersion = "";
+        // Deterministic canonical fingerprint of the catalog's tuned
+        // content — the exact-match admission token join.request must
+        // echo. Never a secret: it is a hash of public tuning data.
+        public string contentFingerprint = "";
         public string eventId = "";
         public string classId = "";
         public int occupancy;

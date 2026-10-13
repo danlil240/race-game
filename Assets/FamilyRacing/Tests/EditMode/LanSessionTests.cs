@@ -95,6 +95,7 @@ namespace FamilyRacing.Tests
             public int SearchStarts;
             public int SearchStops;
             public int ResponderStarts;
+            public string LastCompat = "";
             public readonly List<LanDiscoveredHost> Hosts = new List<LanDiscoveredHost>();
 
             public bool StartSearch(out string error)
@@ -109,9 +110,11 @@ namespace FamilyRacing.Tests
                 SearchStops++;
             }
 
-            public bool StartResponder(ushort gamePort, string hostName, out string error)
+            public bool StartResponder(ushort gamePort, string hostName,
+                string compat, out string error)
             {
                 ResponderStarts++;
+                LastCompat = compat;
                 error = "";
                 return true;
             }
@@ -190,13 +193,16 @@ namespace FamilyRacing.Tests
         internal static string JoinRequest(string participantId,
             string contentVersion = "lan-content-1",
             string gameplayVersion = "gameplay-test",
-            string credential = "")
+            string credential = "",
+            string protocolVersion = null,
+            string fingerprint = null)
         {
             return NetworkProtocol.Encode(NetworkProtocol.MsgJoinRequest,
-                "v", NetworkProtocol.LanProtocolVersion.ToString(
+                "v", protocolVersion ?? NetworkProtocol.LanProtocolVersion.ToString(
                     System.Globalization.CultureInfo.InvariantCulture),
                 "gv", gameplayVersion,
                 "cv", contentVersion,
+                "fp", fingerprint ?? LanCatalog().CompatibilityFingerprint,
                 "pid", participantId,
                 "av", "fox",
                 "ci", "1",
@@ -388,6 +394,204 @@ namespace FamilyRacing.Tests
             Assert.That(occupied, Is.EqualTo(1),
                 "incompatible guest must be rejected before slot allocation");
             Assert.That(roster[0].participantId, Is.EqualTo("host-p"));
+        }
+
+        // --- Task 9: versioned physical admission ---------------------------
+
+        private static string RejectCode(List<string> replies)
+        {
+            foreach (var payload in replies)
+            {
+                string type;
+                Dictionary<string, string> fields;
+                Assert.That(NetworkProtocol.TryDecode(payload, out type, out fields));
+                if (type == NetworkProtocol.MsgJoinReject) return fields["code"];
+            }
+            return null;
+        }
+
+        private static string ExpectedCompat()
+        {
+            return "gameplay-test|lan-content-1|"
+                + LanCatalog().CompatibilityFingerprint;
+        }
+
+        [Test]
+        public void ProtocolTwoIsTheLanContract()
+        {
+            // Task 9: the physical replication epoch — protocol 2,
+            // gameplay-2 and observation schema 4 move together.
+            Assert.That(NetworkSettings.LanProtocolVersion, Is.EqualTo(2));
+            Assert.That(NetworkSettings.GameplayVersion,
+                Is.EqualTo("gameplay-2"));
+            Assert.That(NetworkSettings.StateSchemaVersion, Is.EqualTo(4));
+        }
+
+        [Test]
+        public void JoinRequestCarriesCanonicalFingerprint()
+        {
+            string type;
+            Dictionary<string, string> fields;
+            Assert.That(NetworkProtocol.TryDecode(
+                JoinRequest("p-1"), out type, out fields));
+            Assert.That(fields["v"], Is.EqualTo("2"));
+            Assert.That(fields["fp"],
+                Is.EqualTo(LanCatalog().CompatibilityFingerprint),
+                "join.request carries the canonical tuning fingerprint");
+        }
+
+        [Test]
+        public void ClientEmitsFingerprintInJoinRequest()
+        {
+            var clientLink = new FakeLanLink();
+            var client = StandaloneService(clientLink, new FakeLanProbe(),
+                "guest-1");
+            var join = client.Execute(Cmd("lan.join",
+                P("address", "192.168.1.8", "port", "47777")));
+            Assert.That(join.status, Is.EqualTo(CommandResult.Accepted));
+            client.OnLinkConnected(7);
+            var sent = clientLink.DrainSent();
+            Assert.That(sent.Count, Is.EqualTo(1));
+            string type;
+            Dictionary<string, string> fields;
+            Assert.That(NetworkProtocol.TryDecode(sent[0], out type, out fields));
+            Assert.That(type, Is.EqualTo(NetworkProtocol.MsgJoinRequest));
+            Assert.That(fields["fp"],
+                Is.EqualTo(LanCatalog().CompatibilityFingerprint));
+        }
+
+        [Test]
+        public void LegacyProtocolJoinRejectedBeforeSlotAllocation()
+        {
+            var host = StandaloneHost(link, probe);
+            host.OnLinkConnected(5);
+            // A protocol-1 peer carrying otherwise-valid metadata is
+            // fenced before any slot decision.
+            host.OnLinkMessage(5, JoinRequest("p-legacy",
+                protocolVersion: "1"));
+            Assert.That(RejectCode(link.DrainSent()),
+                Is.EqualTo("incompatible"));
+            var roster = host.Snapshot().participants;
+            var occupied = 0;
+            foreach (var p in roster) if (p.occupied) occupied++;
+            Assert.That(occupied, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void IncompatibleFingerprintRejectedBeforeSlotAllocation()
+        {
+            var host = StandaloneHost(link, probe);
+            host.OnLinkConnected(5);
+            host.OnLinkMessage(5, JoinRequest("p-1",
+                fingerprint: new string('0', 64)));
+            Assert.That(RejectCode(link.DrainSent()),
+                Is.EqualTo("incompatible"));
+            var roster = host.Snapshot().participants;
+            var occupied = 0;
+            foreach (var p in roster) if (p.occupied) occupied++;
+            Assert.That(occupied, Is.EqualTo(1),
+                "a fingerprint mismatch must reject before slot allocation");
+        }
+
+        [Test]
+        public void MissingFingerprintRejectedBeforeSlotAllocation()
+        {
+            var host = StandaloneHost(link, probe);
+            host.OnLinkConnected(5);
+            // A legacy peer that never learned the fp field is fenced by
+            // its absence alone — no slot may be dealt to it.
+            host.OnLinkMessage(5, NetworkProtocol.Encode(
+                NetworkProtocol.MsgJoinRequest,
+                "v", NetworkProtocol.LanProtocolVersion.ToString(
+                    System.Globalization.CultureInfo.InvariantCulture),
+                "gv", "gameplay-test",
+                "cv", "lan-content-1",
+                "pid", "p-legacy",
+                "av", "fox",
+                "ci", "1",
+                "cid", "c-p-legacy",
+                "cred", ""));
+            Assert.That(RejectCode(link.DrainSent()),
+                Is.EqualTo("incompatible"));
+            var roster = host.Snapshot().participants;
+            var occupied = 0;
+            foreach (var p in roster) if (p.occupied) occupied++;
+            Assert.That(occupied, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void HostDescriptorCarriesProtocolAndFingerprint()
+        {
+            var host = StandaloneHost(link, probe);
+            var descriptor = host.Snapshot().descriptor;
+            Assert.That(descriptor.lanProtocol, Is.EqualTo(2));
+            Assert.That(descriptor.contentVersion,
+                Is.EqualTo("lan-content-1"));
+            Assert.That(descriptor.contentFingerprint,
+                Is.EqualTo(LanCatalog().CompatibilityFingerprint));
+            Assert.That(probe.LastCompat, Is.EqualTo(ExpectedCompat()),
+                "the discovery advertisement binds the compat token");
+        }
+
+        [Test]
+        public void DiscoveredEntrySurfacesCompatToken()
+        {
+            var client = StandaloneService(link, probe, "guest-1");
+            client.Execute(Cmd("lan.discover", null));
+            probe.Hosts.Add(new LanDiscoveredHost
+            {
+                address = "192.168.1.8",
+                port = 47777,
+                hostName = "den",
+                compat = ExpectedCompat()
+            });
+            var discovered = client.Snapshot().discovered;
+            Assert.That(discovered.Count, Is.EqualTo(1));
+            Assert.That(discovered[0].compat, Is.EqualTo(ExpectedCompat()));
+        }
+
+        [Test]
+        public void JoinToIncompatibleDiscoveredHostFailsFast()
+        {
+            var clientLink = new FakeLanLink();
+            var clientProbe = new FakeLanProbe();
+            var client = StandaloneService(clientLink, clientProbe, "guest-1");
+            client.Execute(Cmd("lan.discover", null));
+            clientProbe.Hosts.Add(new LanDiscoveredHost
+            {
+                address = "192.168.1.8",
+                port = 47777,
+                hostName = "den",
+                // Another build's tuned content: joining it can only
+                // desynchronize, so the client refuses before dialing.
+                compat = "gameplay-test|lan-content-1|" + new string('0', 64)
+            });
+            var join = client.Execute(Cmd("lan.join",
+                P("address", "192.168.1.8", "port", "47777")));
+            Assert.That(join.status, Is.EqualTo(CommandResult.Rejected));
+            Assert.That(join.code, Is.EqualTo("incompatible"));
+            Assert.That(clientLink.StartClientCalls, Is.EqualTo(0),
+                "an incompatible discovered host must fail before dialing");
+        }
+
+        [Test]
+        public void JoinToCompatibleDiscoveredHostConnects()
+        {
+            var clientLink = new FakeLanLink();
+            var clientProbe = new FakeLanProbe();
+            var client = StandaloneService(clientLink, clientProbe, "guest-1");
+            client.Execute(Cmd("lan.discover", null));
+            clientProbe.Hosts.Add(new LanDiscoveredHost
+            {
+                address = "192.168.1.8",
+                port = 47777,
+                hostName = "den",
+                compat = ExpectedCompat()
+            });
+            var join = client.Execute(Cmd("lan.join",
+                P("address", "192.168.1.8", "port", "47777")));
+            Assert.That(join.status, Is.EqualTo(CommandResult.Accepted));
+            Assert.That(clientLink.StartClientCalls, Is.EqualTo(1));
         }
 
         [Test]

@@ -483,7 +483,7 @@ namespace FamilyRacing.Tests
             }
         }
 
-        // The wire vocabulary a client can emit is only N5IB input
+        // The wire vocabulary a client can emit is only P1IB input
         // batches: there is no client->host message type that can carry
         // progress, finish state, standings, or rewards. Forged control
         // payloads must be dropped before they can touch authoritative

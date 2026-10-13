@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using FamilyRacing.Core.Driving;
+using FamilyRacing.Core.Networking;
 
 namespace FamilyRacing.Core.Racing
 {
@@ -38,11 +39,19 @@ namespace FamilyRacing.Core.Racing
         public bool dnf;
         public long finishTicks;            // elapsed race ticks at finish; 0 otherwise
         public DrivingSessionState session;
+        // Task 9 wire surface: the compact versioned physical-state DTO.
+        // The host's in-memory state keeps the full VehiclePhysicsState
+        // inside session.motor.physics; the wire transform projects it
+        // here (and strips the inline copy) for transmission, and decode
+        // folds it back onto the motor before the state is applied.
+        // `present` distinguishes a physical racer from an arcade one.
+        public NetworkPhysicsState physics;
 
         public NetworkRacerState Copy()
         {
             var copy = (NetworkRacerState)MemberwiseClone();
             copy.session = session != null ? session.Copy() : null;
+            copy.physics = physics != null ? physics.Copy() : null;
             return copy;
         }
     }
