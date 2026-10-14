@@ -260,6 +260,11 @@ namespace FamilyRacing.Core.Foundation
             // reward to the selected profile through the atomic store —
             // exactly once per immutable result, provable by receipt.
             lanSession.SetRewardApplier(ApplyNetworkResult);
+            // M5 Task 4: the allocated race identity binds a durable
+            // reward context before the race clock may start — the
+            // preparer reports an error instead of ever starting
+            // unbound.
+            lanSession.SetRacePreparer(PrepareLanRewardContext);
         }
 
         // The session service hands each finalized result here. Coins and

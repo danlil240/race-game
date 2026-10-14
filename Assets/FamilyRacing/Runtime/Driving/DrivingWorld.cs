@@ -30,6 +30,11 @@ namespace FamilyRacing
         // the presenters publish catalogId "none" and play nothing —
         // never a silent fallback onto unauthored assets.
         [SerializeField] private RacePresentationCatalogAsset presentationCatalog;
+        // M5 Task 4: the gameplay-loop catalog (campaign, bounties,
+        // economy, gadgets, AI difficulties) bound over this world's
+        // driving content. Optional: absent means solo.start reports
+        // contentUnavailable while practice/LAN keep working.
+        [SerializeField] private GameplayCatalogAsset gameplayCatalog;
         [SerializeField] private GameObject coursePrefab;
         [SerializeField] private string contentVersion = "driving-0.1";
         // Developer-facing race-level backend selection, bound to this
@@ -170,6 +175,10 @@ namespace FamilyRacing
         // tutorial.start simply reports contentUnavailable.
         public Core.Tutorial.TutorialDefinition Tutorial { get; private set; }
         public TutorialDefinitionAsset TutorialAsset { get { return tutorial; } }
+        // The validated gameplay catalog built over this world's driving
+        // content (M5 Task 4); null when no asset is bound or conversion
+        // failed — solo.start reports contentUnavailable honestly.
+        public Core.Progression.GameplayCatalog Gameplay { get; private set; }
         public RacePresentationCatalogAsset PresentationCatalog
         {
             get { return presentationCatalog; }
@@ -275,6 +284,18 @@ namespace FamilyRacing
                 Debug.LogError("DrivingWorld: " + error.Message);
                 return null;
             }
+            // Gameplay content validates over the driving catalog it was
+            // authored against: a conversion failure stays null so
+            // solo.start reports contentUnavailable rather than running
+            // against partially bound progression content.
+            Gameplay = null;
+            if (gameplayCatalog != null)
+            {
+                string gameplayError;
+                Gameplay = gameplayCatalog.ToCatalog(catalog, out gameplayError);
+                if (Gameplay == null)
+                    Debug.LogError("DrivingWorld: " + gameplayError);
+            }
             if (coursePrefab != null && courseInstance == null)
             {
                 // Parented under this component so scene/test teardown of
@@ -314,7 +335,15 @@ namespace FamilyRacing
 
         public void ApplyFrame(FoundationState state, float visualAlpha)
         {
-            var session = state != null ? state.driving : null;
+            // Practice still publishes under `driving`; a time trial's
+            // lone session publishes under soloRace.trial — same visual
+            // contract. The four-racer local modes carry no session here:
+            // ApplyRaceFrame owns their views, so the solo visual stays
+            // correctly hidden.
+            var session = state != null
+                ? (state.driving ?? (state.soloRace != null
+                    ? state.soloRace.trial : null))
+                : null;
             var active = session != null && session.motor != null;
             soloCourseActive = active;
             RefreshCourseInstance();

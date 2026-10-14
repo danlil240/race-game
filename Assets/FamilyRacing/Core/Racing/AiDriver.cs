@@ -34,6 +34,15 @@ namespace FamilyRacing.Core.Racing
         // out instead of tailgating through every contact — the offset
         // moves the aim point only; physics and rules are unchanged.
         private readonly float laneOffset;
+        // The authored difficulty preset this follower runs under (M5
+        // Task 4): decision parameters only — the cornering safety
+        // margin and the boost-spend threshold. Null selects the
+        // established LAN constants so takeover/default driving keeps
+        // its proven behaviour. Presets never grant speed, teleport, or
+        // rule exceptions; gadgetUseWillingness/shortcutWillingness are
+        // stored for the gadget/shortcut systems that consume them and
+        // change no decision today.
+        private readonly AiDifficultyDefinition difficulty;
         private bool initialized;
         private int routeIndex;
         private int stuckTicks;
@@ -48,16 +57,41 @@ namespace FamilyRacing.Core.Racing
         private bool wasRecovering;
 
         public AiDriver()
-            : this(0f)
+            : this(0f, null)
         {
         }
 
         public AiDriver(float lateralOffsetMeters)
+            : this(lateralOffsetMeters, null)
+        {
+        }
+
+        public AiDriver(float lateralOffsetMeters,
+            AiDifficultyDefinition difficulty)
         {
             laneOffset = float.IsNaN(lateralOffsetMeters)
                 || float.IsInfinity(lateralOffsetMeters)
                 ? 0f
                 : lateralOffsetMeters;
+            this.difficulty = difficulty;
+        }
+
+        // Effective cornering safety margin: the authored preset scales
+        // the established constant — a higher margin brakes earlier and
+        // corners slower (easier), a lower one pushes deeper (harder).
+        private float CorneringMargin()
+        {
+            return NetworkSettings.AiCorneringMargin
+                * (difficulty != null ? difficulty.brakeMarginScale : 1f);
+        }
+
+        // Effective boost-spend threshold: the authored charge the
+        // follower waits for; null keeps the established constant.
+        private float BoostMinCharge()
+        {
+            return difficulty != null
+                ? difficulty.boostUseMinCharge
+                : NetworkSettings.AiBoostMinCharge;
         }
 
         public DriverInput Sample(DrivingSessionState racer, CourseDefinition course)
@@ -176,7 +210,7 @@ namespace FamilyRacing.Core.Racing
             // hard is suppressed the way a human would feather off.
             var boost = brake <= 0f
                 && Math.Abs(steer) <= NetworkSettings.AiBoostMaxSteer
-                && motor.boostCharge >= NetworkSettings.AiBoostMinCharge;
+                && motor.boostCharge >= BoostMinCharge();
 
             // A grounded near-stopped streak requests the ordinary
             // recover one-shot (queued and consumed like any command).
@@ -315,7 +349,7 @@ namespace FamilyRacing.Core.Racing
                         {
                             var arc = (inLen + outLen) * 0.5f;
                             var cornerSpeed = yawRate
-                                * NetworkSettings.AiCorneringMargin
+                                * CorneringMargin()
                                 * arc / turn;
                             if (cornerSpeed < target) target = cornerSpeed;
                         }
@@ -344,7 +378,7 @@ namespace FamilyRacing.Core.Racing
             var motor = racer.motor;
             var speed = motor.speed;
             if (!Finite(speed) || speed <= 0.1f) return 0f;
-            var radius = PhysicalTurnRadius(phys, speed);
+            var radius = PhysicalTurnRadius(phys, speed, CorneringMargin());
             if (float.IsInfinity(radius) || radius <= 0.001f) return 0f;
             // Exact Dubins unreachability: the target must sit inside
             // one of the two minimum-radius tangent circles — the discs
@@ -376,7 +410,7 @@ namespace FamilyRacing.Core.Racing
         // part of mu*N, so demanding the full coefficient would promise
         // a radius the tires cannot deliver.
         private static float PhysicalTurnRadius(VehiclePhysicsTuning phys,
-            float speed)
+            float speed, float corneringMargin)
         {
             var authority = VehicleAssistRules.SteeringTarget(
                 1f, speed, phys);
@@ -386,7 +420,7 @@ namespace FamilyRacing.Core.Racing
             var friction = speed > 0.001f
                 ? speed * speed / (phys.frictionCoefficient
                     * VehiclePhysicsTuning.StandardGravity
-                    * NetworkSettings.AiCorneringMargin)
+                    * corneringMargin)
                 : 0f;
             return Math.Max(geometric, friction);
         }

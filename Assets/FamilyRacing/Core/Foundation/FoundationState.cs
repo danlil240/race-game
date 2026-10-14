@@ -9,7 +9,8 @@ namespace FamilyRacing.Core.Foundation
     // Serializable full-state DTO. Every Snapshot() call returns an
     // independent deep copy; callers can freely mutate what they receive.
     // stateSchemaVersion 3 adds the network session slice, 4 the physical
-    // surfaces, and 5 the render-profile/performance presentation slice;
+    // surfaces, 5 the render-profile/performance presentation slice, and
+    // 6 the local solo-race slice plus the network current-race identity;
     // consumers must negotiate the schema, never silently reinterpret it.
     [Serializable]
     public sealed class FoundationState
@@ -65,6 +66,14 @@ namespace FamilyRacing.Core.Foundation
         // the bridge's own packet/loss facts on THIS endpoint — null
         // until a replication bridge exists, never fabricated.
         public NetworkLinkState networkLink;
+        // Schema-6 local-mode slice (M5 Task 4): the live solo race
+        // session — exactly one of `race` (campaign/quickRace through
+        // the shared four-racer coordinator) or `trial` (timeTrial
+        // through a lone DrivingSession) populated, plus the finalized
+        // immutable result when the run completed. Null outside a
+        // local mode; practice still publishes under `driving` and LAN
+        // under `networkRace`.
+        public SoloRaceState soloRace;
     }
 
     // Runtime-visible presentation facts (geometry, input ownership, locale,

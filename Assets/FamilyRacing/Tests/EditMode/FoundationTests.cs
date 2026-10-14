@@ -834,6 +834,7 @@ namespace FamilyRacing.Tests
                 "app.focusLost",
                 "camera.toggle", "pause.toggle",
                 "race.start", "race.restart", "race.exit",
+                "solo.start",
                 "tutorial.start", "tutorial.replay", "tutorial.exit",
                 "lan.host", "lan.discover", "lan.discovery.stop", "lan.join",
                 "lan.configure", "lan.vehicle", "lan.ready", "lan.start",

@@ -428,8 +428,14 @@ namespace FamilyRacing.Networking
                 || content == null) return;
             hostSessionId = descriptor.sessionId;
             raceOrdinal++;
-            raceId = hostSessionId + "-r" + raceOrdinal.ToString(
-                System.Globalization.CultureInfo.InvariantCulture);
+            // Task 4: the session service allocates the race identity at
+            // lan.start so every participant binds its reward context
+            // before the race begins — prefer it and keep the legacy
+            // bridge-computed id only as the no-allocation fallback.
+            raceId = !string.IsNullOrEmpty(snap.currentRaceId)
+                ? snap.currentRaceId
+                : hostSessionId + "-r" + raceOrdinal.ToString(
+                    System.Globalization.CultureInfo.InvariantCulture);
             var specs = new List<NetworkRacerSpec>();
             foreach (var participant in snap.participants)
             {

@@ -115,6 +115,10 @@ namespace FamilyRacing.Core.Foundation
 
         private static readonly string[] Languages = { "en", "he" };
         private static readonly string[] Cameras = { "chase", "overhead" };
+        // The local gameplay modes solo.start seats (M5 Task 4);
+        // practice keeps race.start and lan keeps the session surface.
+        private static readonly string[] SoloModes =
+            { "campaign", "quickRace", "timeTrial" };
         // "driving" is never a navigation target: race.start enters it and
         // race.exit is the only way back out. The same rule applies to the
         // LAN phase screens — "lan-browser" is the only LAN target; the
@@ -155,6 +159,17 @@ namespace FamilyRacing.Core.Foundation
                 Param("vehicleId", "string", null), Param("eventId", "string", null)),
             Schema("race.restart"),
             Schema("race.exit"),
+            // M5 Task 4 local modes: the mode chooses the shared
+            // four-racer coordinator (campaign | quickRace) or the lone
+            // trial session (timeTrial); every other selection field is
+            // validated mode-dependently inside SoloRaceSession.
+            Schema("solo.start",
+                Param("mode", "string", SoloModes),
+                OptionalParam("eventId", "string", null),
+                OptionalParam("courseId", "string", null),
+                OptionalParam("classId", "string", null),
+                OptionalParam("vehicleId", "string", null),
+                OptionalParam("difficulty", "string", null)),
             Schema("tutorial.start", Param("vehicleId", "string", null)),
             Schema("tutorial.replay"),
             Schema("tutorial.exit"),
@@ -247,7 +262,7 @@ namespace FamilyRacing.Core.Foundation
         }
 
         public bool Paused { get { return paused; } }
-        public bool Racing { get { return driving != null; } }
+        public bool Racing { get { return driving != null || soloRace != null; } }
 
         // The currently held (leased) local input. Task 5's LAN path feeds
         // this same sample through the validated network input path so the
@@ -486,7 +501,10 @@ namespace FamilyRacing.Core.Foundation
                 remotePresentation = networkRemotePresentation != null
                     ? networkRemotePresentation.Copy() : null,
                 networkLink = networkLinkState != null
-                    ? networkLinkState.Copy() : null
+                    ? networkLinkState.Copy() : null,
+                // M5 Task 4 local modes: the live solo race session —
+                // null unless campaign/quickRace/timeTrial is active.
+                soloRace = soloRace != null ? soloRace.Snapshot() : null
             };
             if (driving != null)
             {
@@ -591,6 +609,13 @@ namespace FamilyRacing.Core.Foundation
                 driving.CancelPending("cleared");
                 DrainDrivingEvents();
             }
+            if (soloRace != null)
+            {
+                // Local-mode sessions carry the local racer's latched
+                // one-shots through the same cancellation policy.
+                soloRace.CancelPending("cleared");
+                DrainSoloEvents();
+            }
         }
 
         // Runtime-only callback the app wires to its physical input
@@ -636,7 +661,8 @@ namespace FamilyRacing.Core.Foundation
                 // hosting/joining/reconnecting would tear down shared state
                 // the running race still claims. Session-internal lan.* and
                 // lan.discover keep their own availability answers.
-                if (driving != null && LanEntryBlockedDuringRace(command.Action))
+                if ((driving != null || soloRace != null)
+                    && LanEntryBlockedDuringRace(command.Action))
                     return Result(command, CommandResult.Rejected, "raceActive");
                 // LAN commands route to the session service; pause.toggle
                 // is a shared toggle on the host and a pause request on a
@@ -665,6 +691,7 @@ namespace FamilyRacing.Core.Foundation
                     case "race.start": return RaceStart(command);
                     case "race.restart": return RaceRestart(command);
                     case "race.exit": return RaceExit(command);
+                    case "solo.start": return SoloStart(command);
                     case "tutorial.start": return TutorialStart(command);
                     case "tutorial.replay": return TutorialReplay(command);
                     case "tutorial.exit": return TutorialExit(command);
@@ -691,6 +718,7 @@ namespace FamilyRacing.Core.Foundation
                 case "race.start":
                 case "race.restart":
                 case "race.exit":
+                case "solo.start":
                 case "tutorial.start":
                 case "tutorial.replay":
                 case "tutorial.exit":
@@ -736,6 +764,7 @@ namespace FamilyRacing.Core.Foundation
                 return Result(command, CommandResult.Failed, "saveFailed");
             }
             EndRace("lifecycle", command);
+            EndSoloRace("lifecycle", command);
             slots[slot].Status = "Loaded";
             slots[slot].Profile = ProfileCopy.DeepCopy(created);
             savedProfile = ProfileCopy.DeepCopy(created);
@@ -762,6 +791,7 @@ namespace FamilyRacing.Core.Foundation
             if (info.Status != "Loaded" && info.Status != "RecoveredFromBackup")
                 return Result(command, CommandResult.Rejected, "unavailable");
             EndRace("lifecycle", command);
+            EndSoloRace("lifecycle", command);
             savedProfile = ProfileCopy.DeepCopy(info.Profile);
             draftProfile = ProfileCopy.DeepCopy(info.Profile);
             activeSlot = slot;
@@ -868,7 +898,8 @@ namespace FamilyRacing.Core.Foundation
 
         private CommandResult SetInput(GameCommand command)
         {
-            var drivingActive = screen == ScreenDriving && driving != null;
+            var drivingActive = screen == ScreenDriving
+                && (driving != null || soloRace != null);
             var lanRaceScreen = screen == ScreenLanRace && LanActive();
             if (screen != ScreenSandbox && !drivingActive && !lanRaceScreen)
                 return Result(command, CommandResult.Rejected, "unavailable");
@@ -915,9 +946,18 @@ namespace FamilyRacing.Core.Foundation
             if (drivingActive && recover)
             {
                 string queueError;
-                if (!driving.QueuePending("recover", command.CommandId, out queueError))
+                if (driving != null)
+                {
+                    if (!driving.QueuePending("recover", command.CommandId, out queueError))
+                        return Result(command, CommandResult.Rejected, queueError);
+                    DrainDrivingEvents();
+                }
+                else if (soloRace != null
+                    && !soloRace.QueuePending("recover", command.CommandId, out queueError))
+                {
                     return Result(command, CommandResult.Rejected, queueError);
-                DrainDrivingEvents();
+                }
+                DrainSoloEvents();
             }
             // LAN race input: the recover flag rides the input frame to the
             // host (which queues and acknowledges the action); a pause pulse
@@ -969,6 +1009,11 @@ namespace FamilyRacing.Core.Foundation
                     driving.CancelPending("paused");
                     DrainDrivingEvents();
                 }
+                if (soloRace != null)
+                {
+                    soloRace.SetPaused(paused);
+                    DrainSoloEvents();
+                }
             }
             return Result(command, CommandResult.Applied, "");
         }
@@ -1001,6 +1046,14 @@ namespace FamilyRacing.Core.Foundation
                 driving.CancelPending("paused");
                 DrainDrivingEvents();
             }
+            // The local session's own clock follows the same toggle —
+            // entering pause freezes every race timer and cancels
+            // latched one-shots; resume republishes race.resumed.
+            if (soloRace != null)
+            {
+                soloRace.SetPaused(paused);
+                DrainSoloEvents();
+            }
             ClearInput();
         }
 
@@ -1012,7 +1065,7 @@ namespace FamilyRacing.Core.Foundation
                 return Result(command, CommandResult.Rejected, "contentUnavailable");
             if (activeSlot < 0)
                 return Result(command, CommandResult.Rejected, "unavailable");
-            if (driving != null)
+            if (driving != null || soloRace != null)
                 return Result(command, CommandResult.Rejected, "raceActive");
             var vehicleId = command.Parameters["vehicleId"];
             var eventId = command.Parameters["eventId"];
@@ -1046,6 +1099,12 @@ namespace FamilyRacing.Core.Foundation
 
         private CommandResult RaceRestart(GameCommand command)
         {
+            // One uniform retry affordance: a local-mode session replays
+            // its stored request under a fresh race identity; the legacy
+            // practice session rebuilds from the catalog exactly as
+            // before.
+            if (driving == null && soloRace != null)
+                return SoloRestart(command);
             if (driving == null)
                 return Result(command, CommandResult.Rejected, "unavailable");
             VehicleTuning tuning;
@@ -1089,9 +1148,13 @@ namespace FamilyRacing.Core.Foundation
 
         private CommandResult RaceExit(GameCommand command)
         {
-            if (driving == null)
+            if (driving == null && soloRace == null)
                 return Result(command, CommandResult.Rejected, "unavailable");
-            EndRace("raceExit", command);
+            // One uniform exit affordance across practice and the local
+            // modes: the solo path aborts without a rewardable result,
+            // retires the unused context and emits race.exited.
+            if (soloRace != null) EndSoloRace("raceExit", command);
+            else EndRace("raceExit", command);
             screen = ScreenPractice;
             return Result(command, CommandResult.Applied, "");
         }
@@ -1110,7 +1173,7 @@ namespace FamilyRacing.Core.Foundation
                 return Result(command, CommandResult.Rejected, "contentUnavailable");
             if (activeSlot < 0)
                 return Result(command, CommandResult.Rejected, "unavailable");
-            if (driving != null)
+            if (driving != null || soloRace != null)
                 return Result(command, CommandResult.Rejected, "raceActive");
             var vehicleId = command.Parameters["vehicleId"];
             VehicleTuning tuning;
@@ -1443,7 +1506,7 @@ namespace FamilyRacing.Core.Foundation
                         available = false;
                         reason = "requiresSelectedProfile";
                     }
-                    else if (driving != null)
+                    else if (driving != null || soloRace != null)
                     {
                         available = false;
                         reason = "raceActive";
@@ -1451,10 +1514,28 @@ namespace FamilyRacing.Core.Foundation
                     break;
                 case "race.restart":
                 case "race.exit":
-                    if (driving == null)
+                    if (driving == null && soloRace == null)
                     {
                         available = false;
                         reason = "noActiveRace";
+                    }
+                    break;
+                case "solo.start":
+                    if (gameplayCatalog == null || gameplayCatalog.IsLegacy
+                        || gameplayCatalog.Driving == null)
+                    {
+                        available = false;
+                        reason = "contentUnavailable";
+                    }
+                    else if (activeSlot < 0)
+                    {
+                        available = false;
+                        reason = "requiresSelectedProfile";
+                    }
+                    else if (driving != null || soloRace != null)
+                    {
+                        available = false;
+                        reason = "raceActive";
                     }
                     break;
                 case "tutorial.start":
@@ -1470,7 +1551,7 @@ namespace FamilyRacing.Core.Foundation
                         available = false;
                         reason = "requiresSelectedProfile";
                     }
-                    else if (driving != null)
+                    else if (driving != null || soloRace != null)
                     {
                         available = false;
                         reason = "raceActive";

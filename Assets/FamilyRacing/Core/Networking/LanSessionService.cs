@@ -129,6 +129,22 @@ namespace FamilyRacing.Core.Networking
         // profile through the atomic store write. FoundationService wires
         // it at runtime; tests substitute the same service directly.
         private Func<RaceResult, RewardApplyResult> rewardApplier;
+        // Composition seam (M5 Task 4): binds and durably stores the
+        // local reward context for one host-allocated race identity
+        // BEFORE that participant acknowledges start readiness. Returns
+        // an error string on failure — a failed preparation on the host
+        // refuses lan.start; on a client it reports failure and keeps
+        // that participant from starting (it leaves the session).
+        // Invoked with the race identity only: the profile's captured
+        // bounty definitions never leave the local device.
+        private Func<string, string> racePreparer;
+        // Host-side race ordinal: lan.start allocates
+        // "<sessionId>-r<N>" so the identity is fixed before any
+        // participant begins the race — the coordinator consumes the
+        // same identity via the broadcast session state.
+        private int raceOrdinal;
+        private string currentRaceId = "";
+        private string preparedRaceId = "";
 
         private DrivingContentCatalog content;
         private string role = RoleNone;
@@ -217,6 +233,19 @@ namespace FamilyRacing.Core.Networking
             rewardApplier = applier;
         }
 
+        // Composition seam (M5 Task 4): the local reward-context bind.
+        // Called with the host-allocated race identity as soon as it is
+        // known — on the host inside lan.start before the race begins,
+        // on a client when the broadcast countdown phase arrives — so a
+        // preparation save failure reports failure and keeps that
+        // participant from starting. Must be idempotent per identity:
+        // reclaim/rejoin and repeated session-state broadcasts can
+        // present the same raceId more than once.
+        public void SetRacePreparer(Func<string, string> preparer)
+        {
+            racePreparer = preparer;
+        }
+
         public CommandResult Execute(GameCommand command)
         {
             if (command == null || string.IsNullOrEmpty(command.Action))
@@ -300,6 +329,10 @@ namespace FamilyRacing.Core.Networking
                 role = role,
                 phase = phase,
                 localParticipantId = role != RoleNone ? localParticipantId : "",
+                // The allocated race identity stays visible through
+                // results so observers correlate deliveries; it clears
+                // when the session returns to lobby or tears down.
+                currentRaceId = currentRaceId,
                 descriptor = descriptor != null ? descriptor.Copy() : null,
                 paused = paused,
                 lastError = lastError
@@ -731,6 +764,24 @@ namespace FamilyRacing.Core.Networking
                     && IsHumanControl(participant.controlSource) && !participant.ready)
                     return Result(command, CommandResult.Rejected, "notReady");
             }
+            // Allocate the race identity up front (Task 4): every
+            // participant binds its local reward context against THIS
+            // identity before acknowledging start readiness — the
+            // coordinator later consumes the same id from the broadcast
+            // session state instead of minting its own.
+            var allocated = sessionId + "-r" + (++raceOrdinal)
+                .ToString(CultureInfo.InvariantCulture);
+            // The host's own preparation must land before the race may
+            // begin: a durable-context save failure keeps every
+            // participant from starting and reports honestly.
+            if (!PrepareForRace(allocated))
+            {
+                raceOrdinal--;
+                lastError = "preparationFailed";
+                return Result(command, CommandResult.Failed,
+                    "preparationFailed");
+            }
+            currentRaceId = allocated;
             // Start freezes the roster: the session stops being joinable
             // and only credentialed rejoins are honored from here on.
             phase = PhaseCountdown;
@@ -792,6 +843,9 @@ namespace FamilyRacing.Core.Networking
             phase = PhaseLobby;
             paused = false;
             pauseRequests.Clear();
+            // The concluded race's allocated identity retires with the
+            // lifecycle — the next lan.start allocates a fresh one.
+            currentRaceId = "";
             // A race-slot reservation dies with the race lifecycle: the
             // rematch back to lobby frees slots held for disconnected
             // players. Their issued credentials stay authenticatable in
@@ -1736,6 +1790,31 @@ namespace FamilyRacing.Core.Networking
             if (!NetworkProtocol.IntField(fields, "ep", out epoch)) epoch = 1;
             participant.ownershipEpoch = epoch;
             phase = NormalizePhase(Field(fields, "ph"));
+            // Credentialed reclaim into a live race presents the same
+            // allocated identity: binding is idempotent so a prepared
+            // participant is a no-op and a device that never prepared
+            // binds now, before any further racing boundaries.
+            var acceptedRace = Field(fields, "rid");
+            if (acceptedRace.Length > 0) currentRaceId = acceptedRace;
+            if (acceptedRace.Length > 0
+                && (phase == PhaseCountdown || phase == PhaseRacing))
+            {
+                if (!PrepareForRace(acceptedRace))
+                {
+                    // Cannot bind the reward context: do not start —
+                    // report the failure and leave the session the same
+                    // observable way a state-offer failure does.
+                    lastError = "preparationFailed";
+                    FailPending("preparationFailed");
+                    link.Send(serverConnection, NetworkProtocol.Encode(
+                        NetworkProtocol.MsgLeave, "pid", localParticipantId));
+                    closeFlushUntil = now
+                        + NetworkSettings.SessionCloseFlushSeconds;
+                    role = RoleNone;
+                    phase = PhaseIdle;
+                    return;
+                }
+            }
             var op = FindJoinOp(Field(fields, "cid"));
             if (op != null) CompletePending(op, CommandResult.Applied, "");
         }
@@ -1757,11 +1836,34 @@ namespace FamilyRacing.Core.Networking
             if (descriptor == null || Field(fields, "sid") != sessionId) return;
             descriptor.eventId = Field(fields, "ev");
             descriptor.classId = Field(fields, "cl");
+            // The host-allocated race identity arrives with the countdown
+            // phase: the local reward context binds against it BEFORE
+            // the race clock may start — a preparation failure keeps
+            // this participant from starting (Task 4).
+            var offeredRace = Field(fields, "rid");
+            var offeredPhase = NormalizePhase(Field(fields, "ph"));
+            if (offeredRace.Length > 0
+                && (offeredPhase == PhaseCountdown || offeredPhase == PhaseRacing)
+                && !PrepareForRace(offeredRace))
+            {
+                lastError = "preparationFailed";
+                FailPending("preparationFailed");
+                link.Send(serverConnection, NetworkProtocol.Encode(
+                    NetworkProtocol.MsgLeave, "pid", localParticipantId));
+                // The datagram gets one flush window, exactly like an
+                // explicit leave — the observable session is already over.
+                closeFlushUntil = now
+                    + NetworkSettings.SessionCloseFlushSeconds;
+                role = RoleNone;
+                phase = PhaseIdle;
+                return;
+            }
+            if (offeredRace.Length > 0) currentRaceId = offeredRace;
             int occupied;
             if (NetworkProtocol.IntField(fields, "occ", out occupied))
                 descriptor.occupancy = occupied;
             descriptor.joinable = Field(fields, "jn") == "1";
-            phase = NormalizePhase(Field(fields, "ph"));
+            phase = offeredPhase;
             paused = Field(fields, "pd") == "1";
             pauseRequests.Clear();
             foreach (var requester in Field(fields, "pr").Split(','))
@@ -1867,6 +1969,10 @@ namespace FamilyRacing.Core.Networking
                 "cl", descriptor != null ? descriptor.classId : "",
                 "ep", participant.ownershipEpoch.ToString(CultureInfo.InvariantCulture),
                 "cred", credential,
+                // A reclaim into countdown/racing must learn the
+                // allocated race identity to bind its reward context
+                // (Task 4) — empty while the lobby has not started.
+                "rid", currentRaceId,
                 "cid", commandId ?? ""));
         }
 
@@ -1899,7 +2005,11 @@ namespace FamilyRacing.Core.Networking
                 "pd", paused ? "1" : "0",
                 "pr", requesters,
                 "occ", descriptor.occupancy.ToString(CultureInfo.InvariantCulture),
-                "jn", descriptor.joinable ? "1" : "0"
+                "jn", descriptor.joinable ? "1" : "0",
+                // The allocated race identity rides the broadcast so each
+                // local device binds its reward context against the same
+                // id the coordinator will run (Task 4).
+                "rid", currentRaceId
             };
             for (var i = 0; i < slots.Length; i++)
             {
@@ -1936,6 +2046,26 @@ namespace FamilyRacing.Core.Networking
             descriptor.joinable = role == RoleHost
                 && phase == PhaseLobby
                 && occupied < NetworkSettings.ParticipantCapacity;
+        }
+
+        // The local reward-context bind for one host-allocated race
+        // identity: idempotent per identity, and a missing preparer is
+        // an honest no-op (older compositions simply do not bind — the
+        // race itself is unaffected; Task 7 then finds no context and
+        // rejects progression evaluation rather than guessing).
+        private bool PrepareForRace(string allocatedRaceId)
+        {
+            if (string.IsNullOrEmpty(allocatedRaceId)) return true;
+            if (preparedRaceId == allocatedRaceId) return true;
+            if (racePreparer == null)
+            {
+                preparedRaceId = allocatedRaceId;
+                return true;
+            }
+            var error = racePreparer(allocatedRaceId);
+            if (!string.IsNullOrEmpty(error)) return false;
+            preparedRaceId = allocatedRaceId;
+            return true;
         }
 
         private void ClearReady()
@@ -2124,6 +2254,11 @@ namespace FamilyRacing.Core.Networking
             departedParticipants.Clear();
             descriptor = null;
             sessionId = "";
+            // A torn-down session keeps no race identity and no
+            // preparation claim — the next session binds fresh.
+            currentRaceId = "";
+            raceOrdinal = 0;
+            preparedRaceId = "";
             serverConnection = 0;
             role = RoleNone;
             phase = PhaseIdle;

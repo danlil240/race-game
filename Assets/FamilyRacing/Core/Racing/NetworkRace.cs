@@ -29,6 +29,7 @@ namespace FamilyRacing.Core.Racing
             internal string participantId;
             internal int slot;
             internal string vehicleId;
+            internal VehicleTuning tuning;   // effective seated tuning
             internal string attribution;   // "human" | "ai"
             internal DrivingSession session;
             internal AiDriver ai;          // non-null while attribution is "ai"
@@ -36,6 +37,20 @@ namespace FamilyRacing.Core.Racing
             internal bool finished;
             internal bool dnf;
             internal long finishTicks;
+        }
+
+        // Local-mode context carried only by TryCreateLocal races: the
+        // mode/rules identity the format-2 result binds, the visible AI
+        // difficulty preset every AI seat (created at construction OR by
+        // a control-source takeover) runs under, and the authored rival
+        // seat for the rivalDefeated fact. LAN races keep this null and
+        // produce legacy format-1 results.
+        private sealed class LocalContext
+        {
+            internal string mode;
+            internal string rulesFingerprint;
+            internal AiDifficultyDefinition difficulty;
+            internal string rivalParticipantId;
         }
 
         // A candidate respawn pose closer than this to a committed peer
@@ -74,16 +89,23 @@ namespace FamilyRacing.Core.Racing
         // every boundary, including paused/finalized boundaries where
         // the sim is not stepped again (Task 11).
         private IVehicleSimulation lastSimulation;
+        // Authoritative per-racer metric counters fed at every completed
+        // boundary; always on (cheap), bound onto format-2 results only.
+        private readonly RaceMetricsAccumulator metrics =
+            new RaceMetricsAccumulator();
+        private readonly LocalContext local;
 
         private NetworkRace(string sessionId, string raceId,
             DrivingContentCatalog content, EventDefinition evt,
-            CourseDefinition course, NetworkRacerSpec[] specs)
+            CourseDefinition course, NetworkRacerSpec[] specs,
+            LocalContext local, VehicleTuning[] tunings)
         {
             this.sessionId = sessionId;
             this.raceId = raceId;
             this.content = content;
             this.evt = evt;
             this.course = course;
+            this.local = local;
             countdownRemaining = evt.countdownTicks;
             phase = countdownRemaining > 0 ? PhaseCountdown : PhaseRunning;
             // One canonical content identity + backend selection for the
@@ -95,23 +117,29 @@ namespace FamilyRacing.Core.Racing
             {
                 var spec = specs[slot];
                 var spawn = course.spawnSlots[slot];
+                var attribution = AttributionFor(spec.controlSource);
+                var tuning = tunings != null && tunings[slot] != null
+                    ? tunings[slot]
+                    : content.Vehicles[spec.vehicleId];
                 // Each per-racer session gets its own id namespace
                 // (raceId-r<slot>) so emitted event identities never
                 // collide; the shared race identity stays on the
                 // coordinator state.
                 var session = new DrivingSession(
                     raceId + "-r" + slot.ToString(CultureInfo.InvariantCulture),
-                    content.Vehicles[spec.vehicleId], course, evt,
+                    tuning, course, evt,
                     content.Version, "", spawn, spec.participantId,
                     fingerprint, backend);
-                var attribution = AttributionFor(spec.controlSource);
                 racers[slot] = new Racer
                 {
                     participantId = spec.participantId,
                     slot = slot,
                     vehicleId = spec.vehicleId,
+                    tuning = tuning,
                     attribution = attribution,
-                    ai = attribution == "ai" ? new AiDriver(LaneFor(slot)) : null,
+                    ai = attribution == "ai"
+                        ? new AiDriver(LaneFor(slot), DifficultyFor())
+                        : null,
                     session = session
                 };
                 // Recovery placement must never overlap a peer body:
@@ -155,6 +183,56 @@ namespace FamilyRacing.Core.Racing
             IReadOnlyList<NetworkRacerSpec> racerSpecs,
             out NetworkRace race, out string error)
         {
+            // The LAN factory always runs the normalized catalog
+            // baseline (requestedTuning ignored) and produces legacy
+            // format-1 results — the local seam owns both differences.
+            return ValidateAndCreate(sessionId, raceId, content, eventId,
+                classId, racerSpecs, null, out race, out error);
+        }
+
+        // The local creation seam (M5 Task 4): same validation and roster
+        // contract as TryCreate, plus the local-mode context the
+        // format-2 result binds and an optional validated per-racer tune.
+        // Differences from the LAN factory, all deliberate:
+        //  - `spec.requestedTuning` is honored when present and valid for
+        //    the seat (vehicle id match, full Validate(), same class,
+        //    backend-compatible) — the local seam exists so a profile-
+        //    sourced tune can seat; LAN still ignores it and always runs
+        //    the normalized catalog baseline.
+        //  - every AI seat — constructed now or created later by a
+        //    control-source takeover — runs under `difficulty`.
+        //  - the finalized result is bound format-2 with mode, rules
+        //    fingerprint, per-seat difficulty and accumulated metrics.
+        public static bool TryCreateLocal(string sessionId, string raceId,
+            DrivingContentCatalog content, string eventId, string classId,
+            IReadOnlyList<NetworkRacerSpec> racerSpecs, string mode,
+            string rulesFingerprint, AiDifficultyDefinition difficulty,
+            string rivalParticipantId,
+            out NetworkRace race, out string error)
+        {
+            race = null;
+            error = null;
+            var local = new LocalContext
+            {
+                mode = mode ?? "",
+                rulesFingerprint = rulesFingerprint ?? "",
+                difficulty = difficulty,
+                rivalParticipantId = rivalParticipantId
+            };
+            if (!ValidateAndCreate(sessionId, raceId, content, eventId,
+                    classId, racerSpecs, local, out race, out error))
+                return false;
+            return true;
+        }
+
+        // Shared validation+construction for both factories — the local
+        // context is null for LAN and drives the tuning-honor and
+        // format-2 result differences only.
+        private static bool ValidateAndCreate(string sessionId, string raceId,
+            DrivingContentCatalog content, string eventId, string classId,
+            IReadOnlyList<NetworkRacerSpec> racerSpecs, LocalContext local,
+            out NetworkRace race, out string error)
+        {
             race = null;
             error = null;
             if (string.IsNullOrEmpty(sessionId) || string.IsNullOrEmpty(raceId))
@@ -179,6 +257,7 @@ namespace FamilyRacing.Core.Racing
             { error = "insufficientSpawns"; return false; }
 
             var specs = new NetworkRacerSpec[NetworkSettings.ParticipantCapacity];
+            var tunings = new VehicleTuning[NetworkSettings.ParticipantCapacity];
             var seenIds = new HashSet<string>(StringComparer.Ordinal);
             foreach (var spec in racerSpecs)
             {
@@ -194,25 +273,41 @@ namespace FamilyRacing.Core.Racing
                 if (!evt.AllowsVehicle(spec.vehicleId)
                     || VehicleTuning.ClassIdOf(spec.vehicleId) != classId)
                 { error = "invalidVehicle"; return false; }
+                var tuning = content.Vehicles[spec.vehicleId];
+                if (local != null && spec.requestedTuning != null)
+                {
+                    // The local seam honors a validated per-racer tune:
+                    // same vehicle id, full tuning validation, same
+                    // class identity, and the race-backend contract —
+                    // anything else falls back to refusal rather than
+                    // silently racing an unvalidated tune.
+                    var requested = spec.requestedTuning;
+                    string tuningError;
+                    if (requested.vehicleId != spec.vehicleId
+                        || !requested.Validate(out tuningError)
+                        || VehicleTuning.ClassIdOf(requested.vehicleId)
+                            != classId)
+                    { error = "invalidVehicle"; return false; }
+                    tuning = requested;
+                }
                 // The backend is a race-level contract selected once at
                 // creation: a physically simulated race refuses to seat
                 // a vehicle that cannot satisfy the backend instead of
                 // failing inside the first batch.
                 if (content.SimulationBackend
-                        == VehicleSimulationBackend.PhysicalAssisted)
-                {
-                    var vehicle = content.Vehicles[spec.vehicleId];
-                    if (vehicle.simulationBackend
+                        == VehicleSimulationBackend.PhysicalAssisted
+                    && (tuning.simulationBackend
                             != VehicleSimulationBackend.PhysicalAssisted
-                        || vehicle.physics == null)
-                    { error = "invalidVehicle"; return false; }
-                }
+                        || tuning.physics == null))
+                { error = "invalidVehicle"; return false; }
+                tunings[spec.slot] = tuning;
                 specs[spec.slot] = spec;
             }
             foreach (var spec in specs)
                 if (spec == null) { error = "invalidRoster"; return false; }
 
-            race = new NetworkRace(sessionId, raceId, content, evt, course, specs);
+            race = new NetworkRace(sessionId, raceId, content, evt, course,
+                specs, local, tunings);
             return true;
         }
 
@@ -232,15 +327,11 @@ namespace FamilyRacing.Core.Racing
             var spawns = new List<VehicleSpawn>(racers.Length);
             foreach (var racer in racers)
             {
-                if (racer == null) continue;
-                VehicleTuning tuning;
-                if (!content.Vehicles.TryGetValue(racer.vehicleId, out tuning)
-                    || tuning == null)
-                    continue;
+                if (racer == null || racer.tuning == null) continue;
                 spawns.Add(new VehicleSpawn
                 {
                     participantId = racer.participantId,
-                    tuning = tuning,
+                    tuning = racer.tuning,
                     initialState = racer.session.Snapshot().motor
                 });
             }
@@ -363,6 +454,13 @@ namespace FamilyRacing.Core.Racing
                     result = null;
                 var completed = racer.session.CompleteStep(result);
                 Stamp(racer, completed.events, emitted);
+                // Metric facts count at the completed simulated boundary
+                // — attribution stamped at emission time, so facts a
+                // human earned stay human facts even if a takeover
+                // happens before the next boundary (Task 4).
+                metrics.RecordBoundary(hostTick, racer.participantId,
+                    racer.attribution, phase == PhaseRunning,
+                    completed.state, completed.events);
                 // 5) a rule-requested recovery reset lands on the body
                 // before this boundary publishes — the committed state
                 // already shows the post-reset pose.
@@ -466,9 +564,10 @@ namespace FamilyRacing.Core.Racing
             racer.attribution = attribution;
             // A fresh driver on every human->ai takeover re-anchors the
             // follower onto the nearest route point at the slot's lane;
-            // handing the slot back drops the driver entirely.
+            // handing the slot back drops the driver entirely. Local
+            // races seat the selected difficulty on every takeover too.
             racer.ai = attribution == "ai"
-                ? new AiDriver(LaneFor(racer.slot)) : null;
+                ? new AiDriver(LaneFor(racer.slot), DifficultyFor()) : null;
             staged.Add(CoordinatorEvent("race.control",
                 (racer.participantId ?? "") + "=" + attribution));
             return true;
@@ -485,6 +584,31 @@ namespace FamilyRacing.Core.Racing
                 || racer.finished || racer.dnf)
             { error = "raceOver"; return false; }
             return racer.session.QueuePending(kind, commandId, out error);
+        }
+
+        // Lifecycle cancellation of one racer's latched one-shots
+        // (local-mode input clear): emits ordered cancelled events the
+        // next boundary publishes, same as the session-level policy.
+        public void CancelPending(string participantId, string reason)
+        {
+            var racer = FindRacer(participantId);
+            if (racer == null) return;
+            racer.session.CancelPending(reason);
+            Stamp(racer, racer.session.DrainEvents(), staged);
+        }
+
+        // Independent authoritative metric rows for the whole roster,
+        // in roster order — observers mutate freely.
+        public List<RaceMetrics> Metrics()
+        {
+            return metrics.Snapshot();
+        }
+
+        // The AI difficulty every local seat runs under — null on LAN,
+        // where the follower keeps its established constants.
+        private AiDifficultyDefinition DifficultyFor()
+        {
+            return local != null ? local.difficulty : null;
         }
 
         // --- internals -------------------------------------------------------
@@ -577,6 +701,15 @@ namespace FamilyRacing.Core.Racing
                     coinsAwarded = racer.finished ? evt.completionCoins : 0
                 });
             }
+            // Local races bind the format-2 result identity BEFORE first
+            // publication: mode, rules fingerprint, per-seat difficulty,
+            // accumulated metrics and the rivalDefeated fact — so the
+            // fingerprint a consumer computes already covers them.
+            if (local != null)
+                RaceResultFactory.Bind(final, local.mode,
+                    local.rulesFingerprint, metrics.Snapshot(),
+                    local.difficulty != null ? local.difficulty.id : "",
+                    local.rivalParticipantId);
             result = final;
             emitted.Add(CoordinatorEvent("race.finalized", result.resultId));
         }
@@ -654,6 +787,13 @@ namespace FamilyRacing.Core.Racing
             {
                 var racer = racers[i];
                 snaps[i].simulation = diagnostics;
+                // Authoritative placement/clock facts refresh every
+                // boundary — counters never come from this call.
+                metrics.UpdateStandards(racer.participantId,
+                    positionOf[i],
+                    racer.finished ? "finished" : racer.dnf ? "dnf" : "",
+                    racer.finished ? racer.finishTicks : 0,
+                    elapsedTicks);
                 state.racers.Add(new NetworkRacerState
                 {
                     participantId = racer.participantId,

@@ -1,0 +1,426 @@
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using FamilyRacing.Core.Automation;
+using FamilyRacing.Core.Driving;
+using FamilyRacing.Core.Networking;
+using FamilyRacing.Core.Profiles;
+using FamilyRacing.Core.Progression;
+using FamilyRacing.Core.Racing;
+
+namespace FamilyRacing.Core.Foundation
+{
+    // Local gameplay-loop half of the foundation service (M5 Task 4):
+    // Campaign, Quick Race and Time Trial run through SoloRaceSession —
+    // the four-racer modes share the authoritative NetworkRace
+    // coordinator, the trial reuses one DrivingSession — all under the
+    // service's single input/pause boundary. Progression modes bind a
+    // durable RaceRewardContext before the first simulated boundary and
+    // retire it on abort; the finalized result feeds the same exactly-
+    // once reward seam LAN uses. Practice keeps its legacy `driving`
+    // path untouched.
+    public sealed partial class FoundationService
+    {
+        private GameplayCatalog gameplayCatalog;
+        private SoloRaceSession soloRace;
+        // The injected vehicle simulation the local race steps through:
+        // separate ownership from the practice `drivingSimulation` even
+        // though the two never coexist — one owner per session identity,
+        // initialized with the session's own roster spawns.
+        private IVehicleSimulation soloSimulation;
+        private SoloRaceSession soloSimulationFor;
+        // A finalized local result feeds the reward seam exactly once;
+        // the flag is per-session because the immutable result object
+        // stays observable on every later snapshot.
+        private bool soloResultApplied;
+
+        // The runtime injects the validated gameplay content once —
+        // solo.start reports contentUnavailable until a non-legacy
+        // catalog arrives, exactly like race.start vs drivingContent.
+        public void SetGameplayCatalog(GameplayCatalog catalog)
+        {
+            gameplayCatalog = catalog;
+        }
+
+        // The local-mode catalog when one is bound (null otherwise) —
+        // read-only seam for tests and the shell's mode pickers.
+        public GameplayCatalog GameplayContent
+        {
+            get { return gameplayCatalog; }
+        }
+
+        // One simulated boundary through the injected vehicle
+        // simulation for the active local race session — the same
+        // prepare/shared-batch/complete seam practice uses, frozen while
+        // paused. A missing simulation provider republishes unchanged
+        // (the session is observable but cannot advance) rather than
+        // manufacturing error events every tick.
+        public void StepSolo()
+        {
+            if (soloRace == null || paused) return;
+            var simulation = EnsureSoloSimulation();
+            if (simulation == null) return;
+            var state = soloRace.Step(input, simulation);
+            AppendDrivingEvents(state.events);
+            if (state.result != null) TryApplyLocalResult(state);
+        }
+
+        // Legacy call shape retained alongside StepDriving(IMotorWorld):
+        // binds the motor world the runtime used to pass and steps
+        // through the same seam via a lazily-wrapped arcade simulation.
+        public void StepSolo(IMotorWorld world)
+        {
+            legacyMotorWorld = world;
+            StepSolo();
+        }
+
+        // The simulation the active local session steps through: built
+        // once per session from the injected factory (or the legacy
+        // world adapter), initialized with the session's own roster
+        // spawns, and disposed with the session.
+        private IVehicleSimulation EnsureSoloSimulation()
+        {
+            if (soloRace == null) return null;
+            if (soloSimulation != null && soloSimulationFor == soloRace)
+                return soloSimulation;
+            ReleaseSoloSimulation();
+            if (gameplayCatalog == null || gameplayCatalog.Driving == null)
+                return null;
+            var spawns = soloRace.VehicleSpawns();
+            // Last line of defense inside the tick path — the same
+            // CatalogSeatsVehicle rule every session-creation boundary
+            // enforces: a roster seat that cannot satisfy the race
+            // backend never reaches the simulation.
+            if (spawns != null)
+                foreach (var spawn in spawns)
+                    if (spawn != null && !CatalogSeatsVehicle(spawn.tuning))
+                        return null;
+            if (drivingSimulationFactory != null)
+                soloSimulation = drivingSimulationFactory(
+                    gameplayCatalog.Driving);
+            else if (legacyMotorWorld != null)
+                soloSimulation = new ArcadeVehicleSimulation(legacyMotorWorld);
+            if (soloSimulation == null) return null;
+            soloSimulation.Initialize(spawns);
+            soloSimulationFor = soloRace;
+            return soloSimulation;
+        }
+
+        private void ReleaseSoloSimulation()
+        {
+            if (soloSimulation != null)
+                soloSimulation.Dispose();
+            soloSimulation = null;
+            soloSimulationFor = null;
+        }
+
+        // --- local mode commands ----------------------------------------
+
+        // solo.start validates the whole selection through
+        // SoloRaceSession.TryCreate — a rejected start leaves no
+        // partially built state, exactly like NetworkRace.TryCreate.
+        // Progression modes bind the durable reward context BEFORE the
+        // session may step: a preparation save failure keeps the race
+        // from starting and reports honestly (the same contract the LAN
+        // preparation seam enforces).
+        private CommandResult SoloStart(GameCommand command)
+        {
+            if (gameplayCatalog == null || gameplayCatalog.IsLegacy
+                || gameplayCatalog.Driving == null)
+                return Result(command, CommandResult.Rejected, "contentUnavailable");
+            if (activeSlot < 0)
+                return Result(command, CommandResult.Rejected, "unavailable");
+            if (driving != null || soloRace != null)
+                return Result(command, CommandResult.Rejected, "raceActive");
+            var mode = command.Parameters["mode"];
+            var request = new SoloRaceRequest
+            {
+                mode = mode,
+                eventId = OptionalParam(command, "eventId"),
+                courseId = OptionalParam(command, "courseId"),
+                classId = OptionalParam(command, "classId"),
+                vehicleId = OptionalParam(command, "vehicleId"),
+                difficultyId = OptionalParam(command, "difficulty"),
+                participantId = savedProfile != null ? savedProfile.id : "",
+                // The run's shared race counter keeps local identities
+                // deterministic and unique across practice/solo sessions.
+                raceId = "race-" + (++raceCounter).ToString(
+                    CultureInfo.InvariantCulture),
+                commandId = command.CommandId
+            };
+            string error;
+            SoloRaceSession created;
+            if (!SoloRaceSession.TryCreate(request, savedProfile,
+                    gameplayCatalog, out created, out error))
+                return Result(command, CommandResult.Rejected, error);
+            if (!BindRewardContextFor(request, created, command))
+                return Result(command, CommandResult.Failed, "saveFailed");
+            soloRace = created;
+            soloResultApplied = false;
+            screen = ScreenDriving;
+            ClearInput();
+            DrainSoloEvents();
+            return Result(command, CommandResult.Applied, "");
+        }
+
+        // Binds the reward context for progression races. Returns true
+        // when the session may start: non-progression modes bind nothing,
+        // a bound context is a durable no-op, and any save failure
+        // refuses the start (the session was never published).
+        private bool BindRewardContextFor(SoloRaceRequest request,
+            SoloRaceSession session, GameCommand command)
+        {
+            RaceMode mode;
+            if (!RaceModeRules.TryParse(request.mode, out mode)
+                || !RaceModeRules.IsProgression(mode))
+                return true;
+            var bindError = BindRewardContext(session.RaceId,
+                RaceModeRules.ModeId(mode),
+                gameplayCatalog.CompatibilityFingerprint);
+            if (bindError == null) return true;
+            // The race may not start unbound: release the never-stepped
+            // session and report the preparation failure honestly.
+            persistenceStatus = bindError;
+            return false;
+        }
+
+        // The shared restart affordance: the local session's stored
+        // request replays under a fresh race identity — the retired
+        // session's context is dropped with it (restart abandons the
+        // run), the new identity binds fresh.
+        private CommandResult SoloRestart(GameCommand command)
+        {
+            var stored = soloRace.Request;
+            if (stored == null)
+                return Result(command, CommandResult.Rejected, "unavailable");
+            stored.raceId = "race-" + (++raceCounter).ToString(
+                CultureInfo.InvariantCulture);
+            stored.commandId = command.CommandId;
+            string error;
+            SoloRaceSession created;
+            if (!SoloRaceSession.TryCreate(stored, savedProfile,
+                    gameplayCatalog, out created, out error))
+            {
+                EndSoloRace("restarted", command);
+                return Result(command, CommandResult.Rejected, error);
+            }
+            // The old identity ends first — its lifecycle events and
+            // context retirement publish on this boundary before the
+            // replacement session's facts.
+            EndSoloRace("restarted", command);
+            if (!BindRewardContextFor(stored, created, command))
+            {
+                ReleaseSoloSimulation();
+                return Result(command, CommandResult.Failed, "saveFailed");
+            }
+            soloRace = created;
+            soloResultApplied = false;
+            screen = ScreenDriving;
+            ClearInput();
+            DrainSoloEvents();
+            return Result(command, CommandResult.Applied, "");
+        }
+
+        // Ends the active local session: latched actions cancel with
+        // their reason, the abort path guarantees no rewardable result,
+        // the unused reward context retires inside one save, held input
+        // neutralizes and the owned simulation releases. The driving
+        // screen falls back to practice.
+        private void EndSoloRace(string reason, GameCommand command)
+        {
+            if (soloRace == null) return;
+            var session = soloRace;
+            session.CancelPending(reason);
+            session.Abort(reason);
+            AppendDrivingEvents(session.DrainStagedEvents());
+            // Abandoned runs retire their unused context immediately;
+            // a finalized race's context stays for Task 7's atomic
+            // reward evaluation — it is not "unused".
+            if (session.Result == null)
+                RetireRewardContext(session.RaceId);
+            AppendSoloEndEvent(session, reason,
+                command != null ? command.CommandId : "");
+            soloRace = null;
+            ReleaseSoloSimulation();
+            if (screen == ScreenDriving) screen = ScreenPractice;
+            paused = false;
+            ClearInput();
+        }
+
+        // The same lifecycle vocabulary the practice path emits: an
+        // explicit exit publishes "race.exited", every other end
+        // (restart, profile switch, lifecycle) publishes "race.ended" —
+        // correlated to the command that produced it.
+        private void AppendSoloEndEvent(SoloRaceSession session,
+            string reason, string commandId)
+        {
+            var kind = reason == "raceExit" ? "race.exited" : "race.ended";
+            AppendDrivingEvents(new[]
+            {
+                new DrivingEvent
+                {
+                    id = session.SessionId + "-end",
+                    tick = tick,
+                    kind = kind,
+                    commandId = commandId ?? "",
+                    detail = reason ?? "",
+                    participantId = "",
+                    attribution = ""
+                }
+            });
+        }
+
+        private void DrainSoloEvents()
+        {
+            if (soloRace == null) return;
+            AppendDrivingEvents(soloRace.DrainStagedEvents());
+        }
+
+        // A finalized local progression result feeds the same exactly-
+        // once reward seam LAN results use: authored completion coins
+        // for a finished local row, provable by receipt. Time Trial
+        // never reaches here (not progression); aborted races never
+        // produce a result at all. Task 7 retires the finished race's
+        // context inside the same atomic save that evaluates bounties.
+        private void TryApplyLocalResult(SoloRaceState state)
+        {
+            if (soloResultApplied || state == null || state.result == null)
+                return;
+            soloResultApplied = true;
+            RaceMode mode;
+            if (!RaceModeRules.TryParse(state.mode, out mode)
+                || !RaceModeRules.IsProgression(mode))
+                return;
+            var applied = ApplyNetworkResult(state.result);
+            if (applied != null && applied.status == RaceRewardService.StatusFailed)
+                persistenceStatus = "saveFailed";
+        }
+
+        // --- reward-context binding -------------------------------------
+        // The durable binding between one race and the reward rules it
+        // was started under: idempotent per race identity, written
+        // through the normal atomic save path. Active bounty assignments
+        // capture WITH their catalog definitions — the parallel lists
+        // the schema requires; an assignment whose definition is absent
+        // binds nothing rather than fabricating a definition. Peer
+        // participants never see these definitions: the context lives in
+        // the local profile file only.
+
+        private string BindRewardContext(string raceId, string mode,
+            string rulesFingerprint)
+        {
+            if (string.IsNullOrEmpty(raceId)) return null;
+            if (savedProfile == null || activeSlot < 0) return "noProfile";
+            if (!WritableSelected()) return "readOnlyProfile";
+            if (string.IsNullOrEmpty(rulesFingerprint))
+                return "contentUnavailable";
+            if (savedProfile.pendingRaceContexts != null)
+                foreach (var row in savedProfile.pendingRaceContexts)
+                    if (row != null && row.raceId == raceId) return null;
+            var context = new RaceRewardContext
+            {
+                raceId = raceId,
+                profileId = savedProfile.id,
+                mode = mode ?? "",
+                rulesFingerprint = rulesFingerprint
+            };
+            if (savedProfile.activeBounties != null
+                && gameplayCatalog != null && gameplayCatalog.Bounties != null)
+                foreach (var assignment in savedProfile.activeBounties)
+                {
+                    if (assignment == null
+                        || string.IsNullOrEmpty(assignment.assignmentId))
+                        continue;
+                    var definition = FindBounty(assignment.bountyId);
+                    if (definition == null) continue;
+                    context.bountyAssignmentIds.Add(assignment.assignmentId);
+                    context.bountyDefinitions.Add(definition.Copy());
+                }
+            var candidate = ProfileCopy.DeepCopy(savedProfile);
+            candidate.pendingRaceContexts.Add(context);
+            try
+            {
+                store.Save(candidate);
+            }
+            catch (Exception)
+            {
+                return "saveFailed";
+            }
+            savedProfile = ProfileCopy.DeepCopy(candidate);
+            slots[activeSlot].Profile = ProfileCopy.DeepCopy(candidate);
+            if (draftProfile != null)
+                ProfileCopy.CopyProgression(savedProfile, draftProfile);
+            persistenceStatus = "saved";
+            return null;
+        }
+
+        // Drops the pending context for one race identity inside one
+        // atomic save — used by abort paths. A failure reports through
+        // persistenceStatus; the row simply stays pending for the next
+        // retirement attempt.
+        private void RetireRewardContext(string raceId)
+        {
+            if (savedProfile == null || activeSlot < 0
+                || string.IsNullOrEmpty(raceId)) return;
+            var found = false;
+            if (savedProfile.pendingRaceContexts != null)
+                foreach (var row in savedProfile.pendingRaceContexts)
+                    if (row != null && row.raceId == raceId)
+                    { found = true; break; }
+            if (!found) return;
+            var candidate = ProfileCopy.DeepCopy(savedProfile);
+            candidate.pendingRaceContexts.RemoveAll(
+                row => row != null && row.raceId == raceId);
+            try
+            {
+                store.Save(candidate);
+            }
+            catch (Exception)
+            {
+                persistenceStatus = "saveFailed";
+                return;
+            }
+            savedProfile = ProfileCopy.DeepCopy(candidate);
+            slots[activeSlot].Profile = ProfileCopy.DeepCopy(candidate);
+            if (draftProfile != null)
+                ProfileCopy.CopyProgression(savedProfile, draftProfile);
+            persistenceStatus = "saved";
+        }
+
+        private BountyDefinition FindBounty(string bountyId)
+        {
+            if (gameplayCatalog == null || gameplayCatalog.Bounties == null
+                || bountyId == null) return null;
+            foreach (var definition in gameplayCatalog.Bounties)
+                if (definition != null && definition.id == bountyId)
+                    return definition;
+            return null;
+        }
+
+        // The LAN preparation seam (Task 4): the session service calls
+        // this with the host-allocated race identity before the race
+        // clock may start — the local reward context binds durably or
+        // the returned error keeps this participant out of the race.
+        // The rules fingerprint is the gameplay catalog's when bound
+        // and the driving catalog's otherwise; neither case fabricates
+        // a fingerprint.
+        private string PrepareLanRewardContext(string allocatedRaceId)
+        {
+            var fingerprint = gameplayCatalog != null
+                ? gameplayCatalog.CompatibilityFingerprint
+                : drivingContent != null
+                    ? drivingContent.CompatibilityFingerprint : "";
+            var error = BindRewardContext(allocatedRaceId, "lan", fingerprint);
+            // A missing profile/catalog is honest unavailability: the
+            // participant cannot bind, so it cannot start.
+            return error;
+        }
+
+        private static string OptionalParam(GameCommand command, string name)
+        {
+            string value;
+            return command.Parameters.TryGetValue(name, out value)
+                ? value ?? "" : "";
+        }
+    }
+}

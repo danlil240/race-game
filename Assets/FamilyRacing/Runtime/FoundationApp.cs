@@ -102,6 +102,12 @@ namespace FamilyRacing
                 var catalog = drivingWorld.Load();
                 loadedCatalog = catalog;
                 if (catalog != null) service.SetDrivingContent(catalog);
+                // M5 Task 4: the gameplay-loop catalog rides the same
+                // injection contract — absent or failed conversion means
+                // solo.start reports contentUnavailable honestly while
+                // practice/LAN stay live.
+                if (catalog != null)
+                    service.SetGameplayCatalog(drivingWorld.Gameplay);
                 // Validated tutorial content enables tutorial.start; its
                 // asset carries the presenter's bundled clip slots.
                 if (drivingWorld.Tutorial != null)
@@ -267,6 +273,11 @@ namespace FamilyRacing
                 // samples held input and consumes pending actions first,
                 // then the observation tick expires leases and publishes.
                 service.StepDriving(drivingWorld != null ? drivingWorld.MotorWorld : null);
+                // The local gameplay modes share this same boundary:
+                // campaign/quickRace step their four-racer coordinator,
+                // timeTrial its lone session — same input, same clock,
+                // same paused freeze as the practice path above.
+                service.StepSolo(drivingWorld != null ? drivingWorld.MotorWorld : null);
                 // One local 30 Hz boundary on the replication path: host
                 // consumes validated inputs and steps the authoritative
                 // race (publishing at 15 Hz); a client emits one sample.
@@ -313,6 +324,14 @@ namespace FamilyRacing
                 var netRace = state.networkRace;
                 var lanRace = netRace != null && netRace.racers != null
                     && netRace.racers.Count > 0;
+                // M5 Task 4: campaign/quickRace publish their shared
+                // four-racer coordinator state under soloRace.race —
+                // same roster render path as LAN but every pose is
+                // locally authoritative (no prediction, no transport).
+                var soloRaceFrame = state.soloRace != null
+                    && state.soloRace.race != null
+                    && state.soloRace.race.racers != null
+                    && state.soloRace.race.racers.Count > 0;
                 drivingWorld.ApplyFrame(state, alpha);
                 // The LAN roster renders from the host-confirmed race
                 // state; the local racer's pose is the smoothed predicted
@@ -321,6 +340,8 @@ namespace FamilyRacing
                 MotorState lanLocalPose = null;
                 if (lanRace)
                     lanLocalPose = ApplyNetworkFrame(netRace, state, alpha);
+                else if (soloRaceFrame)
+                    lanLocalPose = ApplySoloRaceFrame(state.soloRace, state, alpha);
                 else
                 {
                     lastPoseSources.Clear();
@@ -333,7 +354,7 @@ namespace FamilyRacing
                     // actually sees this frame. During a LAN race the
                     // camera follows the locally owned racer's rendered
                     // (predicted/interpolated) pose — never a remote pose.
-                    if (lanRace)
+                    if (lanRace || soloRaceFrame)
                     {
                         var overhead = state.draftProfile != null
                             && state.draftProfile.camera == "overhead";
@@ -360,6 +381,9 @@ namespace FamilyRacing
                 // snapshot instead of re-snapshotting after SetFacts.
                 if (state.driving != null)
                     state.driving.camera = (drivingCamera != null
+                        ? drivingCamera.Facts : drivingWorld.CameraFacts).Copy();
+                else if (state.soloRace != null && state.soloRace.trial != null)
+                    state.soloRace.trial.camera = (drivingCamera != null
                         ? drivingCamera.Facts : drivingWorld.CameraFacts).Copy();
             }
             // Task-5 presentation: the effects/audio presenters read the
@@ -512,6 +536,46 @@ namespace FamilyRacing
             // racers without a roster entry are AI and map by slot.
             drivingWorld.ApplyRaceFrame(race, alpha, overrides,
                 state.network != null ? state.network.participants : null);
+            return localPose;
+        }
+
+        // Publishes a local four-racer frame (M5 Task 4 campaign /
+        // quickRace) into the world: every pose is locally authoritative
+        // — no prediction, no interpolation, no transport — and the
+        // roster carries exactly the one human seat so cosmetics resolve
+        // like a LAN local racer while AI seats fall to slot mapping.
+        // Returns the human racer's pose for the camera to follow.
+        private MotorState ApplySoloRaceFrame(SoloRaceState solo,
+            FoundationState state, float alpha)
+        {
+            lastPoseSources.Clear();
+            MotorState localPose = null;
+            foreach (var racer in solo.race.racers)
+            {
+                if (racer == null || string.IsNullOrEmpty(racer.participantId))
+                    continue;
+                lastPoseSources[racer.participantId] = "authoritative";
+                if (racer.participantId == solo.participantId
+                    && racer.session != null)
+                    localPose = racer.session.motor;
+            }
+            // The cosmetics seam reads avatar/color off participant rows;
+            // the local human is the only rostered participant.
+            var roster = new List<Core.Networking.ParticipantState>(1);
+            if (state.draftProfile != null)
+            {
+                roster.Add(new Core.Networking.ParticipantState
+                {
+                    participantId = solo.participantId,
+                    slot = 0,
+                    occupied = true,
+                    connected = true,
+                    controlSource = "local",
+                    avatar = state.draftProfile.avatar ?? "",
+                    colorIndex = state.draftProfile.colorIndex
+                });
+            }
+            drivingWorld.ApplyRaceFrame(solo.race, alpha, null, roster);
             return localPose;
         }
 

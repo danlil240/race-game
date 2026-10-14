@@ -243,7 +243,7 @@ namespace FamilyRacing.Tests
 
             var state = service.Snapshot();
             Assert.That(state.network.role, Is.EqualTo(LanSessionService.RoleHost));
-            Assert.That(state.stateSchemaVersion, Is.EqualTo(5));
+            Assert.That(state.stateSchemaVersion, Is.EqualTo(6));
             Assert.That(state.network, Is.Not.Null);
 
             foreach (var action in new[]

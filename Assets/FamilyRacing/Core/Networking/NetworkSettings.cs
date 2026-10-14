@@ -20,8 +20,10 @@ namespace FamilyRacing.Core.Networking
         // fingerprint. Schema 5 (M4 Task 2) is additive presentation truth:
         // the applied render profile and a bounded render-performance
         // summary on PresentationState — never frame-sized buffers, and
-        // nothing that crosses the gameplay wire DTO.
-        public const int StateSchemaVersion = 5;
+        // nothing that crosses the gameplay wire DTO. Schema 6 (M5
+        // Task 4) is again additive: the local solo-race slice and the
+        // network session's current-race identity.
+        public const int StateSchemaVersion = 6;
 
         // Compatibility fingerprint for gameplay rules: peers must report
         // the exact same value before a slot is allocated. Content version
