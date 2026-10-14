@@ -16,7 +16,7 @@ namespace FamilyRacing.Networking
     ///
     ///   P1IB  client→host, sequenced-unreliable channel: a batch of up to
     ///         InputPacketSampleCapacity recent NetworkInputFrames.
-    ///   P1SS  host→client, sequenced-unreliable channel: one full
+    ///   P1SS  host→client, reliable-ordered channel: one full
     ///         NetworkSnapshot. Hard ceiling SnapshotCeilingBytes — encode
     ///         fails explicitly instead of truncating racer state. Each
     ///         racer's physical state travels as the compact versioned

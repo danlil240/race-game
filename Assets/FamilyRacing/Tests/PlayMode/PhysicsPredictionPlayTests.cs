@@ -542,9 +542,14 @@ namespace FamilyRacing.Tests
             {
                 if (rig == null) continue;
                 var s = rig.Session.Snapshot();
+                var link = rig.Bridge.LinkState();
                 diag += " | " + rig.Session.Role + "/" + s.phase
                     + " terr=" + rig.Transport.LastError
                     + " lastErr=" + rig.Bridge.LastError
+                    + " gpSeen=" + link.gameplayPacketsSeen
+                    + " snapPub=" + link.snapshotsPublished
+                    + " staleSnap=" + link.staleSnapshots
+                    + " inRej=" + link.inputRejections
                     + " race=" + (rig.Bridge.LatestState != null
                         ? rig.Bridge.LatestState.phase : "none");
             }

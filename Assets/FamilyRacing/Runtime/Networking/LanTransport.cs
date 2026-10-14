@@ -49,9 +49,13 @@ namespace FamilyRacing.Networking
     /// UDP socket. A host binds and listens; a client connects to an
     /// explicit IPv4 endpoint. Two channels share each connection:
     /// the reliable-ordered channel (session protocol, lifecycle,
-    /// ownership, results, and authoritative event batches) and the
-    /// sequenced-unreliable gameplay channel (input batches inbound,
-    /// state snapshots outbound). Connection ids are small
+    /// ownership, results, authoritative event batches, and state
+    /// snapshots — a JSON snapshot always fragments, and UTP fragment
+    /// reassembly cannot survive reordered fragments, so snapshots ride
+    /// the lane that retransmits) and the sequenced-unreliable gameplay
+    /// channel (input batches inbound, resync requests outbound — small
+    /// single-fragment datagrams where sequenced staleness drops are the
+    /// intent). Connection ids are small
     /// locally-assigned handles (1, 2, 3, ...), stable for the life of
     /// the connection and recycled only after Stop.
     ///
@@ -93,10 +97,14 @@ namespace FamilyRacing.Networking
         private NetworkDriver driver;
         // Task 5: two typed lanes share each connection. reliablePipeline
         // carries session/lobby/lifecycle/ownership/results traffic plus
-        // authoritative event batches — ordered and guaranteed.
-        // gameplayPipeline carries input batches and state snapshots —
-        // sequenced so reordered datagrams drop at the transport, loss is
-        // tolerated, and payloads may fragment up to the snapshot ceiling.
+        // authoritative event batches and state snapshots — ordered and
+        // guaranteed; fragmented payloads only survive impairment here
+        // (the reliable stage resends lost fragments, while the sequenced
+        // lane culls reordered fragments and UTP reassembly then fails
+        // the whole packet).
+        // gameplayPipeline carries input batches and resync requests —
+        // small single-fragment datagrams where sequenced staleness
+        // drops are the intent and loss is tolerated.
         private NetworkPipeline reliablePipeline;
         private NetworkPipeline gameplayPipeline;
         private readonly List<Peer> peers = new List<Peer>(4);
@@ -153,8 +161,10 @@ namespace FamilyRacing.Networking
 
         /// <summary>Fired on the Unity thread for every datagram received
         /// on the sequenced-unreliable gameplay channel (input batches
-        /// host-side, state snapshots client-side). The pipeline already
-        /// dropped reordered datagrams; gaps report loss, not stall.</summary>
+        /// host-side; snapshots moved to the reliable channel because
+        /// fragmented packets cannot survive this lane under jitter).
+        /// The pipeline already dropped reordered datagrams; gaps report
+        /// loss, not stall.</summary>
         public event Action<ulong, byte[]> GameplayMessage;
 
         /// <summary>Bind a host socket on all local interfaces.</summary>
@@ -293,8 +303,10 @@ namespace FamilyRacing.Networking
         }
 
         /// <summary>Host: send a datagram to one accepted connection on
-        /// the sequenced-unreliable gameplay channel. Intended for
-        /// high-rate state snapshots where loss is tolerable.</summary>
+        /// the sequenced-unreliable gameplay channel. Reserved for small
+        /// loss-tolerant datagrams; state snapshots exceed one datagram
+        /// and go through <see cref="Send(ulong, byte[])"/> instead —
+        /// a fragmented payload cannot survive this lane under jitter.</summary>
         public bool SendGameplay(ulong connectionId, byte[] payload)
         {
             if (payload == null) throw new ArgumentNullException(nameof(payload));

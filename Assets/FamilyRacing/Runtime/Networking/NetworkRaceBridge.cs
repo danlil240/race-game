@@ -873,10 +873,18 @@ namespace FamilyRacing.Networking
         }
 
         /// <summary>Publish a full four-racer snapshot to every
-        /// authenticated connection on the sequenced-unreliable channel.
-        /// The snapshot ceiling is enforced at encode AND at send; an
-        /// overflowing snapshot fails explicitly instead of truncating
-        /// racer state.</summary>
+        /// authenticated connection on the reliable-ordered channel. A
+        /// JSON snapshot exceeds one datagram, so it always fragments;
+        /// UTP's fragment reassembly requires contiguous in-order
+        /// fragments, which any real jitter profile breaks — on the
+        /// sequenced-unreliable lane reordered fragments are culled and
+        /// every snapshot is lost. The reliable lane retransmits and
+        /// reorders fragments, so impairment degrades to latency, not
+        /// total loss. Ordering is additionally fenced by
+        /// snapshotSequence in <see cref="ApplySnapshot"/>. The snapshot
+        /// ceiling is enforced at encode AND at send; an overflowing
+        /// snapshot fails explicitly instead of truncating racer state.
+        /// </summary>
         public bool Publish(NetworkSnapshot snapshot)
         {
             byte[] packet;
@@ -896,7 +904,7 @@ namespace FamilyRacing.Networking
             var sent = false;
             foreach (var connectionId in session.HostConnections())
             {
-                var ok = transport.SendGameplay(connectionId, packet);
+                var ok = transport.Send(connectionId, packet);
                 if (!ok)
                     LastError = "snapshotSend:" + transport.LastError
                         + " len=" + packet.Length;
@@ -1304,18 +1312,38 @@ namespace FamilyRacing.Networking
             // Shared reliable channel: FRN2 text belongs to the session
             // protocol (LanSessionLink); only gameplay envelopes apply here.
             if (!NetworkWireCodec.IsGameplayPacket(payload)) return;
-            if (NetworkWireCodec.TagOf(payload) == NetworkWireCodec.TagEventBatch
-                && session.Snapshot().role == LanSessionService.RoleClient)
+            var role = session.Snapshot().role;
+            switch (NetworkWireCodec.TagOf(payload))
             {
-                NetworkEventBatch batch;
-                string error;
-                if (!NetworkWireCodec.TryDecodeEventBatch(payload, out batch, out error))
-                {
-                    DroppedPackets++;
-                    LastError = error;
+                case NetworkWireCodec.TagEventBatch:
+                    if (role != LanSessionService.RoleClient) return;
+                    NetworkEventBatch batch;
+                    string batchError;
+                    if (!NetworkWireCodec.TryDecodeEventBatch(payload,
+                            out batch, out batchError))
+                    {
+                        DroppedPackets++;
+                        LastError = batchError;
+                        return;
+                    }
+                    ApplyEventBatch(batch);
                     return;
-                }
-                ApplyEventBatch(batch);
+                case NetworkWireCodec.TagSnapshot:
+                    // Snapshots ride the reliable channel: multi-fragment
+                    // packets cannot survive impairment on the sequenced
+                    // lane (UTP reassembly requires in-order fragments).
+                    if (role != LanSessionService.RoleClient) return;
+                    NetworkSnapshot snapshot;
+                    string snapError;
+                    if (!NetworkWireCodec.TryDecodeSnapshot(payload,
+                            out snapshot, out snapError))
+                    {
+                        DroppedPackets++;
+                        LastError = snapError;
+                        return;
+                    }
+                    ApplySnapshot(snapshot);
+                    return;
             }
         }
 
