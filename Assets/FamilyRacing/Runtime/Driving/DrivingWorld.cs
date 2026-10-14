@@ -17,6 +17,11 @@ namespace FamilyRacing
     public sealed class DrivingWorld : MonoBehaviour
     {
         [SerializeField] private VehicleDefinitionAsset[] vehicles;
+        // Task-4 character catalog: the four authored animals in slot
+        // order (fox, rabbit, panda, raccoon) — the same order
+        // ProfileValidation assigns avatars, so slot N's fallback AI
+        // cosmetic is the slot avatar.
+        [SerializeField] private CharacterDefinitionAsset[] characters;
         [SerializeField] private TrackDefinitionAsset track;
         [SerializeField] private EventDefinitionAsset[] events;
         [SerializeField] private TutorialDefinitionAsset tutorial;
@@ -58,9 +63,26 @@ namespace FamilyRacing
             internal GameObject root;
             internal VehiclePresentation presentation;
             internal string vehicleId = "";
+            // Resolved cosmetic identity (character id + color slot) —
+            // rebinding only happens when it actually changes, so
+            // snapshot churn, disconnects and rejoins never rebuild a
+            // rig that is already correct.
+            internal string cosmeticsKey = "";
+            // Rising-edge detector for the finish celebration.
+            internal bool wasFinished;
         }
         private readonly Dictionary<string, RacerView> racerViews =
             new Dictionary<string, RacerView>(System.StringComparer.Ordinal);
+        // Task-4 presentation facts: the visual identity actually on
+        // screen per presented racer (solo entry first). Rebuilt each
+        // Apply*Frame; entries carry authored ids or honest fallback
+        // tokens — FoundationApp merges the pose-source label on top.
+        private readonly List<RacerPresentationState> racerFacts =
+            new List<RacerPresentationState>();
+        private readonly List<RacerPresentationState> raceFacts =
+            new List<RacerPresentationState>();
+        private RacerPresentationState soloFact;
+        private string soloCosmeticsKey = "";
         private Camera mainCamera;
         private Vector3 savedCameraPosition;
         private Quaternion savedCameraRotation;
@@ -138,6 +160,23 @@ namespace FamilyRacing
         public Core.Tutorial.TutorialDefinition Tutorial { get; private set; }
         public TutorialDefinitionAsset TutorialAsset { get { return tutorial; } }
         public DrivingCameraState CameraFacts { get { return cameraFacts; } }
+        public List<RacerPresentationState> RacerFacts
+        {
+            get { return racerFacts; }
+        }
+        // Read-only seams for tests/diagnostics: the live presentation
+        // components — the solo vehicle and a participant's racer view.
+        public VehiclePresentation SoloPresentation
+        {
+            get { return presentation; }
+        }
+        public VehiclePresentation RacerPresentation(string participantId)
+        {
+            RacerView view;
+            return participantId != null
+                && racerViews.TryGetValue(participantId, out view)
+                && view != null ? view.presentation : null;
+        }
 
         // FoundationApp calls this once a DrivingCamera is bound/active;
         // the world's own ApplyFrame stops driving Camera.main from then on.
@@ -271,7 +310,7 @@ namespace FamilyRacing
                 var motor = session.motor;
                 ApplyVehicleVisual(session.vehicleId, motor,
                     session.input != null ? session.input.steering : 0f,
-                    visualAlpha);
+                    visualAlpha, state);
                 if (presentationCameraBound)
                     // The bound presentation camera publishes its own
                     // facts; the fallback reports nothing rather than a
@@ -280,10 +319,15 @@ namespace FamilyRacing
                 else
                     ApplyOverviewCamera(motor);
             }
-            else if (overviewActive)
+            else
             {
-                RestoreCamera();
-                ClearCameraFacts();
+                soloFact = null;
+                RebuildFactBuffer();
+                if (overviewActive)
+                {
+                    RestoreCamera();
+                    ClearCameraFacts();
+                }
             }
         }
 
@@ -314,14 +358,42 @@ namespace FamilyRacing
         public void ApplyRaceFrame(NetworkRaceState race, float visualAlpha,
             IReadOnlyDictionary<string, MotorState> poseOverrides)
         {
+            ApplyRaceFrame(race, visualAlpha, poseOverrides, null);
+        }
+
+        // `participants` is the Task-4 cosmetics seam: the live roster
+        // carries each human racer's avatar/colorIndex, so views resolve
+        // human cosmetics from existing participants, solo from the
+        // selected profile, and AI/seat-only racers from the stable slot
+        // mapping (slot -> catalog avatar). Never an identity of pose —
+        // roster/view lifecycle still keys off participantId alone.
+        public void ApplyRaceFrame(NetworkRaceState race, float visualAlpha,
+            IReadOnlyDictionary<string, MotorState> poseOverrides,
+            List<ParticipantState> participants)
+        {
             var racers = race != null ? race.racers : null;
             var active = racers != null && racers.Count > 0;
             raceCourseActive = active;
             RefreshCourseInstance();
+            raceFacts.Clear();
             if (!active)
             {
                 ClearRacerViews();
+                RebuildFactBuffer();
                 return;
+            }
+            // Roster lookup: a human racer's avatar/color arrive on the
+            // participant record, not the wire racer state — identity
+            // must never be guessed from pose data.
+            Dictionary<string, ParticipantState> byId = null;
+            if (participants != null)
+            {
+                byId = new Dictionary<string, ParticipantState>(
+                    System.StringComparer.Ordinal);
+                foreach (var participant in participants)
+                    if (participant != null
+                        && participant.participantId != null)
+                        byId[participant.participantId] = participant;
             }
             var seen = new HashSet<string>(System.StringComparer.Ordinal);
             for (var i = 0; i < racers.Count; i++)
@@ -342,7 +414,11 @@ namespace FamilyRacing
                 if (poseOverrides != null)
                     poseOverrides.TryGetValue(racer.participantId,
                         out overrideMotor);
-                ApplyRacerVisual(view, racer, visualAlpha, overrideMotor);
+                ParticipantState participant = null;
+                if (byId != null)
+                    byId.TryGetValue(racer.participantId, out participant);
+                ApplyRacerVisual(view, racer, visualAlpha, overrideMotor,
+                    participant);
             }
             // Deterministic cleanup in ordinal key order.
             var stale = new List<string>();
@@ -350,6 +426,7 @@ namespace FamilyRacing
                 if (!seen.Contains(key)) stale.Add(key);
             stale.Sort(System.StringComparer.Ordinal);
             foreach (var key in stale) DestroyRacerView(key);
+            RebuildFactBuffer();
         }
 
         private RacerView EnsureRacerView(string participantId)
@@ -376,22 +453,58 @@ namespace FamilyRacing
         }
 
         private void ApplyRacerVisual(RacerView view, NetworkRacerState racer,
-            float visualAlpha, MotorState poseOverride)
+            float visualAlpha, MotorState poseOverride,
+            ParticipantState participant)
         {
             if (view == null || view.presentation == null) return;
-            if (racer.vehicleId != view.vehicleId)
+            // Human cosmetics come from the participant's own roster
+            // record — a disconnected-then-rejoined racer keeps its
+            // avatar because the roster carries it, not the pose.
+            // Racers with no roster entry (AI fillers) map by slot.
+            var avatar = participant != null
+                && !string.IsNullOrEmpty(participant.avatar)
+                ? participant.avatar : null;
+            var colorIndex = participant != null
+                ? participant.colorIndex : SlotColorIndex(racer.slot);
+            var character = ResolveCharacter(avatar, racer.slot);
+            var cosmeticsKey = CosmeticsKey(character, colorIndex);
+            if (racer.vehicleId != view.vehicleId
+                || cosmeticsKey != view.cosmeticsKey)
             {
-                VehicleDefinitionAsset asset;
-                if (!vehicleAssets.TryGetValue(racer.vehicleId ?? "", out asset)
-                    || asset == null)
-                    asset = FallbackVehicle(racer.vehicleId);
-                view.presentation.SetVehicle(asset);
-                view.vehicleId = racer.vehicleId;
+                view.presentation.SetRacer(character, colorIndex);
+                if (racer.vehicleId != view.vehicleId)
+                {
+                    VehicleDefinitionAsset asset;
+                    if (!vehicleAssets.TryGetValue(racer.vehicleId ?? "",
+                            out asset)
+                        || asset == null)
+                        asset = FallbackVehicle(racer.vehicleId);
+                    view.presentation.SetVehicle(asset);
+                    view.vehicleId = racer.vehicleId;
+                }
+                view.cosmeticsKey = cosmeticsKey;
             }
+            var wasFinished = view.wasFinished;
+            view.wasFinished = racer.finished;
+            if (racer.finished && !wasFinished)
+                view.presentation.NotifyFinished();
             var steering = racer.session.input != null
                 ? racer.session.input.steering : 0f;
             view.presentation.ApplyPose(
                 poseOverride ?? racer.session.motor, steering, visualAlpha);
+            raceFacts.Add(new RacerPresentationState
+            {
+                participantId = racer.participantId,
+                slot = racer.slot,
+                vehicleId = racer.vehicleId ?? "",
+                vehicleVisualId = view.presentation.BoundVisualId ?? "",
+                characterId = view.presentation.BoundCharacterId ?? "",
+                colorIndex = view.presentation.BoundColorIndex,
+                // The app overlays the real source (predicted/
+                // interpolated) when it supplies a pose override;
+                // absent an override the committed state is truth.
+                poseSource = "authoritative"
+            });
         }
 
         // DestroyImmediate: a deferred Destroy would leave the stale view
@@ -417,24 +530,94 @@ namespace FamilyRacing
         }
 
         private void ApplyVehicleVisual(string vehicleId, MotorState motor,
-            float steering, float visualAlpha)
+            float steering, float visualAlpha, FoundationState state)
         {
             if (vehicleView == null || presentation == null) return;
-            if (vehicleId != shownVehicleId)
+            // Solo cosmetics resolve from the selected profile — the
+            // same avatar/color the profile card shows.
+            var profile = state != null ? state.savedProfile : null;
+            var avatar = profile != null ? profile.avatar : null;
+            var colorIndex = profile != null ? profile.colorIndex : 0;
+            var character = ResolveCharacter(avatar,
+                state != null ? state.activeSlot : -1);
+            var cosmeticsKey = CosmeticsKey(character, colorIndex);
+            if (vehicleId != shownVehicleId
+                || cosmeticsKey != soloCosmeticsKey)
             {
-                VehicleDefinitionAsset asset;
-                if (!vehicleAssets.TryGetValue(vehicleId ?? "", out asset)
-                    || asset == null)
+                presentation.SetRacer(character, colorIndex);
+                if (vehicleId != shownVehicleId)
                 {
-                    // An unresolvable id must not leave the previous
-                    // vehicle's silhouette on screen — fall back to the
-                    // generic body and say so once per id.
-                    asset = FallbackVehicle(vehicleId);
+                    VehicleDefinitionAsset asset;
+                    if (!vehicleAssets.TryGetValue(vehicleId ?? "",
+                            out asset)
+                        || asset == null)
+                    {
+                        // An unresolvable id must not leave the previous
+                        // vehicle's silhouette on screen — fall back to
+                        // the generic body and say so once per id.
+                        asset = FallbackVehicle(vehicleId);
+                    }
+                    presentation.SetVehicle(asset);
+                    shownVehicleId = vehicleId;
                 }
-                presentation.SetVehicle(asset);
-                shownVehicleId = vehicleId;
+                soloCosmeticsKey = cosmeticsKey;
             }
             presentation.ApplyPose(motor, steering, visualAlpha);
+            soloFact = new RacerPresentationState
+            {
+                participantId = profile != null && profile.id != null
+                    ? profile.id : "",
+                slot = state != null ? state.activeSlot : 0,
+                vehicleId = vehicleId ?? "",
+                vehicleVisualId = presentation.BoundVisualId ?? "",
+                characterId = presentation.BoundCharacterId ?? "",
+                colorIndex = presentation.BoundColorIndex,
+                poseSource = "authoritative"
+            };
+            RebuildFactBuffer();
+        }
+
+        // The merged facts buffer the app publishes: solo entry first
+        // when the single-player vehicle is on screen, then every LAN
+        // racer fact from the latest race frame.
+        private void RebuildFactBuffer()
+        {
+            racerFacts.Clear();
+            if (soloFact != null) racerFacts.Add(soloFact);
+            racerFacts.AddRange(raceFacts);
+        }
+
+        private static string CosmeticsKey(
+            CharacterDefinitionAsset character, int colorIndex)
+        {
+            return (character != null ? character.characterId : "-")
+                + "|" + colorIndex;
+        }
+
+        // Character resolution, shared by solo and LAN paths: a known
+        // avatar id binds its authored character directly; anything else
+        // (AI fillers, unknown ids, missing roster entries) falls back
+        // to the stable slot mapping — the catalog order IS the avatar
+        // order (fox, rabbit, panda, raccoon). An empty catalog means no
+        // authored character: the rig shows the honest generic rider.
+        private CharacterDefinitionAsset ResolveCharacter(string avatar,
+            int slot)
+        {
+            if (characters == null || characters.Length == 0) return null;
+            if (!string.IsNullOrEmpty(avatar))
+                foreach (var candidate in characters)
+                    if (candidate != null
+                        && candidate.characterId == avatar)
+                        return candidate;
+            if (slot < 0) return null;
+            return characters[slot % characters.Length];
+        }
+
+        // AI/seat-only racers have no participant color slot — the slot
+        // index itself is the stable palette choice.
+        private static int SlotColorIndex(int slot)
+        {
+            return slot < 0 ? 0 : slot % 4;
         }
 
         private readonly Dictionary<string, VehicleDefinitionAsset> fallbackAssets =

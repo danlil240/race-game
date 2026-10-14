@@ -56,6 +56,11 @@ namespace FamilyRacing
         public float leanDegrees = 4f;
         public Vector3 bodyScale = new Vector3(1.8f, 1.1f, 3.2f);
         public Color bodyColor = new Color(0.91f, 0.51f, 0.42f);
+        // The authored recognizable-vehicle visual (M4 Task 4) bound over
+        // the primitive silhouette above. Null keeps the proven primitive
+        // fallback — the contract never makes authored art a requirement
+        // for a drivable racer.
+        public VehicleVisualDefinitionAsset visual;
 
         // Write every tuning field from a Core preset so the authored
         // source and the generated asset can never drift apart.

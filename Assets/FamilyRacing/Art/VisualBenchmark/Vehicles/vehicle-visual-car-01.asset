@@ -1,0 +1,31 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 20710dadb7c19b64ab4a00ce104f2a28, type: 3}
+  m_Name: vehicle-visual-car-01
+  m_EditorClassIdentifier: FamilyRacing.Runtime::FamilyRacing.VehicleVisualDefinitionAsset
+  visualId: rally-car-01
+  vehicleClass: car
+  prefab: {fileID: 6591771222795804975, guid: fb399e7f93ded434592bc4ab71346d74, type: 3}
+  seatMountName: SeatMount
+  gripLeftName: GripL
+  gripRightName: GripR
+  dashWheelName: DashWheel
+  wheelNames:
+  - WheelFL
+  - WheelFR
+  - WheelRL
+  - WheelRR
+  wheelSteerable: 01010000
+  wheelRadius: 0.32
+  steerDegrees: 25
+  bodyOriginHeight: 0.77
+  riderLeanDegrees: 7

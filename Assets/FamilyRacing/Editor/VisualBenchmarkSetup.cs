@@ -60,6 +60,10 @@ namespace FamilyRacing.EditorTools
             // missing, never regenerated (same rule as every other
             // authored asset here).
             SunnyIslandCourseAuthoring.Ensure();
+            // M4 Task 4: authored racer visuals/characters (vehicles,
+            // animals, palettes) under Art/VisualBenchmark — the same
+            // create-if-missing rule as the course art.
+            RacerVisualAuthoring.Ensure();
             var definition = EnsureDefinition();
             string error;
             if (!definition.Validate(out error))
@@ -184,6 +188,25 @@ namespace FamilyRacing.EditorTools
                     asset.courseVisualPrefab = sunny;
                     dirty = true;
                 }
+            }
+            // Task 4: the character catalog fills missing entries in
+            // slot order — the AI/slot cosmetic mapping depends on it.
+            if (asset.characters == null
+                || asset.characters.Length
+                    != RacerVisualAuthoring.CharacterIds.Length)
+            {
+                asset.characters = new CharacterDefinitionAsset[
+                    RacerVisualAuthoring.CharacterIds.Length];
+                dirty = true;
+            }
+            for (var i = 0; i < asset.characters.Length; i++)
+            {
+                if (asset.characters[i] != null) continue;
+                asset.characters[i] = AssetDatabase
+                    .LoadAssetAtPath<CharacterDefinitionAsset>(
+                        RacerVisualAuthoring.CharacterAssetPath(
+                            RacerVisualAuthoring.CharacterIds[i]));
+                dirty = true;
             }
             if (dirty) EditorUtility.SetDirty(asset);
             return asset;
@@ -438,6 +461,7 @@ namespace FamilyRacing.EditorTools
             Assign(serialized, "tutorial", content.tutorial);
             AssignArray(serialized, "vehicles",
                 content.car, content.moto);
+            AssignArray(serialized, "characters", definition.characters);
             AssignArray(serialized, "events", content.events);
             var version = serialized.FindProperty("contentVersion");
             if (version != null)
@@ -491,6 +515,8 @@ namespace FamilyRacing.EditorTools
                 dirty |= Assign(serialized, "tutorial", content.tutorial);
                 dirty |= EnsureArrayContains(serialized, "vehicles",
                     content.car, content.moto);
+                dirty |= EnsureArrayContains(serialized, "characters",
+                    definition.characters);
                 dirty |= EnsureArrayContains(serialized, "events",
                     content.events);
                 var version = serialized.FindProperty("contentVersion");

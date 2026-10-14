@@ -15,3 +15,8 @@ MonoBehaviour:
   presentationVersion: visual-1
   courseVisualPrefab: {fileID: 1749651245222048085, guid: 2c139f00b744d2a48ad00a85b6112475, type: 3}
   sourceTrack: {fileID: 11400000, guid: 15fda47ea6ac2b247bf2ba7b75a8eb4b, type: 2}
+  characters:
+  - {fileID: 11400000, guid: 5ed328c566290b04b9fead330e2f1306, type: 2}
+  - {fileID: 11400000, guid: e5a5c8d32ae0af34d8d6bde1c14c9f91, type: 2}
+  - {fileID: 11400000, guid: 199030d36162a1b4db6f3d2f1bae6e5d, type: 2}
+  - {fileID: 11400000, guid: 9b31cbcbaa4c9544ca1de4c793f8c069, type: 2}

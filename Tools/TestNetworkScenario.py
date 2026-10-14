@@ -97,6 +97,7 @@ def lan_state(tick=1, schema=5):
             "targetFrameRate": 60,
             "renderingAvailable": True,
             "performance": None,
+            "racers": [],
         }
     return state
 

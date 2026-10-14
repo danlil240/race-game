@@ -4,6 +4,7 @@
   "references": [
     "FamilyRacing.Core",
     "FamilyRacing.Runtime",
+    "FamilyRacing.Editor",
     "Unity.Networking.Transport",
     "Unity.InputSystem",
     "Unity.InputSystem.TestFramework",

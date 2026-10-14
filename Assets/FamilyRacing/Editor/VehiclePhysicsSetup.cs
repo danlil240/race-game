@@ -121,6 +121,12 @@ namespace FamilyRacing.EditorTools
             asset.leanDegrees = 0f;
             asset.bodyScale = new Vector3(1.8f, 1.1f, 3.2f);
             asset.bodyColor = new Color(0.42f, 0.62f, 0.91f);
+            // Task 4: the physical path renders the same authored rally
+            // car — the rig anchors it at the body origin instead of the
+            // ground plane.
+            asset.visual = AssetDatabase
+                .LoadAssetAtPath<VehicleVisualDefinitionAsset>(
+                    RacerVisualAuthoring.CarVisualAssetPath);
             EditorUtility.SetDirty(asset);
             return asset;
         }
@@ -145,6 +151,9 @@ namespace FamilyRacing.EditorTools
             asset.leanDegrees = 0f;
             asset.bodyScale = new Vector3(0.5f, 0.9f, 2.2f);
             asset.bodyColor = new Color(0.50f, 0.78f, 0.70f);
+            asset.visual = AssetDatabase
+                .LoadAssetAtPath<VehicleVisualDefinitionAsset>(
+                    RacerVisualAuthoring.MotoVisualAssetPath);
             EditorUtility.SetDirty(asset);
             return asset;
         }
@@ -192,7 +201,14 @@ namespace FamilyRacing.EditorTools
             if (evt == null || car == null || bike == null) return;
             if (AssetDatabase.LoadAssetAtPath<SceneAsset>(RaceScenePath)
                     != null)
-                return; // authored scene exists: never overwrite
+            {
+                // Authored scene exists: never overwrite it — but repair
+                // new world bindings (the Task-4 character catalog) that
+                // predate them, exactly like the benchmark setup's
+                // ensure-in-place path.
+                RepairRaceSceneCharacters();
+                return;
+            }
             var coursePrefab = AssetDatabase.LoadAssetAtPath<GameObject>(
                 DrivingDir + "/GrayboxCourse.prefab");
             var track = evt.track;
@@ -237,6 +253,16 @@ namespace FamilyRacing.EditorTools
             var world = appObject.AddComponent<DrivingWorld>();
             var serialized = new SerializedObject(world);
             AssignObjectArray(serialized, "vehicles", car, bike);
+            // The four authored animals in slot order — the roster's
+            // AI fallback cosmetics map slot N to catalog entry N.
+            var characterAssets = new Object[
+                RacerVisualAuthoring.CharacterIds.Length];
+            for (var ci = 0; ci < characterAssets.Length; ci++)
+                characterAssets[ci] = AssetDatabase
+                    .LoadAssetAtPath<CharacterDefinitionAsset>(
+                        RacerVisualAuthoring.CharacterAssetPath(
+                            RacerVisualAuthoring.CharacterIds[ci]));
+            AssignObjectArray(serialized, "characters", characterAssets);
             AssignObject(serialized, "track", track);
             AssignObjectArray(serialized, "events", evt);
             AssignObject(serialized, "coursePrefab", coursePrefab);
@@ -249,6 +275,51 @@ namespace FamilyRacing.EditorTools
             serialized.ApplyModifiedPropertiesWithoutUndo();
 
             EditorSceneManager.SaveScene(scene, RaceScenePath);
+        }
+
+        // Repair pass for an already-authored PhysicsRace scene: bind the
+        // four animal characters on its DrivingWorld so the racer rig
+        // resolves real cosmetics instead of the fallback rider. Runs
+        // only when the property is unset — a hand-edited catalog is
+        // never rewritten.
+        private static void RepairRaceSceneCharacters()
+        {
+            var scene = EditorSceneManager.OpenScene(RaceScenePath,
+                OpenSceneMode.Single);
+            try
+            {
+                var dirty = false;
+                foreach (var world in
+                    Object.FindObjectsByType<DrivingWorld>(
+                        FindObjectsInactive.Include,
+                        FindObjectsSortMode.None))
+                {
+                    var serialized = new SerializedObject(world);
+                    var property = serialized.FindProperty("characters");
+                    if (property == null || property.arraySize != 0)
+                        continue;
+                    property.arraySize =
+                        RacerVisualAuthoring.CharacterIds.Length;
+                    for (var i = 0; i < property.arraySize; i++)
+                        property.GetArrayElementAtIndex(i)
+                            .objectReferenceValue = AssetDatabase
+                                .LoadAssetAtPath<CharacterDefinitionAsset>(
+                                    RacerVisualAuthoring.CharacterAssetPath(
+                                        RacerVisualAuthoring
+                                            .CharacterIds[i]));
+                    dirty |= serialized
+                        .ApplyModifiedPropertiesWithoutUndo();
+                }
+                if (dirty)
+                {
+                    EditorSceneManager.MarkSceneDirty(scene);
+                    EditorSceneManager.SaveScene(scene);
+                }
+            }
+            finally
+            {
+                EditorSceneManager.CloseScene(scene, true);
+            }
         }
 
         private static void AssignObject(SerializedObject so,

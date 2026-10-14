@@ -27,6 +27,11 @@ namespace FamilyRacing
         // gates, route, spawn grid and recovery rules as the driving
         // slice. Referenced, never copied.
         public TrackDefinitionAsset sourceTrack;
+        // Task-4 typed catalog: the four authored animals in slot order
+        // (fox, rabbit, panda, raccoon — the same order ProfileValidation
+        // assigns avatars, so AI/slot cosmetics land correctly). Vehicle
+        // visuals bind per-vehicle on VehicleDefinitionAsset.visual.
+        public CharacterDefinitionAsset[] characters;
 
         public bool Validate(out string error)
         {

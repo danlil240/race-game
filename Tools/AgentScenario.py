@@ -209,6 +209,25 @@ def validate_schema5_presentation(state):
         "Schema-5 presentation is missing renderingAvailable"
     assert "performance" in presentation, \
         "Schema-5 presentation is missing the performance key"
+    # Task-4 racer facts: a bounded list naming the presented visual
+    # identity per racer (authored ids or honest fallback tokens) and the
+    # pose source driving it — "authoritative", "predicted" or
+    # "interpolated".
+    racers = presentation.get("racers")
+    assert isinstance(racers, list), \
+        "Schema-5 presentation is missing the racers list"
+    for racer in racers:
+        assert isinstance(racer, dict), "racers entries must be objects"
+        for key in ("participantId", "vehicleId", "vehicleVisualId",
+                    "characterId", "poseSource"):
+            assert isinstance(racer.get(key), str), \
+                "racers entry missing " + key
+        for key in ("slot", "colorIndex"):
+            assert type(racer.get(key)) is int, \
+                "racers entry missing int " + key
+        assert racer["poseSource"] in (
+            "authoritative", "predicted", "interpolated", ""), \
+            "unknown poseSource " + repr(racer["poseSource"])
     perf = presentation["performance"]
     if perf is not None:
         assert isinstance(perf, dict), "performance must be an object or null"

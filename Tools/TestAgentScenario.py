@@ -109,6 +109,7 @@ class IntegrityTests(unittest.TestCase):
                 "renderScale": 0.75,
                 "targetFrameRate": 30,
                 "renderingAvailable": True,
+                "racers": [],
                 "performance": {
                     "profile": "tablet",
                     "captureValid": True,
@@ -145,6 +146,7 @@ class IntegrityTests(unittest.TestCase):
             lambda s: s.pop("presentation"),
             lambda s: s["presentation"].pop("renderProfileId"),
             lambda s: s["presentation"].pop("performance"),
+            lambda s: s["presentation"].pop("racers"),
             lambda s: s["presentation"].update(renderProfileId="quantum"),
             lambda s: s["presentation"].update(renderingAvailable="yes"),
             lambda s: s["presentation"]["performance"].pop("reportStatus"),

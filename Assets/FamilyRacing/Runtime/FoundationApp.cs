@@ -302,7 +302,10 @@ namespace FamilyRacing
                 if (lanRace)
                     lanLocalPose = ApplyNetworkFrame(netRace, state, alpha);
                 else
+                {
+                    lastPoseSources.Clear();
                     drivingWorld.ApplyRaceFrame(null); // retire racer views
+                }
                 if (drivingCamera != null)
                 {
                     // Applied after the world visuals so its transform wins;
@@ -441,19 +444,25 @@ namespace FamilyRacing
             var now = Time.realtimeSinceStartupAsDouble;
             var overrides = new Dictionary<string, MotorState>(
                 StringComparer.Ordinal);
+            lastPoseSources.Clear();
             MotorState localPose = null;
             foreach (var racer in race.racers)
             {
                 if (racer == null || string.IsNullOrEmpty(racer.participantId))
                     continue;
+                // Default: the committed host state is the pose source.
+                lastPoseSources[racer.participantId] = "authoritative";
                 if (racer.participantId == localId)
                 {
-                    localPose = raceBridge != null
+                    var predicted = raceBridge != null
                         ? raceBridge.SmoothedLocalMotor(now) : null;
+                    localPose = predicted;
                     if (localPose == null && racer.session != null)
                         localPose = racer.session.motor;
                     if (localPose != null)
                         overrides[racer.participantId] = localPose;
+                    if (predicted != null)
+                        lastPoseSources[racer.participantId] = "predicted";
                 }
                 else
                 {
@@ -461,11 +470,48 @@ namespace FamilyRacing
                         ? raceBridge.SampleRemotePose(racer.participantId, now)
                         : null;
                     if (remote != null)
+                    {
                         overrides[racer.participantId] = remote;
+                        lastPoseSources[racer.participantId] =
+                            "interpolated";
+                    }
                 }
             }
-            drivingWorld.ApplyRaceFrame(race, alpha, overrides);
+            // The roster resolves human cosmetics (avatar + color slot);
+            // racers without a roster entry are AI and map by slot.
+            drivingWorld.ApplyRaceFrame(race, alpha, overrides,
+                state.network != null ? state.network.participants : null);
             return localPose;
+        }
+
+        // The last ApplyNetworkFrame's pose-source per participant — the
+        // world writes "authoritative" on every fact; these labels
+        // override it where a predicted/interpolated pose drove the view.
+        private readonly Dictionary<string, string> lastPoseSources =
+            new Dictionary<string, string>(StringComparer.Ordinal);
+
+        // Snapshot of the world's racer facts with the app's pose-source
+        // labels merged in — the facts the schemas actually stream.
+        private List<RacerPresentationState> BuildRacerFacts()
+        {
+            var source = drivingWorld != null ? drivingWorld.RacerFacts : null;
+            var list = new List<RacerPresentationState>(
+                source != null ? source.Count : 0);
+            if (source != null)
+                foreach (var fact in source)
+                {
+                    var copy = fact != null ? fact.Copy() : null;
+                    if (copy != null)
+                    {
+                        string poseSource;
+                        if (copy.participantId != null
+                            && lastPoseSources.TryGetValue(
+                                copy.participantId, out poseSource))
+                            copy.poseSource = poseSource;
+                    }
+                    list.Add(copy);
+                }
+            return list;
         }
 
         private void RefreshPresentation(FoundationState state)
@@ -508,6 +554,10 @@ namespace FamilyRacing
             // the graybox placeholder.
             presentation.courseVisualId = drivingWorld != null
                 ? drivingWorld.CourseVisualId : "none";
+            // Schema-5 racer facts: the actual bound visual/character
+            // identities (or honest fallback tokens) with the real
+            // pose-source label overlaid.
+            presentation.racers = BuildRacerFacts();
             presentation.performance = perfRecorder != null
                 ? perfRecorder.Summary() : null;
             service.SetPresentation(presentation);

@@ -46,3 +46,4 @@ MonoBehaviour:
   leanDegrees: 0
   bodyScale: {x: 1.8, y: 1.1, z: 3.2}
   bodyColor: {r: 0.42, g: 0.62, b: 0.91, a: 1}
+  visual: {fileID: 11400000, guid: 9ea35238d1f48ab42b3bfbffd7ec2943, type: 2}

@@ -33,6 +33,10 @@ namespace FamilyRacing.EditorTools
             var driftMat = EnsureMaterial("GrayboxDrift.mat",
                 new Color(0.36f, 0.36f, 0.40f));
 
+            // Task 4: authored racer visuals/characters must exist before
+            // the vehicle definitions bind them; ensure creates missing
+            // assets only, so re-runs never clobber authored art.
+            RacerVisualAuthoring.Ensure();
             var car = EnsureCar();
             var moto = EnsureMotorcycle();
             var track = EnsureTrack();
@@ -92,8 +96,18 @@ namespace FamilyRacing.EditorTools
             asset.leanDegrees = 4f;
             asset.bodyScale = new Vector3(1.8f, 1.1f, 3.2f);
             asset.bodyColor = new Color(0.91f, 0.51f, 0.42f);
+            asset.visual = RacerVisual(true);
             EditorUtility.SetDirty(asset);
             return asset;
+        }
+
+        // The authored benchmark visual (Task 4): null-safe — a missing
+        // asset leaves the proven primitive fallback bound.
+        private static VehicleVisualDefinitionAsset RacerVisual(bool car)
+        {
+            return AssetDatabase.LoadAssetAtPath<VehicleVisualDefinitionAsset>(
+                car ? RacerVisualAuthoring.CarVisualAssetPath
+                    : RacerVisualAuthoring.MotoVisualAssetPath);
         }
 
         private static VehicleDefinitionAsset EnsureMotorcycle()
@@ -104,6 +118,7 @@ namespace FamilyRacing.EditorTools
             asset.leanDegrees = 24f;
             asset.bodyScale = new Vector3(0.9f, 1.4f, 2.2f);
             asset.bodyColor = new Color(0.50f, 0.78f, 0.70f);
+            asset.visual = RacerVisual(false);
             EditorUtility.SetDirty(asset);
             return asset;
         }
@@ -400,6 +415,7 @@ namespace FamilyRacing.EditorTools
                 }
                 var serialized = new SerializedObject(world);
                 dirty |= AssignArray(serialized, "vehicles", car, moto);
+                dirty |= AssignCharacters(serialized);
                 dirty |= Assign(serialized, "track", track);
                 dirty |= AssignArray(serialized, "events", practice, intro, free);
                 dirty |= Assign(serialized, "tutorial", tutorial);
@@ -419,6 +435,20 @@ namespace FamilyRacing.EditorTools
             }
             if (!alreadyOpen)
                 EditorSceneManager.CloseScene(scene, true);
+        }
+
+        // The four authored animals in slot order — the roster's AI
+        // fallback cosmetics map slot N to catalog entry N.
+        private static bool AssignCharacters(SerializedObject so)
+        {
+            var characters = new CharacterDefinitionAsset[
+                RacerVisualAuthoring.CharacterIds.Length];
+            for (var i = 0; i < characters.Length; i++)
+                characters[i] = AssetDatabase
+                    .LoadAssetAtPath<CharacterDefinitionAsset>(
+                        RacerVisualAuthoring.CharacterAssetPath(
+                            RacerVisualAuthoring.CharacterIds[i]));
+            return AssignArray(so, "characters", characters);
         }
 
         private static bool Assign(SerializedObject so, string property, Object value)

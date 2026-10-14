@@ -930,7 +930,8 @@ namespace FamilyRacing.Tests
                 BindingFlags.NonPublic | BindingFlags.Instance);
             Assert.That(applyVisual, Is.Not.Null);
             applyVisual.Invoke(world, new object[]
-                { "ghost-01", Snapshot().driving.motor, 0f, 1f });
+                { "ghost-01", Snapshot().driving.motor, 0f, 1f,
+                    Snapshot() });
             Assert.That(presentation.ShownKey, Is.EqualTo("|ghost-01"),
                 "an unknown vehicle id must fall back to the generic cube");
             Assert.That(

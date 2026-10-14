@@ -14,6 +14,7 @@ asset GUID).
 | Date | Spend | Notes |
 |---|---|---|
 | 2026-10-14 | US$0 of US$100 | All benchmark environment art is original, authored procedurally in-editor. No purchases made or needed. |
+| 2026-10-14 | US$0 of US$100 | Vehicle and animal racer visuals (Task 4) are original, authored procedurally in-editor. No purchases made or needed. |
 
 ## Referenced assets (machine-readable)
 
@@ -56,14 +57,45 @@ Columns: `guid` | `path` | `source` | `license` | `cost` | `role`.
 | ea022b971af4d764db3514527b06e362 | Assets/FamilyRacing/Art/VisualBenchmark/Environment/Materials/Mat_WallWhite.mat | Original — procedurally authored by SunnyIslandCourseAuthoring.cs (sha256:eeed9ed88d7808c5) | Project-owned original work — no third-party license, no attribution required | US$0 | dressing material |
 | 385b8fb875492e24fb0bff5f740d178d | Assets/FamilyRacing/Art/VisualBenchmark/Environment/Materials/Mat_Water.mat | Original — procedurally authored by SunnyIslandCourseAuthoring.cs (sha256:d859efa692f31325) | Project-owned original work — no third-party license, no attribution required | US$0 | dressing material |
 | d37bed84d2cc3a04b9d38fe97824ee5e | Assets/FamilyRacing/Art/VisualBenchmark/Environment/Materials/Sky_SunnyIsland.mat | Original — procedurally authored by SunnyIslandCourseAuthoring.cs (sha256:0cc2e25f204ba187) | Project-owned original work — no third-party license, no attribution required | US$0 | scene skybox (procedural sky, turquoise tint) |
+| fb399e7f93ded434592bc4ab71346d74 | Assets/FamilyRacing/Art/VisualBenchmark/Vehicles/rally-car-01.prefab | Original — procedurally authored by RacerVisualAuthoring.cs (sha256:2a042c3f8cca632e) | Project-owned original work — no third-party license, no attribution required | US$0 | rally-car vehicle visual prefab (chassis + mounts + wheels) |
+| 6e95907f019e5054dac543837a89f4d6 | Assets/FamilyRacing/Art/VisualBenchmark/Vehicles/moto-01.prefab | Original — procedurally authored by RacerVisualAuthoring.cs (sha256:d023f4fc48e3576a) | Project-owned original work — no third-party license, no attribution required | US$0 | dirt-motorcycle vehicle visual prefab (frame + mounts + wheels) |
+| 9ea35238d1f48ab42b3bfbffd7ec2943 | Assets/FamilyRacing/Art/VisualBenchmark/Vehicles/vehicle-visual-car-01.asset | Original — procedurally authored by RacerVisualAuthoring.cs (sha256:6d691552cb77527d) | Project-owned original work — no third-party license, no attribution required | US$0 | car vehicle visual definition (prefab + mount/mountable names) |
+| 7a0c81b7db2aa5d4ca98b9aafb108a61 | Assets/FamilyRacing/Art/VisualBenchmark/Vehicles/vehicle-visual-moto-01.asset | Original — procedurally authored by RacerVisualAuthoring.cs (sha256:b41c5fa8245c238e) | Project-owned original work — no third-party license, no attribution required | US$0 | motorcycle vehicle visual definition (prefab + mount names) |
+| 9f2371cfe56aa5346aea25d607a2cb52 | Assets/FamilyRacing/Art/VisualBenchmark/Vehicles/Mat_CarBody.mat | Original — procedurally authored by RacerVisualAuthoring.cs (sha256:d91c5029e0374ee3) | Project-owned original work — no third-party license, no attribution required | US$0 | rally car body material |
+| 50e9d912b38e6e44aba9ee3132e508de | Assets/FamilyRacing/Art/VisualBenchmark/Vehicles/Mat_CarCream.mat | Original — procedurally authored by RacerVisualAuthoring.cs (sha256:ccf3dd322712b96a) | Project-owned original work — no third-party license, no attribution required | US$0 | rally car secondary material |
+| 32adfa3e42cebc640809bb9f026df800 | Assets/FamilyRacing/Art/VisualBenchmark/Vehicles/Mat_CarDark.mat | Original — procedurally authored by RacerVisualAuthoring.cs (sha256:248c47fff0ac13a4) | Project-owned original work — no third-party license, no attribution required | US$0 | rally car dark trim/tires material |
+| 2626790a73663484f8dbc813ad944749 | Assets/FamilyRacing/Art/VisualBenchmark/Vehicles/Mat_CarGlass.mat | Original — procedurally authored by RacerVisualAuthoring.cs (sha256:04ea9d729b111411) | Project-owned original work — no third-party license, no attribution required | US$0 | rally car glass material |
+| 8c8fc40b465795f49980fc96a5e1f9a6 | Assets/FamilyRacing/Art/VisualBenchmark/Vehicles/Mat_MotoBody.mat | Original — procedurally authored by RacerVisualAuthoring.cs (sha256:160fa8de158292d3) | Project-owned original work — no third-party license, no attribution required | US$0 | motorcycle body material |
+| fe1c347a36dbf144abf5678f2fe53cea | Assets/FamilyRacing/Art/VisualBenchmark/Vehicles/Mat_MotoDark.mat | Original — procedurally authored by RacerVisualAuthoring.cs (sha256:0181e12aa90a0d3f) | Project-owned original work — no third-party license, no attribution required | US$0 | motorcycle dark trim/tires material |
+| c9123051332424b459e188eb4aa7363f | Assets/FamilyRacing/Art/VisualBenchmark/Vehicles/Mat_MotoMetal.mat | Original — procedurally authored by RacerVisualAuthoring.cs (sha256:0bfae1ed3758a263) | Project-owned original work — no third-party license, no attribution required | US$0 | motorcycle fork/exhaust metal material |
+| db18d3f3c4743d5469ef29103bd1df19 | Assets/FamilyRacing/Art/VisualBenchmark/Vehicles/Mat_VehicleAccent.mat | Original — procedurally authored by RacerVisualAuthoring.cs (sha256:b6cbe5ad97f2f2dd) | Project-owned original work — no third-party license, no attribution required | US$0 | shared per-racer accent tint material (property-block override) |
+| 1e6a3d931d463a34e8821215a46dd84c | Assets/FamilyRacing/Art/VisualBenchmark/Characters/racer-fox.prefab | Original — procedurally authored by RacerVisualAuthoring.cs (sha256:2ce215b267f9dd04) | Project-owned original work — no third-party license, no attribution required | US$0 | fox racer prefab (shared skeleton rig) |
+| cf568f7084c35fe438dfdb941a8c7049 | Assets/FamilyRacing/Art/VisualBenchmark/Characters/racer-rabbit.prefab | Original — procedurally authored by RacerVisualAuthoring.cs (sha256:ceca9cd67e44069d) | Project-owned original work — no third-party license, no attribution required | US$0 | rabbit racer prefab (shared skeleton rig) |
+| 43baa7c128b01e948886e9d7b7ad4be4 | Assets/FamilyRacing/Art/VisualBenchmark/Characters/racer-panda.prefab | Original — procedurally authored by RacerVisualAuthoring.cs (sha256:d5f360d322fff5e9) | Project-owned original work — no third-party license, no attribution required | US$0 | panda racer prefab (shared skeleton rig) |
+| 2c0035d919ae4804986a44ff6ca64939 | Assets/FamilyRacing/Art/VisualBenchmark/Characters/racer-raccoon.prefab | Original — procedurally authored by RacerVisualAuthoring.cs (sha256:e0676fa88f25abad) | Project-owned original work — no third-party license, no attribution required | US$0 | raccoon racer prefab (shared skeleton rig) |
+| 5ed328c566290b04b9fead330e2f1306 | Assets/FamilyRacing/Art/VisualBenchmark/Characters/character-fox.asset | Original — procedurally authored by RacerVisualAuthoring.cs (sha256:1e155e57ce42effd) | Project-owned original work — no third-party license, no attribution required | US$0 | fox character definition (prefab ref + species identity) |
+| e5a5c8d32ae0af34d8d6bde1c14c9f91 | Assets/FamilyRacing/Art/VisualBenchmark/Characters/character-rabbit.asset | Original — procedurally authored by RacerVisualAuthoring.cs (sha256:438b227b3e15a97c) | Project-owned original work — no third-party license, no attribution required | US$0 | rabbit character definition (prefab ref + species identity) |
+| 199030d36162a1b4db6f3d2f1bae6e5d | Assets/FamilyRacing/Art/VisualBenchmark/Characters/character-panda.asset | Original — procedurally authored by RacerVisualAuthoring.cs (sha256:215a950db698cb8c) | Project-owned original work — no third-party license, no attribution required | US$0 | panda character definition (prefab ref + species identity) |
+| 9b31cbcbaa4c9544ca1de4c793f8c069 | Assets/FamilyRacing/Art/VisualBenchmark/Characters/character-raccoon.asset | Original — procedurally authored by RacerVisualAuthoring.cs (sha256:4c8ab15272051159) | Project-owned original work — no third-party license, no attribution required | US$0 | raccoon character definition (prefab ref + species identity) |
+| 84d49c6e1b8fec540a2269d5de30fe1f | Assets/FamilyRacing/Art/VisualBenchmark/Characters/Mat_Fox.mat | Original — procedurally authored by RacerVisualAuthoring.cs (sha256:be1eee5e03c6fee3) | Project-owned original work — no third-party license, no attribution required | US$0 | fox fur material |
+| 1cf33abf899544a4c8ed40288bd61d77 | Assets/FamilyRacing/Art/VisualBenchmark/Characters/Mat_FoxCream.mat | Original — procedurally authored by RacerVisualAuthoring.cs (sha256:1aab7e35826c068c) | Project-owned original work — no third-party license, no attribution required | US$0 | fox belly/muzzle material |
+| 2a1501c1f42fb1a4aba4176b4bbce4c1 | Assets/FamilyRacing/Art/VisualBenchmark/Characters/Mat_Rabbit.mat | Original — procedurally authored by RacerVisualAuthoring.cs (sha256:72c0cb8a243a8aed) | Project-owned original work — no third-party license, no attribution required | US$0 | rabbit fur material |
+| 45644f18deddfc448a7b49ee369f318a | Assets/FamilyRacing/Art/VisualBenchmark/Characters/Mat_RabbitInner.mat | Original — procedurally authored by RacerVisualAuthoring.cs (sha256:2be0dfd251003c46) | Project-owned original work — no third-party license, no attribution required | US$0 | rabbit inner-ear material |
+| 26a9acba021944047913c3824c61e612 | Assets/FamilyRacing/Art/VisualBenchmark/Characters/Mat_Panda.mat | Original — procedurally authored by RacerVisualAuthoring.cs (sha256:66ccd42202412549) | Project-owned original work — no third-party license, no attribution required | US$0 | panda white fur material |
+| 3ab29fe6844e45f488fb6b7f1a04cf37 | Assets/FamilyRacing/Art/VisualBenchmark/Characters/Mat_PandaDark.mat | Original — procedurally authored by RacerVisualAuthoring.cs (sha256:7ef64bdaa821a938) | Project-owned original work — no third-party license, no attribution required | US$0 | panda dark patches material |
+| 12fbfdafbf715ba4789b6540fb7ccbe2 | Assets/FamilyRacing/Art/VisualBenchmark/Characters/Mat_Raccoon.mat | Original — procedurally authored by RacerVisualAuthoring.cs (sha256:18e427e0d8c3bf82) | Project-owned original work — no third-party license, no attribution required | US$0 | raccoon fur material |
+| 09dc1892339c2eb448bdeee03b3b041f | Assets/FamilyRacing/Art/VisualBenchmark/Characters/Mat_RaccoonDark.mat | Original — procedurally authored by RacerVisualAuthoring.cs (sha256:048b74f2e452c461) | Project-owned original work — no third-party license, no attribution required | US$0 | raccoon mask/stripes material |
+| 099d15ceaf300e5408ec7fce47f98bd2 | Assets/FamilyRacing/Art/VisualBenchmark/Characters/Mat_CharAccent.mat | Original — procedurally authored by RacerVisualAuthoring.cs (sha256:fd078039b79e9559) | Project-owned original work — no third-party license, no attribution required | US$0 | shared per-racer scarf accent material (property-block override) |
+| 2dee69fdbbc2c8f42afe58c91234e1d1 | Assets/FamilyRacing/Art/VisualBenchmark/Characters/Mat_EyeDark.mat | Original — procedurally authored by RacerVisualAuthoring.cs (sha256:ada2579d2dcab48f) | Project-owned original work — no third-party license, no attribution required | US$0 | shared eye material |
 <!-- INVENTORY-TABLE-END -->
 
 ## Authored-in-editor originals
 
 All `Assets/FamilyRacing/Art/VisualBenchmark/` content is generated by
-`Assets/FamilyRacing/Editor/SunnyIslandCourseAuthoring.cs` from Unity
-primitives — original work owned by this project, no third-party
-licenses, no attribution obligations. Their GUIDs and SHA-256 hashes
+`Assets/FamilyRacing/Editor/SunnyIslandCourseAuthoring.cs` (environment)
+and `Assets/FamilyRacing/Editor/RacerVisualAuthoring.cs` (vehicles +
+characters) from Unity primitives — original work owned by this
+project, no third-party licenses, no attribution obligations. Their GUIDs and SHA-256 hashes
 are recorded in the table above after each authored regeneration (the
 hash records the exact serialized asset reviewed; `.meta` files are
 committed with the assets).
@@ -77,9 +109,6 @@ cap, not authorization.
 
 ## Open needs
 
-- Vehicle and animal racer visuals (Task 4) — planned as original
-  in-editor work; record candidates here if licensed sources are
-  preferred.
 - Tutorial voice clips (existing open gate from earlier milestones) —
   requires licensed synthetic voices per `GAME_PLAN.md` §3; unchanged
   by this task.

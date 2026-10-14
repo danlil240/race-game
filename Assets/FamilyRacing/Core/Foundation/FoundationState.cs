@@ -107,6 +107,14 @@ namespace FamilyRacing.Core.Foundation
         // False on a headless run: frame intervals then describe unrendered
         // frames and can never pass as rendered-player evidence.
         public bool renderingAvailable = true;
+        // Per-racer visual identity actually on screen (M4 Task 4): one
+        // entry per presented vehicle — the solo racer or every LAN
+        // racer view — carrying the resolved vehicle/character/color
+        // identity (authored ids or honest "primitive-fallback"/"none"
+        // tokens) and the pose source driving it. Bounded by the shared
+        // four-racer capacity plus the solo slot.
+        public List<RacerPresentationState> racers =
+            new List<RacerPresentationState>();
         // Bounded render-performance summary (counts/percentiles/health —
         // never per-frame buffers). Null only when capture is disabled.
         public RenderPerformanceSummary performance;
@@ -116,7 +124,38 @@ namespace FamilyRacing.Core.Foundation
             var copy = (PresentationState)MemberwiseClone();
             copy.camera = camera != null ? camera.Copy() : null;
             copy.performance = performance != null ? performance.Copy() : null;
+            if (racers != null && racers.Count > 0)
+            {
+                copy.racers = new List<RacerPresentationState>(racers.Count);
+                foreach (var racer in racers)
+                    copy.racers.Add(racer != null ? racer.Copy() : null);
+            }
             return copy;
+        }
+    }
+
+    // One presented racer's visual identity (M4 Task 4). vehicleVisualId
+    // is the authored VehicleVisualDefinitionAsset visualId actually
+    // bound, or the fallback token when primitives render; characterId
+    // is the resolved animal, the generic "fallback" rider, or "none"
+    // when the primitive silhouette shows no animal. poseSource names
+    // which state source drives the pose: "authoritative" (solo/host
+    // commits), "predicted" (client-local prediction) or "interpolated"
+    // (remote snapshot interpolation).
+    [Serializable]
+    public sealed class RacerPresentationState
+    {
+        public string participantId = "";
+        public int slot;
+        public string vehicleId = "";
+        public string vehicleVisualId = "";
+        public string characterId = "";
+        public int colorIndex;
+        public string poseSource = "";
+
+        public RacerPresentationState Copy()
+        {
+            return (RacerPresentationState)MemberwiseClone();
         }
     }
 

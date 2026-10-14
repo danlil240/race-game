@@ -33,6 +33,22 @@ namespace FamilyRacing
         private float leanRoll;
         private string shownKey = "";
 
+        // Task-4 authored visual channel: when the bound vehicle
+        // definition carries a VehicleVisualDefinitionAsset, a
+        // RacerVisualRig instantiates the authored vehicle + seated
+        // character under the same lean pivot and owns the mounts. The
+        // primitive path stays intact as the fallback whenever the
+        // authored visual is missing or cannot serve the silhouette.
+        private RacerVisualRig rig;
+        private VehicleVisualDefinitionAsset boundVisual;
+        private CharacterDefinitionAsset pendingCharacter;
+        private int pendingColorIndex = -1;
+        // Physical wheel channel in rig mode: the rig's wheel pivots get
+        // body-space mount positions minus the prefab's ground-plane
+        // anchor offset; the "Spin" children get the axle/roll rotation.
+        private Transform[] wheelSpinNodes;
+        private Vector3 wheelSpaceOrigin;
+
         // Physical wheel rig: one authored mount/steer spec per visible
         // wheel transform, in the tuning's wheel order.
         private struct PhysWheelVisual
@@ -60,12 +76,53 @@ namespace FamilyRacing
         {
             if (asset == null) return;
             EnsureBuilt();
-            var key = asset.silhouette + "|" + asset.vehicleId;
+            var key = asset.silhouette + "|" + asset.vehicleId + "|"
+                + (asset.visual != null ? asset.visual.visualId : "-");
             if (bodyMaterial != null) bodyMaterial.color = asset.bodyColor;
             leanMaxDegrees = asset.leanDegrees;
             if (key == shownKey) return;
             shownKey = key;
             Rebuild(asset);
+        }
+
+        // The racer's resolved cosmetics: a CharacterDefinitionAsset (or
+        // null for the honest fallback rider) plus the profile color
+        // slot. Stored ahead of SetVehicle so a rebuild binds it; calling
+        // it again on a bound rig re-binds in place — rejoins and roster
+        // churn never stack rigs or parts.
+        public void SetRacer(CharacterDefinitionAsset character,
+            int colorIndex)
+        {
+            if (character == pendingCharacter
+                && colorIndex == pendingColorIndex) return;
+            pendingCharacter = character;
+            pendingColorIndex = colorIndex;
+            if (rig != null && boundVisual != null)
+            {
+                rig.Bind(boundVisual, pendingCharacter, pendingColorIndex);
+                BoundCharacterId = rig.BoundCharacterId;
+                BoundColorIndex = rig.BoundColorIndex;
+            }
+            else if (rig == null)
+            {
+                // Primitive silhouette: cosmetics are recorded for the
+                // presentation facts even though nothing authored shows.
+                BoundColorIndex = colorIndex;
+            }
+        }
+
+        // The visual identities actually on screen — authored ids or the
+        // honest fallback tokens. Published per racer through
+        // PresentationState.racers so a missing asset is observable.
+        public string BoundVisualId { get; private set; }
+        public string BoundCharacterId { get; private set; }
+        public int BoundColorIndex { get; private set; } = -1;
+        public RacerVisualRig Rig { get { return rig; } }
+
+        // Finish-line celebration: arms up + a short bounce, cosmetic only.
+        public void NotifyFinished()
+        {
+            if (rig != null) rig.NotifyFinished();
         }
 
         // Committed motor pose → root transform; steering hold → cosmetic
@@ -88,7 +145,7 @@ namespace FamilyRacing
             if (leanPivot == null || motor == null) return;
             if (motor.physics != null)
             {
-                ApplyPhysicalPose(motor, alpha);
+                ApplyPhysicalPose(motor, steering, alpha);
                 return;
             }
             var pos = new Vector3(motor.x, motor.y, motor.z);
@@ -119,6 +176,7 @@ namespace FamilyRacing
             leanRoll = Mathf.Lerp(leanRoll, target,
                 1f - Mathf.Exp(-LeanSmoothing * Time.deltaTime));
             leanPivot.localRotation = Quaternion.Euler(0f, 0f, leanRoll);
+            if (rig != null) rig.ApplyPose(motor, steering, alpha);
         }
 
         // Committed poses the visual interpolates between, plus the last
@@ -147,7 +205,8 @@ namespace FamilyRacing
         // never re-upright it), position/attitude/wheel state interpolate
         // between the last two committed boundaries, and a recovery
         // epoch bump or teleport-scale jump snaps to the new commit.
-        private void ApplyPhysicalPose(MotorState motor, float alpha)
+        private void ApplyPhysicalPose(MotorState motor, float steering,
+            float alpha)
         {
             var phys = motor.physics;
             var pos = new Vector3(motor.x, motor.y, motor.z);
@@ -193,6 +252,10 @@ namespace FamilyRacing
             leanRoll = 0f;
             leanPivot.localRotation = Quaternion.identity;
             ApplyPhysicalWheels(physPrevWheels, physCurWheels, a);
+            // The rig's rider reactions (squash, head, celebration) run
+            // here too — the rider adds no roll of its own: the physical
+            // chassis attitude already IS the lean.
+            if (rig != null) rig.ApplyPose(motor, steering, alpha);
         }
 
         private static WheelSample[] SnapshotWheels(WheelPhysicsState[] wheels)
@@ -235,15 +298,37 @@ namespace FamilyRacing
                 var steer = spec.steerable
                     ? Mathf.Lerp(p.steer, c.steer, a) : 0f;
                 var spin = Mathf.Lerp(p.spin, c.spin, a);
-                part.localPosition = new Vector3(spec.mount.x,
-                    spec.mount.y - spring, spec.mount.z);
-                // Steer yaw wraps the axle tilt and roll spin: road-wheel
-                // direction first, then the cylinder's axle laid onto the
-                // lateral axis, then the travel-derived roll about it.
-                part.localRotation = Quaternion.Euler(0f,
-                        steer * Mathf.Rad2Deg, 0f)
-                    * Quaternion.Euler(0f, 0f, 90f)
-                    * Quaternion.Euler(0f, spin * Mathf.Rad2Deg, 0f);
+                // Mounts are body-space; the rig's wheel pivots live one
+                // ground-plane anchor below the body origin, so the same
+                // spec minus that offset lands the authored tires exactly
+                // where the primitive channel put them.
+                part.localPosition = new Vector3(
+                    spec.mount.x - wheelSpaceOrigin.x,
+                    spec.mount.y - spring - wheelSpaceOrigin.y,
+                    spec.mount.z - wheelSpaceOrigin.z);
+                var spinNode = wheelSpinNodes != null
+                    && i < wheelSpinNodes.Length
+                    ? wheelSpinNodes[i] : null;
+                if (spinNode != null)
+                {
+                    // Rig convention: pivot carries the road-wheel steer
+                    // (and the suspension travel above), the Spin child
+                    // carries the laid-axle roll — same math, split so
+                    // forks/fenders can steer with the pivot.
+                    part.localRotation = Quaternion.Euler(0f,
+                        steer * Mathf.Rad2Deg, 0f);
+                    spinNode.localRotation = Quaternion.Euler(0f, 0f, 90f)
+                        * Quaternion.Euler(0f, spin * Mathf.Rad2Deg, 0f);
+                }
+                else
+                {
+                    // Primitive convention: one node carries steer yaw
+                    // wrapping the axle tilt and roll spin.
+                    part.localRotation = Quaternion.Euler(0f,
+                            steer * Mathf.Rad2Deg, 0f)
+                        * Quaternion.Euler(0f, 0f, 90f)
+                        * Quaternion.Euler(0f, spin * Mathf.Rad2Deg, 0f);
+                }
             }
         }
 
@@ -262,6 +347,15 @@ namespace FamilyRacing
             darkMaterial = new Material(shader) { color = new Color(0.16f, 0.17f, 0.19f) };
         }
 
+        private void EnsureRig()
+        {
+            if (rig == null)
+            {
+                rig = gameObject.AddComponent<RacerVisualRig>();
+                rig.SetContentRoot(leanPivot);
+            }
+        }
+
         private void Rebuild(VehicleDefinitionAsset asset)
         {
             // DestroyImmediate: a deferred Destroy would leave the old
@@ -272,9 +366,61 @@ namespace FamilyRacing
             parts.Clear();
             physWheels = null;
             wheelVisuals = new Transform[0];
-            if (asset.physicsTuning != null
+            wheelSpinNodes = null;
+            wheelSpaceOrigin = Vector3.zero;
+
+            var physical = asset.physicsTuning != null
                 && asset.simulationBackend
-                    == VehicleSimulationBackend.PhysicalAssisted)
+                    == VehicleSimulationBackend.PhysicalAssisted;
+            var visual = asset.visual;
+            var authoredReady = visual != null && visual.prefab != null
+                && string.Equals(visual.vehicleClass, asset.silhouette,
+                    System.StringComparison.OrdinalIgnoreCase);
+            if (authoredReady)
+            {
+                // Authored path: the rig instantiates the vehicle prefab
+                // under the same lean pivot the primitives used, so the
+                // arcade cosmetic lean and the physical root attitude
+                // carry authored visuals identically.
+                EnsureRig();
+                rig.SetBodyOriginHeight(
+                    physical ? visual.bodyOriginHeight : 0f);
+                rig.Bind(visual, pendingCharacter, pendingColorIndex);
+                wheelSpaceOrigin = rig.VehicleRoot != null
+                    ? rig.VehicleRoot.localPosition : Vector3.zero;
+                BoundVisualId = visual.visualId;
+                BoundCharacterId = rig.BoundCharacterId;
+                BoundColorIndex = rig.BoundColorIndex;
+                if (physical)
+                {
+                    BindPhysicalWheelSpecs(asset);
+                    wheelVisuals = rig.WheelPivots;
+                    wheelSpinNodes = rig.WheelSpins;
+                }
+                return;
+            }
+
+            // Honest fallback: a bound visual that cannot serve this
+            // silhouette is reported, and a vehicle without an authored
+            // visual logs once per bind — never silent stale visuals.
+            if (visual != null)
+                Debug.LogWarning("VehiclePresentation: visual '"
+                    + visual.visualId + "' cannot serve vehicle '"
+                    + asset.vehicleId + "' (prefab missing or class '"
+                    + visual.vehicleClass + "' != silhouette '"
+                    + asset.silhouette
+                    + "') — falling back to the primitive silhouette.");
+            else if (asset.silhouette == "car"
+                || asset.silhouette == "motorcycle")
+                Debug.Log("VehiclePresentation: vehicle '"
+                    + asset.vehicleId + "' has no authored visual — "
+                    + "primitive fallback silhouette.");
+            if (rig != null) rig.Clear();
+            BoundVisualId = RacerVisualRig.PrimitiveFallbackVisualId;
+            BoundCharacterId = RacerVisualRig.NoCharacterId;
+            BoundColorIndex = pendingColorIndex;
+
+            if (physical)
             {
                 BuildPhysical(asset);
             }
@@ -341,14 +487,34 @@ namespace FamilyRacing
         // render transform IS the rigid-body frame — the physics body
         // origin anchors at (0,0,0) of this hierarchy, not at ground
         // level the way the arcade silhouette assumes.
-        private void BuildPhysical(VehicleDefinitionAsset asset)
+        // The suspension/steer spec table shared by the primitive and
+        // authored wheel channels: one entry per tuning wheel, in order.
+        private void BindPhysicalWheelSpecs(VehicleDefinitionAsset asset)
         {
             var tuning = asset.physicsTuning;
-            var chassis = tuning.chassisSize;
             physRestLength = tuning.suspensionRestLength;
             physExtraDroop = tuning.suspensionExtraDroop;
             var specs = tuning.wheels != null ? tuning.wheels.Length : 0;
             physWheels = new PhysWheelVisual[specs];
+            for (var i = 0; i < specs; i++)
+            {
+                var spec = tuning.wheels[i];
+                if (spec == null) continue;
+                physWheels[i] = new PhysWheelVisual
+                {
+                    mount = spec.mount,
+                    radius = spec.radius,
+                    steerable = spec.steerable
+                };
+            }
+        }
+
+        private void BuildPhysical(VehicleDefinitionAsset asset)
+        {
+            var tuning = asset.physicsTuning;
+            var chassis = tuning.chassisSize;
+            BindPhysicalWheelSpecs(asset);
+            var specs = physWheels.Length;
             wheelVisuals = new Transform[specs];
 
             Part(PrimitiveType.Cube, "Body", bodyMaterial,
@@ -378,12 +544,6 @@ namespace FamilyRacing
             {
                 var spec = tuning.wheels[i];
                 if (spec == null) continue;
-                physWheels[i] = new PhysWheelVisual
-                {
-                    mount = spec.mount,
-                    radius = spec.radius,
-                    steerable = spec.steerable
-                };
                 var wheel = Part(PrimitiveType.Cylinder,
                     names != null ? names[i] : "Wheel" + i, darkMaterial,
                     spec.mount, new Vector3(spec.radius * 2f,
