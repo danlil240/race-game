@@ -19,9 +19,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from VisualBenchmarkScenario import (PERF_COMBO_FLOOR_SECONDS,
                                      PERF_RACING_FLOOR_SECONDS,
-                                     PERF_WARMUP_MS, PerfAccumulator,
+                                     PERF_WARMUP_MS, GenerationSamplers,
+                                     PerfAccumulator,
                                      build_parser, check_build_manifest,
-                                     check_labels, check_perf_evidence,
+                                     check_labels,
+                                     check_memory_generations,
+                                     check_perf_evidence,
                                      check_rendered_samples, check_shots,
                                      check_streams, evaluate_verdict,
                                      transport_label,
@@ -98,6 +101,20 @@ def _good_parts():
                 "host": _good_endpoint_perf(),
                 "client-0": _good_endpoint_perf(),
             },
+            # Per-process-generation memory accounting: the live
+            # generations each hold valid samples; the dead generation
+            # honestly ends all-unavailable.
+            "memoryGenerations": [
+                {"role": "host", "generation": 1, "pid": 111,
+                 "alive": True, "okSamples": 4,
+                 "unavailableSamples": 1},
+                {"role": "client-0", "generation": 1, "pid": 222,
+                 "alive": False, "okSamples": 3,
+                 "unavailableSamples": 2},
+                {"role": "client-0", "generation": 2, "pid": 333,
+                 "alive": True, "okSamples": 5,
+                 "unavailableSamples": 0},
+            ],
         },
         "shots": [
             {"peer": "host", "captureId": "vb-host-start",
@@ -431,6 +448,150 @@ class PerfReportFileTests(unittest.TestCase):
         self.assertEqual(entry["status"], "invalid")
         self.assertIn("sampleLimitExceeded", entry["reason"])
         self.assertEqual(entry["captureValid"], False)
+
+
+class _FakeSampler:
+    """Scripted MemorySampler stand-in: writes one memory.ndjson line
+    per scripted status so GenerationSamplers.account() reads real
+    per-generation evidence files."""
+
+    def __init__(self, evidence_dir, statuses, pid=None, interval=1.0):
+        self.path = Path(evidence_dir) / "memory.ndjson"
+        self.statuses = list(statuses)
+        self.pid = pid
+        self.interval = interval
+        self.started = False
+
+    def start(self):
+        self.started = True
+        with self.path.open("x", encoding="utf-8") as sink:
+            for sequence, status in enumerate(self.statuses, 1):
+                sink.write(json.dumps(
+                    {"type": "memory", "sequence": sequence,
+                     "status": status, "units": "bytes"}) + "\n")
+        return self
+
+    def stop(self, timeout=5.0):
+        pass
+
+
+class GenerationSamplersTests(unittest.TestCase):
+    """Every process generation is its own measurement target: its own
+    pid, process-start identity, evidence interval and sampler. A
+    relaunch must create a new sampler through start(); a recycled pid
+    is rejected; a dead generation's file honestly reads all
+    unavailable; and a live generation with zero valid samples fails
+    the verdict."""
+
+    def test_each_generation_gets_own_sampler_and_interval(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            made = []
+
+            def factory(evidence_dir, pid=None, interval=1.0):
+                sampler = _FakeSampler(evidence_dir, ["ok"],
+                                       pid=pid, interval=interval)
+                made.append(sampler)
+                return sampler
+
+            samplers = GenerationSamplers(
+                sampler_factory=factory, stamp_of=lambda pid: pid * 10)
+            first = samplers.start("client-0", 1, 111, root / "g1")
+            second = samplers.start("client-0", 2, 222, root / "g2")
+
+            self.assertEqual(len(made), 2)
+            self.assertNotEqual(first["memory"], second["memory"])
+            self.assertEqual(first["processStartStamp"], 1110)
+            self.assertEqual(second["processStartStamp"], 2220)
+            self.assertEqual(first["pid"], 111)
+            self.assertEqual(second["pid"], 222)
+            self.assertTrue(all(made_i.started for made_i in made))
+
+    def test_pid_reuse_across_generations_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            samplers = GenerationSamplers(
+                sampler_factory=lambda d, pid=None, interval=1.0:
+                    _FakeSampler(d, ["ok"], pid=pid),
+                stamp_of=lambda pid: pid)
+            samplers.start("client-0", 1, 111, root / "g1")
+            with self.assertRaises(AssertionError):
+                # Same pid number, different start stamp: recycled.
+                samplers.start("client-0", 2, 111, root / "g2")
+            # The start stamp does not rescue it: the same pid on a new
+            # generation means the old process never died, which is
+            # itself a fault-injection defect.
+            samplers2 = GenerationSamplers(
+                sampler_factory=lambda d, pid=None, interval=1.0:
+                    _FakeSampler(d, ["ok"], pid=pid),
+                stamp_of=lambda pid: pid)
+            samplers2.start("client-0", 1, 111, root / "g3")
+            with self.assertRaises(AssertionError):
+                samplers2.start("client-0", 2, 111, root / "g4")
+
+    def test_dead_generation_unavailable_live_generation_samples(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            statuses = [["unavailable", "unavailable"], ["ok", "ok"]]
+            made = []
+
+            def factory(evidence_dir, pid=None, interval=1.0):
+                sampler = _FakeSampler(
+                    evidence_dir, statuses[len(made)],
+                    pid=pid, interval=interval)
+                made.append(sampler)
+                return sampler
+
+            samplers = GenerationSamplers(
+                sampler_factory=factory, stamp_of=lambda pid: pid * 10)
+            samplers.start("client-0", 1, 111, root / "g1")
+            samplers.end_generation("client-0", 1)
+            samplers.start("client-0", 2, 222, root / "g2")
+            samplers.stop_all()
+
+            account = samplers.account()
+            self.assertEqual(len(account), 2)
+            dead = account[0]
+            live = account[1]
+            self.assertFalse(dead["alive"])
+            self.assertEqual(dead["okSamples"], 0)
+            self.assertEqual(dead["unavailableSamples"], 2)
+            self.assertTrue(live["alive"])
+            self.assertEqual(live["okSamples"], 2)
+            self.assertEqual(check_memory_generations(account), [])
+
+    def test_zero_valid_samples_on_live_generation_cannot_pass(self):
+        account = [
+            {"role": "host", "generation": 1, "pid": 1,
+             "alive": True, "okSamples": 3, "unavailableSamples": 0},
+            {"role": "client-0", "generation": 1, "pid": 2,
+             "alive": False, "okSamples": 0, "unavailableSamples": 4},
+            {"role": "client-0", "generation": 2, "pid": 3,
+             "alive": True, "okSamples": 0, "unavailableSamples": 3},
+        ]
+        failures = check_memory_generations(account)
+        self.assertTrue(any("no valid memory samples" in failure
+                            for failure in failures), failures)
+        parts = _good_parts()
+        parts["perf"]["memoryGenerations"] = account
+        self.assertTrue(evaluate_verdict(parts))
+
+    def test_verdict_accepts_all_unavailable_dead_generation(self):
+        parts = _good_parts()
+        parts["perf"]["memoryGenerations"][1]["okSamples"] = 0
+        parts["perf"]["memoryGenerations"][1]["unavailableSamples"] = 5
+        self.assertEqual(evaluate_verdict(parts), [])
+
+    def test_generation_with_no_records_at_all_fails(self):
+        account = [
+            {"role": "host", "generation": 1, "pid": 1,
+             "alive": True, "okSamples": 2, "unavailableSamples": 0},
+            {"role": "client-0", "generation": 1, "pid": 2,
+             "alive": True, "okSamples": 0, "unavailableSamples": 0},
+        ]
+        failures = check_memory_generations(account)
+        self.assertTrue(any("no samples at all" in failure
+                            for failure in failures), failures)
 
 
 class CliContractTests(unittest.TestCase):
