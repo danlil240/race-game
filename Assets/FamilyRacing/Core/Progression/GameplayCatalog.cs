@@ -112,6 +112,7 @@ namespace FamilyRacing.Core.Progression
                 { error = "campaign.course " + courseId; return false; }
 
             var gadgetEventCount = 0;
+            var regularClasses = new HashSet<string>(StringComparer.Ordinal);
             foreach (var eventId in campaign.regularEventIds)
             {
                 EventDefinition evt;
@@ -123,6 +124,12 @@ namespace FamilyRacing.Core.Progression
                 // the driving catalog checked at build time.
                 if (!evt.Validate(out error))
                 { error = "campaign.event " + eventId + " " + error; return false; }
+                // A regular event must be typed: an untyped (legacy) event
+                // carries no objectives, so its three star bits could never
+                // be earned.
+                if (evt.eventType == "")
+                { error = "campaign.event " + eventId + " untyped"; return false; }
+                regularClasses.Add(evt.vehicleClass);
                 if (!campaign.courseIds.Contains(evt.courseId))
                 { error = "campaign.event " + eventId + " course"; return false; }
                 if (evt.eventType == GameplayEventType.Gadget) gadgetEventCount++;
@@ -153,6 +160,11 @@ namespace FamilyRacing.Core.Progression
                 { error = "campaign.finale " + finale.eventId + " rewardVehicle"; return false; }
                 finaleClasses.Add(finale.classId);
             }
+            // One rival finale per class: every class that has regular
+            // events must ship its finale.
+            foreach (var classId in regularClasses)
+                if (!finaleClasses.Contains(classId))
+                { error = "campaign.finale missing class " + classId; return false; }
             if (gadgetEventCount > 0
                 && (gadgets.gadgets == null || gadgets.gadgets.Count == 0))
             { error = "gadgets.empty"; return false; }

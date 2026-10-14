@@ -6,14 +6,18 @@ namespace FamilyRacing.Core.Progression
     // One upgrade category: `maxLevel` purchasable levels at `prices`
     // coins each. The level-N effect is additive: multiplier =
     // 1 + levelMultiplierStep * level (default step 0.05 -> max 1.15
-    // at level 3). Which tuning fields each category scales is resolver
-    // policy (Task 8), not data here.
+    // at level 3). `tuningFields` is the authored list of VehicleTuning
+    // fields the multiplier scales — the Task-8 resolver consumes it
+    // rather than hardcoding a mapping.
     public sealed class UpgradeCategoryDefinition
     {
         public string id = "";
         public int maxLevel = 3;
         public List<int> prices = new List<int>();
         public float levelMultiplierStep = 0.05f;
+        // e.g. acceleration -> ["acceleration"], handling ->
+        // ["steeringRate","grip"], boost -> ["boostAcceleration","boostMaxSpeed"]
+        public List<string> tuningFields = new List<string>();
 
         public bool Validate(out string error)
         {
@@ -21,6 +25,19 @@ namespace FamilyRacing.Core.Progression
             if (string.IsNullOrEmpty(id)) { error = "id"; return false; }
             if (maxLevel <= 0) { error = "maxLevel"; return false; }
             if (prices == null || prices.Count != maxLevel) { error = "prices"; return false; }
+            if (tuningFields == null || tuningFields.Count == 0)
+            { error = "tuningFields"; return false; }
+            if (tuningFields != null)
+            {
+                var seen = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var field in tuningFields)
+                {
+                    if (string.IsNullOrEmpty(field))
+                    { error = "tuningFields"; return false; }
+                    if (!seen.Add(field))
+                    { error = "tuningFields.duplicate"; return false; }
+                }
+            }
             if (prices != null)
                 for (var i = 0; i < prices.Count; i++)
                 {
@@ -46,9 +63,11 @@ namespace FamilyRacing.Core.Progression
                 id = id,
                 maxLevel = maxLevel,
                 levelMultiplierStep = levelMultiplierStep,
-                prices = new List<int>()
+                prices = new List<int>(),
+                tuningFields = new List<string>()
             };
             if (prices != null) copy.prices.AddRange(prices);
+            if (tuningFields != null) copy.tuningFields.AddRange(tuningFields);
             return copy;
         }
     }

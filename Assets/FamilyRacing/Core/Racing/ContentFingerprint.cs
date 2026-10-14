@@ -429,6 +429,7 @@ namespace FamilyRacing.Core.Racing
                     if (prices != null)
                         foreach (var price in prices) writer.Write(price);
                     F(writer, category.levelMultiplierStep);
+                    WriteStrings(writer, category.tuningFields);
                 }
         }
 

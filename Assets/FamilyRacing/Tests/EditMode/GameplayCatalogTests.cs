@@ -300,6 +300,19 @@ namespace FamilyRacing.Tests
                 cat.prices.Add(60);
                 cat.prices.Add(120);
                 cat.prices.Add(180);
+                // Spec mapping: which tuning fields this category scales.
+                if (category == "acceleration")
+                    cat.tuningFields.Add("acceleration");
+                else if (category == "handling")
+                {
+                    cat.tuningFields.Add("steeringRate");
+                    cat.tuningFields.Add("grip");
+                }
+                else
+                {
+                    cat.tuningFields.Add("boostAcceleration");
+                    cat.tuningFields.Add("boostMaxSpeed");
+                }
                 economy.upgradeCategories.Add(cat);
             }
             return economy;
@@ -433,11 +446,20 @@ namespace FamilyRacing.Tests
                 Is.EquivalentTo(new[] { "easy", "medium", "hard" }));
 
             Assert.That(catalog.Economy.upgradeCategories, Has.Count.EqualTo(3));
+            var expectedFields = new Dictionary<string, string[]>
+            {
+                ["acceleration"] = new[] { "acceleration" },
+                ["handling"] = new[] { "steeringRate", "grip" },
+                ["boost"] = new[] { "boostAcceleration", "boostMaxSpeed" }
+            };
             foreach (var category in catalog.Economy.upgradeCategories)
             {
                 Assert.That(category.maxLevel, Is.EqualTo(3), category.id);
                 Assert.That(category.prices,
                     Is.EqualTo(new[] { 60, 120, 180 }), category.id);
+                Assert.That(category.tuningFields,
+                    Is.EqualTo(expectedFields[category.id]),
+                    category.id + " tuning field mapping");
             }
 
             // Initial challenge IDs the profile seeds its three assignments
@@ -612,6 +634,8 @@ namespace FamilyRacing.Tests
                 "placement bonus");
             Changes(c => c.Economy.upgradeCategories[1].levelMultiplierStep = 0.06f,
                 "upgrade step");
+            Changes(c => c.Economy.upgradeCategories[2].tuningFields[1] = "boostDurationSeconds",
+                "upgrade tuning field");
 
             // Gadgets.
             Changes(c =>
@@ -637,6 +661,31 @@ namespace FamilyRacing.Tests
             Changes(c =>
                 c.Driving.Events["harbor-hop-car-circuit"].laps = 3,
                 "event laps");
+        }
+
+        [Test]
+        public void UntypedLegacyEventCannotBeARegularCampaignEvent()
+        {
+            // An untyped event carries no objectives — as a regular event it
+            // would inflate PossibleRegularStars with 3 unearnable stars.
+            var untyped = Driving();
+            var evt = untyped.Events["harbor-hop-car-circuit"];
+            evt.eventType = "";
+            evt.vehicleClass = "";
+            evt.objectives = null;
+            AssertRejected(driving: untyped,
+                because: "untyped (legacy) event in regularEventIds");
+        }
+
+        [Test]
+        public void EveryClassWithRegularEventsRequiresAFinale()
+        {
+            // The plan's world ships one rival finale per class; a class
+            // whose finale is missing must not validate.
+            var noMotoFinale = Campaign();
+            noMotoFinale.finales.RemoveAt(1);
+            AssertRejected(campaign: noMotoFinale,
+                because: "motorcycle class has regular events but no finale");
         }
 
         [Test]

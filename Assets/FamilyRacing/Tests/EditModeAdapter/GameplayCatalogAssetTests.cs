@@ -257,7 +257,8 @@ namespace FamilyRacing.Tests
                     new EconomyDefinitionAsset.CategoryRow
                     {
                         categoryId = "acceleration",
-                        prices = new[] { 60, 120, 180 }
+                        prices = new[] { 60, 120, 180 },
+                        tuningFields = new[] { "acceleration" }
                     }
                 };
                 gadgets.gadgets = new[]

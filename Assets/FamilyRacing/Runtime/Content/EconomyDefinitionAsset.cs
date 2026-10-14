@@ -19,6 +19,8 @@ namespace FamilyRacing
             public int maxLevel = 3;
             public int[] prices = { 60, 120, 180 };
             public float levelMultiplierStep = 0.05f;
+            // VehicleTuning fields this category's multiplier scales.
+            public string[] tuningFields = new string[0];
         }
 
         public int completionCoins = 20;
@@ -55,6 +57,8 @@ namespace FamilyRacing
                         levelMultiplierStep = row.levelMultiplierStep
                     };
                     if (row.prices != null) category.prices.AddRange(row.prices);
+                    if (row.tuningFields != null)
+                        category.tuningFields.AddRange(row.tuningFields);
                     economy.upgradeCategories.Add(category);
                 }
             if (!economy.Validate(out error))
