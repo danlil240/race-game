@@ -542,6 +542,17 @@ class LanDriver:
 
     def pump(self):
         """Re-evaluate observed state and issue at most one fresh hold."""
+        # input.set is fire-and-forget: nothing else watches whether the
+        # endpoint ever answered. A command older than the documented
+        # deadline with no result at all is stuck — surface it here
+        # instead of letting resends mask the loss.
+        overdue = self.peer.overdue_commands()
+        assert not overdue, (
+            "%d command(s) unanswered past the %.1fs command deadline "
+            "on this peer — a stuck command is a defect, not in-flight "
+            "work: %s" % (len(overdue),
+                          Client.COMMAND_RESULT_DEADLINE_SECONDS,
+                          sorted(overdue.items())[:3]))
         if not self.send_ok or self.suspended:
             return
         racer = self._racer()
@@ -888,9 +899,15 @@ def drive_race(host, clients, class_id, checks):
                   % class_id)
 
 
-def settle_results(peers, checks):
+def settle_results(peers, checks, departed=()):
     """Every surviving endpoint reaches results with the immutable
-    result, then deliveries reach their persisted terminal state."""
+    result, then deliveries reach their persisted terminal state.
+
+    `departed` names participantIds that explicitly left the session:
+    only their delivery rows may carry the terminal "undeliverable"
+    verdict. A transient disconnect reads "connected: false" exactly the
+    same way, so "not connected" can never be the legitimacy test —
+    the caller knows who left."""
     for name, peer in peers:
         # The session phase and the finished-race snapshot are separate
         # wire facts: a client can see "results" a boundary before the
@@ -914,17 +931,27 @@ def settle_results(peers, checks):
     for name, peer in peers:
         wait_state(peer, deliveries_settled, 60, name + " delivery settle")
         rows = peer.state["network"]["results"]
-        # A failed row is honest only when its code is a permanent
-        # ineligible verdict (e.g. ineligible:dnf — the delivered result
-        # was applied but the racer earned no reward by rule). Any other
-        # failure code is a retryable persistence fault the scenario
-        # must not wave through.
-        bad = [row for row in rows
-               if row["state"] == "failed"
-               and not (row.get("code") or "").startswith("ineligible:")]
+        # A failed row is honest only as a permanent verdict: an
+        # ineligible:* result-outcome verdict (the delivered result was
+        # applied but the racer earned no reward by rule), or
+        # undeliverable — the terminal verdict for a participant that
+        # explicitly left, which only the caller's `departed` set can
+        # legitimize. Any other failure code is a retryable persistence
+        # fault the scenario must not wave through.
+        bad = []
+        for row in rows:
+            if row["state"] != "failed":
+                continue
+            code = row.get("code") or ""
+            if code.startswith("ineligible:"):
+                continue
+            if code == "undeliverable" \
+                    and row.get("participantId") in departed:
+                continue
+            bad.append(row)
         assert not bad, \
-            name + " delivery failed for a recoverable reason: " \
-            + repr(bad)
+            name + " delivery failed for a recoverable or unattributed " \
+            "reason: " + repr(bad)
         for row in rows:
             if row["state"] != "failed":
                 continue
@@ -932,9 +959,13 @@ def settle_results(peers, checks):
             # the row belongs to the live race: an ineligible:dnf row
             # must belong to a racer the result itself records as dnf —
             # a code that contradicts the result is a ledger bug, not
-            # an honest outcome. Rows retained from earlier races no
-            # longer have their result in the live race slice, so only
-            # the ineligible-prefix requirement above covers them.
+            # an honest outcome. undeliverable is a departure verdict
+            # (checked against `departed` above), not a result outcome —
+            # and rows retained from earlier races no longer have their
+            # result in the live race slice, so only the permanent-code
+            # requirement above covers them.
+            if (row.get("code") or "") == "undeliverable":
+                continue
             race = peer.state["networkRace"] or {}
             if row.get("raceId") != race.get("raceId"):
                 continue
@@ -1154,7 +1185,10 @@ def run_lifecycle(host, clients, checks, join_address=None,
 
     survivors = [("host", host)] + [
         ("client-%d" % i, c) for i, c in enumerate(active)]
-    settle_results(survivors, checks)
+    # Attach mode departed via lan.leave; fault mode's killed process
+    # credentialed-rejoined, so nobody permanently departed.
+    departed = set() if fault is not None else {dropped_id}
+    settle_results(survivors, checks, departed=departed)
 
     # Duplicate result retrieval: the immutable result serves repeated
     # requests identically and the ledger never duplicates a row.
@@ -1177,7 +1211,7 @@ def run_lifecycle(host, clients, checks, join_address=None,
                    15, name + " rematch lobby")
     checks.append("lan.rematch returned survivors to the lobby")
     drive_race(host, active, "motorcycle", checks)
-    settle_results(survivors, checks)
+    settle_results(survivors, checks, departed=departed)
     checks.append("both classes completed a full race lifecycle")
 
     # Host loss: an explicit host leave broadcasts session.closed and

@@ -114,6 +114,13 @@ namespace FamilyRacing.Core.Networking
         // redelivery and retries replay the receipt instead of re-awarding.
         private readonly List<RaceResult> deliveredResults =
             new List<RaceResult>();
+        // Host side: participants who explicitly left the session
+        // (lan.leave/MsgLeave) — permanent departures, distinct from a
+        // transient link drop that still owns a reserved slot. Their
+        // outstanding delivery rows settle as terminal "undeliverable"
+        // instead of retrying a participant that can never come back.
+        private readonly HashSet<string> departedParticipants =
+            new HashSet<string>(StringComparer.Ordinal);
         // Composition seam: applies a finalized result to the selected
         // profile through the atomic store write. FoundationService wires
         // it at runtime; tests substitute the same service directly.
@@ -1102,13 +1109,21 @@ namespace FamilyRacing.Core.Networking
                 if (!slot.occupied
                     || EntryFor(retained, slot.participantId) == null)
                     continue;
+                // A participant who explicitly left before the result
+                // published can never receive the automatic offer: the
+                // row records the honest terminal verdict rather than a
+                // forever-pending lie.
+                var departed = departedParticipants.Contains(
+                    slot.participantId);
                 retained.deliveries.Add(new RaceResultDelivery
                 {
                     participantId = slot.participantId,
-                    state = "pending",
+                    state = departed ? "failed" : "pending",
+                    code = departed ? "undeliverable" : "",
                     lastOfferedAt = double.NegativeInfinity
                 });
             }
+            RefreshDeliveryStatus(retained);
             retainedResults.Add(retained);
             // The host's own reward applies through the same atomic write
             // every client uses — no privileged local path.
@@ -1217,12 +1232,14 @@ namespace FamilyRacing.Core.Networking
             }
         }
 
-        // conflict and ineligible:* can never resolve by resending the
-        // same immutable bytes; every other failure (saveFailed, ...)
-        // is treated as transient and keeps retrying.
+        // conflict, undeliverable and ineligible:* can never resolve by
+        // resending the same immutable bytes — conflict/undeliverable
+        // name why resending is hopeless (conflicting retained payload,
+        // participant gone for good); every other failure (saveFailed,
+        // ...) is treated as transient and keeps retrying.
         private static bool PermanentDeliveryFailure(string code)
         {
-            return code == "conflict"
+            return code == "conflict" || code == "undeliverable"
                 || (code != null && code.StartsWith("ineligible:"));
         }
 
@@ -1516,7 +1533,17 @@ namespace FamilyRacing.Core.Networking
                         rotated ?? credential);
                     BroadcastSessionState();
                     // A credentialed rejoin resumes unacknowledged result
-                    // delivery on the next offer pass.
+                    // delivery immediately: the offer cadence throttles
+                    // resends to the SAME connection — this connection is
+                    // brand new, so every pending row for the reclaiming
+                    // participant is due now, not one redelivery cycle
+                    // later.
+                    foreach (var retained in retainedResults)
+                    {
+                        var row = DeliveryFor(retained, participantId);
+                        if (row != null && row.state == "pending")
+                            row.lastOfferedAt = double.NegativeInfinity;
+                    }
                     OfferPending(now);
                     return;
                 }
@@ -1623,6 +1650,22 @@ namespace FamilyRacing.Core.Networking
             connectionIdFor.Remove(participantId);
             var participant = FindParticipant(participantId);
             if (participant == null) return;
+            // Explicit leave is a permanent departure — unlike a link
+            // drop, which keeps the reserved slot reclaimable. Every
+            // outstanding delivery row for the departed participant
+            // settles as a terminal failure; persisted rows and prior
+            // permanent verdicts are immutable history, never rewritten.
+            departedParticipants.Add(participantId);
+            foreach (var result in retainedResults)
+            {
+                var delivery = DeliveryFor(result, participantId);
+                if (delivery == null || delivery.state == "persisted") continue;
+                if (delivery.state == "failed"
+                    && PermanentDeliveryFailure(delivery.code)) continue;
+                delivery.state = "failed";
+                delivery.code = "undeliverable";
+                RefreshDeliveryStatus(result);
+            }
             if (phase == PhaseLobby)
             {
                 // An explicit leave in the lobby ends all credential rights.
@@ -2065,6 +2108,7 @@ namespace FamilyRacing.Core.Networking
             paused = false;
             retainedResults.Clear();
             deliveredResults.Clear();
+            departedParticipants.Clear();
             descriptor = null;
             sessionId = "";
             serverConnection = 0;

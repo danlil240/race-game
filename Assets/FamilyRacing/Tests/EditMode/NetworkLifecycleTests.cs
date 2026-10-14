@@ -141,6 +141,60 @@ namespace FamilyRacing.Tests
                 Is.EqualTo(CommandResult.Applied));
         }
 
+        private static RaceResult FinishedResult(string sessionId, string raceId,
+            params string[] participantOutcomes)
+        {
+            var result = new RaceResult
+            {
+                resultId = raceId + "/result",
+                sessionId = sessionId,
+                raceId = raceId,
+                eventId = "lan-mixed",
+                contentVersion = "lan-content-1",
+                finalized = true,
+                finalizedHostTick = 300,
+                finalizedElapsedTicks = 210,
+                completionCoins = 20
+            };
+            var position = 0;
+            for (var i = 0; i + 1 < participantOutcomes.Length; i += 2)
+            {
+                var outcome = participantOutcomes[i + 1];
+                var finished = outcome == "finished";
+                result.racers.Add(new RaceResultEntry
+                {
+                    position = ++position,
+                    slot = i / 2,
+                    participantId = participantOutcomes[i],
+                    vehicleId = "car-01",
+                    attribution = "human",
+                    outcome = outcome,
+                    finishTicks = finished ? 210 : 0,
+                    lapsCompleted = finished ? 1 : 0,
+                    coinsAwarded = finished ? 20 : 0
+                });
+            }
+            return result;
+        }
+
+        private static RaceResult Retained(LanSessionService host,
+            string resultId)
+        {
+            foreach (var result in host.RetainedResults())
+                if (result.resultId == resultId) return result;
+            return null;
+        }
+
+        private static ResultDeliveryState DeliveryOf(
+            NetworkSessionState state, string resultId, string participantId)
+        {
+            foreach (var entry in state.results)
+                if (entry.resultId == resultId
+                    && entry.participantId == participantId)
+                    return entry;
+            return null;
+        }
+
         private static ParticipantState Find(NetworkSessionState state,
             string participantId)
         {
@@ -373,7 +427,95 @@ namespace FamilyRacing.Tests
             Assert.That(guest.connected, Is.True);
         }
 
-        // --- credentialed rejoin / fencing -----------------------------------
+        // --- result delivery lifecycle policy ---------------------------------
+
+        [Test]
+        public void ExplicitLeaveTerminatesPendingDeliveryButDisconnectDoesNot()
+        {
+            var guestLink = new LanSessionTests.FakeLanLink();
+            var guest = NewGuest(guestLink, "p-guest");
+            host.SetRewardApplier(result =>
+                RewardApplyResult.Applied(20, result.Fingerprint()));
+            guest.SetRewardApplier(result =>
+                RewardApplyResult.Applied(20, result.Fingerprint()));
+            JoinGuest(host, link, guest, guestLink, GuestConn, HostConn);
+            ConfigureCar(host);
+            ReadyAndStart(host, GuestConn);
+            Assert.That(host.BeginRace(), Is.True);
+
+            var result1 = FinishedResult("s-1", "s-1-r1",
+                "p-host", "dnf", "p-guest", "finished");
+            Assert.That(host.PublishResult(result1), Is.True);
+            Assert.That(DeliveryOf(host.Snapshot(),
+                result1.resultId, "p-guest").state, Is.EqualTo("pending"));
+            var fingerprint1 = Retained(host, result1.resultId).Fingerprint();
+
+            // A transient link drop leaves the row pending — the slot is
+            // reserved and the guest may credentialed rejoin to receive it.
+            host.OnLinkDisconnected(GuestConn, "lost");
+            link.DrainSent();
+            Assert.That(DeliveryOf(host.Snapshot(),
+                result1.resultId, "p-guest").state, Is.EqualTo("pending"),
+                "a disconnect must not settle the pending delivery");
+
+            guest.OnLinkDisconnected(HostConn, "lost");
+            Assert.That(guest.Execute(Cmd("lan.reconnect", null)).status,
+                Is.EqualTo(CommandResult.Accepted));
+            host.OnLinkConnected(GuestConn2);
+            guest.OnLinkConnected(HostConn);
+            for (var i = 0; i < 4; i++)
+                PumpWire(link, guestLink, host, guest, GuestConn2, HostConn);
+
+            Assert.That(DeliveryOf(host.Snapshot(),
+                result1.resultId, "p-guest").state, Is.EqualTo("persisted"),
+                "the pending row must redeliver across a credentialed rejoin");
+            Assert.That(Retained(host, result1.resultId).Fingerprint(),
+                Is.EqualTo(fingerprint1),
+                "delivery lifecycle must never rewrite the immutable result");
+
+            // A second result while the guest is still connected; its
+            // offers are deliberately not delivered so the row is still
+            // pending when the participant leaves for good.
+            var result2 = FinishedResult("s-1", "s-1-r2",
+                "p-host", "finished", "p-guest", "finished");
+            Assert.That(host.PublishResult(result2), Is.True);
+            link.DrainSent();
+            guestLink.DrainSent();
+            Assert.That(DeliveryOf(host.Snapshot(),
+                result2.resultId, "p-guest").state, Is.EqualTo("pending"));
+            var fingerprint2 = Retained(host, result2.resultId).Fingerprint();
+
+            Assert.That(guest.Execute(Cmd("lan.leave", null)).status,
+                Is.EqualTo(CommandResult.Applied));
+            guestLink.DeliverTo(host, GuestConn2);
+
+            var settled = DeliveryOf(host.Snapshot(),
+                result2.resultId, "p-guest");
+            Assert.That(settled.state, Is.EqualTo("failed"),
+                "explicit leave settles outstanding delivery as terminal");
+            Assert.That(settled.code, Is.EqualTo("undeliverable"));
+            Assert.That(Retained(host, result2.resultId).deliveryStatus,
+                Is.EqualTo("failed"));
+            Assert.That(DeliveryOf(host.Snapshot(),
+                result1.resultId, "p-guest").state, Is.EqualTo("persisted"),
+                "persisted history must not be rewritten by the departure");
+            Assert.That(Retained(host, result2.resultId).Fingerprint(),
+                Is.EqualTo(fingerprint2),
+                "the immutable result fingerprint survives the verdict");
+
+            // Terminal means terminal: no redelivery cadence revives it.
+            host.AdvanceWallTime(
+                NetworkSettings.ResultRedeliverySeconds + 1.0);
+            foreach (var pair in link.DrainPairs())
+            {
+                string type;
+                Dictionary<string, string> fields;
+                Assert.That(
+                    !NetworkProtocol.TryDecode(pair.Value, out type, out fields)
+                    || type != NetworkProtocol.MsgResultOffer, Is.True,
+                    "an undeliverable row must never be re-offered");
+            }
+        }
 
         [Test]
         public void ReconnectKeepsSameRacerAndProgress()

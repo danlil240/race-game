@@ -339,6 +339,16 @@ class Client:
         self.action_states = {}
         self.sock = socket.create_connection(("127.0.0.1", connection["port"]), timeout=10)
         self.reader = self.sock.makefile("rb")
+        # Command-latency accounting: every command frame sent is owed a
+        # result inside the documented deadline (COMMANDS.md). A command
+        # that outlives the deadline is stuck — overdue_commands() names
+        # it so a stuck input fails instead of hiding behind resends.
+        self.pending_commands = {}
+        self.results = {}
+        # The first non-EOF failure observed while draining this client
+        # from another peer's wait — recorded, never swallowed silently.
+        self.drain_error = None
+        self._drained_terminal = False
         # A dedicated pump consumes this socket continuously and queues raw
         # frames: the player's stream writer fails honestly after a bounded
         # send timeout, so a scenario thread blocked waiting on ANOTHER
@@ -379,6 +389,9 @@ class Client:
         self.outgoing.write(json.dumps(logged, ensure_ascii=False) + "\n")
         self.outgoing.flush()
         self.sock.sendall((json.dumps(frame) + "\n").encode("utf-8"))
+        command_id = frame.get("commandId")
+        if command_id is not None:
+            self.pending_commands[command_id] = time.monotonic()
 
     _MAX_LINE = 1024 * 1024 + 1
     _uses_pump = True
@@ -446,34 +459,76 @@ class Client:
             assert len(self.state["slots"]) == 4, "Incomplete profile state"
         self.incoming.write(json.dumps(event, ensure_ascii=False) + "\n")
         self.incoming.flush()
+        if event.get("type") == "result" \
+                and event.get("commandId") is not None:
+            # Any result proves the frame reached the command pipeline —
+            # an intermediate "accepted" counts; the terminal outcome is
+            # still owned by the waiting caller's own bounded wait.
+            self.results[event["commandId"]] = event.get("status")
+            self.pending_commands.pop(event["commandId"], None)
         self.events.append(event)
         return event
+
+    # The documented command deadline (COMMANDS.md): an unanswered
+    # command older than this is stuck, not "in flight".
+    COMMAND_RESULT_DEADLINE_SECONDS = 5.0
+
+    def overdue_commands(self,
+            deadline=COMMAND_RESULT_DEADLINE_SECONDS):
+        """Commands sent longer ago than `deadline` with no result at all.
+        Returns {commandId: age_seconds} — the watchdog input for drivers
+        that fire-and-forget (LanDriver sends input.set without an
+        immediate wait, so only this check can name a stuck command)."""
+        now = time.monotonic()
+        # Snapshot the pairs: a peer drain on another client's wait
+        # thread resolves results into this same dict concurrently.
+        return {command_id: now - sent
+                for command_id, sent in list(self.pending_commands.items())
+                if now - sent > deadline}
 
     def _drain_peers(self):
         """Consume whatever other live clients already sent; otherwise a
         long wait on this endpoint starves their validation sinks.
-        Peers whose socket is gone (closed, or a test double without a
-        real descriptor) are skipped rather than selected on."""
+
+        Pumped peers buffer lines on their pump thread, so draining reads
+        the queued backlog — polling the raw socket would always look
+        empty while the pump races us and would leave the backlog to age.
+        A terminal peer (honest EOF from a finished capture) is skipped.
+        A non-terminal read failure — validation assert, evidence-write
+        error — is a live defect: recorded on the peer and never retried
+        silently while the backlog keeps flowing."""
         for other in list(_ACTIVE_CLIENTS):
-            if other is self:
+            if other is self or other._drained_terminal \
+                    or other.drain_error is not None:
                 continue
-            sock = getattr(other, "sock", None)
-            try:
-                if sock is None or sock.fileno() < 0:
+            if getattr(other, "_uses_pump", False):
+                budget = other._lines.qsize()
+            else:
+                sock = getattr(other, "sock", None)
+                try:
+                    if sock is None or sock.fileno() < 0 \
+                            or not select.select([sock], [], [], 0)[0]:
+                        continue
+                except (OSError, ValueError, AttributeError):
                     continue
-            except (OSError, ValueError, AttributeError):
-                continue
-            try:
-                while select.select([sock], [], [], 0)[0]:
-                    try:
-                        other.read(0.02)
-                    except socket.timeout:
-                        break
-            except (OSError, ValueError, AssertionError):
-                # An AssertionError from read() is an honest EOF: the peer's
-                # server side closed the session (a finished capture does
-                # this deliberately). A closed peer is not a drain target.
-                continue
+                budget = 256
+            for _ in range(min(budget, 512)):
+                try:
+                    other.read(0.02)
+                except socket.timeout:
+                    break
+                except AssertionError as error:
+                    if getattr(other, "_terminal", None) is not None:
+                        # Honest EOF: the peer's server side closed the
+                        # session (a finished capture does this
+                        # deliberately) — not a drain target any more.
+                        other._drained_terminal = True
+                    else:
+                        other.drain_error = error
+                    break
+                except (OSError, ValueError) as error:
+                    other.drain_error = error
+                    break
 
     def wait(self, predicate, timeout=20, on_event=None):
         deadline = time.monotonic() + timeout
@@ -603,6 +658,20 @@ def _windows_process_sample(pid):
         return value, stamp
     finally:
         kernel32.CloseHandle(handle)
+
+
+def process_start_stamp(pid):
+    """Process-start identity for a pid — the creation stamp that
+    separates a live process from a recycled pid number. Returns None
+    when the platform has no stamp concept or the probe failed; the
+    caller records the gap, never fabricates one."""
+    if sys.platform != "win32":
+        return None
+    try:
+        _value, stamp = _windows_process_sample(pid)
+        return stamp
+    except Exception:
+        return None
 
 
 def _android_total_pss_bytes(serial, package, adb="adb"):
