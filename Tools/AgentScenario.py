@@ -543,8 +543,17 @@ class Client:
 # Devices compare only against their own baseline; PSS and working set are
 # differently-defined quantities and are never compared to each other.
 
-def _windows_working_set_bytes(pid):
-    """Process working set in bytes via psapi; raises on failure."""
+def _windows_process_sample(pid):
+    """(working-set bytes, creation stamp) via psapi; raises on failure.
+
+    A terminated pid can still resolve: while any handle keeps the
+    process object alive, OpenProcess succeeds and GetProcessMemoryInfo
+    reports a ~0-byte working set for the dead process — a fabricated
+    measurement. WaitForSingleObject on a SYNCHRONIZE handle separates
+    "alive" from "exited", and the GetProcessTimes creation stamp lets
+    the caller spot a reused pid instead of silently sampling a
+    different process as "ok".
+    """
     import ctypes
     from ctypes import wintypes
 
@@ -565,17 +574,33 @@ def _windows_working_set_bytes(pid):
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     psapi = ctypes.WinDLL("psapi", use_last_error=True)
     PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    SYNCHRONIZE = 0x00100000
+    WAIT_OBJECT_0 = 0
     handle = kernel32.OpenProcess(
-        PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, False, pid)
     if not handle:
         raise OSError("OpenProcess failed for pid %d" % pid)
     try:
+        if kernel32.WaitForSingleObject(handle, 0) == WAIT_OBJECT_0:
+            raise OSError("pid %d has exited" % pid)
         counters = PROCESS_MEMORY_COUNTERS()
         counters.cb = ctypes.sizeof(counters)
         if not psapi.GetProcessMemoryInfo(
                 handle, ctypes.byref(counters), counters.cb):
             raise OSError("GetProcessMemoryInfo failed for pid %d" % pid)
-        return int(counters.WorkingSetSize)
+        created = wintypes.FILETIME()
+        if not kernel32.GetProcessTimes(
+                handle, ctypes.byref(created),
+                ctypes.byref(wintypes.FILETIME()),
+                ctypes.byref(wintypes.FILETIME()),
+                ctypes.byref(wintypes.FILETIME())):
+            raise OSError("GetProcessTimes failed for pid %d" % pid)
+        value = int(counters.WorkingSetSize)
+        if value <= 0:
+            raise OSError(
+                "pid %d reported a zero working set" % pid)
+        stamp = (created.dwHighDateTime << 32) | created.dwLowDateTime
+        return value, stamp
     finally:
         kernel32.CloseHandle(handle)
 
@@ -597,7 +622,11 @@ def _android_total_pss_bytes(serial, package, adb="adb"):
                       output.stdout, re.IGNORECASE)
     if match is None:
         raise OSError("dumpsys meminfo carried no TOTAL PSS row")
-    return int(match.group(1).replace(",", "")) * 1024
+    pss = int(match.group(1).replace(",", "")) * 1024
+    if pss <= 0:
+        raise OSError(
+            "dumpsys meminfo reported zero PSS for " + package)
+    return pss
 
 
 class MemorySampler:
@@ -614,6 +643,7 @@ class MemorySampler:
             "MemorySampler needs a Windows pid or an adb device serial"
         self._path = Path(evidence_dir) / "memory.ndjson"
         self._pid = pid
+        self._pid_created = None
         self._serial = adb_serial
         self._package = package
         self._interval = interval
@@ -637,13 +667,26 @@ class MemorySampler:
 
     def stop(self, timeout=5.0):
         self._stop.set()
-        self._thread.join(timeout)
+        # ident is None until the thread is started — joining a
+        # never-started thread raises RuntimeError.
+        if self._thread.ident is not None:
+            self._thread.join(timeout)
 
     def _sample(self):
         if self._pid is not None:
+            value, created = _windows_process_sample(self._pid)
+            # The sampler never rebinds: a relaunched player is a new
+            # measurement target. A reused pid (same number, different
+            # creation stamp) must record unavailable, not silently
+            # sample a different process as "ok".
+            if self._pid_created is None:
+                self._pid_created = created
+            elif created != self._pid_created:
+                raise OSError(
+                    "pid %d was reused by a new process; "
+                    "sampler stays bound to the original" % self._pid)
             return ("process.workingSet",
-                    "psapi GetProcessMemoryInfo",
-                    _windows_working_set_bytes(self._pid))
+                    "psapi GetProcessMemoryInfo", value)
         return ("process.totalPss",
                 "adb dumpsys meminfo",
                 _android_total_pss_bytes(self._serial, self._package))

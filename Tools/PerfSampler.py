@@ -67,16 +67,23 @@ def main():
         if args.seconds > 0:
             time.sleep(args.seconds)
         else:
-            try:
-                while True:
-                    time.sleep(1)
-            except KeyboardInterrupt:
-                pass
+            while True:
+                time.sleep(1)
+    except KeyboardInterrupt:
+        # An interrupted bounded/unbounded run still writes result.json
+        # below — partial evidence must never be lost silently.
+        result["interrupted"] = True
+    except BaseException as error:
+        result["error"] = "%s: %s" % (type(error).__name__, error)
+    finally:
         sampler.stop()
+    try:
         path = args.evidence / "memory.ndjson"
-        records = [json.loads(line)
-                   for line in path.read_text(encoding="utf-8")
-                   .splitlines() if line.strip()]
+        records = []
+        if path.is_file():
+            records = [json.loads(line)
+                       for line in path.read_text(encoding="utf-8")
+                       .splitlines() if line.strip()]
         result["samples"] = len(records)
         result["okSamples"] = sum(
             1 for record in records if record.get("status") == "ok")
@@ -84,13 +91,20 @@ def main():
             1 for record in records
             if record.get("status") == "unavailable")
         result["file"] = str(path)
-        result["status"] = "passed"
-        if not records:
+        # "passed" requires at least one real measurement — a run whose
+        # samples are all unavailable (or never landed) can never be a
+        # green light for a status-only consumer.
+        if result["okSamples"] > 0:
+            result["status"] = "passed"
+        else:
             result["status"] = "failed"
-            result["error"] = "no samples recorded"
+            result.setdefault(
+                "error",
+                "all %d samples unavailable" % len(records)
+                if records else "no samples recorded")
     except Exception as error:
-        result["error"] = str(error)
-        sampler.stop()
+        result["status"] = "failed"
+        result["error"] = "%s: %s" % (type(error).__name__, error)
     (args.evidence / "result.json").write_text(
         json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(result, ensure_ascii=False, indent=2))

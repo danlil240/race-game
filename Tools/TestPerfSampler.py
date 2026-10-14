@@ -7,6 +7,7 @@ never a fabricated zero and never Unity heap data.
 
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import time
@@ -67,6 +68,50 @@ class MemorySamplerTests(unittest.TestCase):
             assert record["units"] == "bytes"
             assert record["reason"]
 
+    @unittest.skipUnless(sys.platform == "win32",
+                         "working-set sampling is a Windows path")
+    def test_dead_pid_records_unavailable_not_zero_ok(self):
+        # The M4 review finding: a killed process whose handle lingers
+        # still resolves through OpenProcess, and the old code recorded
+        # its ~0-byte working set as status:"ok". It must be
+        # unavailable with a reason, carrying no fabricated value.
+        # Keep the Popen object alive through sampling: its held
+        # process handle keeps the dead pid resolvable, reproducing
+        # the exact "terminated handle still samples" failure mode.
+        process = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(30)"])
+        process.kill()
+        process.wait()
+        with tempfile.TemporaryDirectory() as directory:
+            sampler = MemorySampler(directory, pid=process.pid,
+                                    interval=0.2)
+            sampler.start()
+            time.sleep(0.5)
+            sampler.stop()
+            records = self._records(directory)
+        assert records, "no samples recorded"
+        for record in records:
+            assert record["status"] == "unavailable", record
+            assert "value" not in record, \
+                "dead pid must not fabricate a measurement"
+            assert record["reason"]
+
+    def test_pid_reuse_raises_instead_of_sampling_new_process(self):
+        # A relaunched player can reuse the pid number; a changed
+        # creation stamp must surface as a failure (unavailable
+        # record), never an "ok" on a different process.
+        with tempfile.TemporaryDirectory() as directory:
+            sampler = MemorySampler(directory, pid=12345, interval=0.1)
+            with mock.patch("AgentScenario._windows_process_sample",
+                            side_effect=[(4096, 111), (4096, 222)]):
+                sampler._sample()
+                with self.assertRaises(OSError):
+                    sampler._sample()
+
+    def test_stop_on_never_started_sampler_does_not_raise(self):
+        with tempfile.TemporaryDirectory() as directory:
+            MemorySampler(directory, pid=os.getpid()).stop()
+
     def test_sampler_requires_a_target(self):
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaises(AssertionError):
@@ -113,6 +158,51 @@ class PerfSamplerCliTests(unittest.TestCase):
             assert result["status"] == "passed"
             assert result["metric"] == "process.workingSet"
             assert result["okSamples"] >= 1
+
+    @unittest.skipUnless(sys.platform == "win32",
+                         "working-set sampling is a Windows path")
+    def test_main_never_passes_with_zero_ok_samples(self):
+        # A run on a dead pid must report a failing status — a
+        # status-only consumer can never see "passed" for a run
+        # that measured nothing.
+        process = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(30)"])
+        process.kill()
+        process.wait()
+        with tempfile.TemporaryDirectory() as directory:
+            argv = ["PerfSampler.py", "--pid", str(process.pid),
+                    "--evidence", str(Path(directory) / "run"),
+                    "--interval", "0.2", "--seconds", "0.5"]
+            with mock.patch.object(sys, "argv", argv):
+                assert PerfSampler.main() == 1
+            result = json.loads(
+                (Path(directory) / "run" / "result.json")
+                .read_text(encoding="utf-8"))
+            assert result["status"] != "passed", result
+            assert result["status"] == "failed"
+            assert result["okSamples"] == 0
+            assert result["samples"] >= 1
+            assert result["unavailableSamples"] == result["samples"]
+
+    @unittest.skipUnless(sys.platform == "win32",
+                         "working-set sampling is a Windows path")
+    def test_interrupt_during_bounded_run_still_writes_result(self):
+        with tempfile.TemporaryDirectory() as directory:
+            argv = ["PerfSampler.py", "--pid", str(os.getpid()),
+                    "--evidence", str(Path(directory) / "run"),
+                    "--interval", "0.2", "--seconds", "30"]
+            sleeps = mock.patch.object(
+                PerfSampler.time, "sleep",
+                side_effect=KeyboardInterrupt)
+            with mock.patch.object(sys, "argv", argv), sleeps:
+                PerfSampler.main()
+            result_path = Path(directory) / "run" / "result.json"
+            assert result_path.is_file(), \
+                "interrupt must not lose result.json"
+            result = json.loads(
+                result_path.read_text(encoding="utf-8"))
+            assert result["interrupted"] is True
+            assert "samples" in result
 
 
 if __name__ == "__main__":

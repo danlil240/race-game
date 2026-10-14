@@ -153,11 +153,17 @@ gate `notVerified`.**
   the fault-injection kill the sampler kept the dead PID bound —
   post-kill records report ~0.05 MB working-set readings on a
   terminated handle, and the relaunched gen-2 process was never
-  sampled. **Tooling gap recorded honestly:** `MemorySampler` is not
-  re-bound on relaunch, and a dead-PID sample reports `status: ok`
-  with a near-zero value rather than `unavailable`. Gen-2 client
-  process-memory evidence does not exist; the affected rows stay
-  `notVerified`-flagged rather than filled.
+  sampled. **Tooling gap recorded honestly, and since fixed:** the
+  run showed `MemorySampler` does not rebind on relaunch and a
+  dead-PID sample reported `status: ok` with a near-zero value rather
+  than `unavailable`. The sampler now detects an exited process
+  (SYNCHRONIZE `WaitForSingleObject` before `GetProcessMemoryInfo`,
+  plus a zero-working-set guard and a pid-reuse creation-stamp check
+  that refuses to silently rebind), so dead or recycled pids record
+  `unavailable` with a reason, and `PerfSampler.py` never reports
+  `status: passed` when `okSamples` is 0. For this run, gen-2 client
+  process-memory evidence still does not exist; the affected rows
+  stay `notVerified`-flagged rather than filled.
 - Startup/loading reported separately by the recorder: `warmup` 60–62.8 s,
   `loading` 0.0 s, per-phase excluded buckets (host: countdown 59.5 s,
   menu 5.3 s, results 432.7 s; client-0: countdown 56.9 s, menu 4.6 s,
