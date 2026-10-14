@@ -37,6 +37,10 @@ namespace FamilyRacing.EditorTools
             // the vehicle definitions bind them; ensure creates missing
             // assets only, so re-runs never clobber authored art.
             RacerVisualAuthoring.Ensure();
+            // Task 5: the shared race presentation catalog (effect
+            // prefabs + generated WAV bindings) — the driving slice
+            // plays the same authored cues the benchmark verifies.
+            RacePresentationAuthoring.Ensure();
             var car = EnsureCar();
             var moto = EnsureMotorcycle();
             var track = EnsureTrack();
@@ -419,6 +423,9 @@ namespace FamilyRacing.EditorTools
                 dirty |= Assign(serialized, "track", track);
                 dirty |= AssignArray(serialized, "events", practice, intro, free);
                 dirty |= Assign(serialized, "tutorial", tutorial);
+                dirty |= Assign(serialized, "presentationCatalog",
+                    AssetDatabase.LoadAssetAtPath<RacePresentationCatalogAsset>(
+                        RacePresentationAuthoring.CatalogPath));
                 dirty |= Assign(serialized, "coursePrefab", course);
                 var version = serialized.FindProperty("contentVersion");
                 if (version != null && version.stringValue != ContentVersion)

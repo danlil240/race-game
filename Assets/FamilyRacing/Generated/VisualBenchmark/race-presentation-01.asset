@@ -1,0 +1,183 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 609764aff95435043a72de8b52fcb31e, type: 3}
+  m_Name: race-presentation-01
+  m_EditorClassIdentifier: FamilyRacing.Runtime::FamilyRacing.RacePresentationCatalogAsset
+  catalogId: race-presentation-01
+  cues:
+  - cueId: landing
+    eventKind: motor.landed
+    clip: {fileID: 8300000, guid: 4fa9e394d277e114081dab828fbc65e5, type: 3}
+    volumeCategory: effects
+    volume: 0.9
+    minIntervalSeconds: 0.15
+  - cueId: wall
+    eventKind: motor.wallHit
+    clip: {fileID: 8300000, guid: b4e00586b6a7ee046910a3b784800312, type: 3}
+    volumeCategory: effects
+    volume: 0.85
+    minIntervalSeconds: 0.25
+  - cueId: contact
+    eventKind: motor.contact
+    clip: {fileID: 8300000, guid: b4e00586b6a7ee046910a3b784800312, type: 3}
+    volumeCategory: effects
+    volume: 0.8
+    minIntervalSeconds: 0.25
+  - cueId: nudge
+    eventKind: motor.racerNudge
+    clip: {fileID: 8300000, guid: 3ce6febd4578f7b47a68e85f8ebdd081, type: 3}
+    volumeCategory: effects
+    volume: 0.7
+    minIntervalSeconds: 0.2
+  - cueId: boost
+    eventKind: motor.boostStart
+    clip: {fileID: 8300000, guid: 1b41b04e6f5799b449a835fdbb28b091, type: 3}
+    volumeCategory: effects
+    volume: 0.8
+    minIntervalSeconds: 0.1
+  - cueId: air
+    eventKind: motor.becameAirborne
+    clip: {fileID: 8300000, guid: a915e48a6cf0cca46be016b215b27a20, type: 3}
+    volumeCategory: effects
+    volume: 0.6
+    minIntervalSeconds: 0.1
+  - cueId: checkpoint
+    eventKind: checkpoint.crossed
+    clip: {fileID: 8300000, guid: 0a04cdac830875a4085313200b079808, type: 3}
+    volumeCategory: effects
+    volume: 0.75
+    minIntervalSeconds: 0.2
+  - cueId: go
+    eventKind: race.running
+    clip: {fileID: 8300000, guid: 25a6417490f62bc4bbbc8d6b59eaeec5, type: 3}
+    volumeCategory: effects
+    volume: 0.85
+    minIntervalSeconds: 0.1
+  - cueId: finish
+    eventKind: race.finished
+    clip: {fileID: 8300000, guid: 12ec2200c114f25439af6cc4829c4962, type: 3}
+    volumeCategory: effects
+    volume: 0.9
+    minIntervalSeconds: 0.1
+  - cueId: finalize
+    eventKind: race.finalized
+    clip: {fileID: 8300000, guid: 12ec2200c114f25439af6cc4829c4962, type: 3}
+    volumeCategory: effects
+    volume: 0.9
+    minIntervalSeconds: 0.1
+  loops:
+  - loopId: engine.car
+    clip: {fileID: 8300000, guid: 620c74a26aaedb4448402ea24b532fcf, type: 3}
+    volumeCategory: effects
+    volume: 0.55
+    maxVoices: 4
+  - loopId: engine.motorcycle
+    clip: {fileID: 8300000, guid: 179b30f2b3812f243ae4130085685499, type: 3}
+    volumeCategory: effects
+    volume: 0.55
+    maxVoices: 4
+  - loopId: skid
+    clip: {fileID: 8300000, guid: 39f231f9e9befd84abb9b6f991b74300, type: 3}
+    volumeCategory: effects
+    volume: 0.45
+    maxVoices: 3
+  - loopId: boost
+    clip: {fileID: 8300000, guid: 6749111d6b1b7c641818b4e2ee0a96fc, type: 3}
+    volumeCategory: effects
+    volume: 0.5
+    maxVoices: 3
+  music:
+  - cueId: music-race
+    phase: racing
+    clip: {fileID: 8300000, guid: 7d28a9f475a61b04a8796454cde4b8b7, type: 3}
+    volume: 0.6
+  - cueId: music-results
+    phase: results
+    clip: {fileID: 8300000, guid: d3f2061a315c26b4698cc61d6e5ada3c, type: 3}
+    volume: 0.6
+  effects:
+  - effectId: drift-dust
+    prefab: {fileID: 3007468520347504727, guid: 86f2de74cdfdb2d4fada7de7f5a59f71, type: 3}
+    poolSize: 10
+    lifetimeSeconds: 0.55
+    faceCamera: 0
+    growTo: 2.1
+  - effectId: boost-flare
+    prefab: {fileID: 2187233340002071318, guid: 28f100aec707cb540832d8e0ec11608c, type: 3}
+    poolSize: 8
+    lifetimeSeconds: 0.4
+    faceCamera: 1
+    growTo: 1.8
+  - effectId: landing-puff
+    prefab: {fileID: 7650599465224466889, guid: 2a3d838d893a9d143b95664829909a6d, type: 3}
+    poolSize: 6
+    lifetimeSeconds: 0.7
+    faceCamera: 0
+    growTo: 1.9
+  - effectId: wall-shunt
+    prefab: {fileID: 4914346398122729215, guid: 960b12cd11608e541b24d0c850131beb, type: 3}
+    poolSize: 6
+    lifetimeSeconds: 0.5
+    faceCamera: 1
+    growTo: 1.7
+  - effectId: checkpoint-sparkle
+    prefab: {fileID: 4831923012190953419, guid: e4929901b07463d4982249eee7eb419f, type: 3}
+    poolSize: 8
+    lifetimeSeconds: 0.8
+    faceCamera: 1
+    growTo: 1.5
+  - effectId: finish-burst
+    prefab: {fileID: 711106373090091278, guid: 2e03abb3485e326439673d68f586694f, type: 3}
+    poolSize: 4
+    lifetimeSeconds: 1.4
+    faceCamera: 0
+    growTo: 1.6
+  effectTriggers:
+  - eventKind: motor.landed
+    effectId: landing-puff
+    count: 2
+  - eventKind: motor.wallHit
+    effectId: wall-shunt
+    count: 1
+  - eventKind: motor.contact
+    effectId: wall-shunt
+    count: 1
+  - eventKind: motor.racerNudge
+    effectId: wall-shunt
+    count: 1
+  - eventKind: motor.boostStart
+    effectId: boost-flare
+    count: 2
+  - eventKind: motor.becameAirborne
+    effectId: drift-dust
+    count: 1
+  - eventKind: checkpoint.crossed
+    effectId: checkpoint-sparkle
+    count: 3
+  - eventKind: race.finished
+    effectId: finish-burst
+    count: 1
+  - eventKind: race.finalized
+    effectId: finish-burst
+    count: 1
+  driftEffectId: drift-dust
+  boostEffectId: boost-flare
+  driftEmitSeconds: 0.14
+  boostEmitSeconds: 0.08
+  engineLoopPrefix: engine.
+  skidLoopId: skid
+  boostLoopId: boost
+  maxOneShotVoices: 8
+  remoteVoiceScale: 0.45
+  enginePitchMin: 0.85
+  enginePitchMax: 1.7
+  engineReferenceSpeed: 24

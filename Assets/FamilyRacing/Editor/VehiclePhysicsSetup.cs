@@ -265,6 +265,12 @@ namespace FamilyRacing.EditorTools
             AssignObjectArray(serialized, "characters", characterAssets);
             AssignObject(serialized, "track", track);
             AssignObjectArray(serialized, "events", evt);
+            // Task 5: the shared presentation catalog — the physics
+            // slice plays the same authored cues (motor.contact is the
+            // physical backend's chassis-hit event).
+            AssignObject(serialized, "presentationCatalog",
+                AssetDatabase.LoadAssetAtPath<RacePresentationCatalogAsset>(
+                    RacePresentationAuthoring.CatalogPath));
             AssignObject(serialized, "coursePrefab", coursePrefab);
             var version = serialized.FindProperty("contentVersion");
             if (version != null) version.stringValue = RaceContentVersion;

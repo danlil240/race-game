@@ -33,6 +33,12 @@ namespace FamilyRacing
         private DrivingWorld drivingWorld;
         private DrivingCamera drivingCamera;
         private TutorialPresenter tutorialPresenter;
+        // M4 Task 5: the race effects/audio presenters consume the same
+        // published state (deduped event stream + live motor poses)
+        // through the authored presentation catalog. They never mutate
+        // simulation state — they are listeners on the boundary.
+        private RaceEffectsPresenter raceEffects;
+        private RaceAudioPresenter raceAudio;
         private ValidationBridge bridge;
         private FoundationInput driverInput;
         private FoundationShell shell;
@@ -110,6 +116,20 @@ namespace FamilyRacing
             // temporary overview fallback.
             drivingCamera = GetComponent<DrivingCamera>();
             if (drivingCamera == null) drivingCamera = gameObject.AddComponent<DrivingCamera>();
+            // Task-5 presentation listeners: bound to the authored
+            // catalog once — ApplyFrame then keys every (re)bind off the
+            // published race identity itself, so rejoins and fresh races
+            // reset cursors without any scene bookkeeping here.
+            raceEffects = GetComponent<RaceEffectsPresenter>();
+            if (raceEffects == null)
+                raceEffects = gameObject.AddComponent<RaceEffectsPresenter>();
+            raceAudio = GetComponent<RaceAudioPresenter>();
+            if (raceAudio == null)
+                raceAudio = gameObject.AddComponent<RaceAudioPresenter>();
+            raceEffects.Bind(
+                drivingWorld != null ? drivingWorld.PresentationCatalog : null);
+            raceAudio.Bind(
+                drivingWorld != null ? drivingWorld.PresentationCatalog : null);
             // With a live presentation camera the world's temporary overview
             // fallback stays off — exactly one system owns Camera.main each
             // frame, and a disengaged presentation camera cannot expose a
@@ -342,6 +362,17 @@ namespace FamilyRacing
                     state.driving.camera = (drivingCamera != null
                         ? drivingCamera.Facts : drivingWorld.CameraFacts).Copy();
             }
+            // Task-5 presentation: the effects/audio presenters read the
+            // same latest snapshot — after world/camera applied, before
+            // the presentation fold — so their published facts describe
+            // this rendered frame exactly. Pause/exit context comes from
+            // the state itself: no race context stops every loop, a
+            // paused frame suspends them, a fresh race identity resets
+            // the dedupe cursor without replaying history.
+            if (raceEffects != null)
+                raceEffects.ApplyFrame(state, Time.unscaledDeltaTime);
+            if (raceAudio != null)
+                raceAudio.ApplyFrame(state, Time.unscaledDeltaTime);
             // Entering the shared network pause neutralizes held local
             // input and requires re-arm, the same cleanup focus loss runs:
             // held steering must not seep through the resume boundary.
@@ -560,6 +591,13 @@ namespace FamilyRacing
             presentation.racers = BuildRacerFacts();
             presentation.performance = perfRecorder != null
                 ? perfRecorder.Summary() : null;
+            // Schema-5 effects/audio truth (M4 Task 5): publish only
+            // while a presentation catalog is bound — an unbound scene
+            // reports null slices, never a fabricated catalog identity.
+            presentation.effects = raceEffects != null && raceEffects.Bound
+                ? raceEffects.Facts : null;
+            presentation.audio = raceAudio != null && raceAudio.Bound
+                ? raceAudio.Facts : null;
             service.SetPresentation(presentation);
         }
 

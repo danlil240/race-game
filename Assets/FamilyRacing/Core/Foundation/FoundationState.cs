@@ -118,12 +118,23 @@ namespace FamilyRacing.Core.Foundation
         // Bounded render-performance summary (counts/percentiles/health —
         // never per-frame buffers). Null only when capture is disabled.
         public RenderPerformanceSummary performance;
+        // --- Schema-5 additive slice (M4 Task 5) --------------------------
+        // The actual race effects/audio presentation state on this
+        // device: bound catalog identity, live pooled-effect counts and
+        // pool-exhaustion counters, live loop/voice ids, the active music
+        // cue, and the honest missing-asset lists. Null when no
+        // presentation catalog is bound (a non-racing scene reports
+        // nothing rather than fabricating a silent catalog).
+        public RaceEffectsState effects;
+        public RaceAudioState audio;
 
         public PresentationState Copy()
         {
             var copy = (PresentationState)MemberwiseClone();
             copy.camera = camera != null ? camera.Copy() : null;
             copy.performance = performance != null ? performance.Copy() : null;
+            copy.effects = effects != null ? effects.Copy() : null;
+            copy.audio = audio != null ? audio.Copy() : null;
             if (racers != null && racers.Count > 0)
             {
                 copy.racers = new List<RacerPresentationState>(racers.Count);
@@ -156,6 +167,92 @@ namespace FamilyRacing.Core.Foundation
         public RacerPresentationState Copy()
         {
             return (RacerPresentationState)MemberwiseClone();
+        }
+    }
+
+    // One pooled effect channel's live facts (M4 Task 5). `exhausted`
+    // counts refused activations this race — pool pressure is observable,
+    // never silent.
+    [Serializable]
+    public sealed class EffectPoolFacts
+    {
+        public string effectId = "";
+        public int capacity;
+        public int active;
+        public int exhausted;
+
+        public EffectPoolFacts Copy()
+        {
+            return (EffectPoolFacts)MemberwiseClone();
+        }
+    }
+
+    // The effects presenter's actual state (M4 Task 5): the bound catalog,
+    // live pooled instances, per-pool capacity/pressure and the bounded
+    // missing-prefab list. A race teardown clears the live fields; the
+    // catalog identity and exhaustion counters remain for the record.
+    [Serializable]
+    public sealed class RaceEffectsState
+    {
+        public string catalogId = "none";
+        public int activeEffects;
+        public List<EffectPoolFacts> pools = new List<EffectPoolFacts>();
+        // Effect ids whose catalog slot has no prefab — bounded (16) with
+        // the overflow in `missingDropped` so the list stays truthful.
+        public List<string> missingEffects = new List<string>();
+        public int missingDropped;
+
+        public RaceEffectsState Copy()
+        {
+            var copy = new RaceEffectsState
+            {
+                catalogId = catalogId,
+                activeEffects = activeEffects,
+                missingDropped = missingDropped
+            };
+            foreach (var pool in pools)
+                copy.pools.Add(pool != null ? pool.Copy() : null);
+            copy.missingEffects.AddRange(missingEffects);
+            return copy;
+        }
+    }
+
+    // The audio presenter's actual state (M4 Task 5): the bound catalog,
+    // pause flag, active music cue id, live loop identities
+    // ("<loopId>@<racerKey>"), live voice count, the one-shot count this
+    // race, and the bounded missing-clip cue list. Empty lists mean
+    // nothing is sounding — a missing clip is a missing entry, never a
+    // claimed playback.
+    [Serializable]
+    public sealed class RaceAudioState
+    {
+        public string catalogId = "none";
+        public bool paused;
+        public string musicCue = "none";
+        public List<string> loops = new List<string>();
+        public int voices;
+        public int oneShots;
+        // One-shot activations refused because every authored voice was
+        // busy — pressure is observable, never silent.
+        public int droppedOneShots;
+        public List<string> missingCues = new List<string>();
+        public int missingDropped;
+
+        public RaceAudioState Copy()
+        {
+            var copy = new RaceAudioState
+            {
+                catalogId = catalogId,
+                paused = paused,
+                musicCue = musicCue,
+                voices = voices,
+                oneShots = oneShots,
+                droppedOneShots = droppedOneShots,
+                missingDropped = missingDropped
+            };
+            copy.loops.AddRange(loops);
+            copy.missingCues.AddRange(missingCues);
+            return copy;
         }
     }
 

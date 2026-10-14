@@ -42,7 +42,11 @@ are explicitly `notImplemented`; additional QA gaps are listed below.
 `language`, `activeSlot`, `slots[]`, `savedProfile`, `draftProfile`,
 `pendingSettings`, `input`, `paused`, `persistenceStatus`,
 `captureValid/captureError`, `presentation` (incl. `backlogSteps`,
-`stepOverloads`, and the actually-applied `presentation.camera` facts),
+`stepOverloads`, the actually-applied `presentation.camera` facts, and
+the schema-5 `presentation.effects`/`presentation.audio` slices — bound
+catalog identity, live pooled-effect counts, music cue, active loops,
+voice/one-shot counters, dropped-pressure and bounded missing-asset
+lists; null when no race-presentation catalog is bound),
 `featureCoverage`, `driving`, `drivingEvents`,
 `droppedDrivingEvents`, and the schema-3+ network slices `network`
 (always populated: `role`, `phase`, `localParticipantId`, `descriptor`,

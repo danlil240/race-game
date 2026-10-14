@@ -32,6 +32,10 @@ namespace FamilyRacing
         // assigns avatars, so AI/slot cosmetics land correctly). Vehicle
         // visuals bind per-vehicle on VehicleDefinitionAsset.visual.
         public CharacterDefinitionAsset[] characters;
+        // Task-5 typed catalog: the authored cue/effect bindings the
+        // scene's race effects/audio presenters consume — cue clips,
+        // effect prefab pools, voice bounds and volume categories.
+        public RacePresentationCatalogAsset presentationCatalog;
 
         public bool Validate(out string error)
         {
@@ -55,6 +59,11 @@ namespace FamilyRacing
             if (sourceTrack == null)
             {
                 error = name + ": missing sourceTrack reference";
+                return false;
+            }
+            if (presentationCatalog == null)
+            {
+                error = name + ": missing presentationCatalog reference";
                 return false;
             }
             error = null;

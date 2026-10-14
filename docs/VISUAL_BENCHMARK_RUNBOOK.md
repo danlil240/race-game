@@ -302,3 +302,42 @@ Pending: manual image review on a display, A7 Lite device
 qualification (tablet profile at 0.75 scale + sustained four-racer
 measurement), real lightmap bake (scene carries GI-contributing flags;
 no LightingDataAsset is baked yet), sustained multi-racer soak.
+
+## Task 5 — effects, audio, camera readability, bilingual presentation (2026-10-14)
+
+The benchmark now runs the catalog-driven race presentation layer
+(`race-presentation-01`, `Runtime/Content/RacePresentationCatalogAsset.cs`):
+`RaceEffectsPresenter` pools authored quad effects (drift dust, boost
+flare, landing puff, wall shunt, checkpoint sparkle, finish burst under
+`Art/VisualBenchmark/Effects/`) and `RaceAudioPresenter` plays the
+offline-synthesized WAV pack under `Audio/VisualBenchmark/` (engine/
+skid/boost loops on live motor state, event-deduplicated one-shot cues,
+racing/results music). Event bursts deduplicate by stable event identity
+through `RaceEventCursor` — the first frame after any (re)bind is a
+history baseline, so reconnect/correction replays never replay one-shots.
+Pause suspends every loop and the music; `race.exit` stops them
+outright. Volumes ride the profile's three buses — effects slider owns
+cues/engine/skid/boost, music slider owns music, voice slider owns
+tutorial voice — nothing crosses. Missing clips/prefabs publish on
+`presentation.audio.missingCues` / `presentation.effects.missingEffects`
+(bounded, `missingDropped` overflow) instead of claiming playback; pool
+and voice exhaustion publish as `exhausted`/`droppedOneShots` counters.
+The slices ride every schema-5 boundary as `presentation.effects` /
+`presentation.audio` (null when no catalog is bound). Both presenters
+are pure consumers — they never write `driving`/`drivingEvents`.
+
+### Task-5 verification results
+
+| Check | Result |
+|---|---|
+| Focused PlayMode `RacePresentationPlayTests` | 8/8 — dedupe on repeated snapshots, correction replay, reconnect baseline, pause/exit loop stop, three-bus volume isolation, reduced-shake + occlusion fit, truthful missing-clip reporting, facts publishing |
+| `Verify.ps1 -Mode EditMode` | 662/664 passed — 1 pre-existing packaged-font fixture failure (`FoundationFontSetupTests.SetupRepairsFontReferencesAndPreservesAuthoredFallbacks`, gated on the deferred font-download fixtures), 1 pre-existing skip (`EveryCueHasWiredClipForBothLocales`, the intentionally open tutorial-voice gate) |
+| `Verify.ps1 -Mode PlayMode` | 268/270 — 2 documented environment-blocked impaired-LAN timeouts (unchanged signature) |
+| `Verify.ps1 -Mode WindowsVisualBenchmark` | dev player built clean (`result=Succeeded errors=0`, ~238 MB) |
+| Rendered dev player scenario (`Tools/RacePresentationShots.py`) | 10/10 checks — live `presentation.audio`/`presentation.effects` asserted at every beat (music-race/results transitions, engine/skid/boost loops, pause/resume, exit teardown, zero missing cues/effects); 5 screenshots under `Logs/t5-shots/run/screenshots/`, 0% missing-shader magenta; per-beat facts in `Logs/t5-shots/evidence/presentation-beats.json` |
+| Audio pack decode | all 14 WAVs decode as valid 22050 Hz mono PCM via Python `wave` |
+
+Pending: human listening review of the bundled cues/music, tutorial
+voice clips still gated on owner Azure Speech credentials (the missing-
+audio gate stays open by design — `Audio/Tutorial/README.md`), manual
+image review on a display, A7 Lite device qualification.

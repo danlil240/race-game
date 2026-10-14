@@ -422,6 +422,7 @@ MonoBehaviour:
   - {fileID: 11400000, guid: 392bb32a8d524cd5905a527fd50ad39b, type: 2}
   - {fileID: 11400000, guid: aab9648ed52d47cab50e8396838bf2c6, type: 2}
   tutorial: {fileID: 11400000, guid: e123e5457263c71488e91e8596dc34d2, type: 2}
+  presentationCatalog: {fileID: 11400000, guid: f9473ab8d0e67d94f9c4e64845a90309, type: 2}
   coursePrefab: {fileID: 4656068473831479409, guid: 27d614269b044ec4f8407710870a80be, type: 3}
   contentVersion: driving-0.1
   simulationBackend: 0

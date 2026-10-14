@@ -25,6 +25,11 @@ namespace FamilyRacing
         [SerializeField] private TrackDefinitionAsset track;
         [SerializeField] private EventDefinitionAsset[] events;
         [SerializeField] private TutorialDefinitionAsset tutorial;
+        // M4 Task 5: the authored cue/effect catalog the race effects and
+        // audio presenters consume. Optional like tutorial: absent means
+        // the presenters publish catalogId "none" and play nothing —
+        // never a silent fallback onto unauthored assets.
+        [SerializeField] private RacePresentationCatalogAsset presentationCatalog;
         [SerializeField] private GameObject coursePrefab;
         [SerializeField] private string contentVersion = "driving-0.1";
         // Developer-facing race-level backend selection, bound to this
@@ -165,6 +170,10 @@ namespace FamilyRacing
         // tutorial.start simply reports contentUnavailable.
         public Core.Tutorial.TutorialDefinition Tutorial { get; private set; }
         public TutorialDefinitionAsset TutorialAsset { get { return tutorial; } }
+        public RacePresentationCatalogAsset PresentationCatalog
+        {
+            get { return presentationCatalog; }
+        }
         public DrivingCameraState CameraFacts { get { return cameraFacts; } }
         public List<RacerPresentationState> RacerFacts
         {

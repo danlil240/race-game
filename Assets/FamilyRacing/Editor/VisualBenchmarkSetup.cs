@@ -64,6 +64,10 @@ namespace FamilyRacing.EditorTools
             // animals, palettes) under Art/VisualBenchmark — the same
             // create-if-missing rule as the course art.
             RacerVisualAuthoring.Ensure();
+            // M4 Task 5: the race presentation catalog — effect prefabs
+            // under Art/VisualBenchmark/Effects plus the generated WAV
+            // bindings under Audio/VisualBenchmark.
+            RacePresentationAuthoring.Ensure();
             var definition = EnsureDefinition();
             string error;
             if (!definition.Validate(out error))
@@ -206,6 +210,15 @@ namespace FamilyRacing.EditorTools
                     .LoadAssetAtPath<CharacterDefinitionAsset>(
                         RacerVisualAuthoring.CharacterAssetPath(
                             RacerVisualAuthoring.CharacterIds[i]));
+                dirty = true;
+            }
+            // Task 5: the race presentation catalog the scene's effects/
+            // audio presenters consume.
+            if (asset.presentationCatalog == null)
+            {
+                asset.presentationCatalog = AssetDatabase
+                    .LoadAssetAtPath<RacePresentationCatalogAsset>(
+                        RacePresentationAuthoring.CatalogPath);
                 dirty = true;
             }
             if (dirty) EditorUtility.SetDirty(asset);
@@ -459,6 +472,8 @@ namespace FamilyRacing.EditorTools
             Assign(serialized, "coursePrefab",
                 definition.courseVisualPrefab);
             Assign(serialized, "tutorial", content.tutorial);
+            Assign(serialized, "presentationCatalog",
+                definition.presentationCatalog);
             AssignArray(serialized, "vehicles",
                 content.car, content.moto);
             AssignArray(serialized, "characters", definition.characters);
@@ -513,6 +528,8 @@ namespace FamilyRacing.EditorTools
                 dirty |= Assign(serialized, "coursePrefab",
                     definition.courseVisualPrefab);
                 dirty |= Assign(serialized, "tutorial", content.tutorial);
+                dirty |= Assign(serialized, "presentationCatalog",
+                    definition.presentationCatalog);
                 dirty |= EnsureArrayContains(serialized, "vehicles",
                     content.car, content.moto);
                 dirty |= EnsureArrayContains(serialized, "characters",

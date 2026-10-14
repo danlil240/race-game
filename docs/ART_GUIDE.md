@@ -165,9 +165,17 @@ trilight stands as the documented ambient.
 
 ## Effects restraint
 
-No particles, trails or animated materials in this treatment — Task 5
-owns effects/audio. The benchmark course proves readability on static
-dressing alone.
+The course treatment itself carries no particles, trails or animated
+materials — readability is proven on static dressing alone. Task 5 adds
+a catalog-driven presentation layer on top (`race-presentation-01`):
+flat-colored quad bursts and emitters in the same palette language —
+drift dust in deck sand, landing/wall puffs in whitewash, boost flare
+in warm orange, checkpoint sparkle and the finish burst in the
+mandatory-route sun-yellow accent family. Effects are presentation-only
+decoration (pooled, bounded, despawned quads) — they carry zero
+colliders, mutate no simulation state, and gameplay readability never
+depends on them: audio cues and camera feedback carry the required
+signal.
 
 ## Performance budget (tablet-first)
 
