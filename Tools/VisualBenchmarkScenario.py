@@ -641,6 +641,19 @@ class VBDriver(LanDriver):
     # consecutive pumps before the aim is treated as a new anchoring.
     PROJECTION_WINDOW = 45.0
 
+    # The 30-minute perf segment drives long enough that the stock
+    # resend/moved cadence burns tens of thousands of input.set
+    # identities — every command, rejections included, permanently
+    # consumes one of FoundationService.IdentityCapacity = 10000
+    # results, after which everything is rejected commandCapacity
+    # (qual-2 evidence). The benchmark driver therefore opts into the
+    # shared minimum-send-gap pacing (~3 sends/s, ~7,000 identities
+    # over a full run, hold_ticks raised to outlive the resend gap).
+    # The stock LanDriver stays unthrottled: throttling its short
+    # races measurably beaches the follower (post-change live pass
+    # needed >LAN_MAX_RECOVERIES recoveries in one race).
+    MIN_SEND_TICKS = 10
+
     def __init__(self, peer, report, remote=False):
         self._report = report
         self._tripped = False

@@ -412,12 +412,14 @@ forwarded loopback socket and needs no scenario changes.
   every endpoint the camera least covered for the race's class so the
   four class×camera cells fill evenly; per-cycle results settle through
   the once-only ledger and health is sampled against the 256-record
-  outgoing bound. The route follower also paces its `input.set` resends
-  (one hold per ~10 sim ticks, ~3/s): every command — `input.set`
-  included, rejections included — permanently consumes one of the
-  10,000 result identities in `FoundationService.IdentityCapacity`, and
-  an unthrottled driver would exhaust a long session's store
-  mid-benchmark (rejected `commandCapacity` from then on).
+  outgoing bound. The benchmark's `VBDriver` route follower also paces
+  its `input.set` resends (`MIN_SEND_TICKS = 10`, ~3/s — an opt-in the
+  shared `LanDriver` leaves off, since its short races cannot reach the
+  ceiling): every command — `input.set` included, rejections included —
+  permanently consumes one of the 10,000 result identities in
+  `FoundationService.IdentityCapacity`, and an unthrottled driver would
+  exhaust a long session's store mid-benchmark (rejected
+  `commandCapacity` from then on).
 
 ### The verdict (`result.json`)
 
@@ -454,6 +456,19 @@ collected`, nonzero racing samples) and hashed; its racing seconds are
 recomputed from the segment table, never trusted from the summary
 field. Attach mode accepts `--perf-report-dir`; absent reports are
 recorded `pendingPlayerQuit` — a named gap, never a fabrication.
+
+**Recorder bounds** (`RenderPerformanceCapture`,
+`RenderPerformanceState.cs`): `MaxSamples = 300,000` frame-interval
+samples — ~83 min of rendered frames at 60 fps, ~2.4 MB of retained
+doubles — sized to out-cover the mandated capture, which needs ≥31 min
+at 60 fps (the 30-minute sustained segment plus warm-up, lifecycle and
+results frames ≈ 45–50 min total). The previous 120,000 bound held only
+~33 min and truncated a real `--minutes 30` run mid-capture
+(`sampleLimitExceeded`, `droppedFrames` counted). Overflow is never
+silent: it flips `captureValid: false` with `captureInvalidReason:
+sampleLimitExceeded`, which fails `check_perf_reports` on the quit
+report and `check_rendered_samples` on the live stream. `MaxSegments =
+1024` is the second bound (a full qualification uses ~100).
 
 ### Honesty labels and exclusions
 

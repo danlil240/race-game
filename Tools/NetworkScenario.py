@@ -389,14 +389,16 @@ class LanDriver:
     RESEND_TICKS = 3    # boundary ticks; always resend before lease-out
     CORRECTION = 0.08   # resend earlier when steering moved this far
     # Command identities are finite (FoundationService.IdentityCapacity
-    # = 10000, one per result — rejections included): a thirty-minute
-    # driven benchmark at the old cadence burns tens of thousands of
-    # input.set identities and every subsequent command is rejected
-    # commandCapacity. The follower therefore enforces a minimum
-    # sim-tick gap between sends and holds each lease long enough to
-    # cover it — steering corrections land within ~1/3 s, the same
-    # order as a human's reaction on a laggy link.
-    MIN_SEND_TICKS = 10
+    # = 10000, one per result — rejections included), so a long-session
+    # driver can opt into a minimum sim-tick gap between sends plus a
+    # hold long enough to cover it — steering corrections land within
+    # ~1/3 s, the same order as a human's reaction on a laggy link.
+    # The stock follower keeps the proven resend/moved cadence (0 = no
+    # extra pacing): its races are far too short to reach the identity
+    # ceiling, so a slower rate buys nothing and only quantizes the
+    # steering the follower was tuned for. Only the benchmark's
+    # VBDriver raises this floor.
+    MIN_SEND_TICKS = 0
 
     def __init__(self, peer, remote=False):
         self.peer = peer
