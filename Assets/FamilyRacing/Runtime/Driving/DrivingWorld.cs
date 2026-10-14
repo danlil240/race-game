@@ -83,6 +83,10 @@ namespace FamilyRacing
             new List<RacerPresentationState>();
         private RacerPresentationState soloFact;
         private string soloCosmeticsKey = "";
+        // The session whose finish edge already fired the celebration —
+        // a held flag never replays it, a new race (new session object)
+        // fires again. Cleared when the session goes away.
+        private DrivingSessionState soloFinishedSession;
         private Camera mainCamera;
         private Vector3 savedCameraPosition;
         private Quaternion savedCameraRotation;
@@ -311,6 +315,16 @@ namespace FamilyRacing
                 ApplyVehicleVisual(session.vehicleId, motor,
                     session.input != null ? session.input.steering : 0f,
                     visualAlpha, state);
+                // Finish edge: same celebration contract as the LAN
+                // path — once per race session, never replayed by a
+                // held flag or a view rebuild mid-race.
+                if (session.finished
+                    && !ReferenceEquals(soloFinishedSession, session)
+                    && presentation != null)
+                {
+                    soloFinishedSession = session;
+                    presentation.NotifyFinished();
+                }
                 if (presentationCameraBound)
                     // The bound presentation camera publishes its own
                     // facts; the fallback reports nothing rather than a
@@ -322,6 +336,7 @@ namespace FamilyRacing
             else
             {
                 soloFact = null;
+                soloFinishedSession = null;
                 RebuildFactBuffer();
                 if (overviewActive)
                 {

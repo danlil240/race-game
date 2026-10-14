@@ -505,6 +505,96 @@ namespace FamilyRacing.Tests
             }
         }
 
+        // A cosmetic identity correction mid-race (roster merge, profile
+        // fixup) must rebind the bound rig IN PLACE — the same rig
+        // object swaps animal + color and the facts publish the new
+        // identity; the stale slot-mapped animal must never persist.
+        [UnityTest]
+        public IEnumerator CharacterSwapRebindsInPlace()
+        {
+            var racers = new[]
+            {
+                Racer("p0", 0, "car-01", Motor(0f, 0f, 8f, 0f), 0f)
+            };
+            var participants = new List<ParticipantState>
+            {
+                Participant("p0", 0, "fox", 0)
+            };
+            world.ApplyRaceFrame(Race(racers), 1f, null, participants);
+            yield return null;
+            var pres = world.RacerPresentation("p0");
+            Assert.That(pres, Is.Not.Null);
+            Assert.That(pres.BoundCharacterId, Is.EqualTo("fox"),
+                "setup: fox bound");
+            var rig = pres.Rig;
+            Assert.That(rig, Is.Not.Null);
+
+            participants[0].avatar = "panda";
+            participants[0].colorIndex = 2;
+            world.ApplyRaceFrame(Race(racers), 1f, null, participants);
+            yield return null;
+            Assert.That(pres.Rig, Is.SameAs(rig),
+                "a cosmetic swap rebinds the existing rig — never a "
+                + "second stacked one");
+            Assert.That(pres.BoundCharacterId, Is.EqualTo("panda"),
+                "the bound character must follow the corrected roster "
+                + "identity");
+            Assert.That(pres.BoundColorIndex, Is.EqualTo(2));
+            var fact = world.RacerFacts.Find(f => f.participantId == "p0");
+            Assert.That(fact.characterId, Is.EqualTo("panda"),
+                "facts publish the swapped identity");
+            Assert.That(fact.colorIndex, Is.EqualTo(2));
+        }
+
+        // The solo finish edge must fire the same celebration the LAN
+        // path gets — exactly once per race: a held `finished` flag is
+        // not a replay trigger, and a new race's finish fires again.
+        [UnityTest]
+        public IEnumerator SoloFinishFiresCelebrationExactlyOnce()
+        {
+            var state = new FoundationState
+            {
+                driving = new DrivingSessionState
+                {
+                    vehicleId = "car-01",
+                    phase = "running",
+                    motor = Motor(0f, 0f, 8f, 0f),
+                    finished = true
+                }
+            };
+            world.ApplyFrame(state);
+            yield return null;
+            var rig = world.SoloPresentation.Rig;
+            Assert.That(rig, Is.Not.Null,
+                "the solo authored path carries a rig");
+            Assert.That(rig.CelebrationActive, Is.True,
+                "the solo finish edge must fire the celebration");
+
+            // Held flag: once the celebration expires it must not
+            // restart — the edge fired once, not every frame.
+            var deadline = Time.time + 2.2f;
+            while (Time.time < deadline)
+            {
+                world.ApplyFrame(state);
+                yield return null;
+            }
+            Assert.That(rig.CelebrationActive, Is.False,
+                "a held finished flag must not replay the celebration");
+
+            // A new race (new session object) finishing fires again.
+            state.driving = new DrivingSessionState
+            {
+                vehicleId = "car-01",
+                phase = "running",
+                motor = Motor(0f, 0f, 8f, 0f),
+                finished = true
+            };
+            world.ApplyFrame(state);
+            yield return null;
+            Assert.That(rig.CelebrationActive, Is.True,
+                "a new race's finish must fire a fresh celebration");
+        }
+
         // Rematch + snapshot churn: repeated race start/end cycles and
         // repeated identical frames must never stack rigs, materials or
         // spawned parts — the world reuses the same views.

@@ -103,10 +103,12 @@ namespace FamilyRacing
                 BoundCharacterId = rig.BoundCharacterId;
                 BoundColorIndex = rig.BoundColorIndex;
             }
-            else if (rig == null)
+            else if (boundVisual == null)
             {
-                // Primitive silhouette: cosmetics are recorded for the
-                // presentation facts even though nothing authored shows.
+                // Primitive silhouette (no visual bound — including a
+                // cleared rig after fallback): cosmetics are recorded
+                // for the presentation facts even though nothing
+                // authored shows.
                 BoundColorIndex = colorIndex;
             }
         }
@@ -386,6 +388,10 @@ namespace FamilyRacing
                 rig.SetBodyOriginHeight(
                     physical ? visual.bodyOriginHeight : 0f);
                 rig.Bind(visual, pendingCharacter, pendingColorIndex);
+                // Remember the bound visual so a later SetRacer can
+                // rebind in place — without it the rebind path is dead
+                // and the rig keeps its first identity forever.
+                boundVisual = visual;
                 wheelSpaceOrigin = rig.VehicleRoot != null
                     ? rig.VehicleRoot.localPosition : Vector3.zero;
                 BoundVisualId = visual.visualId;
@@ -416,6 +422,10 @@ namespace FamilyRacing
                     + asset.vehicleId + "' has no authored visual — "
                     + "primitive fallback silhouette.");
             if (rig != null) rig.Clear();
+            // The fallback also clears the remembered visual: a later
+            // SetRacer must not resurrect an authored visual onto the
+            // primitive silhouette.
+            boundVisual = null;
             BoundVisualId = RacerVisualRig.PrimitiveFallbackVisualId;
             BoundCharacterId = RacerVisualRig.NoCharacterId;
             BoundColorIndex = pendingColorIndex;

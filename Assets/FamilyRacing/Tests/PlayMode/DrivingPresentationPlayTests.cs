@@ -932,7 +932,9 @@ namespace FamilyRacing.Tests
             applyVisual.Invoke(world, new object[]
                 { "ghost-01", Snapshot().driving.motor, 0f, 1f,
                     Snapshot() });
-            Assert.That(presentation.ShownKey, Is.EqualTo("|ghost-01"),
+            // ShownKey is silhouette|vehicleId|visualId — the generic
+            // fallback has no silhouette and no authored visual ("-").
+            Assert.That(presentation.ShownKey, Is.EqualTo("|ghost-01|-"),
                 "an unknown vehicle id must fall back to the generic cube");
             Assert.That(
                 world.transform.Find("DrivingVehicle/LeanPivot/Cabin"),

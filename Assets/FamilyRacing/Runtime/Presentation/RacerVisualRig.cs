@@ -472,6 +472,13 @@ namespace FamilyRacing
             celebrateT = CelebrationSeconds;
         }
 
+        // True while the finish celebration is playing — the
+        // observability seam tests/facts read; purely cosmetic.
+        public bool CelebrationActive
+        {
+            get { return celebrateT > 0f; }
+        }
+
         // Neutral pose: celebrations and squash end, arms re-aim at the
         // grips on the next ApplyPose. Visual transform identity stays
         // intact — this resets motion state, never the binding.
