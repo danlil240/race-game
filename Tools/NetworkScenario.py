@@ -388,6 +388,15 @@ class LanDriver:
     HOLD_TICKS = 8
     RESEND_TICKS = 3    # boundary ticks; always resend before lease-out
     CORRECTION = 0.08   # resend earlier when steering moved this far
+    # Command identities are finite (FoundationService.IdentityCapacity
+    # = 10000, one per result — rejections included): a thirty-minute
+    # driven benchmark at the old cadence burns tens of thousands of
+    # input.set identities and every subsequent command is rejected
+    # commandCapacity. The follower therefore enforces a minimum
+    # sim-tick gap between sends and holds each lease long enough to
+    # cover it — steering corrections land within ~1/3 s, the same
+    # order as a human's reaction on a laggy link.
+    MIN_SEND_TICKS = 10
 
     def __init__(self, peer, remote=False):
         self.peer = peer
@@ -400,8 +409,10 @@ class LanDriver:
         # hold so no single stale sample can spin the car.
         self.lookahead = LAN_LOOKAHEAD * 1.4 if remote else LAN_LOOKAHEAD
         self.gain = LAN_STEER_GAIN * (0.43 if remote else 1.0)
-        self.hold_ticks = 4 if remote else self.HOLD_TICKS
+        self.hold_ticks = max(4 if remote else self.HOLD_TICKS,
+                              self.MIN_SEND_TICKS + 4)
         self.resend_ticks = 2 if remote else self.RESEND_TICKS
+        self.min_send_ticks = self.MIN_SEND_TICKS
         # Pose extrapolation from observed heading+speed compensates the
         # same wire age: aim at where the car IS now, not where the
         # snapshot left it — purely the replicated motor's own fields.
@@ -630,7 +641,7 @@ class LanDriver:
             tick = self.peer.last_state_tick or 0
             stale = (self.held is None
                      or tick >= self.held_at + self.resend_ticks)
-            if stale:
+            if stale and tick >= self.held_at + self.min_send_ticks:
                 self._send(steering)
                 self.held = steering
                 self.held_boost = boost
@@ -686,7 +697,8 @@ class LanDriver:
         stale = (self.held is None or self.held_boost != boost
                  or tick >= self.held_at + self.resend_ticks)
         moved = self.held is None or abs(steering - self.held) >= self.CORRECTION
-        if stale or moved:
+        if (stale or moved) \
+                and tick >= self.held_at + self.min_send_ticks:
             self._send(steering, boost=boost)
             self.held = steering
             self.held_boost = boost
@@ -819,6 +831,16 @@ def drive_race(host, clients, class_id, checks):
                  {"eventId": event_id, "classId": class_id})
     host.applied("lan.vehicle", {"vehicleId": vehicle_id})
     for index, peer in enumerate(clients):
+        # The client's mirrored descriptor lags the host's configure by
+        # a session broadcast; a vehicle pick processed while the lobby
+        # still shows the previous event's class is rejected
+        # invalidVehicle — exactly what a human sees too. Wait for the
+        # client to observe the new class before it selects.
+        wait_state(peer,
+                   lambda state, cid=class_id:
+                       (((state.get("network") or {}).get("descriptor")
+                         or {}).get("classId") == cid),
+                   20, "client-%d lobby class" % index)
         accepted, _ = peer.command("lan.vehicle", {"vehicleId": vehicle_id})
         assert accepted["status"] == "accepted"
         assert wait_terminal(peer, accepted["commandId"],

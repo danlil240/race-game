@@ -142,6 +142,27 @@ python Tools\NetworkScenario.py --launch <player.exe> [--players 2-4] [--no-faul
 # time for --minutes, sampling per-device health and boundary cadence;
 # the once-only result/delivery ledger is checked across every rematch:
 python Tools\NetworkSoak.py --connections <host-run>\connection.json <client-run>\connection.json --minutes 30 --evidence <new-dir> [--host-address <ip>]
+# M4 visual-benchmark qualification on the Sunny Island course
+# (schema 5). The mandated interface attaches to 2-4 independently
+# launched benchmark players — the first connection is driven as the
+# host; Android descriptors are per-device ADB-forwarded loopback
+# endpoints. Empty seats fill through normal AI fill to four racers.
+# The run is three labeled segments: solo tutorial/locale/volume phase
+# per endpoint (before any hosting), the LAN lifecycle (both classes,
+# both cameras, drift/boost/jump/recovery, shared pause, drop +
+# reconnect path, avatar/color continuity, immutable results, labeled
+# landmark screenshots, bounded pools, quiet teardown), then a separate
+# performance segment accumulating --minutes of observed active racing
+# per endpoint. The verdict demands the fixed floors (>=1,800 s racing
+# per endpoint after the 60 s warm-up; every class/camera combination
+# >=300 s) plus verified streams, rendered-frame evidence, a landed
+# screenshot set, and honest loopback/AI-fill labels — a short
+# --minutes run produces a shorter measurement and an honest failure.
+python Tools\VisualBenchmarkScenario.py --connections <host-run>\connection.json <client-run>\connection.json [more descriptors] --evidence <new-dir> --minutes 30 [--host-address <ip>] [--allow-loopback] [--perf-report-dir <dir>]
+# Dev convenience: self-launch local benchmark players (adds the
+# labeled process-kill fault-injection segment, collects the quit-time
+# perf reports under evidence, optionally forces --render-profile):
+python Tools\VisualBenchmarkScenario.py --launch <player.exe> [--players 2-4] [--no-fault-injection] [--render-profile pc|tablet] --evidence <new-dir> --minutes 30
 # Physical-backend qualification: attach to a launched
 # Builds\Windows-Physics\FamilyRacing.exe validation run. Drives the
 # authored physics-01 event on both physical vehicles through the same

@@ -149,7 +149,11 @@ namespace FamilyRacing.Core.Foundation
     // instead of silently dropping evidence.
     public sealed class RenderPerformanceCapture
     {
-        public const int MaxSamples = 120000;
+        // ~83 min of rendered frames at 60 fps — the mandated visual
+        // benchmark runs ~45-50 min of capture (lifecycle plus the
+        // 30-minute sustained segment), so the store must comfortably
+        // out-cover it while staying memory-bounded (~2.5 MB of doubles).
+        public const int MaxSamples = 300000;
         public const int MaxSegments = 1024;
         public const double WarmupSeconds = 60.0;
         public const double WindowSeconds = 300.0;

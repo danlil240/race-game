@@ -341,3 +341,147 @@ Pending: human listening review of the bundled cues/music, tutorial
 voice clips still gated on owner Azure Speech credentials (the missing-
 audio gate stays open by design — `Audio/Tutorial/README.md`), manual
 image review on a display, A7 Lite device qualification.
+
+## Task 6 — qualification scenario through the command path (2026-10-15)
+
+`Tools/VisualBenchmarkScenario.py` proves the benchmark end-to-end
+through the existing command and validation surfaces — no new gameplay
+bypass, no teleport, no sleeps-as-proof. It composes the shared
+protocol client (`AgentScenario.Client`), the LAN lifecycle and driver
+helpers (`NetworkScenario`), the sustained-cycle/health machinery
+(`NetworkSoak`), the landmark-navigation pattern (`SunnyIslandShots`)
+and the schema-5 presentation assertions (`RacePresentationShots`).
+
+### Commands
+
+```powershell
+# Mandated interface — 2-4 independently launched dev players.
+# The FIRST descriptor is the host; Android descriptors are
+# per-device ADB-forwarded loopback endpoints:
+python Tools\VisualBenchmarkScenario.py --connections <run1>\connection.json <run2>\connection.json --evidence <new-dir> --minutes 30
+
+# Same-machine players: pass --host-address 127.0.0.1 (or
+# --allow-loopback for the loopback direct-join fallback); both are
+# labeled loopback evidence, never LAN acceptance.
+python Tools\VisualBenchmarkScenario.py --connections <run1>\connection.json <run2>\connection.json --evidence <new-dir> --minutes 30 --host-address 127.0.0.1
+
+# Dev convenience: the scenario launches and owns the players (adds the
+# labeled process-kill fault injection + quit-time perf reports):
+python Tools\VisualBenchmarkScenario.py --launch Builds\Windows-VisualBenchmark\FamilyRacing.exe --players 2 --evidence <new-dir> --minutes 30
+```
+
+Attach mode needs each player launched with a validation dir:
+
+```powershell
+& "Builds\Windows-VisualBenchmark\FamilyRacing.exe" `
+  --validation-dir <run-N> --perf-report-dir <run-N>\perf
+```
+
+For a device run each player is a separate process (Windows) or
+`adb forward tcp:<port> tcp:<port>` per device (Android development
+builds); the ADB descriptor is the same `connection.json` shape over a
+forwarded loopback socket and needs no scenario changes.
+
+### What a run proves (all through real commands)
+
+- Segment A, solo tutorial phase per endpoint **before any hosting**:
+  profile create, `ui.language` he+en boundaries, all three volume
+  controls through `settings.update`/`settings.save`, `tutorial.start`,
+  `tutorial.replay` (voice replay re-issues the cue), honest clip
+  identity reporting, then `tutorial.exit`.
+- Segment B, LAN lifecycle: discovery/direct join, AI fill to four
+  racers, car and motorcycle races through rematch, both cameras via
+  `camera.toggle`, held drift, boost, the landmark ramp, deduplicated
+  recover, client-request + host-toggle shared pause, a mid-race drop
+  with host-observed `controlSource: ai` takeover plus the reconnect
+  path (attach mode honestly records the `noSession` rejection; launch
+  mode kills and relaunches a process and exercises the credentialed
+  rejoin), avatar/color continuity across the rematch, immutable
+  results (duplicate `lan.results.request` serves the identical
+  result), bounded pools, and quiet presentation facts after teardown.
+- Labeled landmark screenshots (`vb-<peer>-<landmark>`) issued when a
+  peer's own racer enters the authored landmark radius while four
+  racers are presented; request→completion is correlated by
+  `captureId`, tick, race id, vehicle and applied camera. A `failed` or
+  `timedOut` record, a missing/empty PNG, or a peer with no captured
+  shot is a verdict failure — never a successful capture. Landmarks
+  never approached are recorded `missed` (honest coverage gaps).
+- Segment C, the **separate** performance segment: a fresh session,
+  then real-time race cycles until every endpoint's stream-measured
+  active racing reaches `--minutes` (default 30). Each cycle assigns
+  every endpoint the camera least covered for the race's class so the
+  four class×camera cells fill evenly; per-cycle results settle through
+  the once-only ledger and health is sampled against the 256-record
+  outgoing bound. The route follower also paces its `input.set` resends
+  (one hold per ~10 sim ticks, ~3/s): every command — `input.set`
+  included, rejections included — permanently consumes one of the
+  10,000 result identities in `FoundationService.IdentityCapacity`, and
+  an unthrottled driver would exhaust a long session's store
+  mid-benchmark (rejected `commandCapacity` from then on).
+
+### The verdict (`result.json`)
+
+`evaluate_verdict` fails the run when ANY dimension is missing —
+verified complete streams per endpoint (contiguous sequencing, legal
+transitions, `captureComplete`), identical build/content/protocol/
+schema across endpoints, rendered-player evidence (`renderingAvailable`
+plus nonzero `racingSamples` — headless captures can never pass), the
+shot set, the honesty labels, and the fixed performance floors:
+**≥1,800 observed active-racing seconds per endpoint after the 60 s
+warm-up and ≥300 s in every class/camera combination.** Warm-up,
+paused, lobby, countdown and results time all land in the reported
+`excluded` table — slow transitions can never hide in a good aggregate.
+A shorter `--minutes` only shortens the drive loop; the floors do not
+move, so a bring-up run reports an honest `failed` verdict.
+
+### Evidence layout
+
+```
+<evidence>/result.json            verdict, failures, checks, labels,
+                                  perf totals + excluded accounting,
+                                  shot manifest, incidents, hashes
+<evidence>/<role>-evidence/       attach.json or launch.json,
+                                  process.json, commands/observed logs
+<evidence>/<role>-run/            connection.json, state.ndjson,
+                                  screenshots/, capture-status.json
+<evidence>/<role>-perf/           memory.ndjson (launch mode),
+                                  perf-report-<runId>.json at quit
+```
+
+`perf-report-<runId>.json` is validated on collection (reportVersion 1
+wrapper, `captureValid`, `renderingAvailable`, `evidenceStatus:
+collected`, nonzero racing samples) and hashed; its racing seconds are
+recomputed from the segment table, never trusted from the summary
+field. Attach mode accepts `--perf-report-dir`; absent reports are
+recorded `pendingPlayerQuit` — a named gap, never a fabrication.
+
+### Honesty labels and exclusions
+
+`labels` records `transport` (`loopback`/`mixed`/`lan` — ADB-forwarded
+descriptors honestly report loopback), `loopbackEndpoints`,
+`humanRacers`, `aiFilledSeats` and the `aiFillNoted`/`loopbackNoted`
+flags; the verdict recomputes them from the descriptors and fails on
+any mismatch. `notVerified` always names: cross-device LAN
+reachability on loopback runs, physical input/UI parity, human visual/
+Hebrew/audio review, and the ordinary-build arm.
+
+**Ordinary builds cannot be attached** — validation endpoints are
+compiled out (proven in the Task-1 absence check). The ordinary arm is
+manual: launch the ordinary player with `--perf-report-dir <dir>` and
+`--render-profile tablet` (or platform default), drive the same course
+by hand for the segment, then read `perf-report-<runId>.json` plus
+`Tools\PerfSampler.py` process memory. The report carries the same
+`RenderPerformanceSummary` fields — that is the only measurement an
+ordinary build can produce, and this scenario's verdict can never
+consume it.
+
+### Task-6 verification results
+
+| Check | Result |
+|---|---|
+| `python -m unittest discover -s Tools -p 'Test*.py'` | 245/245 — includes `TestVisualBenchmarkScenario` (18): the six required negative validators (`RejectsMissingRenderedSamples`, `RejectsIncompleteStream`, `DoesNotCountPausedTime`, `RequiresBothClassesAndCameras`, `LabelsLoopbackAndAiFillHonestly`, `RejectsMismatchedBuildManifest`) each corrupt one evidence dimension and force a failing verdict; invalidated captures and the quit-report entry shape are covered too; the valid fixture passes |
+| RED evidence | test module ran before implementation — `ModuleNotFoundError: No module named 'VisualBenchmarkScenario'` |
+| `--minutes 0.5` bring-up (`Logs\vb-bringup-10`) | mechanically complete — verdict `failed` only on the fixed floors, as a short run must |
+| `--minutes 30` qualification (`Logs\vb-qual-5`, `Logs\vb-qual-6`) | **passed** — 1,808–1,836 stream-measured racing s per endpoint, all four class×camera cells ≥374 s, both quit-time perf reports `validated` (`captureValid: true`, 123k/113k racing samples, p95 16.7 ms, zero stalls), 12/12 landmark shots, process-kill → AI takeover → credentialed rejoin labeled (`client-0-gen1` `faultCasualty`), immutable results + once-only ledger across 21 cycles, transport `loopback` + `aiFilledSeats: 2` labeled. Bring-up iterations surfaced and fixed real defects: a client-descriptor `lan.vehicle` race (`invalidVehicle`), `input.set` identity-budget exhaustion (`commandCapacity` at `IdentityCapacity=10000`), the recorder's own `MaxSamples` bound (120k→300k — ~33 min at 60 fps was shorter than the mandated capture), and a quit-time crash on invalid-report collection. |
+
+

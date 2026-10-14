@@ -269,6 +269,45 @@ proven by PlayMode on both ends:
   `docs/tasks/vehicle-physics-report.md` (the backend stays **opt-in** —
   arcade remains the shipped default).
 
+## Verified (M4 visual-benchmark qualification tooling, Task 6)
+
+`Tools\VisualBenchmarkScenario.py` is the Sunny Island benchmark
+qualification path over the schema-5 stream — see
+`docs/VISUAL_BENCHMARK_RUNBOOK.md` §Task 6 for the full contract,
+evidence layout and verdict rules. In brief: the mandated
+`--connections` form attaches to 2-4 independently launched benchmark
+players (first descriptor is the host; ADB-forwarded Android
+descriptors accepted), runs a solo tutorial/locale/volume phase per
+endpoint before any hosting, drives the LAN lifecycle on both classes
+and cameras (drift/boost/jump/recovery, shared pause, drop + reconnect
+path, avatar/color continuity, immutable results, bounded pools, quiet
+teardown) with labeled landmark screenshots, then a **separate**
+performance segment measuring observed active racing per endpoint. The
+verdict demands verified complete streams, rendered-frame evidence,
+the landed shot set, honest loopback/AI-fill labels, and the fixed
+floors (≥1,800 s racing after the 60 s warm-up; ≥300 s per class×camera
+combination) — every excluded-time bucket is reported and a short
+run fails honestly. `Tools\TestVisualBenchmarkScenario.py` locks the
+six required negative validators plus the accumulator's warm-up/pause/
+combo accounting, the invalidated-capture failures and the
+quit-report entry shape (18 tests, inside the 245-test Tools suite).
+
+**Proven live (2026-10-14, `Logs\vb-qual-5\` + `Logs\vb-qual-6\`):**
+the mandated `--minutes 30` run passed against fresh
+`Builds\Windows-VisualBenchmark\` development players — ~1,836
+stream-measured racing s per endpoint with all four class×camera
+cells ≥374 s, both quit-time perf reports validated
+(`captureValid: true`, 123k/113k racing samples, p95 16.7 ms), 12/12
+landmark shots captured, fault-injection kill → AI takeover →
+credentialed rejoin exercised and labeled, immutable results and the
+once-only delivery ledger settled across 21 rematch cycles. The run
+is desktop automation evidence only — loopback transport and two
+AI-filled seats are labeled, never claimed as device/four-human
+acceptance. It also surfaced and fixed one product bound
+(`RenderPerformanceCapture.MaxSamples` 120k→300k: the recorder's own
+store previously invalidated any capture longer than ~33 min at
+60 fps, shorter than the mandated benchmark).
+
 ## Known QA gaps (`notVerified` — do not read as passed)
 
 - Physical input/UI parity is covered by synthetic PlayMode callbacks only
@@ -317,9 +356,11 @@ proven by PlayMode on both ends:
   (`Tools\TestNetworkSoak.py`) but its 30-minute multi-device run is
   hardware-gated. On-device soak, ordinary-build frame performance
   (structurally unmeasurable by this harness — validation endpoints are
-  compiled out of ordinary builds, proven in the task-10 report),
-  render frame times, and the four-racer/tablet-host target remain
-  unmeasured.
+  compiled out of ordinary builds, proven in the task-10 report), the
+  four-racer/tablet-host target remain unmeasured. The M4
+  visual-benchmark 30-minute rendered qualification is **proven** on
+  Windows (`Logs\vb-qual-5\`/`Logs\vb-qual-6\`, loopback + AI fill
+  labeled); the A7 Lite device run remains hardware-gated.
 - Ordinary Windows LAN play is **not verified**: it can only be
   demonstrated by humans driving ordinary builds on two machines —
   validation sockets are compiled out of ordinary builds by design, so
