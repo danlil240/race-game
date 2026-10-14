@@ -452,9 +452,20 @@ move, so a bring-up run reports an honest `failed` verdict.
                                   process.json, commands/observed logs
 <evidence>/<role>-run/            connection.json, state.ndjson,
                                   screenshots/, capture-status.json
-<evidence>/<role>-perf/           memory.ndjson (launch mode),
+<evidence>/<role>-perf/           memory.ndjson (launch mode, gen 1),
                                   perf-report-<runId>.json at quit
+<evidence>/<role>-relaunchN-perf/ memory.ndjson for generation N —
+                                  every relaunch is a new measurement
+                                  target: own pid, process-start stamp,
+                                  interval file, sampler thread
 ```
+
+`report.perf.memoryGenerations` carries the per-generation accounting
+read back from those files (`okSamples`/`unavailableSamples`, pid,
+process-start stamp, alive flag). The verdict requires the live
+generation of every role to hold ≥1 valid sample — zero valid samples
+can never pass — while a dead generation honestly reads
+all-`unavailable`, which is itself the evidence the pid stayed dead.
 
 `perf-report-<runId>.json` is validated on collection (reportVersion 1
 wrapper, `captureValid`, `renderingAvailable`, `evidenceStatus:
@@ -555,19 +566,37 @@ reasoning and the open-gate/owner table live in
 Note: `Logs\vb-t7-opt`/`vb-t7-opt-2` (pre-fix) surfaced and pinned the
 snapshot-slice defect; `vb-t7-opt-3`/`-4` (`--no-fault-injection`)
 honestly failed at race-2 delivery settle — a permanently-departed
-participant's ledger row stays `pending` past the 60 s settle window
-(disclosed in the report as an open lifecycle-design question, not a
-perf defect).
+participant's ledger row stayed `pending` past the 60 s settle window.
+Resolved (M5 Task 1): an explicit `lan.leave` now settles that
+participant's outstanding rows as terminal `failed`/`undeliverable`,
+and rows for participants who left before publish are created
+`undeliverable`; a transient disconnect still leaves rows `pending`
+for credentialed redelivery. `settle_results` accepts `undeliverable`
+only for caller-named departed participants.
 
 ### Recorded tooling/product gaps for the device pass
 
-- `MemorySampler` is not re-bound after a fault-injection relaunch —
-  gen-2 process memory is unsampled and dead-PID samples read ~0 MB
-  `ok` instead of `unavailable` (recorded in the report; gate rows
-  stay `notVerified`).
+- ~~`MemorySampler` is not re-bound after a fault-injection relaunch~~
+  **Fixed (M5 Task 1):** `GenerationSamplers` gives every process
+  generation its own pid, process-start stamp, evidence interval and
+  sampler; relaunch creates the new sampler explicitly, a recycled pid
+  is rejected, dead generations keep recording `unavailable`, and the
+  verdict fails any live generation with zero valid samples
+  (`GenerationSamplersTests`).
 - Intermittent credentialed-rejoin `input.set` stall (~110–130 s,
-  burst-executed at race end) — product defect disclosed in the
-  report, needs its own investigation before device acceptance.
+  burst-executed at race end) — investigated in M5 Task 1: the stall
+  was harness-side observation starvation (peer drains gated on kernel
+  socket readability while the pump thread consumed the backlog into
+  the line queue, and non-EOF read/evidence-write failures were
+  swallowed silently), plus one real product contribution — a
+  rejoined participant's pending result offers waited a full
+  redelivery cycle because the cadence stamp belonged to the dead
+  connection. Both fixed; fire-and-forget driver sends are now
+  watchdogged against the documented 5 s command deadline so a
+  recurrence fails fast and attributable
+  (`RejoinedHumanInputAppliesWithinCommandDeadline`,
+  `LanDriver.pump` overdue-command assert). No recurrence on the
+  fixed harness (`Logs\ns-m5-task1`, 23 checks, pass).
 - Fixed this task: one-boundary stale `prediction` slice on
   `lan.leave` teardown — `FoundationService.Snapshot` now gates the
   slice on the record's own role/race facts
