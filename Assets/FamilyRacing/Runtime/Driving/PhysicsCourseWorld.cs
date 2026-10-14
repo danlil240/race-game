@@ -22,6 +22,19 @@ namespace FamilyRacing
         public const int VehicleLayer = 8;
         public const int VehicleLayerMask = 1 << VehicleLayer;
 
+        // Built-in "Ignore Raycast" layer, reused by the visual
+        // benchmark for camera-occluder colliders: invisible boxes the
+        // DrivingCamera's ~0 occlusion ray can pull in on. They are
+        // camera-only collision — never gameplay geometry — so the
+        // physical backend strips them from its collision-only clone.
+        // Layer 2 is already absent from DefaultRaycastLayers (motor
+        // probes, WheelRaycastMask), but the layer matrix is all-ones:
+        // without the strip below a cloned occluder would still make
+        // real contact with vehicle chassis and read as a wall hit.
+        public const int CameraOccluderLayer = 2;
+        public const int CameraOccluderLayerMask =
+            1 << CameraOccluderLayer;
+
         private Scene scene;
         private PhysicsScene physics;
         private bool disposed;
@@ -117,8 +130,15 @@ namespace FamilyRacing
             {
                 // Trigger volumes (checkpoint gates, zones) are invisible
                 // to physics queries anyway; removing them keeps the
-                // collision scene minimal and unambiguous.
-                if (collider.isTrigger) UnityEngine.Object.DestroyImmediate(collider);
+                // collision scene minimal and unambiguous. Camera-
+                // occluder boxes (Ignore Raycast layer) are non-trigger
+                // by contract so the camera ray sees them — but they are
+                // camera-only collision and must never reach the
+                // simulation, where a solid box on an all-ones layer
+                // matrix would block or tilt vehicle chassis.
+                if (collider.isTrigger
+                    || collider.gameObject.layer == CameraOccluderLayer)
+                    UnityEngine.Object.DestroyImmediate(collider);
             }
         }
 

@@ -41,9 +41,12 @@ namespace FamilyRacing.EditorTools
         // PresentationState.courseVisualId: the prefab's root name.
         public const string CourseVisualId = "sunny-island-benchmark-01";
         // Built-in "Ignore Raycast" layer: excluded from every driving
-        // and physics probe mask in this project, but still raycast-
-        // visible to the driving camera's occlusion pull-in.
-        public const int OccluderLayer = 2;
+        // and physics probe mask in this project, stripped from the
+        // physical backend's collision clone, but still raycast-visible
+        // to the driving camera's occlusion pull-in. Aliased to the
+        // runtime constant so both sides pin one value.
+        public const int OccluderLayer =
+            PhysicsCourseWorld.CameraOccluderLayer;
 
         private const string GrayboxCoursePath =
             "Assets/FamilyRacing/Generated/Driving/GrayboxCourse.prefab";

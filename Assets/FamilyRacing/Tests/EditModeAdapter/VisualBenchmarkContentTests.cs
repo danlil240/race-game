@@ -35,9 +35,10 @@ namespace FamilyRacing.Tests
         // that stays the gameplay authority. The only other colliders
         // allowed anywhere in the prefab are dedicated camera-occluder
         // boxes: non-trigger, renderer-free, on the built-in Ignore
-        // Raycast layer (2) that DefaultRaycastLayers excludes, so
-        // motor probes, wheel raycasts and the physical backend never
-        // see them while the driving camera's ~0 occlusion ray does.
+        // Raycast layer (2) that DefaultRaycastLayers excludes — so
+        // motor probes and wheel raycasts never see them, the physical
+        // backend's collision clone strips them by layer, and the
+        // driving camera's ~0 occlusion ray still pulls in on them.
         [Test]
         public void DressingPreservesGameplayGeometry()
         {
@@ -73,8 +74,8 @@ namespace FamilyRacing.Tests
             {
                 var baseline = ColliderSignatures(grayboxInst.transform);
                 Assert.That(baseline.Count, Is.EqualTo(16),
-                    "graybox-01 baseline: 11 solid colliders + 5 trigger "
-                    + "gates (the authored collision contract)");
+                    "graybox-01 baseline: 10 solid colliders + 6 "
+                    + "trigger gates (the authored collision contract)");
 
                 GameObject gameplay = null;
                 foreach (Transform child in sunnyInst.transform)
@@ -318,6 +319,12 @@ namespace FamilyRacing.Tests
                 Object.DestroyImmediate(sunnyInst);
             }
         }
+
+        // Physical-backend pin lives in PlayMode
+        // (VisualBenchmarkCoursePlayTests.
+        // CameraOccludersNeverEnterPhysicalBackend): PhysicsCourseWorld
+        // creates its collision scene via SceneManager.CreateScene,
+        // which the runtime API only permits during play mode.
 
         private static void AssertCameraRayHitsOccluder(
             Vector3 target, Vector3 ideal, Transform gameplay)

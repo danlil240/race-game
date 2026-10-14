@@ -267,6 +267,110 @@ namespace FamilyRacing.Tests
             return found;
         }
 
+        // Physical-backend pin: the PhysicalAssisted simulation clones
+        // the course visual into a dedicated collision-only scene via
+        // PhysicsCourseWorld. Camera-occluder boxes are non-trigger by
+        // contract, so query masks alone cannot exclude them — without
+        // an explicit layer strip they would become live contact
+        // geometry on the all-ones layer matrix and read as wall/ground
+        // hits. The clone must therefore carry EXACTLY the graybox
+        // baseline's solid colliders: every layer-2 occluder gone,
+        // every trigger gate gone, nothing added and nothing renamed.
+        // (Runs in PlayMode: PhysicsCourseWorld builds its scene via
+        // SceneManager.CreateScene, a play-mode-only runtime API.)
+        [Test]
+        public void CameraOccludersNeverEnterPhysicalBackend()
+        {
+            GameObject sunny = null;
+            GameObject graybox = null;
+#if UNITY_EDITOR
+            sunny = UnityEditor.AssetDatabase.LoadAssetAtPath<GameObject>(
+                "Assets/FamilyRacing/Art/VisualBenchmark/Environment/"
+                + "sunny-island-benchmark-01.prefab");
+            graybox = UnityEditor.AssetDatabase
+                .LoadAssetAtPath<GameObject>(
+                    DrivingDir + "/GrayboxCourse.prefab");
+#endif
+            Assert.That(sunny, Is.Not.Null,
+                "the dressed course visual must exist");
+            Assert.That(graybox, Is.Not.Null);
+
+            var baselineSolid = new List<string>();
+            var grayboxInst = Object.Instantiate(graybox);
+            try
+            {
+                foreach (var c in
+                    grayboxInst.GetComponentsInChildren<Collider>(true))
+                    if (!c.isTrigger)
+                        baselineSolid.Add(c.name);
+                baselineSolid.Sort();
+                Assert.That(baselineSolid.Count, Is.EqualTo(10),
+                    "graybox-01 carries exactly 10 solid colliders "
+                    + "(6 trigger gates complete the 16-collider set)");
+            }
+            finally
+            {
+                Object.Destroy(grayboxInst);
+            }
+
+            PhysicsCourseWorld physicsWorld = null;
+            try
+            {
+                physicsWorld =
+                    PhysicsCourseWorld.Create("camocc-pin", sunny);
+                var cloneColliders = new List<Collider>();
+                foreach (var root in
+                    physicsWorld.Scene.GetRootGameObjects())
+                    cloneColliders.AddRange(
+                        root.GetComponentsInChildren<Collider>(true));
+
+                var cloneNames = new List<string>();
+                foreach (var c in cloneColliders)
+                {
+                    Assert.That(c.gameObject.layer,
+                        Is.Not.EqualTo(
+                            PhysicsCourseWorld.CameraOccluderLayer),
+                        "camera occluder '" + c.name
+                        + "' survived into the physical backend — it "
+                        + "would make real contact with chassis on the "
+                        + "all-ones layer matrix");
+                    Assert.That(c.isTrigger, Is.False,
+                        "trigger '" + c.name
+                        + "' leaked into the collision scene");
+                    Assert.That(c as BoxCollider, Is.Not.Null,
+                        "non-box collider '" + c.name
+                        + "' in the physics clone");
+                    cloneNames.Add(c.name);
+                }
+                cloneNames.Sort();
+                CollectionAssert.AreEqual(baselineSolid, cloneNames,
+                    "the physical backend's collision set must be the "
+                    + "graybox baseline exactly — occluders stripped, "
+                    + "nothing else touched");
+
+                // A suspension-height ray into the clone where a cargo
+                // occluder box sits (BarrierA's lane at x=25, z=-25)
+                // must hit only baseline geometry: the occluder box
+                // reaching 0.35 m past the collider face is gone, so
+                // the downward ray finds the ground — never a ghost
+                // occluder surface above it.
+                RaycastHit hit;
+                Assert.That(physicsWorld.Raycast(
+                        new Vector3(25f, 3.4f, -25f), Vector3.down,
+                        out hit, 6f, ~0), Is.True,
+                    "the stripped clone must still answer rays at the "
+                    + "cargo occluder span");
+                CollectionAssert.Contains(baselineSolid,
+                    hit.collider.name,
+                    "a ghost occluder answered the ray: "
+                    + hit.collider.name + " is not baseline geometry");
+            }
+            finally
+            {
+                if (physicsWorld != null) physicsWorld.Dispose();
+            }
+        }
+
         // One lap that takes both optional shortcut branches — inside
         // (south of) IslandNorthEast on leg two and inside (west of)
         // IslandSouthEast on leg four — through the real dressed prefab.
