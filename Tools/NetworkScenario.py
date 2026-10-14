@@ -537,7 +537,9 @@ class LanDriver:
         }
         try:
             self.peer.send(frame)
-        except OSError:
+        except (OSError, ValueError):
+            # ValueError covers a peer whose evidence stream was closed
+            # from another thread mid-pump (killed-process teardown).
             self.send_ok = False
 
     def pump(self):
@@ -1439,6 +1441,14 @@ def run_scenario(player_command, evidence, players=2,
                             client.close()
                         except Exception:
                             pass
+                        # The dead generation's driver must stop here:
+                        # its endpoint can never answer again, and a
+                        # later relaunch registers a fresh driver for
+                        # the new generation. Steering a corpse would
+                        # only send into a closed socket.
+                        _LAN_DRIVERS[:] = [
+                            d for d in _LAN_DRIVERS
+                            if d.peer is not client]
                         entry["alive"] = False
                         report["runs"].append({
                             "role": name, "pid": process.pid,

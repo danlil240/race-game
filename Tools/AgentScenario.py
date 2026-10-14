@@ -479,6 +479,12 @@ class Client:
         Returns {commandId: age_seconds} — the watchdog input for drivers
         that fire-and-forget (LanDriver sends input.set without an
         immediate wait, so only this check can name a stuck command)."""
+        # A closed endpoint (process killed by fault injection, capture
+        # torn down) can never answer again — its unanswered frames are
+        # honestly recorded in commands.ndjson, but they are dead, not
+        # stuck, so they must not trip the deadline watchdog.
+        if self._closing:
+            return {}
         now = time.monotonic()
         # Snapshot the pairs: a peer drain on another client's wait
         # thread resolves results into this same dict concurrently.
@@ -495,8 +501,10 @@ class Client:
         empty while the pump races us and would leave the backlog to age.
         A terminal peer (honest EOF from a finished capture) is skipped.
         A non-terminal read failure — validation assert, evidence-write
-        error — is a live defect: recorded on the peer and never retried
-        silently while the backlog keeps flowing."""
+        error — is a live defect: recorded on the peer, persisted to its
+        evidence directory, and never retried silently while the backlog
+        keeps flowing. wait() then fails fast with the peer named, so a
+        frozen backlog can never age into an unattributable timeout."""
         for other in list(_ACTIVE_CLIENTS):
             if other is self or other._drained_terminal \
                     or other.drain_error is not None:
@@ -524,25 +532,63 @@ class Client:
                         # deliberately) — not a drain target any more.
                         other._drained_terminal = True
                     else:
-                        other.drain_error = error
+                        other._record_drain_error(error)
                     break
                 except (OSError, ValueError) as error:
-                    other.drain_error = error
+                    other._record_drain_error(error)
                     break
+
+    def _record_drain_error(self, error):
+        """Persist a drain failure so the peer's evidence names the real
+        cause — the write itself is best-effort (the evidence path may be
+        the component that failed)."""
+        self.drain_error = error
+        try:
+            (self.evidence / "drain-error.txt").write_text(
+                repr(error) + "\n", encoding="utf-8")
+        except Exception:
+            pass
+
+    def _peer_drain_errors(self):
+        """Live drain failures recorded on any active peer."""
+        return [(other.info.get("port", "?"), other.drain_error)
+                for other in list(_ACTIVE_CLIENTS)
+                if other.drain_error is not None]
+
+    def _raise_peer_drain_error(self):
+        failures = self._peer_drain_errors()
+        if failures:
+            port, error = failures[0]
+            raise AssertionError(
+                "Peer drain for port %s failed: %r" % (port, error))
 
     def wait(self, predicate, timeout=20, on_event=None):
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
+            # A recorded peer drain failure is a live defect — fail now
+            # with its real cause rather than waiting out the deadline
+            # while its backlog stays frozen.
+            self._raise_peer_drain_error()
             try:
-                event = self.read(deadline - time.monotonic())
+                # Bounded slices keep the drain-health check reachable
+                # even when no events arrive.
+                event = self.read(min(0.5, deadline - time.monotonic()))
             except (socket.timeout, TimeoutError):
+                self._drain_peers()
                 continue
             if on_event is not None:
                 on_event(event)
             if predicate(event):
                 return event
             self._drain_peers()
-        raise AssertionError("Timed out waiting for a recorded outcome")
+        hint = ""
+        failures = self._peer_drain_errors()
+        if failures:
+            hint = " (peer drain failures: %s)" % "; ".join(
+                "port %s: %r" % (port, error)
+                for port, error in failures)
+        raise AssertionError(
+            "Timed out waiting for a recorded outcome" + hint)
 
     def command(self, action, parameters=None, command_id=None):
         command_id = command_id or str(uuid.uuid4())
@@ -586,6 +632,16 @@ class Client:
             pass
         self.incoming.close()
         self.outgoing.close()
+        # Dead endpoint: pending frames stay visible in commands.ndjson
+        # (sent, never answered) but leave the watchdog map — nothing
+        # will ever resolve them and they are not a stuck-command defect.
+        self.pending_commands.clear()
+        # A drain failure recorded while a peer waited on us must not die
+        # silently at teardown either — name it here as well.
+        if self.drain_error is not None:
+            raise AssertionError(
+                "Client closed with an unresolved drain failure: %r"
+                % self.drain_error)
 
 
 # --- external process-memory sampling (M4 Task 2) -------------------------
