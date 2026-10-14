@@ -74,6 +74,20 @@ namespace FamilyRacing.Tests
             var authoredFallback = FontAsset.CreateFontAsset(
                 AssetDatabase.LoadAssetAtPath<Font>("Assets/FamilyRacing/Fonts/NotoSans-Regular.ttf"),
                 42, 5, GlyphRenderMode.SDFAA, 1024, 1024, AtlasPopulationMode.Dynamic, true);
+            // The authored fallback must be persistent: Create() loads scenes
+            // in Single mode, which unloads transient objects. A destroyed
+            // first entry poisons HasCharacters fallback traversal.
+            var folder = "Assets/FontSetupFallback-" + Guid.NewGuid().ToString("N");
+            AssetDatabase.CreateFolder("Assets", folder.Substring("Assets/".Length));
+            authoredFallback.name = "AuthoredFallback";
+            AssetDatabase.CreateAsset(authoredFallback, folder + "/AuthoredFallback.asset");
+            if (authoredFallback.material != null)
+                AssetDatabase.AddObjectToAsset(authoredFallback.material, authoredFallback);
+            foreach (var texture in authoredFallback.atlasTextures)
+                if (texture != null)
+                    AssetDatabase.AddObjectToAsset(texture, authoredFallback);
+            EditorUtility.SetDirty(authoredFallback);
+            AssetDatabase.SaveAssets();
             var guid = AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(latin));
             try
             {
@@ -92,10 +106,10 @@ namespace FamilyRacing.Tests
             {
                 text.defaultFontAsset = latin;
                 latin.fallbackFontAssetTable = originalFallbacks;
-                UnityEngine.Object.DestroyImmediate(authoredFallback);
                 EditorUtility.SetDirty(latin);
                 EditorUtility.SetDirty(text);
                 AssetDatabase.SaveAssets();
+                AssetDatabase.DeleteAsset(folder);
             }
         }
 
