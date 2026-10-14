@@ -28,14 +28,16 @@ namespace FamilyRacing.Tests
         private const string ArtRoot =
             "Assets/FamilyRacing/Art/VisualBenchmark";
 
-        // The collision contract: every collider in the sunny-island
-        // course visual must be a byte-for-byte match of the shared
-        // graybox prefab's collider set — same names, transforms, sizes,
-        // trigger flags and layers — and must live inside the nested
-        // GrayboxCourse prefab instance that stays the gameplay
-        // authority. Dressing contributes zero colliders and zero
-        // rigidbodies, so motor probes, wheel raycasts and the physical
-        // backend's collision clone see the identical shape.
+        // The collision contract: every collider that GAMEPLAY can see
+        // must be a byte-for-byte match of the shared graybox prefab's
+        // collider set — same names, transforms, sizes, trigger flags
+        // and layers — inside the nested GrayboxCourse prefab instance
+        // that stays the gameplay authority. The only other colliders
+        // allowed anywhere in the prefab are dedicated camera-occluder
+        // boxes: non-trigger, renderer-free, on the built-in Ignore
+        // Raycast layer (2) that DefaultRaycastLayers excludes, so
+        // motor probes, wheel raycasts and the physical backend never
+        // see them while the driving camera's ~0 occlusion ray does.
         [Test]
         public void DressingPreservesGameplayGeometry()
         {
@@ -89,22 +91,44 @@ namespace FamilyRacing.Tests
                     "the gameplay subtree must be a real instance of the "
                     + "shared GrayboxCourse prefab — never a copy");
 
-                // Every collider in the whole dressed prefab sits inside
-                // that nested instance and matches the baseline exactly.
+                // Every collider that gameplay can reach sits inside the
+                // nested instance and matches the baseline exactly. The
+                // ONLY colliders permitted outside it are camera-only
+                // occluders: non-trigger BoxColliders carrying no
+                // renderer, on the Ignore Raycast layer, so they pull
+                // the chase camera in without touching physics.
                 var allColliders =
                     sunnyInst.GetComponentsInChildren<Collider>(true);
-                Assert.That(allColliders.Length,
-                    Is.EqualTo(baseline.Count),
-                    "dressing must add no colliders: the dressed prefab "
-                    + "carries exactly the baseline collision set");
+                var cameraOccluders = 0;
                 var seen = new HashSet<string>();
                 foreach (var collider in allColliders)
                 {
-                    Assert.That(
-                        collider.transform.IsChildOf(gameplay.transform),
-                        Is.True, "collider '" + collider.name
-                        + "' escaped the gameplay subtree — dressing may "
-                        + "never carry collision");
+                    if (!collider.transform.IsChildOf(
+                        gameplay.transform))
+                    {
+                        var occ = collider as BoxCollider;
+                        Assert.That(occ, Is.Not.Null,
+                            "dressing collider '" + collider.name
+                            + "' must be a BoxCollider camera occluder");
+                        Assert.That(occ.isTrigger, Is.False,
+                            "camera occluder '" + collider.name
+                            + "' must be non-trigger — the camera ray "
+                            + "uses QueryTriggerInteraction.Ignore");
+                        Assert.That(collider.gameObject.layer,
+                            Is.EqualTo(SunnyIslandCourseAuthoring
+                                .OccluderLayer),
+                            "camera occluder '" + collider.name
+                            + "' must sit on the Ignore Raycast layer so "
+                            + "DefaultRaycastLayers probes skip it");
+                        Assert.That(
+                            collider.GetComponent<MeshRenderer>(),
+                            Is.Null,
+                            "camera occluder '" + collider.name
+                            + "' must be invisible — colliders never "
+                            + "double as visuals");
+                        cameraOccluders++;
+                        continue;
+                    }
                     var expected = baseline[collider.name];
                     Assert.That(collider.GetType(),
                         Is.EqualTo(expected.type), collider.name);
@@ -130,6 +154,35 @@ namespace FamilyRacing.Tests
                 }
                 Assert.That(seen.Count, Is.EqualTo(baseline.Count),
                     "every baseline collider is present and identical");
+                Assert.That(cameraOccluders,
+                    Is.GreaterThanOrEqualTo(20),
+                    "tall dressing must carry dedicated camera occluders "
+                    + "on the Ignore Raycast layer — found "
+                    + cameraOccluders);
+
+                // Visual coverage: every SOLID gameplay collider is fully
+                // hidden by its dressing group — contiguous along its
+                // long axis, covering across the cross axis, and at
+                // least as tall — so no bare collider face or visual
+                // gap can read as a passable opening.
+                AssertColliderCovered(sunnyInst, gameplay,
+                    "BarrierA", "CargoA");
+                AssertColliderCovered(sunnyInst, gameplay,
+                    "BarrierB", "CargoB");
+                AssertColliderCovered(sunnyInst, gameplay,
+                    "WallNorth", "WallClad_N");
+                AssertColliderCovered(sunnyInst, gameplay,
+                    "WallSouth", "WallClad_S");
+                AssertColliderCovered(sunnyInst, gameplay,
+                    "WallEast", "WallClad_E");
+                AssertColliderCovered(sunnyInst, gameplay,
+                    "WallWest", "WallClad_W");
+                AssertColliderCovered(sunnyInst, gameplay,
+                    "IslandNorthEast", "IslandNE_");
+                AssertColliderCovered(sunnyInst, gameplay,
+                    "IslandSouthEast", "IslandSE_");
+                AssertColliderCovered(sunnyInst, gameplay,
+                    "Ramp", "Ramp");
 
                 // No rigidbodies anywhere: the physical backend clones
                 // this prefab for collision — a body would change it.
@@ -202,6 +255,195 @@ namespace FamilyRacing.Tests
                 Object.DestroyImmediate(grayboxInst);
                 Object.DestroyImmediate(sunnyInst);
             }
+        }
+
+        // Camera-occluder contract, proven on the real prefab: a chase
+        // camera ray (DrivingCamera uses RaycastAll with ~0 and
+        // QueryTriggerInteraction.Ignore) trailing a vehicle toward a
+        // tall dressing element must hit a dedicated layer-2 occluder
+        // BEFORE its visuals can clip the lens — and the identical ray
+        // under DefaultRaycastLayers (motor probes, wheel suspension)
+        // must not see that occluder at all.
+        [Test]
+        public void CameraOccludersPullInWithoutTouchingPhysics()
+        {
+            VisualBenchmarkSetup.Create();
+            var sunny = AssetDatabase.LoadAssetAtPath<GameObject>(
+                SunnyIslandCourseAuthoring.CourseVisualPath);
+            Assert.That(sunny, Is.Not.Null);
+            var sunnyInst = (GameObject)PrefabUtility.InstantiatePrefab(
+                sunny);
+            try
+            {
+                Physics.SyncTransforms();
+                GameObject gameplay = null;
+                foreach (Transform child in sunnyInst.transform)
+                    if (child.name == "GrayboxCourse")
+                        gameplay = child.gameObject;
+                Assert.That(gameplay, Is.Not.Null);
+
+                // Case 1 — the south-wall parapet band: a vehicle
+                // driving north away from the wall at (0,-71) trails
+                // the chase camera over the rail (ideal ~8m back and
+                // ~3.3m above the 1.2m target height). The 3m wall
+                // collider tops out at y=3 — without the layer-2 band
+                // the ~4.2m-high ray would sail through rail and posts.
+                AssertCameraRayHitsOccluder(
+                    new Vector3(0f, 1.2f, -71f),
+                    new Vector3(0f, 4.5f, -79.65f),
+                    gameplay.transform);
+
+                // Case 2 — the NE shortcut-mouth sign at (42,21): a
+                // vehicle leaving the lane mouth trailing the camera
+                // through the sign board must pull on the occluder,
+                // never clip the pole/board visuals.
+                AssertCameraRayHitsOccluder(
+                    new Vector3(42f, 1.2f, 24f),
+                    new Vector3(42f, 4.5f, 15.35f),
+                    gameplay.transform);
+
+                // Layer 2 stays out of the gameplay probe mask the
+                // motor/suspension code queries.
+                Assert.That(
+                    (Physics.DefaultRaycastLayers
+                        & (1 << SunnyIslandCourseAuthoring
+                            .OccluderLayer)) == 0,
+                    Is.True,
+                    "Ignore Raycast must stay out of "
+                    + "DefaultRaycastLayers — a camera occluder must "
+                    + "never become a gameplay surface");
+            }
+            finally
+            {
+                Object.DestroyImmediate(sunnyInst);
+            }
+        }
+
+        private static void AssertCameraRayHitsOccluder(
+            Vector3 target, Vector3 ideal, Transform gameplay)
+        {
+            var delta = ideal - target;
+            var distance = delta.magnitude;
+            var dir = delta / distance;
+            // Exactly the camera's query: every non-trigger collider.
+            var hits = Physics.RaycastAll(target, dir, distance, ~0,
+                QueryTriggerInteraction.Ignore);
+            System.Array.Sort(hits,
+                (a, b) => a.distance.CompareTo(b.distance));
+            Assert.That(hits.Length, Is.GreaterThan(0),
+                "camera ray " + target + " -> " + ideal
+                + " hit nothing — the occluder is missing");
+            var first = hits[0];
+            Assert.That(
+                first.collider.transform.IsChildOf(gameplay),
+                Is.False,
+                "first camera hit '" + first.collider.name
+                + "' is gameplay geometry — the occluder must screen "
+                + "before or outside it");
+            Assert.That(first.collider.gameObject.layer,
+                Is.EqualTo(SunnyIslandCourseAuthoring.OccluderLayer),
+                "first camera hit '" + first.collider.name
+                + "' is on layer " + first.collider.gameObject.layer
+                + ", not the camera-occluder layer");
+            // The same ray under the gameplay probe mask must skip the
+            // occluder entirely.
+            var probe = Physics.RaycastAll(target, dir, distance,
+                Physics.DefaultRaycastLayers,
+                QueryTriggerInteraction.Ignore);
+            foreach (var hit in probe)
+                Assert.That(hit.collider.gameObject.layer,
+                    Is.Not.EqualTo(
+                        SunnyIslandCourseAuthoring.OccluderLayer),
+                    "gameplay probe saw occluder '" + hit.collider.name
+                    + "' on layer 2 — DefaultRaycastLayers must "
+                    + "exclude it");
+        }
+
+        // Every renderer in the named dressing group must, together,
+        // hide the whole collider: contiguous coverage along the
+        // collider's long axis (no gap reads as an opening), each
+        // covering renderer spanning the cross axis, at least as tall
+        // as the collider, and reaching down to its base.
+        private static void AssertColliderCovered(GameObject sunnyInst,
+            GameObject gameplay, string colliderName, string prefix)
+        {
+            BoxCollider col = null;
+            foreach (var c in
+                gameplay.GetComponentsInChildren<BoxCollider>(true))
+                if (c.name == colliderName) col = c;
+            Assert.That(col, Is.Not.Null,
+                "gameplay collider '" + colliderName + "' not found");
+            var cb = col.bounds;
+            var longX = cb.size.x >= cb.size.z;
+            var loMin = longX ? cb.min.x : cb.min.z;
+            var loMax = longX ? cb.max.x : cb.max.z;
+            var crMin = longX ? cb.min.z : cb.min.x;
+            var crMax = longX ? cb.max.z : cb.max.x;
+            const float eps = 0.06f;
+
+            var intervals = new List<Vector2>();
+            var floor = float.MaxValue;
+            var matched = 0;
+            foreach (var r in
+                sunnyInst.GetComponentsInChildren<MeshRenderer>(true))
+            {
+                if (r.transform.IsChildOf(gameplay.transform)) continue;
+                if (!UnderPrefix(r.transform, sunnyInst.transform,
+                        prefix))
+                    continue;
+                matched++;
+                var b = r.bounds;
+                // Only renderers that span the collider's cross axis and
+                // reach its top count toward coverage.
+                var bCrMin = longX ? b.min.z : b.min.x;
+                var bCrMax = longX ? b.max.z : b.max.x;
+                if (bCrMin > crMin + eps || bCrMax < crMax - eps)
+                    continue;
+                if (b.max.y < cb.max.y - eps) continue;
+                intervals.Add(new Vector2(
+                    longX ? b.min.x : b.min.z,
+                    longX ? b.max.x : b.max.z));
+                if (b.min.y < floor) floor = b.min.y;
+            }
+            Assert.That(matched, Is.GreaterThan(0),
+                "no dressing renderers match prefix '" + prefix
+                + "' for collider '" + colliderName + "'");
+            Assert.That(intervals.Count, Is.GreaterThan(0),
+                "no '" + prefix + "' renderer spans and tops collider '"
+                + colliderName + "'");
+            Assert.That(floor, Is.LessThanOrEqualTo(cb.min.y + eps),
+                "'" + prefix + "' dressing floats above the base of '"
+                + colliderName + "'");
+
+            // Merge intervals along the long axis: a single merged run
+            // must contain the whole collider extent.
+            intervals.Sort((a, b) => a.x.CompareTo(b.x));
+            var curMin = intervals[0].x;
+            var curMax = intervals[0].y;
+            var contiguous = curMin <= loMin + eps;
+            foreach (var iv in intervals)
+            {
+                if (iv.x > curMax + eps) contiguous = false;
+                if (iv.y > curMax) curMax = iv.y;
+            }
+            Assert.That(curMin, Is.LessThanOrEqualTo(loMin + eps),
+                "'" + prefix + "' dressing starts past the beginning of '"
+                + colliderName + "' — the collider's leading face shows");
+            Assert.That(curMax, Is.GreaterThanOrEqualTo(loMax - eps),
+                "'" + prefix + "' dressing ends before the end of '"
+                + colliderName + "' — the collider's trailing face shows");
+            Assert.That(contiguous, Is.True,
+                "'" + prefix + "' dressing has a gap along '"
+                + colliderName + "' — a bare collider face would read "
+                + "as a passable opening");
+        }
+
+        private static bool UnderPrefix(Transform t, Transform root,
+            string prefix)
+        {
+            for (; t != null && t != root; t = t.parent)
+                if (t.name.StartsWith(prefix)) return true;
+            return false;
         }
 
         private sealed class Sig
@@ -281,17 +523,75 @@ namespace FamilyRacing.Tests
                     + "cost — purchases need controller approval first");
                 Assert.That(row.role, Is.Not.Empty,
                     "inventory row " + row.guid + " has no role");
-                // Builtin package/builtin guids resolve differently; only
-                // FamilyRacing project guids must map to a path on disk.
+                // Project-asset rows must resolve: the recorded GUID
+                // maps to a real asset at exactly the recorded path —
+                // a stale or invented GUID fails here.
+                if (row.path.StartsWith("Assets/"))
+                {
+                    var resolved = AssetDatabase.GUIDToAssetPath(
+                        row.guid);
+                    Assert.That(resolved, Is.EqualTo(row.path),
+                        "inventory guid " + row.guid
+                        + " resolves to '" + resolved
+                        + "', not the recorded '" + row.path + "'");
+                }
             }
 
+            // The two Unity built-in resource GUIDs are pinned to their
+            // real meanings — they used to be swapped/misdescribed:
+            //   e000...0000 = unity default resources = the primitive
+            //     meshes (cube/sphere/cylinder/plane) the dressing is
+            //     built from;
+            //   f000...0000 = unity builtin-extra = the built-in shader
+            //     classes (procedural skybox) — NOT primitive meshes.
+            var byGuid = new Dictionary<string, Row>();
+            foreach (var row in rows) byGuid[row.guid] = row;
+            Assert.That(
+                byGuid.ContainsKey(
+                    "0000000000000000e000000000000000"),
+                Is.True, "builtin primitive-mesh guid e000...0000 "
+                + "needs an inventory row");
+            Assert.That(
+                byGuid.ContainsKey(
+                    "0000000000000000f000000000000000"),
+                Is.True, "builtin-extra shader guid f000...0000 "
+                + "needs an inventory row");
+            var eRow = byGuid["0000000000000000e000000000000000"];
+            var fRow = byGuid["0000000000000000f000000000000000"];
+            StringAssert.Contains("primitive",
+                (eRow.path + " " + eRow.source + " " + eRow.role)
+                    .ToLowerInvariant(),
+                "e000...0000 must be described as the primitive-mesh "
+                + "resource");
+            StringAssert.Contains("shader",
+                (fRow.path + " " + fRow.source + " " + fRow.role)
+                    .ToLowerInvariant(),
+                "f000...0000 must be described as the builtin-extra "
+                + "shader resource");
+            StringAssert.DoesNotContain("primitive",
+                fRow.path.ToLowerInvariant(),
+                "f000...0000 is builtin-extra shaders, not primitives "
+                + "— do not describe it as the mesh resource");
+            StringAssert.DoesNotContain("shader",
+                eRow.path.ToLowerInvariant(),
+                "e000...0000 is the primitive-mesh resource, not "
+                + "shaders");
+
             var referenced = new HashSet<string>();
+            // Every project asset the course visual depends on —
+            // authored art AND the nested graybox gameplay prefab —
+            // must be inventoried; the scene contributes its art-root
+            // references (skybox, lighting).
             foreach (var path in AssetDatabase.GetDependencies(
-                new[]
-                {
-                    SunnyIslandCourseAuthoring.CourseVisualPath,
-                    VisualBenchmarkSetup.ScenePath
-                }, true))
+                SunnyIslandCourseAuthoring.CourseVisualPath, true))
+            {
+                if (!path.StartsWith("Assets/")) continue;
+                var guid = AssetDatabase.AssetPathToGUID(path);
+                Assert.That(guid, Is.Not.Empty);
+                referenced.Add(guid);
+            }
+            foreach (var path in AssetDatabase.GetDependencies(
+                VisualBenchmarkSetup.ScenePath, true))
             {
                 if (!path.StartsWith(ArtRoot + "/")) continue;
                 var guid = AssetDatabase.AssetPathToGUID(path);
@@ -300,6 +600,8 @@ namespace FamilyRacing.Tests
             }
             Assert.That(referenced.Count, Is.GreaterThan(0),
                 "the course visual should reference authored art assets");
+            // Built-in dependencies cannot be enumerated by path —
+            // the e000/f000 row pins above cover them.
 
             var inventoriedGuids = new HashSet<string>();
             foreach (var row in rows) inventoriedGuids.Add(row.guid);

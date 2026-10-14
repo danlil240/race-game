@@ -64,8 +64,42 @@ feature is ~0.4 m so it survives 0.75 render scale.
 - Boats: 6 m hulls, low cabins, one mast; anchored outside the sea
   walls, decoration only.
 - Cargo stacks: the chicane barriers are dressed as painted cargo rows
-  slightly *larger* than their colliders (never smaller — a driver may
-  brush paint, never clip through a visual gap).
+  slightly *larger* than their colliders — contiguous along the full
+  collider length (never smaller, never gapped: a driver may brush
+  paint, never clip through a visual gap or aim at a bare collider
+  face).
+
+## Animal silhouettes (binding for Task 4 racers)
+
+Racers are stylized cartoon animals driving chunky open vehicles. The
+silhouette rules keep them readable at 0.75 render scale on the tablet:
+
+- **Silhouette-first design.** Every animal must be identifiable by
+  outline alone against both cameras: one signature ear/head/tail shape
+  per species (round ears, tall ears, long snout, curled tail — pick one
+  dominant feature and exaggerate it; never stack small details).
+- **Proportion language.** Oversized head (roughly 40–50% of body
+  height), compact torso, stubby limbs — the same rounded, toy-like
+  proportion language as the environment (5–7 m houses, chunky palms).
+  Realistic anatomy and thin extremities are off-language: limbs and
+  tails must be thick enough to survive the smallest on-screen size.
+- **Reading distance.** The racer silhouette must stay legible inside
+  its vehicle at chase-camera distance and against the dark road ribbon
+  from the overhead camera — light-to-mid body tones against the darker
+  road, no pure-white bodies that clip into wall whitewash, no water
+  turquoise or road-dust browns as the dominant body color.
+- **Palette.** Racers use saturated accent colors the course reserves
+  for characters — coral, mango, leaf green, sky blue, berry purple —
+  never mandatory-route yellow, shortcut teal or jump red as the
+  dominant body color (route language must never appear to sit on a
+  racer).
+- **Materials.** Same flat-matte Simple Lit treatment as the course —
+  no fur shaders, no translucency, no emission. A darker belly/muzzle
+  block plus one contrasting accent (scarf, cap or stripe) per animal
+  carries personality without texture.
+- **Scale band.** Drivers sit 1.4–1.8 m tall in the seat; the vehicle
+  stays under ~2.2 m tall overall so nothing occludes the road behind
+  it from the overhead camera.
 
 ## Materials
 
@@ -96,21 +130,25 @@ would be unreadable at 0.75 scale.
 ## Occlusion and collision rules (binding)
 
 - **The nested `GrayboxCourse` prefab instance is the only gameplay
-  geometry.** Dressing contributes zero colliders — not one — so motor
-  probes, wheel raycasts and the physical backend's collision clone see
-  exactly the shipped collision set.
+  geometry.** Dressing contributes zero colliders that gameplay can see
+  — motor probes, wheel raycasts and the physical backend's collision
+  clone all query `Physics.DefaultRaycastLayers`, which excludes layer
+  2, so the shipped collision set is the only physical shape.
 - Occluder-class dressing (anything tall enough to sit between a camera
   and the road — houses, the lighthouse, palms, boats, masts, sign and
-  pennant posts, cargo stacks) is authored on the built-in **Ignore
-  Raycast layer (2)**: excluded from `Physics.DefaultRaycastLayers`
-  (motor probes, wheel suspension rays) while remaining visible to the
-  camera's explicit occlusion raycast and to renders. If a future
-  element must actively occlude the camera, it gets a collider on layer
-  2 — never on Default — and must sit inside or behind existing
-  collision so a physical chassis can never reach it.
+  pennant posts, cargo stacks, parapet rails, ramp rails) is authored on
+  the built-in **Ignore Raycast layer (2)** and carries a dedicated
+  non-trigger **camera-occluder BoxCollider** on the same layer:
+  invisible to `Physics.DefaultRaycastLayers` but hit by the driving
+  camera's explicit `~0` occlusion raycast, so the chase camera pulls in
+  *before* the lens can clip inside a visual. The rule is hard: a
+  camera-only collider lives on layer 2, carries no renderer, is never
+  a trigger — and **never** sits on Default or inside the gameplay
+  subtree.
 - Nothing tall is placed on the drivable deck; islands/water/walls host
   every tall element. Decorative barrier visuals always *cover* their
-  collider — never recessed behind the real boundary.
+  collider — never recessed behind the real boundary, and contiguous
+  along the collider's full length so no gap reads as an opening.
 - Overhead readability: the only overhead crossings are the checker
   line and gate stripes — flat paint, never geometry over the road.
 

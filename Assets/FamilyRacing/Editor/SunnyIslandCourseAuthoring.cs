@@ -11,16 +11,19 @@ namespace FamilyRacing.EditorTools
     // Collision contract (binding, enforced by
     // VisualBenchmarkContentTests.DressingPreservesGameplayGeometry):
     //   - the nested GrayboxCourse prefab instance is the ONLY gameplay
-    //     geometry — dressing contributes zero colliders;
+    //     geometry — dressing meshes never carry colliders;
     //   - occluder-class dressing (anything tall enough to sit between a
     //     camera and the road) lives on the built-in Ignore Raycast layer
     //     (2): invisible to motor probes and wheel suspension raycasts
-    //     (Physics.DefaultRaycastLayers) but still hit by the driving
-    //     camera's explicit ~0 occlusion ray and by renders;
+    //     (Physics.DefaultRaycastLayers), and paired with a dedicated
+    //     non-trigger camera-occluder collider on the same layer so the
+    //     driving camera's explicit ~0 occlusion ray pulls in BEFORE the
+    //     lens can clip inside the visual;
     //   - flat dressing (roads, water, paint, wall cladding) stays on
-    //     Default and also carries no collider;
+    //     Default and carries no collider at all;
     //   - decorative barrier visuals always cover their collider — never
-    //     recessed — so a driver may brush paint, never clip a gap.
+    //     recessed — so a driver may brush paint, never clip a gap
+    //     (the coverage intervals are pinned by the EditMode test).
     //
     // Author() is deterministic: materials are created-or-updated in
     // place and the prefab is saved over its own path, so GUIDs survive
@@ -268,6 +271,32 @@ namespace FamilyRacing.EditorTools
                 OccluderLayer);
         }
 
+        // Dedicated camera-occluder collider: a non-trigger BoxCollider
+        // on a collider-free GameObject on the Ignore Raycast layer.
+        // Motor probes, wheel suspension and the physical backend query
+        // DefaultRaycastLayers (which excludes layer 2), so these never
+        // change gameplay; the driving camera's ~0 occlusion ray DOES
+        // hit them, so tall dressing genuinely pulls the camera in front
+        // of its visuals instead of clipping through them.
+        private static void CamOcc(Transform parent, string name,
+            Vector3 localCenter, Vector3 size)
+        {
+            CamOcc(parent, name, localCenter, size, Quaternion.identity);
+        }
+
+        private static void CamOcc(Transform parent, string name,
+            Vector3 localCenter, Vector3 size, Quaternion localRotation)
+        {
+            var g = new GameObject(name);
+            g.transform.SetParent(parent, false);
+            g.transform.localPosition = localCenter;
+            g.transform.localRotation = localRotation;
+            g.layer = OccluderLayer;
+            var box = g.AddComponent<BoxCollider>();
+            box.size = size;
+            box.isTrigger = false; // the camera ray ignores triggers
+        }
+
         // Flat top surfaces: road/lane/paint slabs — stacked at distinct
         // heights (road 0.025, boardwalk 0.045, paint 0.055-0.065) so
         // overlapping ribbons can never z-fight.
@@ -454,25 +483,41 @@ namespace FamilyRacing.EditorTools
                 Box(d, "Post_E", 119.55f, 3.7f, z, 0.5f, 0.9f, 0.5f, teal);
                 Box(d, "Post_W", -119.55f, 3.7f, z, 0.5f, 0.9f, 0.5f, teal);
             }
+            // The rail + posts rise ~1.1 m above the 3 m wall colliders:
+            // thin camera-only occluder bands along each parapet top.
+            CamOcc(d, "WallTopOcc_N", new Vector3(0f, 3.7f, 79.55f),
+                new Vector3(241f, 1.5f, 1.6f));
+            CamOcc(d, "WallTopOcc_S", new Vector3(0f, 3.7f, -79.55f),
+                new Vector3(241f, 1.5f, 1.6f));
+            CamOcc(d, "WallTopOcc_E", new Vector3(119.55f, 3.7f, 0f),
+                new Vector3(1.6f, 1.5f, 161f));
+            CamOcc(d, "WallTopOcc_W", new Vector3(-119.55f, 3.7f, 0f),
+                new Vector3(1.6f, 1.5f, 161f));
         }
 
         // ---------------------------------------------------------------
-        // The chicane barriers dressed as painted cargo rows — every clad
-        // box is wider/taller than its collider (6x30x2 and 30x6x2), so
-        // the visual always covers the real block.
+        // The chicane barriers dressed as painted cargo rows. Coverage is
+        // exact: each collider is fully hidden — BarrierA (6x2x30 at
+        // x=25, z in [-40,-10]) gets three 10.4 m crates at z=-15/-25/-35
+        // (contiguous [-40.2,-9.8], no visual gap inside the solid);
+        // BarrierB (30x2x6 at z=10, x in [-45,-15]) gets the same row
+        // yawed 90 degrees at x=-40/-30/-20 (contiguous [-45.2,-14.8]).
+        // Wider and taller than the collider on every axis, so a driver
+        // may brush paint but can never see a bare collider face or aim
+        // at a false opening. Pinned by DressingPreservesGameplayGeometry.
         private static void BuildBarrierStacks(Transform d, Palette mats)
         {
-            CargoStack(d, mats, 25f, -14f, 0f, "CargoA1",
+            CargoStack(d, mats, 25f, -15f, 0f, "CargoA1",
                 mats.Get("Mat_PastelBlue"));
             CargoStack(d, mats, 25f, -25f, 0f, "CargoA2",
                 mats.Get("Mat_PastelYellow"));
-            CargoStack(d, mats, 25f, -36f, 0f, "CargoA3",
+            CargoStack(d, mats, 25f, -35f, 0f, "CargoA3",
                 mats.Get("Mat_PastelPink"));
-            CargoStack(d, mats, -39f, 10f, 90f, "CargoB1",
+            CargoStack(d, mats, -40f, 10f, 90f, "CargoB1",
                 mats.Get("Mat_PastelPink"));
             CargoStack(d, mats, -30f, 10f, 90f, "CargoB2",
                 mats.Get("Mat_PastelBlue"));
-            CargoStack(d, mats, -21f, 10f, 90f, "CargoB3",
+            CargoStack(d, mats, -20f, 10f, 90f, "CargoB3",
                 mats.Get("Mat_PastelYellow"));
         }
 
@@ -482,11 +527,15 @@ namespace FamilyRacing.EditorTools
             var g = Group(d, name, x, z);
             g.localRotation = Quaternion.Euler(0f, yaw, 0f);
             Occ(g, "Crate", PrimitiveType.Cube,
-                new Vector3(0f, 1.3f, 0f), new Vector3(6.5f, 2.6f, 9.6f),
+                new Vector3(0f, 1.3f, 0f), new Vector3(6.5f, 2.6f, 10.4f),
                 Quaternion.identity, mat);
             Occ(g, "Lid", PrimitiveType.Cube,
-                new Vector3(0f, 2.72f, 0f), new Vector3(6.7f, 0.24f, 9.8f),
+                new Vector3(0f, 2.72f, 0f), new Vector3(6.7f, 0.24f, 10.6f),
                 Quaternion.identity, mats.Get("Mat_Boardwalk"));
+            // The stack tops the 2 m collider by ~0.9 m — camera-only
+            // occluder so the chase lens cannot clip a lid.
+            CamOcc(g, "CamOcc", new Vector3(0f, 1.5f, 0f),
+                new Vector3(6.7f, 3.0f, 10.6f));
         }
 
         // ---------------------------------------------------------------
@@ -563,6 +612,10 @@ namespace FamilyRacing.EditorTools
                 new Vector3(w, h, depth), Quaternion.identity, bodyMat);
             Roof(lod1, mats, w, h, depth, ridgeYaw);
             AddLod(host.gameObject, lod0, lod1, 0.10f);
+            // Camera occluder over body + gable roof (apex ~h + 0.8w).
+            var top = h + w * 0.85f;
+            CamOcc(host, "CamOcc", new Vector3(0f, top * 0.5f, 0f),
+                new Vector3(w * 1.3f, top, depth * 1.2f));
         }
 
         private static void Roof(Transform parent, Palette mats,
@@ -608,6 +661,9 @@ namespace FamilyRacing.EditorTools
                 new LOD(0.015f, new Renderer[]
                     { g1.GetComponent<Renderer>() })
             });
+            // ~9.6 m to the lamp top — the tallest occluder on course.
+            CamOcc(host, "CamOcc", new Vector3(0f, 4.9f, 0f),
+                new Vector3(3.4f, 9.8f, 3.4f));
         }
 
         private static void Palm(Transform parent, Palette mats,
@@ -645,6 +701,9 @@ namespace FamilyRacing.EditorTools
                 new LOD(0.015f, new Renderer[]
                     { g1.GetComponent<Renderer>() })
             });
+            // Canopy tops ~4.1 m — well inside the chase-camera arc.
+            CamOcc(host, "CamOcc", new Vector3(0f, 2.3f, 0f),
+                new Vector3(3.9f, 4.6f, 3.9f));
         }
 
         private static void AddLod(GameObject host, Transform lod0,
@@ -684,6 +743,10 @@ namespace FamilyRacing.EditorTools
                     new Vector3(-60f + side * 6.3f, 1.6f, 30f),
                     new Vector3(0.3f, 0.9f, 16f), rot,
                     mats.Get("Mat_Trunk"), 0);
+                // Rails crest ~2.4 m above the ramp deck's own collider.
+                CamOcc(d, "RampRailOcc",
+                    new Vector3(-60f + side * 6.3f, 1.6f, 30f),
+                    new Vector3(0.5f, 1.2f, 16.4f), rot);
             }
             // Red pennants at the crest and approach.
             Pennant(d, mats, -67f, 44f, mats.Get("Mat_FlagRed"));
@@ -726,6 +789,8 @@ namespace FamilyRacing.EditorTools
             Occ(g, "Flag", PrimitiveType.Cube,
                 new Vector3(0.55f, 3.5f, 0f), new Vector3(1.1f, 0.55f, 0.08f),
                 Quaternion.identity, flagMat);
+            CamOcc(g, "CamOcc", new Vector3(0.3f, 2.0f, 0f),
+                new Vector3(1.9f, 4.0f, 0.35f));
         }
 
         private static void ShortcutSign(Transform d, Palette mats,
@@ -742,6 +807,8 @@ namespace FamilyRacing.EditorTools
             Occ(g, "Arrow", PrimitiveType.Cube,
                 new Vector3(0.35f, 2.3f, 0.1f), new Vector3(0.7f, 0.34f, 0.06f),
                 Quaternion.Euler(0f, 0f, 45f), mats.Get("Mat_CheckWhite"));
+            CamOcc(g, "CamOcc", new Vector3(0.1f, 1.4f, 0f),
+                new Vector3(1.7f, 2.8f, 0.4f));
         }
 
         // ---------------------------------------------------------------
@@ -790,6 +857,9 @@ namespace FamilyRacing.EditorTools
                 new LOD(0.015f, new Renderer[]
                     { g1.GetComponent<Renderer>() })
             });
+            // Hull + mast top out ~5.6 m in group space.
+            CamOcc(g, "CamOcc", new Vector3(0.5f, 2.6f, 0f),
+                new Vector3(7.4f, 6.0f, 3.4f));
         }
     }
 }

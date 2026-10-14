@@ -82,9 +82,12 @@ namespace FamilyRacing.Tests
         // A small real course: flat ground plus a solid wall the car must
         // not penetrate. It stays inactive in the scene so only the cloned
         // instance the DrivingWorld activates participates in physics.
+        // The root carries the production course name: DrivingWorld keeps
+        // the source prefab's root name on the instance (that name is the
+        // published courseVisualId), so tests find it by that name.
         private GameObject BuildCourseSource()
         {
-            var root = new GameObject("test-course");
+            var root = new GameObject("GrayboxCourse");
             var ground = GameObject.CreatePrimitive(PrimitiveType.Cube);
             ground.name = "Ground";
             ground.transform.SetParent(root.transform, false);
