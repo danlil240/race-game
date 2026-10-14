@@ -846,6 +846,93 @@ namespace FamilyRacing.Tests
                 "a terminal race must not emit resume events");
         }
 
+        // The published `prediction` slice is contract-gated to a live
+        // client LAN race (FoundationState.cs): null on the host and
+        // outside a race. A live benchmark scenario (2026-10-14) caught a
+        // stale slice on a `lan.leave` teardown boundary — the bridge
+        // clears its own facts on its next pump, one boundary after the
+        // session transition — so Snapshot() gates the slice on the
+        // record's own role/race facts, never on push timing.
+        [Test]
+        public void PredictionSliceNeverPublishesOutsideClientRace()
+        {
+            var directory = System.IO.Path.Combine(
+                System.IO.Path.GetTempPath(),
+                "family-racing-pred-" + Guid.NewGuid().ToString("N"));
+            System.IO.Directory.CreateDirectory(directory);
+            try
+            {
+                var guestLink = new LanSessionTests.FakeLanLink();
+                var guest = NewGuest(guestLink, "p-guest");
+                var guestService =
+                    new FamilyRacing.Core.Foundation.FoundationService(
+                        new ProfileStore(directory,
+                            new LanSessionTests.LanTestJsonSerializer()),
+                        "en", "lan-session-test");
+                guestService.SetDrivingContent(LanSessionTests.LanCatalog());
+                guestService.SetLanSession(guest);
+                JoinGuest(host, link, guest, guestLink, GuestConn, HostConn);
+
+                var facts = new NetworkPredictionState
+                {
+                    participantId = "p-guest",
+                    active = true
+                };
+                // In-lobby client leg: facts pushed, no race yet — the
+                // slice must stay unpublished.
+                guestService.SetPredictionState(facts);
+                var lobby = guestService.Snapshot();
+                Assert.That(lobby.network.role,
+                    Is.EqualTo(LanSessionService.RoleClient));
+                Assert.That(lobby.prediction, Is.Null,
+                    "prediction leaked while client had no race");
+
+                // Client + pushed race state: the slice publishes.
+                guestService.SetNetworkRaceState(new NetworkRaceState
+                {
+                    sessionId = "s", raceId = "r1", phase = "running"
+                });
+                Assert.That(guestService.Snapshot().prediction,
+                    Is.Not.Null, "client in a race must publish prediction");
+
+                // The regressed boundary: lan.leave clears the role
+                // immediately while the pushed facts stay stale — the
+                // record must still never claim prediction.
+                Assert.That(guest.Execute(Cmd("lan.leave", null)).status,
+                    Is.EqualTo(CommandResult.Applied));
+                var left = guestService.Snapshot();
+                Assert.That(left.network.role,
+                    Is.EqualTo(LanSessionService.RoleNone));
+                Assert.That(left.prediction, Is.Null,
+                    "teardown boundary published a stale prediction slice");
+
+                // Host leg: role=host never predicts, even with both
+                // facts pushed.
+                var hostService =
+                    new FamilyRacing.Core.Foundation.FoundationService(
+                        new ProfileStore(directory,
+                            new LanSessionTests.LanTestJsonSerializer()),
+                        "en", "lan-session-test");
+                hostService.SetDrivingContent(LanSessionTests.LanCatalog());
+                hostService.SetLanSession(host);
+                hostService.SetPredictionState(facts);
+                hostService.SetNetworkRaceState(new NetworkRaceState
+                {
+                    sessionId = "s", raceId = "r1", phase = "running"
+                });
+                var hostSnap = hostService.Snapshot();
+                Assert.That(hostSnap.network.role,
+                    Is.EqualTo(LanSessionService.RoleHost));
+                Assert.That(hostSnap.prediction, Is.Null,
+                    "the host must never publish a prediction slice");
+            }
+            finally
+            {
+                if (System.IO.Directory.Exists(directory))
+                    System.IO.Directory.Delete(directory, true);
+            }
+        }
+
         // --- solo-blocked lifecycle ----------------------------------------------
 
         [Test]

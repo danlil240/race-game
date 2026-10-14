@@ -78,6 +78,12 @@ Android path from `docs/NETWORK_TEST_RUNBOOK.md`, now automated).
 
 ## Build evidence
 
+> Superseded: the hash tables below record the first produced artifacts.
+> The **final same-source manifests** produced on the Task-7 closing
+> revision (`99f4dcf` + the snapshot-guard fix committed with this
+> closeout) are in "Task 7 — closeout" at the bottom of this runbook
+> and in `docs/tasks/visual-benchmark-report.md`.
+
 Produced 2026-10-13/14 from the working tree at baseline `25d39d4` plus
 the uncommitted Task-1 slice (files listed in the task report). Every
 flavor builds `Generated/VisualBenchmark/VisualBenchmark.unity` only —
@@ -498,5 +504,77 @@ consume it.
 | RED evidence | test module ran before implementation — `ModuleNotFoundError: No module named 'VisualBenchmarkScenario'` |
 | `--minutes 0.5` bring-up (`Logs\vb-bringup-10`) | mechanically complete — verdict `failed` only on the fixed floors, as a short run must |
 | `--minutes 30` qualification (`Logs\vb-qual-5`, `Logs\vb-qual-6`) | **passed** — 1,808–1,836 stream-measured racing s per endpoint, all four class×camera cells ≥374 s, both quit-time perf reports `validated` (`captureValid: true`, 123k/113k racing samples, p95 16.7 ms, zero stalls), 12/12 landmark shots, process-kill → AI takeover → credentialed rejoin labeled (`client-0-gen1` `faultCasualty`), immutable results + once-only ledger across 21 cycles, transport `loopback` + `aiFilledSeats: 2` labeled. Bring-up iterations surfaced and fixed real defects: a client-descriptor `lan.vehicle` race (`invalidVehicle`), `input.set` identity-budget exhaustion (`commandCapacity` at `IdentityCapacity=10000`), the recorder's own `MaxSamples` bound (120k→300k — ~33 min at 60 fps was shorter than the mandated capture), and a quit-time crash on invalid-report collection. |
+
+## Task 7 — device-free optimization check and closeout (2026-10-14)
+
+The A7 Lite and four physical participants are unavailable in this
+environment (`adb devices` on the bundled platform-tools returned an
+empty list on 2026-10-14). Every hardware/human gate stays
+`notVerified`; the milestone closes as **development complete;
+acceptance open** (`docs/tasks/visual-benchmark-report.md`).
+
+### Final same-source builds (all four flavors, Task-7 closing revision)
+
+| Flavor | Artifact | SHA-256 / size |
+|---|---|---|
+| Windows Mono development | `Builds\Windows-VisualBenchmark\FamilyRacing.exe` | exe `B7CCA8B82003185F22644D0EE1C23B3640DE1B996802D4F5D0501E287011AFA6`; Core.dll `DA2A5A7B35F858D8A1A4C471B9334CCF7E19E9C8DC3BE99271C278B03523A3EE`; Runtime.dll `9B934A697B2F16B8D6040F26119177F07519D90CF9F456BB868DCF39D2254D3F`; level0 `E85DDA974D2F42419294E96DA4A947E6B074E42A88D63461F690405AF0675BC5` — Core.dll differs from the qual-5/6 evidence player by the snapshot-guard fix; opt-5 measured this artifact directly |
+| Windows Mono ordinary | `Builds\Windows-VisualBenchmark-Ordinary\FamilyRacing.exe` | exe `EB143EAD6441B6DD9D7D145ADB85410E9389FB3878899AE537E8C9869CCE38FA`; Core.dll `E224631214F61DE78E65515702132EE0D56F281ADC8D1A56E52737FEC19EB409`; Runtime.dll `B1DD42D7AE17D7081EB00987D3DA9419F07F588EAB7FBFC062D1C9AFE53DEADC`; level0 `5DF00FE7BBD88ACA491E7D26E038FAFF02653308D577C798E9351245AD071AD2` |
+| Android IL2CPP development | `Builds\Android-VisualBenchmark\FamilyRacing.apk` | `8265D6BE2CFA31A2994582451C44FC2FA1177E87A7C52B02D5E144BF925B158D`, 51,550,871 B (`Logs\android-offline\20261014-110723-5d6c59bb62b1480fb508b514005cfe5f\result.json`) |
+| Android IL2CPP ordinary | `Builds\Android-VisualBenchmark-Ordinary\FamilyRacing.apk` | `686E4EF26A46A39EBC85F5BA6250603F5C941F72968195420144F135560E9424`, 45,550,179 B (`Logs\android-offline\20261014-110942-2f08b509b04d4be0ad9600e47fe79580\result.json`) |
+
+The earlier Task-1 APKs recorded above predated the Task-3/4/5 content —
+these are the first same-source benchmark APKs carrying the Sunny Island
+content. The ordinary player's validation absence was re-verified on
+this final build (`Logs\vb-t7-ordinary-check`: empty `--validation-dir`,
+zero listeners; dev control produced `connection.json` + socket).
+
+### Task-7 gate results
+
+| Suite | Result |
+|---|---|
+| `Verify.ps1 -Mode CoreOffline` | 600/600 — incl. new `PredictionSliceNeverPublishesOutsideClientRace` |
+| `Verify.ps1 -Mode EditMode` | 663/665 — 1 pre-existing font-fixture failure + 1 voice-clip `[Ignore]`, unchanged signatures |
+| `Verify.ps1 -Mode PlayMode` | 270/272 — the 2 documented environment-blocked impaired-link failures, unchanged |
+| `python -m unittest discover -s Tools -p 'Test*.py'` | 245/245 |
+| `Tools\Test-VerifyTooling.ps1` / `Tools\Test-AndroidOffline.ps1` | 18/18 and 30/30 |
+| Rendered optimization pass (`Logs\vb-t7-opt-5`, final build) | validated perf reports: host p95 16.670 ms / max 23.16 ms / 0 stalls; client p95 16.670 ms / max 18.11 ms / 0 stalls |
+
+### Optimization check outcome
+
+The rendered profile pass on the final build (`Logs\vb-t7-opt-5`,
+validated quit-time reports: host p95 16.670 ms / max 23.16 ms, client
+p95 16.670 ms / max 18.11 ms, 0 stalls) plus the qual-6 segment table
+show **no actionable hotspot on PC**: every class×camera racing segment
+sits at p95 ≈ 16.67 ms (vsync-locked 60 fps), worst observed racing
+frame 35.0 ms, zero steady-state >100 ms stalls, host working set
+499→624 MB peak over ~43 min. Per the controller ruling (optimize only
+measured causes), **no optimization changes were made**; the full
+reasoning and the open-gate/owner table live in
+`docs/tasks/visual-benchmark-report.md`.
+
+Note: `Logs\vb-t7-opt`/`vb-t7-opt-2` (pre-fix) surfaced and pinned the
+snapshot-slice defect; `vb-t7-opt-3`/`-4` (`--no-fault-injection`)
+honestly failed at race-2 delivery settle — a permanently-departed
+participant's ledger row stays `pending` past the 60 s settle window
+(disclosed in the report as an open lifecycle-design question, not a
+perf defect).
+
+### Recorded tooling/product gaps for the device pass
+
+- `MemorySampler` is not re-bound after a fault-injection relaunch —
+  gen-2 process memory is unsampled and dead-PID samples read ~0 MB
+  `ok` instead of `unavailable` (recorded in the report; gate rows
+  stay `notVerified`).
+- Intermittent credentialed-rejoin `input.set` stall (~110–130 s,
+  burst-executed at race end) — product defect disclosed in the
+  report, needs its own investigation before device acceptance.
+- Fixed this task: one-boundary stale `prediction` slice on
+  `lan.leave` teardown — `FoundationService.Snapshot` now gates the
+  slice on the record's own role/race facts
+  (`PredictionSliceNeverPublishesOutsideClientRace`).
+- Real lightmap bake still absent (GI flags set, no
+  `LightingDataAsset`) — required **before** the device arm so bake
+  cost is inside the measurement.
+
 
 

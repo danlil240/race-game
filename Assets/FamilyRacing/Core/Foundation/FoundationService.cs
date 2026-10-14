@@ -432,6 +432,9 @@ namespace FamilyRacing.Core.Foundation
 
         public FoundationState Snapshot()
         {
+            var network = NetworkSnapshot();
+            var networkRaceCopy = networkRaceState != null
+                ? networkRaceState.Copy() : null;
             var state = new FoundationState
             {
                 stateSchemaVersion = NetworkSettings.StateSchemaVersion,
@@ -466,9 +469,19 @@ namespace FamilyRacing.Core.Foundation
                 driving = null,
                 drivingEvents = new List<DrivingEvent>(),
                 droppedDrivingEvents = droppedDrivingEvents,
-                network = NetworkSnapshot(),
-                networkRace = networkRaceState != null ? networkRaceState.Copy() : null,
+                network = network,
+                networkRace = networkRaceCopy,
+                // Contract: `prediction` is null on the host and outside
+                // a LAN race. The replication bridge clears its own
+                // facts on its next pump, which can lag the session's
+                // role/race transition by a boundary — this record must
+                // stay self-consistent, so gate the slice on THIS
+                // record's own network slices (surfaced live 2026-10-14:
+                // a `lan.leave` teardown boundary briefly published a
+                // stale prediction slice with role=none).
                 prediction = networkPrediction != null
+                    && network.role == LanSessionService.RoleClient
+                    && networkRaceCopy != null
                     ? networkPrediction.Copy() : null,
                 remotePresentation = networkRemotePresentation != null
                     ? networkRemotePresentation.Copy() : null,

@@ -361,6 +361,24 @@ store previously invalidated any capture longer than ~33 min at
   visual-benchmark 30-minute rendered qualification is **proven** on
   Windows (`Logs\vb-qual-5\`/`Logs\vb-qual-6\`, loopback + AI fill
   labeled); the A7 Lite device run remains hardware-gated.
+- M4 closeout (2026-10-14, task 7): the visual-benchmark acceptance
+  report, evidence matrix, open-gate/owner table and the owner tablet
+  review protocol live in `docs/tasks/visual-benchmark-report.md`.
+  Recorded gaps surfacing there: an **intermittent credentialed-rejoin
+  `input.set` stall** (~110–130 s in-app, burst-executed at race end —
+  product defect, needs its own investigation); a **departed-
+  participant pending delivery row** wedges the `--no-fault-injection`
+  settle step (open lifecycle-design question); a one-boundary stale
+  `prediction` slice on `lan.leave` teardown surfaced and was **fixed**
+  (`FoundationService.Snapshot` guard +
+  `PredictionSliceNeverPublishesOutsideClientRace`); `MemorySampler` is not
+  re-bound after a fault-injection relaunch (gen-2 process memory
+  unsampled; dead-PID samples read ~0 MB `ok` instead of
+  `unavailable`); the real lightmap bake is still absent (GI flags set,
+  no `LightingDataAsset`) and is required before device qualification;
+  tutorial voice clips remain credential-gated; the quantified
+  capture-overhead A/B (instrumented vs `--perf-capture off`/ordinary)
+  has not been run on a matched workload.
 - Ordinary Windows LAN play is **not verified**: it can only be
   demonstrated by humans driving ordinary builds on two machines —
   validation sockets are compiled out of ordinary builds by design, so

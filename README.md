@@ -46,6 +46,19 @@ classes) and `Tools\PhysicsSoak.py` (multi-endpoint LAN); device and
 human handling gates are **open**: see
 `docs\tasks\vehicle-physics-report.md`.
 
+**Sunny Island visual benchmark (M4, development complete; acceptance
+open).** The proven `graybox-01` course runs dressed as a representative
+benchmark (`visual-1` content): authored environment/vehicle/animal
+visuals, cataloged effects and offline-synthesized audio, pc/tablet URP
+render profiles, rendered-frame measurement (`--perf-report-dir`,
+`PerfSampler`), four same-source build flavors, and the schema-5
+qualification scenario `Tools\VisualBenchmarkScenario.py` — two
+consecutive 30-minute PC runs passed (≥1,800 racing s per endpoint, all
+four class×camera cells, p95 16.7 ms, zero steady-state stalls; see
+`Logs\vb-qual-5`/`Logs\vb-qual-6`). Device and owner-review gates are
+**open**: see `docs\tasks\visual-benchmark-report.md` and
+`docs\VISUAL_BENCHMARK_RUNBOOK.md`.
+
 **Foundation shell.** `Assets/FamilyRacing/Core` is a
 Unity-free, C# 9, .NET Standard 2.1-compatible assembly:
 
@@ -154,6 +167,21 @@ tests are discovered.
 
 ## Remaining gates
 
+- **M4 visual-benchmark closeout (2026-10-14, task 7)**: final
+  same-source Windows/Android development + ordinary benchmark builds
+  produced and hashed; gate re-run (CoreOffline 600/600, EditMode
+  663/665 with 1 pre-existing font-fixture failure + 1 voice-clip skip,
+  PlayMode 270/272 with the 2 documented impaired-link environment
+  failures, Python 245/245, tooling 18/18 + 30/30); ordinary validation
+  absence re-verified; PC-side optimization pass found no actionable
+  hotspot (60 fps p95 16.7 ms, 0 steady-state >100 ms stalls) so no
+  optimization changes were made. **Open**: A7 Lite device matrix,
+  four-human physical LAN, ordinary-build performance arm, owner
+  tablet/Hebrew/audio review, real lightmap bake, the disclosed
+  credentialed-rejoin `input.set` stall defect, thermal/rematch device
+  evidence — all `notVerified` in
+  `docs\tasks\visual-benchmark-report.md`. **M4: development complete;
+  acceptance open.**
 - **Vehicle-physics qualification (2026-10-13, task 12)**: the opt-in
   `PhysicalAssisted` backend is implemented for both vehicle classes,
   LAN-replicated (schema 4, protocol 2) with approximate client
