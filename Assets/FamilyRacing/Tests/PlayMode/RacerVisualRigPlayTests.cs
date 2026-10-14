@@ -547,22 +547,30 @@ namespace FamilyRacing.Tests
         }
 
         // The solo finish edge must fire the same celebration the LAN
-        // path gets — exactly once per race: a held `finished` flag is
-        // not a replay trigger, and a new race's finish fires again.
+        // path gets — exactly once per race. Production snapshots a NEW
+        // DrivingSessionState every rendered frame (Snapshot()), so the
+        // edge must be value-keyed like the LAN `wasFinished` bool: a
+        // held flag across fresh session objects is NOT a replay
+        // trigger — an object-identity guard would re-arm the
+        // celebration every frame and it would never decay.
         [UnityTest]
         public IEnumerator SoloFinishFiresCelebrationExactlyOnce()
         {
-            var state = new FoundationState
+            FoundationState FreshFinishedFrame()
             {
-                driving = new DrivingSessionState
+                return new FoundationState
                 {
-                    vehicleId = "car-01",
-                    phase = "running",
-                    motor = Motor(0f, 0f, 8f, 0f),
-                    finished = true
-                }
-            };
-            world.ApplyFrame(state);
+                    driving = new DrivingSessionState
+                    {
+                        vehicleId = "car-01",
+                        phase = "running",
+                        motor = Motor(0f, 0f, 8f, 0f),
+                        finished = true
+                    }
+                };
+            }
+
+            world.ApplyFrame(FreshFinishedFrame());
             yield return null;
             var rig = world.SoloPresentation.Rig;
             Assert.That(rig, Is.Not.Null,
@@ -570,29 +578,28 @@ namespace FamilyRacing.Tests
             Assert.That(rig.CelebrationActive, Is.True,
                 "the solo finish edge must fire the celebration");
 
-            // Held flag: once the celebration expires it must not
-            // restart — the edge fired once, not every frame.
+            // Keep feeding FRESH finished states for longer than the
+            // celebration lasts: if the edge re-arms on every new
+            // session object the celebration can never expire.
             var deadline = Time.time + 2.2f;
             while (Time.time < deadline)
             {
-                world.ApplyFrame(state);
+                world.ApplyFrame(FreshFinishedFrame());
                 yield return null;
             }
             Assert.That(rig.CelebrationActive, Is.False,
-                "a held finished flag must not replay the celebration");
+                "fresh finished frames must not re-arm — the edge "
+                + "fires once, then decays");
 
-            // A new race (new session object) finishing fires again.
-            state.driving = new DrivingSessionState
-            {
-                vehicleId = "car-01",
-                phase = "running",
-                motor = Motor(0f, 0f, 8f, 0f),
-                finished = true
-            };
-            world.ApplyFrame(state);
+            // Race ends (session gone → edge resets), then a new race
+            // finishes: the rising edge fires again exactly once.
+            world.ApplyFrame(new FoundationState());
+            yield return null;
+            world.ApplyFrame(FreshFinishedFrame());
             yield return null;
             Assert.That(rig.CelebrationActive, Is.True,
-                "a new race's finish must fire a fresh celebration");
+                "a new race's finish edge must fire a fresh "
+                + "celebration");
         }
 
         // Rematch + snapshot churn: repeated race start/end cycles and
