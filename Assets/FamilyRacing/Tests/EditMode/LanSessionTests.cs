@@ -419,13 +419,16 @@ namespace FamilyRacing.Tests
         [Test]
         public void ProtocolTwoIsTheLanContract()
         {
-            // Task 9: the physical replication epoch — protocol 2 and
-            // gameplay-2 are the wire contract. Observation schema 5 (M4
-            // Task 2) is additive presentation truth and does not touch
-            // either gameplay binding.
+            // Task 9: the physical replication epoch — protocol 2 is the
+            // wire contract. Observation schema 5 (M4 Task 2) is additive
+            // presentation truth and does not touch either gameplay
+            // binding. M5 Task 2 bumped the gameplay-rules identity to
+            // gameplay-3: the GameplayCatalog contract (objectives,
+            // difficulty, economy, gadgets) is now part of what peers
+            // must agree on.
             Assert.That(NetworkSettings.LanProtocolVersion, Is.EqualTo(2));
             Assert.That(NetworkSettings.GameplayVersion,
-                Is.EqualTo("gameplay-2"));
+                Is.EqualTo("gameplay-3"));
             Assert.That(NetworkSettings.StateSchemaVersion, Is.EqualTo(5));
         }
 

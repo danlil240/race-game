@@ -26,7 +26,12 @@ namespace FamilyRacing.Core.Networking
         // Compatibility fingerprint for gameplay rules: peers must report
         // the exact same value before a slot is allocated. Content version
         // comes from the DrivingContentCatalog and is checked separately.
-        public const string GameplayVersion = "gameplay-2";
+        // gameplay-3 (M5 Task 2): the gameplay-rules contract now includes
+        // the first-world GameplayCatalog — objectives, difficulty presets,
+        // economy and gadget definitions — all bound by the catalog
+        // compatibility fingerprint, so M4 gameplay-2 peers can never be
+        // silently admitted under the new rules set.
+        public const string GameplayVersion = "gameplay-3";
 
         // Four racers total; AI fills slots without a human (Task 4).
         public const int ParticipantCapacity = 4;
