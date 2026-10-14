@@ -73,7 +73,7 @@ namespace FamilyRacing.Tests
             var reloaded = restartedStore.Load(0).Profile;
             Assert.That(reloaded.coins, Is.EqualTo(27));
             Assert.That(reloaded.appliedResults.Count, Is.EqualTo(1));
-            Assert.That(reloaded.schemaVersion, Is.EqualTo(2));
+            Assert.That(reloaded.schemaVersion, Is.EqualTo(3));
 
             var again = RaceRewardService.Apply(
                 result, reloaded.id, reloaded, restartedStore);
@@ -350,8 +350,8 @@ namespace FamilyRacing.Tests
             var loaded = Store().Load(0);
             Assert.That(loaded.Status, Is.EqualTo(ProfileLoadStatus.Loaded));
             var profile = loaded.Profile;
-            Assert.That(profile.schemaVersion, Is.EqualTo(2),
-                "a schema-1 file migrates in memory on read");
+            Assert.That(profile.schemaVersion, Is.EqualTo(3),
+                "a schema-1 file migrates 1 -> 2 -> 3 in memory on read");
             Assert.That(profile.language, Is.EqualTo("he"));
             Assert.That(profile.camera, Is.EqualTo("overhead"));
             Assert.That(profile.reducedCameraShake, Is.True);
@@ -372,8 +372,9 @@ namespace FamilyRacing.Tests
 
             Store().Save(profile);
             var written = File.ReadAllText(Primary(0));
-            Assert.That(written, Does.Contain("\"schemaVersion\":2"));
+            Assert.That(written, Does.Contain("\"schemaVersion\":3"));
             Assert.That(written, Does.Contain("\"appliedResults\""));
+            Assert.That(written, Does.Contain("\"activeBounties\""));
             var reloaded = Store().Load(0);
             Assert.That(reloaded.Status, Is.EqualTo(ProfileLoadStatus.Loaded));
             Assert.That(reloaded.Profile.coins, Is.EqualTo(41));
@@ -385,7 +386,7 @@ namespace FamilyRacing.Tests
             // A file from a newer build is never migrated, recovered over,
             // or overwritten by a load.
             var newer = ValidProfile(0, 9);
-            newer.schemaVersion = 3;
+            newer.schemaVersion = 4;
             File.WriteAllText(Primary(0), serializer.Serialize(newer));
             var newerRaw = File.ReadAllText(Primary(0));
             var blocked = Store().Load(0);
@@ -635,7 +636,7 @@ namespace FamilyRacing.Tests
         {
             return new ProfileSave
             {
-                schemaVersion = 2,
+                schemaVersion = 3,
                 id = id,
                 slot = slot,
                 avatar = "fox",
@@ -647,7 +648,18 @@ namespace FamilyRacing.Tests
                 voiceVolume = 1f,
                 coins = coins,
                 unlockedVehicles = new List<string> { "car-01", "motorcycle-01" },
-                appliedResults = new List<AppliedResultReceipt>()
+                appliedResults = new List<AppliedResultReceipt>(),
+                eventProgress = new List<EventProgress>(),
+                worldProgress = new List<WorldProgress>(),
+                finaleProgress = new List<FinaleProgress>(),
+                vehicleUpgrades = new List<VehicleUpgrade>(),
+                ownedCosmetics = new List<string>(),
+                equippedCosmetics = new List<string>(),
+                activeBounties = ProfileProgressSeed.CreateInitialBounties(),
+                bountyRotationCursor = 0,
+                timeTrialRecords = new List<TimeTrialRecord>(),
+                purchaseReceipts = new List<PurchaseReceipt>(),
+                pendingRaceContexts = new List<RaceRewardContext>()
             };
         }
 

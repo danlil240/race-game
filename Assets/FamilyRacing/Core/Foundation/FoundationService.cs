@@ -241,7 +241,7 @@ namespace FamilyRacing.Core.Foundation
                 slots[slot] = new SlotInfo
                 {
                     Status = load.Status.ToString(),
-                    Profile = CopyProfile(load.Profile)
+                    Profile = ProfileCopy.DeepCopy(load.Profile)
                 };
             }
         }
@@ -458,8 +458,8 @@ namespace FamilyRacing.Core.Foundation
                     throttle = input.Throttle
                 },
                 slots = new List<SlotState>(),
-                savedProfile = CopyProfile(savedProfile),
-                draftProfile = CopyProfile(draftProfile),
+                savedProfile = ProfileCopy.DeepCopy(savedProfile),
+                draftProfile = ProfileCopy.DeepCopy(draftProfile),
                 pendingSettings = pendingSettings,
                 persistenceStatus = persistenceStatus,
                 captureValid = captureValid,
@@ -510,7 +510,7 @@ namespace FamilyRacing.Core.Foundation
                 {
                     slot = slot,
                     status = slots[slot].Status,
-                    profile = CopyProfile(slots[slot].Profile)
+                    profile = ProfileCopy.DeepCopy(slots[slot].Profile)
                 });
             }
             return state;
@@ -737,9 +737,9 @@ namespace FamilyRacing.Core.Foundation
             }
             EndRace("lifecycle", command);
             slots[slot].Status = "Loaded";
-            slots[slot].Profile = CopyProfile(created);
-            savedProfile = CopyProfile(created);
-            draftProfile = CopyProfile(created);
+            slots[slot].Profile = ProfileCopy.DeepCopy(created);
+            savedProfile = ProfileCopy.DeepCopy(created);
+            draftProfile = ProfileCopy.DeepCopy(created);
             activeSlot = slot;
             language = created.language;
             screen = ScreenSettings;
@@ -762,8 +762,8 @@ namespace FamilyRacing.Core.Foundation
             if (info.Status != "Loaded" && info.Status != "RecoveredFromBackup")
                 return Result(command, CommandResult.Rejected, "unavailable");
             EndRace("lifecycle", command);
-            savedProfile = CopyProfile(info.Profile);
-            draftProfile = CopyProfile(info.Profile);
+            savedProfile = ProfileCopy.DeepCopy(info.Profile);
+            draftProfile = ProfileCopy.DeepCopy(info.Profile);
             activeSlot = slot;
             language = info.Profile.language;
             pendingSettings = false;
@@ -822,7 +822,7 @@ namespace FamilyRacing.Core.Foundation
             var voice = ParseDecimal(command.Parameters["voiceVolume"]);
             if (!InUnitRange(music) || !InUnitRange(effects) || !InUnitRange(voice))
                 return Result(command, CommandResult.Rejected, "invalidParameter");
-            var draft = CopyProfile(savedProfile);
+            var draft = ProfileCopy.DeepCopy(savedProfile);
             draft.language = command.Parameters["language"];
             draft.camera = command.Parameters["camera"];
             draft.reducedCameraShake = command.Parameters["reducedCameraShake"] == "true";
@@ -839,7 +839,11 @@ namespace FamilyRacing.Core.Foundation
         {
             if (!WritableSelected())
                 return Result(command, CommandResult.Rejected, "unavailable");
-            var candidate = CopyProfile(draftProfile);
+            // Settings save merges the draft's settings slice onto the
+            // live profile's progression — a stale draft can never roll
+            // coins, receipts or any schema-3 progression back.
+            var candidate = ProfileCopy.DeepCopy(savedProfile);
+            ProfileCopy.CopySettings(draftProfile, candidate);
             try
             {
                 store.Save(candidate);
@@ -848,15 +852,15 @@ namespace FamilyRacing.Core.Foundation
             {
                 // Restore the prior saved draft and visible language; the
                 // persisted profile is unchanged by the store's safe save.
-                draftProfile = CopyProfile(savedProfile);
+                draftProfile = ProfileCopy.DeepCopy(savedProfile);
                 language = savedProfile.language;
                 pendingSettings = false;
                 persistenceStatus = "saveFailed";
                 return Result(command, CommandResult.Failed, "saveFailed");
             }
-            savedProfile = CopyProfile(candidate);
-            draftProfile = CopyProfile(candidate);
-            slots[activeSlot].Profile = CopyProfile(candidate);
+            savedProfile = ProfileCopy.DeepCopy(candidate);
+            draftProfile = ProfileCopy.DeepCopy(candidate);
+            slots[activeSlot].Profile = ProfileCopy.DeepCopy(candidate);
             pendingSettings = false;
             persistenceStatus = "saved";
             return Result(command, CommandResult.Applied, "");
@@ -1598,42 +1602,10 @@ namespace FamilyRacing.Core.Foundation
             return result.Copy();
         }
 
-        private static ProfileSave CopyProfile(ProfileSave profile)
-        {
-            if (profile == null) return null;
-            return new ProfileSave
-            {
-                schemaVersion = profile.schemaVersion,
-                id = profile.id,
-                slot = profile.slot,
-                avatar = profile.avatar,
-                colorIndex = profile.colorIndex,
-                language = profile.language,
-                camera = profile.camera,
-                reducedCameraShake = profile.reducedCameraShake,
-                musicVolume = profile.musicVolume,
-                effectsVolume = profile.effectsVolume,
-                voiceVolume = profile.voiceVolume,
-                coins = profile.coins,
-                unlockedVehicles = profile.unlockedVehicles == null
-                    ? null
-                    : new List<string>(profile.unlockedVehicles),
-                appliedResults = CopyReceipts(profile.appliedResults)
-            };
-        }
-
-        // The receipt ledger deep-copies with the profile so no snapshot
-        // or draft can ever share — or silently drop — applied-result
-        // state. Receipts are never silently evicted.
-        private static List<AppliedResultReceipt> CopyReceipts(
-            List<AppliedResultReceipt> receipts)
-        {
-            if (receipts == null) return null;
-            var copy = new List<AppliedResultReceipt>(receipts.Count);
-            foreach (var receipt in receipts)
-                copy.Add(receipt != null ? receipt.Copy() : null);
-            return copy;
-        }
+        // Profile copies all flow through ProfileCopy.DeepCopy — the
+        // single lossless copy that keeps every snapshot, draft, slot
+        // cache and reward candidate deeply independent of the live
+        // profile's nested collections.
 
         private static KeyValuePair<string, ParameterSpec[]> Schema(string action, params ParameterSpec[] parameters)
         {

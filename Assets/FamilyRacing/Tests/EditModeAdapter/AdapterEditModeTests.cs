@@ -31,6 +31,126 @@ namespace FamilyRacing.Tests
             Assert.That(back.slot, Is.EqualTo(profile.slot));
             Assert.That(back.language, Is.EqualTo(profile.language));
             Assert.That(back.schemaVersion, Is.EqualTo(profile.schemaVersion));
+            // Seeded schema-3 assignments survive the adapter round trip.
+            Assert.That(back.activeBounties, Is.Not.Null);
+            Assert.That(back.activeBounties.Count, Is.EqualTo(3));
+            Assert.That(back.activeBounties.Select(a => a.bountyId),
+                Is.EquivalentTo(profile.activeBounties.Select(a => a.bountyId)));
+            Assert.That(back.activeBounties.Select(a => a.assignmentId),
+                Is.EquivalentTo(profile.activeBounties.Select(a => a.assignmentId)));
+            Assert.That(back.eventProgress, Is.Not.Null);
+            Assert.That(back.pendingRaceContexts, Is.Not.Null);
+            Assert.That(back.purchaseReceipts, Is.Not.Null);
+        }
+
+        // Schema-3 progression rows must survive the Unity adapter
+        // bit-for-bit: JsonUtility writes the shape and strict Newtonsoft
+        // reads it back — nested rows and all.
+        [Test]
+        public void UnityProfileSerializerRoundTripsSchemaThreeProgression()
+        {
+            var serializer = new UnityProfileSerializer();
+            var profile = ProfileFactory.Create(1, "en");
+            profile.coins = 71;
+            profile.eventProgress.Add(new EventProgress
+            {
+                eventId = "ev-1", completed = true, objectiveMask = 5
+            });
+            profile.worldProgress.Add(new WorldProgress
+            {
+                worldId = "world-1", completed = true
+            });
+            profile.finaleProgress.Add(new FinaleProgress
+            {
+                eventId = "finale-1", completed = true, victorious = true
+            });
+            profile.vehicleUpgrades.Add(new VehicleUpgrade
+            {
+                vehicleId = "car-01", acceleration = 2, handling = 1, boost = 0
+            });
+            profile.ownedCosmetics.Add("livery-sun");
+            profile.equippedCosmetics.Add("livery-sun");
+            profile.activeBounties[0].progress = 4;
+            profile.bountyRotationCursor = 2;
+            profile.timeTrialRecords.Add(new TimeTrialRecord
+            {
+                courseId = "course-1", classId = "class-a", bestTicks = 9123
+            });
+            profile.purchaseReceipts.Add(new PurchaseReceipt
+            {
+                purchaseId = "purchase-1", kind = "upgrade",
+                vehicleId = "car-01", category = "boost", itemId = "",
+                level = 1, costCoins = 60
+            });
+            profile.pendingRaceContexts.Add(new RaceRewardContext
+            {
+                raceId = "race-1", profileId = profile.id, mode = "campaign",
+                rulesFingerprint = new string('f', 64),
+                bountyAssignmentIds = new System.Collections.Generic.List<string>
+                    { profile.activeBounties[0].assignmentId },
+                bountyDefinitions = new System.Collections.Generic.List<FamilyRacing.Core.Progression.BountyDefinition>
+                {
+                    new FamilyRacing.Core.Progression.BountyDefinition
+                    {
+                        id = "drift-10s", family = "drift",
+                        metric = FamilyRacing.Core.Progression.BountyMetric.DriftSeconds,
+                        threshold = 10, unit = "seconds", rewardCoins = 40,
+                        aggregation = FamilyRacing.Core.Progression.BountyAggregation.Sum,
+                        repeatable = true, rivalId = ""
+                    }
+                }
+            });
+            profile.appliedResults.Add(new AppliedResultReceipt
+            {
+                resultId = "r1/result", participantId = profile.id,
+                awardedCoins = 20, fingerprint = new string('a', 64)
+            });
+
+            var back = serializer.Deserialize(serializer.Serialize(profile));
+            Assert.That(back, Is.Not.Null);
+            Assert.That(back.schemaVersion, Is.EqualTo(3));
+            Assert.That(back.coins, Is.EqualTo(71));
+            Assert.That(back.eventProgress.Count, Is.EqualTo(1));
+            Assert.That(back.eventProgress[0].eventId, Is.EqualTo("ev-1"));
+            Assert.That(back.eventProgress[0].completed, Is.True);
+            Assert.That(back.eventProgress[0].objectiveMask, Is.EqualTo(5));
+            Assert.That(back.worldProgress[0].worldId, Is.EqualTo("world-1"));
+            Assert.That(back.worldProgress[0].completed, Is.True);
+            Assert.That(back.finaleProgress[0].eventId, Is.EqualTo("finale-1"));
+            Assert.That(back.finaleProgress[0].victorious, Is.True);
+            Assert.That(back.vehicleUpgrades[0].vehicleId, Is.EqualTo("car-01"));
+            Assert.That(back.vehicleUpgrades[0].acceleration, Is.EqualTo(2));
+            Assert.That(back.vehicleUpgrades[0].handling, Is.EqualTo(1));
+            Assert.That(back.vehicleUpgrades[0].boost, Is.EqualTo(0));
+            Assert.That(back.ownedCosmetics, Is.EqualTo(new[] { "livery-sun" }));
+            Assert.That(back.equippedCosmetics, Is.EqualTo(new[] { "livery-sun" }));
+            Assert.That(back.activeBounties[0].progress, Is.EqualTo(4));
+            Assert.That(back.bountyRotationCursor, Is.EqualTo(2));
+            Assert.That(back.timeTrialRecords[0].courseId, Is.EqualTo("course-1"));
+            Assert.That(back.timeTrialRecords[0].classId, Is.EqualTo("class-a"));
+            Assert.That(back.timeTrialRecords[0].bestTicks, Is.EqualTo(9123));
+            Assert.That(back.purchaseReceipts[0].purchaseId, Is.EqualTo("purchase-1"));
+            Assert.That(back.purchaseReceipts[0].kind, Is.EqualTo("upgrade"));
+            Assert.That(back.purchaseReceipts[0].vehicleId, Is.EqualTo("car-01"));
+            Assert.That(back.purchaseReceipts[0].category, Is.EqualTo("boost"));
+            Assert.That(back.purchaseReceipts[0].level, Is.EqualTo(1));
+            Assert.That(back.purchaseReceipts[0].costCoins, Is.EqualTo(60));
+            var context = back.pendingRaceContexts[0];
+            Assert.That(context.raceId, Is.EqualTo("race-1"));
+            Assert.That(context.profileId, Is.EqualTo(profile.id));
+            Assert.That(context.mode, Is.EqualTo("campaign"));
+            Assert.That(context.rulesFingerprint, Is.EqualTo(new string('f', 64)));
+            Assert.That(context.bountyAssignmentIds,
+                Is.EqualTo(new[] { profile.activeBounties[0].assignmentId }));
+            Assert.That(context.bountyDefinitions.Count, Is.EqualTo(1));
+            Assert.That(context.bountyDefinitions[0].id, Is.EqualTo("drift-10s"));
+            Assert.That(context.bountyDefinitions[0].metric,
+                Is.EqualTo(FamilyRacing.Core.Progression.BountyMetric.DriftSeconds));
+            Assert.That(context.bountyDefinitions[0].threshold, Is.EqualTo(10));
+            Assert.That(context.bountyDefinitions[0].repeatable, Is.True);
+            Assert.That(back.appliedResults[0].resultId, Is.EqualTo("r1/result"));
+            Assert.That(back.appliedResults[0].fingerprint,
+                Is.EqualTo(new string('a', 64)));
         }
 
         [Test]

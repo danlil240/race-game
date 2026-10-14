@@ -278,13 +278,13 @@ namespace FamilyRacing.Core.Foundation
                 && applied.status != RaceRewardService.StatusAlreadyApplied)
                 return applied;
             if (activeSlot >= 0)
-                slots[activeSlot].Profile = CopyProfile(savedProfile);
+                slots[activeSlot].Profile = ProfileCopy.DeepCopy(savedProfile);
             if (draftProfile != null)
-            {
-                draftProfile.coins = savedProfile.coins;
-                draftProfile.appliedResults =
-                    CopyReceipts(savedProfile.appliedResults);
-            }
+                // Refresh the draft's full progression slice — coins,
+                // receipts and every schema-3 collection — so a pending
+                // settings edit never carries stale progression into a
+                // save.
+                ProfileCopy.CopyProgression(savedProfile, draftProfile);
             return applied;
         }
 

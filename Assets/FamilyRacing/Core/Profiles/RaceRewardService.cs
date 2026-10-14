@@ -116,7 +116,7 @@ namespace FamilyRacing.Core.Profiles
 
             // Mutate a candidate copy: the live profile and the disk both
             // stay exactly as they were unless the atomic write commits.
-            var candidate = Copy(savedProfile);
+            var candidate = ProfileCopy.DeepCopy(savedProfile);
             candidate.coins += awarded;
             candidate.appliedResults.Add(new AppliedResultReceipt
             {
@@ -150,31 +150,8 @@ namespace FamilyRacing.Core.Profiles
             return null;
         }
 
-        private static ProfileSave Copy(ProfileSave profile)
-        {
-            var copy = new ProfileSave
-            {
-                schemaVersion = profile.schemaVersion,
-                id = profile.id,
-                slot = profile.slot,
-                avatar = profile.avatar,
-                colorIndex = profile.colorIndex,
-                language = profile.language,
-                camera = profile.camera,
-                reducedCameraShake = profile.reducedCameraShake,
-                musicVolume = profile.musicVolume,
-                effectsVolume = profile.effectsVolume,
-                voiceVolume = profile.voiceVolume,
-                coins = profile.coins,
-                unlockedVehicles = profile.unlockedVehicles == null
-                    ? null : new List<string>(profile.unlockedVehicles),
-                appliedResults = new List<AppliedResultReceipt>()
-            };
-            if (profile.appliedResults != null)
-                foreach (var receipt in profile.appliedResults)
-                    copy.appliedResults.Add(
-                        receipt != null ? receipt.Copy() : null);
-            return copy;
-        }
+        // Candidate copies come from ProfileCopy.DeepCopy — the single
+        // lossless copy, so every progression collection rides along and
+        // no draft of the award shares mutable rows with the live profile.
     }
 }

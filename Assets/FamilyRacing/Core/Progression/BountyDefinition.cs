@@ -47,6 +47,9 @@ namespace FamilyRacing.Core.Progression
     // One repeatable challenge in the fixed offline catalog. Progress
     // rows in the profile reference `id` via their assignment; rotation
     // order is the authored list order (Task 6/7 own the cursor).
+    // [Serializable]: RaceRewardContext durably snapshots the bound
+    // definitions inside the profile file (Unity adapter is JsonUtility).
+    [Serializable]
     public sealed class BountyDefinition
     {
         public string id = "";

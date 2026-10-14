@@ -6,7 +6,7 @@ namespace FamilyRacing.Core.Profiles
     [Serializable]
     public sealed class ProfileSave
     {
-        public int schemaVersion = 2;
+        public int schemaVersion = 3;
         public string id;
         public int slot;
         public string avatar;
@@ -22,5 +22,22 @@ namespace FamilyRacing.Core.Profiles
         // Schema 2: receipts for immutable race results already applied to
         // this profile. Coins and receipts are always written together.
         public List<AppliedResultReceipt> appliedResults;
+        // Schema 3: first-world progression. Campaign facts (per-event
+        // completion/objective stars, world and finale completion),
+        // purchased vehicle upgrades, owned/equipped cosmetics, the three
+        // rotating challenge assignments plus their deterministic
+        // rotation cursor, time-trial records, durable purchase receipts,
+        // and race-bound reward contexts awaiting a finalized result.
+        public List<EventProgress> eventProgress;
+        public List<WorldProgress> worldProgress;
+        public List<FinaleProgress> finaleProgress;
+        public List<VehicleUpgrade> vehicleUpgrades;
+        public List<string> ownedCosmetics;
+        public List<string> equippedCosmetics;
+        public List<BountyAssignment> activeBounties;
+        public int bountyRotationCursor;
+        public List<TimeTrialRecord> timeTrialRecords;
+        public List<PurchaseReceipt> purchaseReceipts;
+        public List<RaceRewardContext> pendingRaceContexts;
     }
 }

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Text.RegularExpressions;
+using FamilyRacing.Core.Progression;
 
 namespace FamilyRacing.Core.Profiles
 {
@@ -16,8 +17,15 @@ namespace FamilyRacing.Core.Profiles
     // validation. A profile is only usable when every check passes.
     internal static class ProfileValidation
     {
-        internal const int SchemaVersion = 2;
+        internal const int SchemaVersion = 3;
         internal const int SlotCount = 4;
+        // Authored upgrade cap (EconomyDefinition.maxLevel) mirrored here
+        // so a stored upgrade level can be checked without loading
+        // content; the bounty tray holds at most the three initial
+        // assignments.
+        internal const int MaxUpgradeLevel = 3;
+        internal const int MaxBountySlots = 3;
+        private const int MaxObjectiveMask = (1 << CampaignDefinition.ObjectiveBitsPerEvent) - 1;
 
         internal static readonly string[] Avatars = { "fox", "rabbit", "panda", "raccoon" };
         internal static readonly string[] Languages = { "en", "he" };
@@ -82,6 +90,118 @@ namespace FamilyRacing.Core.Profiles
                     if (!seen.Add(receipt.resultId)) return ProfileCheck.Invalid;
                 }
             }
+            // The schema-3 progression collections exist only once the
+            // file claims schema 3; schema-1/2 files gain them during
+            // migration, so nothing below applies earlier than that.
+            if (profile.schemaVersion >= 3)
+            {
+                if (profile.eventProgress == null || profile.worldProgress == null
+                    || profile.finaleProgress == null || profile.vehicleUpgrades == null
+                    || profile.ownedCosmetics == null || profile.equippedCosmetics == null
+                    || profile.activeBounties == null || profile.timeTrialRecords == null
+                    || profile.purchaseReceipts == null || profile.pendingRaceContexts == null)
+                    return ProfileCheck.Invalid;
+                if (profile.bountyRotationCursor < 0) return ProfileCheck.Invalid;
+
+                var seen = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var row in profile.eventProgress)
+                {
+                    if (row == null || !IsSlugId(row.eventId)
+                        || row.objectiveMask < 0 || row.objectiveMask > MaxObjectiveMask)
+                        return ProfileCheck.Invalid;
+                    if (!seen.Add(row.eventId)) return ProfileCheck.Invalid;
+                }
+                seen.Clear();
+                foreach (var row in profile.worldProgress)
+                {
+                    if (row == null || !IsSlugId(row.worldId)) return ProfileCheck.Invalid;
+                    if (!seen.Add(row.worldId)) return ProfileCheck.Invalid;
+                }
+                seen.Clear();
+                foreach (var row in profile.finaleProgress)
+                {
+                    if (row == null || !IsSlugId(row.eventId)) return ProfileCheck.Invalid;
+                    if (!seen.Add(row.eventId)) return ProfileCheck.Invalid;
+                }
+                seen.Clear();
+                foreach (var row in profile.vehicleUpgrades)
+                {
+                    if (row == null || !IsSlugId(row.vehicleId)
+                        || !IsUpgradeLevel(row.acceleration)
+                        || !IsUpgradeLevel(row.handling)
+                        || !IsUpgradeLevel(row.boost))
+                        return ProfileCheck.Invalid;
+                    if (!seen.Add(row.vehicleId)) return ProfileCheck.Invalid;
+                }
+                seen.Clear();
+                foreach (var cosmeticId in profile.ownedCosmetics)
+                    if (!IsSlugId(cosmeticId) || !seen.Add(cosmeticId))
+                        return ProfileCheck.Invalid;
+                seen.Clear();
+                // Equipped cosmetics can never bypass ownership.
+                foreach (var cosmeticId in profile.equippedCosmetics)
+                {
+                    if (!IsSlugId(cosmeticId) || !seen.Add(cosmeticId))
+                        return ProfileCheck.Invalid;
+                    if (!ContainsString(profile.ownedCosmetics, cosmeticId))
+                        return ProfileCheck.Invalid;
+                }
+                seen.Clear();
+                var bountyIds = new HashSet<string>(StringComparer.Ordinal);
+                if (profile.activeBounties.Count > MaxBountySlots)
+                    return ProfileCheck.Invalid;
+                foreach (var row in profile.activeBounties)
+                {
+                    if (row == null || string.IsNullOrEmpty(row.assignmentId)
+                        || !IsSlugId(row.bountyId) || row.progress < 0)
+                        return ProfileCheck.Invalid;
+                    if (!seen.Add(row.assignmentId)) return ProfileCheck.Invalid;
+                    if (!bountyIds.Add(row.bountyId)) return ProfileCheck.Invalid;
+                }
+                seen.Clear();
+                foreach (var row in profile.timeTrialRecords)
+                {
+                    if (row == null || !IsSlugId(row.courseId) || !IsSlugId(row.classId)
+                        || row.bestTicks <= 0)
+                        return ProfileCheck.Invalid;
+                    if (!seen.Add(row.courseId + "\n" + row.classId))
+                        return ProfileCheck.Invalid;
+                }
+                seen.Clear();
+                foreach (var row in profile.purchaseReceipts)
+                {
+                    if (row == null || string.IsNullOrEmpty(row.purchaseId)
+                        || row.level < 0 || row.costCoins < 0)
+                        return ProfileCheck.Invalid;
+                    if (!seen.Add(row.purchaseId)) return ProfileCheck.Invalid;
+                }
+                seen.Clear();
+                foreach (var row in profile.pendingRaceContexts)
+                {
+                    if (row == null || string.IsNullOrEmpty(row.raceId)
+                        || string.IsNullOrEmpty(row.mode)
+                        // A captured context must belong to this profile.
+                        || row.profileId != profile.id
+                        || !IsFingerprint(row.rulesFingerprint)
+                        || row.bountyAssignmentIds == null
+                        || row.bountyDefinitions == null
+                        // Assignment ids and their captured definitions
+                        // are parallel — the task-4 binding stores
+                        // exactly the definitions each id referenced.
+                        || row.bountyAssignmentIds.Count != row.bountyDefinitions.Count
+                        || row.bountyAssignmentIds.Count > MaxBountySlots)
+                        return ProfileCheck.Invalid;
+                    var seenAssignments = new HashSet<string>(StringComparer.Ordinal);
+                    foreach (var assignmentId in row.bountyAssignmentIds)
+                        if (string.IsNullOrEmpty(assignmentId)
+                            || !seenAssignments.Add(assignmentId))
+                            return ProfileCheck.Invalid;
+                    foreach (var definition in row.bountyDefinitions)
+                        if (definition == null || !definition.Validate(out _))
+                            return ProfileCheck.Invalid;
+                    if (!seen.Add(row.raceId)) return ProfileCheck.Invalid;
+                }
+            }
             return ProfileCheck.Valid;
         }
 
@@ -110,6 +230,25 @@ namespace FamilyRacing.Core.Profiles
         private static bool IsValidVolume(float volume)
         {
             return !float.IsNaN(volume) && !float.IsInfinity(volume) && volume >= 0f && volume <= 1f;
+        }
+
+        // Vehicle, event, cosmetic, course and other content ids all share
+        // the kebab-case slug grammar already enforced for vehicles.
+        private static bool IsSlugId(string id)
+        {
+            return !string.IsNullOrEmpty(id) && VehicleId.IsMatch(id);
+        }
+
+        private static bool IsUpgradeLevel(int level)
+        {
+            return level >= 0 && level <= MaxUpgradeLevel;
+        }
+
+        private static bool ContainsString(List<string> list, string value)
+        {
+            foreach (var entry in list)
+                if (entry == value) return true;
+            return false;
         }
     }
 }

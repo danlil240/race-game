@@ -1043,7 +1043,7 @@ namespace FamilyRacing.Tests
         {
             return new ProfileSave
             {
-                schemaVersion = 2,
+                schemaVersion = 3,
                 id = "11111111-1111-4111-8111-111111111111",
                 slot = slot,
                 avatar = "fox",
@@ -1055,7 +1055,18 @@ namespace FamilyRacing.Tests
                 voiceVolume = 1f,
                 coins = 0,
                 unlockedVehicles = new List<string> { "car-01", "motorcycle-01" },
-                appliedResults = new List<AppliedResultReceipt>()
+                appliedResults = new List<AppliedResultReceipt>(),
+                eventProgress = new List<EventProgress>(),
+                worldProgress = new List<WorldProgress>(),
+                finaleProgress = new List<FinaleProgress>(),
+                vehicleUpgrades = new List<VehicleUpgrade>(),
+                ownedCosmetics = new List<string>(),
+                equippedCosmetics = new List<string>(),
+                activeBounties = ProfileProgressSeed.CreateInitialBounties(),
+                bountyRotationCursor = 0,
+                timeTrialRecords = new List<TimeTrialRecord>(),
+                purchaseReceipts = new List<PurchaseReceipt>(),
+                pendingRaceContexts = new List<RaceRewardContext>()
             };
         }
 
