@@ -95,6 +95,7 @@ namespace FamilyRacing
         {
             DeactivateAll();
             cursor.Reset(raceId ?? "");
+            ResetRaceCounters();
             contextActive = false;
             emitCooldowns.Clear();
             UpdateFacts();
@@ -110,6 +111,7 @@ namespace FamilyRacing
                 contextActive = false;
                 cursor.Reset("");
                 emitCooldowns.Clear();
+                ResetRaceCounters();
                 UpdateFacts();
                 return;
             }
@@ -118,6 +120,7 @@ namespace FamilyRacing
                 DeactivateAll();
                 cursor.Reset(raceId);
                 emitCooldowns.Clear();
+                ResetRaceCounters();
             }
             contextActive = true;
             var paused = RacePresentationUtil.IsPaused(state);
@@ -396,6 +399,22 @@ namespace FamilyRacing
             }
         }
 
+        // Per-race counters live and die with the race binding: every
+        // re-baseline (explicit Reset, a new race identity on the
+        // stream, or teardown to no race) zeroes them so a rematch can
+        // never publish the previous race's pressure. Pool objects are
+        // resources and persist across races; their `exhausted`
+        // counters do not. The log-once guards (`missingLogged`,
+        // `exhaustedLogged`) stay app-lifetime — they bound warning
+        // spam, they are not facts.
+        private void ResetRaceCounters()
+        {
+            foreach (var pool in pools.Values) pool.exhausted = 0;
+            missingSet.Clear();
+            missingOrder.Clear();
+            missingDropped = 0;
+        }
+
         private void RecordMissing(string effectId)
         {
             if (missingSet.Add(effectId))
@@ -464,6 +483,7 @@ namespace FamilyRacing
             contextActive = false;
             cursor.Reset("");
             emitCooldowns.Clear();
+            ResetRaceCounters();
             UpdateFacts();
         }
 

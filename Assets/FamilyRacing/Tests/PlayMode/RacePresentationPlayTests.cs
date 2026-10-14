@@ -562,5 +562,159 @@ namespace FamilyRacing.Tests
             audioFacts.loops.Clear();
             Assert.That(audio.Facts.loops, Is.Not.Empty);
         }
+
+        // --- per-race counter hygiene --------------------------------------
+
+        [Test]
+        public void RematchResetsPerRaceCounters()
+        {
+            // Race A accumulates every counter: one-shots, a missing
+            // cue, and a genuinely exhausted effect pool (one landing
+            // burst fills poolSize=4; the second landing refuses all).
+            catalog.effectTriggers[0].count = 4;
+            audio.Reset("race-a");
+            effects.Reset("race-a");
+            var history = new List<DrivingEvent>();
+            audio.ApplyFrame(RaceState("race-a", "running", 10f,
+                history), 0.033f);
+            effects.ApplyFrame(RaceState("race-a", "running", 10f,
+                history), 0.033f);
+
+            history.Add(Ev("race-a", 3, "motor.landed"));
+            history.Add(Ev("race-a", 4, "motor.landed"));
+            history.Add(Ev("race-a", 5, "race.finished")); // clip slot is empty
+            LogAssert.Expect(LogType.Warning,
+                new System.Text.RegularExpressions.Regex("no clip"));
+            var later = RaceState("race-a", "running", 10f, history);
+            audio.ApplyFrame(later, 0.033f);
+            effects.ApplyFrame(later, 0.033f);
+            Assert.That(audio.Facts.oneShots, Is.GreaterThan(0),
+                "race A fired one-shots before the rematch");
+            Assert.That(audio.Facts.missingCues, Does.Contain("finish"),
+                "race A reported the missing finish cue");
+            var exhaustedPool = effects.Facts.pools
+                .Find(p => p.effectId == "landing-puff");
+            Assert.That(exhaustedPool.exhausted, Is.GreaterThan(0),
+                "the landing pool genuinely exhausted in race A");
+
+            // The app's real rematch path: a new race identity arrives
+            // on the stream — ApplyFrame re-baselines (no explicit
+            // Reset). Race B's first published facts must not inherit
+            // race A's pressure.
+            var fresh = RaceState("race-b", "running", 10f,
+                new List<DrivingEvent>());
+            audio.ApplyFrame(fresh, 0.033f);
+            effects.ApplyFrame(fresh, 0.033f);
+
+            var audioFacts = audio.Facts;
+            Assert.That(audioFacts.oneShots, Is.EqualTo(0),
+                "rematch must not report race A's one-shot count");
+            Assert.That(audioFacts.droppedOneShots, Is.EqualTo(0));
+            Assert.That(audioFacts.refusedLoopVoices, Is.EqualTo(0));
+            Assert.That(audioFacts.missingCues, Is.Empty,
+                "rematch must not report race A's missing cues");
+            Assert.That(audioFacts.missingDropped, Is.EqualTo(0));
+            Assert.That(audioFacts.loops,
+                Does.Contain("engine.car@race-b"),
+                "race B's own live loop is present under the new key");
+
+            var effectFacts = effects.Facts;
+            Assert.That(effectFacts.activeEffects, Is.EqualTo(0));
+            Assert.That(effectFacts.pools
+                    .Find(p => p.effectId == "landing-puff").exhausted,
+                Is.EqualTo(0),
+                "rematch must not report race A's pool pressure");
+            Assert.That(effectFacts.missingEffects, Is.Empty);
+            Assert.That(effectFacts.missingDropped, Is.EqualTo(0));
+
+            // Teardown to no race also zeroes the counters — no stale
+            // "this race" claims on the menu.
+            audio.ApplyFrame(new FoundationState
+            {
+                draftProfile = fresh.draftProfile
+            }, 0.033f);
+            effects.ApplyFrame(new FoundationState
+            {
+                draftProfile = fresh.draftProfile
+            }, 0.033f);
+            Assert.That(audio.Facts.oneShots, Is.EqualTo(0));
+            Assert.That(audio.Facts.missingCues, Is.Empty);
+            Assert.That(effects.Facts.activeEffects, Is.EqualTo(0));
+        }
+
+        [Test]
+        public void LoopVoiceBoundRefusalIsObservable()
+        {
+            // One authored skid voice, two drifting racers: the second
+            // refusal must publish on the facts — bounded voice pressure
+            // is never silent.
+            foreach (var loop in catalog.loops)
+                if (loop.loopId == "skid") loop.maxVoices = 1;
+            var lan = LanRaceState("lan-9", "p1", "p2");
+            audio.ApplyFrame(lan, 0.033f);
+
+            var facts = audio.Facts;
+            var skidLoops = 0;
+            foreach (var entry in facts.loops)
+                if (entry.StartsWith("skid@")) skidLoops++;
+            Assert.That(skidLoops, Is.EqualTo(1),
+                "the authored bound holds — only one skid voice plays");
+            Assert.That(facts.refusedLoopVoices, Is.EqualTo(1),
+                "the refused racer's loop is counted, not silent");
+
+            // Held across frames: the refusal counts once per episode,
+            // never once per frame.
+            audio.ApplyFrame(lan, 0.033f);
+            audio.ApplyFrame(lan, 0.033f);
+            Assert.That(audio.Facts.refusedLoopVoices, Is.EqualTo(1),
+                "a held drift must not inflate the refusal counter");
+        }
+
+        // A host-confirmed LAN race snapshot: the solo `driving` slice is
+        // null and `networkRace.racers` carries each racer's committed
+        // session — the shape Racers() enumerates for per-racer loops.
+        private static FoundationState LanRaceState(string raceId,
+            params string[] driftingPids)
+        {
+            var race = new NetworkRaceState
+            {
+                raceId = raceId,
+                phase = "running"
+            };
+            foreach (var pid in driftingPids)
+                race.racers.Add(new NetworkRacerState
+                {
+                    participantId = pid,
+                    vehicleId = "car-01",
+                    session = new DrivingSessionState
+                    {
+                        raceId = raceId,
+                        vehicleId = "car-01",
+                        motor = new MotorState
+                        {
+                            speed = 10f,
+                            grounded = true,
+                            drifting = true
+                        }
+                    }
+                });
+            return new FoundationState
+            {
+                language = "en",
+                screen = "driving",
+                networkRace = race,
+                network = new FamilyRacing.Core.Networking
+                    .NetworkSessionState
+                    {
+                        localParticipantId = driftingPids[0]
+                    },
+                draftProfile = new ProfileSave
+                {
+                    musicVolume = 0.5f,
+                    effectsVolume = 0.6f,
+                    voiceVolume = 0.9f
+                }
+            };
+        }
     }
 }

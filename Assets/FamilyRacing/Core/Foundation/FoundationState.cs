@@ -189,8 +189,11 @@ namespace FamilyRacing.Core.Foundation
 
     // The effects presenter's actual state (M4 Task 5): the bound catalog,
     // live pooled instances, per-pool capacity/pressure and the bounded
-    // missing-prefab list. A race teardown clears the live fields; the
-    // catalog identity and exhaustion counters remain for the record.
+    // missing-prefab list. Per-race counters (each pool's `exhausted`,
+    // `missingEffects`/`missingDropped`) reset on every re-baseline —
+    // a new race identity, an explicit re-bind or teardown to no race —
+    // so a rematch never reports the previous race's pressure; only
+    // `catalogId` persists across races.
     [Serializable]
     public sealed class RaceEffectsState
     {
@@ -219,10 +222,14 @@ namespace FamilyRacing.Core.Foundation
 
     // The audio presenter's actual state (M4 Task 5): the bound catalog,
     // pause flag, active music cue id, live loop identities
-    // ("<loopId>@<racerKey>"), live voice count, the one-shot count this
-    // race, and the bounded missing-clip cue list. Empty lists mean
-    // nothing is sounding — a missing clip is a missing entry, never a
-    // claimed playback.
+    // ("<loopId>@<racerKey>"), live voice count, and the per-race
+    // counters. `oneShots`, `droppedOneShots`, `refusedLoopVoices` and
+    // `missingCues`/`missingDropped` describe the current race binding
+    // only — every re-baseline (a new race identity, an explicit
+    // re-bind or teardown to no race) zeroes them, so a rematch never
+    // reports the previous race's totals; only `catalogId` persists
+    // across races. Empty lists mean nothing is sounding — a missing
+    // clip is a missing entry, never a claimed playback.
     [Serializable]
     public sealed class RaceAudioState
     {
@@ -235,6 +242,10 @@ namespace FamilyRacing.Core.Foundation
         // One-shot activations refused because every authored voice was
         // busy — pressure is observable, never silent.
         public int droppedOneShots;
+        // Loop activations refused because the loop's authored
+        // maxVoices was reached — counted once per wanting episode
+        // (loopId@racerKey while the condition holds), never per frame.
+        public int refusedLoopVoices;
         public List<string> missingCues = new List<string>();
         public int missingDropped;
 
@@ -248,6 +259,7 @@ namespace FamilyRacing.Core.Foundation
                 voices = voices,
                 oneShots = oneShots,
                 droppedOneShots = droppedOneShots,
+                refusedLoopVoices = refusedLoopVoices,
                 missingDropped = missingDropped
             };
             copy.loops.AddRange(loops);

@@ -157,6 +157,22 @@ namespace FamilyRacing.Tests
                         racingSamples = 42,
                         p95FrameMs = 33.5,
                         reportStatus = "written"
+                    },
+                    // Task-5 additive slices (review fix): the audio
+                    // refusal counter and effect pool facts must round-
+                    // trip and copy independently like the rest.
+                    audio = new RaceAudioState
+                    {
+                        catalogId = "race-presentation-01",
+                        musicCue = "music-race",
+                        oneShots = 3,
+                        droppedOneShots = 1,
+                        refusedLoopVoices = 2
+                    },
+                    effects = new RaceEffectsState
+                    {
+                        catalogId = "race-presentation-01",
+                        activeEffects = 2
                     }
                 }
             };
@@ -184,15 +200,26 @@ namespace FamilyRacing.Tests
                 Is.EqualTo(42));
             Assert.That(roundTrip.presentation.performance.p95FrameMs,
                 Is.EqualTo(33.5).Within(0.0001));
+            Assert.That(roundTrip.presentation.audio, Is.Not.Null);
+            Assert.That(roundTrip.presentation.audio.refusedLoopVoices,
+                Is.EqualTo(2));
+            Assert.That(roundTrip.presentation.audio.droppedOneShots,
+                Is.EqualTo(1));
+            Assert.That(roundTrip.presentation.effects, Is.Not.Null);
+            Assert.That(roundTrip.presentation.effects.activeEffects,
+                Is.EqualTo(2));
             // Deep-copy handling: mutating a published copy never rewrites
             // the live presentation slice.
             var copy = state.presentation.Copy();
             copy.performance.racingSamples = -1;
             copy.renderProfileId = "pc";
+            copy.audio.refusedLoopVoices = -1;
             Assert.That(state.presentation.performance.racingSamples,
                 Is.EqualTo(42));
             Assert.That(state.presentation.renderProfileId,
                 Is.EqualTo("tablet"));
+            Assert.That(state.presentation.audio.refusedLoopVoices,
+                Is.EqualTo(2));
         }
     }
 }

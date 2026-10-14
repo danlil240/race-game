@@ -67,6 +67,15 @@ namespace FamilyRacing
             new Dictionary<string, float>(StringComparer.Ordinal);
         private int oneShots;
         private int droppedOneShots;
+        private int refusedLoopVoices;
+        // Loop keys refused on the authored maxVoices bound while still
+        // wanted — the episode key keeps a held condition from counting
+        // once per frame; a granted voice or an ended condition clears
+        // it so a later re-refusal counts again.
+        private readonly HashSet<string> refusedLoops =
+            new HashSet<string>(StringComparer.Ordinal);
+        private readonly HashSet<string> refusedLogged =
+            new HashSet<string>(StringComparer.Ordinal);
         private readonly RaceAudioState snapshot = new RaceAudioState();
 
         public RaceAudioState Facts { get { return snapshot.Copy(); } }
@@ -91,6 +100,7 @@ namespace FamilyRacing
             StopAllVoices();
             StopMusic();
             cursor.Reset(raceId ?? "");
+            ResetRaceCounters();
             contextActive = false;
             musicCueId = "";
             musicStarted = false;
@@ -111,6 +121,7 @@ namespace FamilyRacing
                 contextActive = false;
                 framePaused = false;
                 cursor.Reset("");
+                ResetRaceCounters();
                 UpdateFacts();
                 return;
             }
@@ -119,6 +130,7 @@ namespace FamilyRacing
                 StopAllVoices();
                 StopMusic();
                 cursor.Reset(raceId);
+                ResetRaceCounters();
                 musicCueId = "";
                 musicStarted = false;
             }
@@ -221,6 +233,10 @@ namespace FamilyRacing
                 if (wanted == null || !wanted.Contains(pair.Key))
                     stale.Add(pair.Key);
             foreach (var key in stale) RemoveVoice(key);
+            // A refusal episode ends with its wanting condition, so a
+            // later re-refusal counts as a fresh refusal.
+            if (wanted == null) refusedLoops.Clear();
+            else refusedLoops.RemoveWhere(key => !wanted.Contains(key));
             if (wanted == null) return;
 
             foreach (var racer in racers)
@@ -248,15 +264,33 @@ namespace FamilyRacing
             Voice voice;
             if (!voices.TryGetValue(key, out voice))
             {
-                // Per-loop voice bound: refuse extras honestly (no silent
-                // over-subscription); the cap lives in authored data.
-                var inUse = 0;
-                foreach (var other in voices.Values)
-                    if (other.loopId == loopId) inUse++;
-                if (inUse >= entry.maxVoices) return;
+                // A clip-less loop is missing-asset truth regardless of
+                // capacity — report the miss before counting pressure.
                 if (entry.clip == null)
                 {
                     RecordMissing(loopId);
+                    return;
+                }
+                // Per-loop voice bound: refused activations are per-race
+                // observable pressure (facts.refusedLoopVoices) and warn
+                // once per loop id — never a silent drop. The episode
+                // key keeps a held condition counted once, not once
+                // per frame.
+                var inUse = 0;
+                foreach (var other in voices.Values)
+                    if (other.loopId == loopId) inUse++;
+                if (inUse >= entry.maxVoices)
+                {
+                    if (refusedLoops.Add(key))
+                    {
+                        refusedLoopVoices++;
+                        if (refusedLogged.Add(loopId))
+                            Debug.LogWarning("RaceAudioPresenter: loop '"
+                                + loopId + "' voice refused — authored "
+                                + "maxVoices (" + entry.maxVoices
+                                + ") reached; the refusal is reported "
+                                + "on the facts.");
+                    }
                     return;
                 }
                 var go = new GameObject("Loop-" + key);
@@ -275,6 +309,9 @@ namespace FamilyRacing
                 };
                 voices[key] = voice;
             }
+            // The voice exists — any earlier refusal episode for this
+            // key is over; a future refusal counts anew.
+            refusedLoops.Remove(key);
             voice.source.pitch = pitch;
             voice.source.volume = BusVolume(voice.category, state)
                 * Mathf.Clamp01(voice.authoredVolume)
@@ -417,6 +454,24 @@ namespace FamilyRacing
             }
         }
 
+        // Per-race counters live and die with the race binding: every
+        // re-baseline (explicit Reset, a new race identity on the
+        // stream, or teardown to no race) zeroes them so a rematch can
+        // never publish the previous race's pressure. The log-once
+        // guards (`missingLogged`, `refusedLogged`) stay app-lifetime —
+        // they bound warning spam, they are not facts.
+        private void ResetRaceCounters()
+        {
+            oneShots = 0;
+            droppedOneShots = 0;
+            refusedLoopVoices = 0;
+            missingOrder.Clear();
+            missingSet.Clear();
+            missingDropped = 0;
+            lastCueAt.Clear();
+            refusedLoops.Clear();
+        }
+
         private void RecordMissing(string cueId)
         {
             if (string.IsNullOrEmpty(cueId)) return;
@@ -461,6 +516,7 @@ namespace FamilyRacing
                     ? 1 : 0);
             snapshot.oneShots = oneShots;
             snapshot.droppedOneShots = droppedOneShots;
+            snapshot.refusedLoopVoices = refusedLoopVoices;
             snapshot.missingCues.Clear();
             snapshot.missingCues.AddRange(missingOrder);
             snapshot.missingDropped = missingDropped;
@@ -473,6 +529,7 @@ namespace FamilyRacing
             contextActive = false;
             framePaused = false;
             cursor.Reset("");
+            ResetRaceCounters();
             UpdateFacts();
         }
 
