@@ -119,6 +119,10 @@ namespace FamilyRacing.Core.Networking
         // transient link drop that still owns a reserved slot. Their
         // outstanding delivery rows settle as terminal "undeliverable"
         // instead of retrying a participant that can never come back.
+        // The mark retires the moment a deliberate return lands — a
+        // successful fresh join or credentialed reclaim with the same
+        // participant id — so future results are deliverable again while
+        // the abandoned rows stay terminal.
         private readonly HashSet<string> departedParticipants =
             new HashSet<string>(StringComparer.Ordinal);
         // Composition seam: applies a finalized result to the selected
@@ -1526,6 +1530,11 @@ namespace FamilyRacing.Core.Networking
                     reclaim.connected = true;
                     reclaim.controlSource = ControlRemote;
                     reclaim.ownershipEpoch = epoch;
+                    // A deliberate return revives delivery eligibility for
+                    // FUTURE rows: the departed mark only stamped new
+                    // PublishResult rows, and the old undeliverable rows
+                    // stay terminal history — they are never rewritten.
+                    departedParticipants.Remove(participantId);
                     // The presented credential is retired the moment it is
                     // honored; accept carries the rotated replacement.
                     var rotated = reconnectRegistry.Rotate(participantId);
@@ -1584,6 +1593,10 @@ namespace FamilyRacing.Core.Networking
             openConnections.Remove(connectionId);
             connections[connectionId] = participantId;
             connectionIdFor[participantId] = connectionId;
+            // A fresh join reusing a participant id that explicitly left
+            // is a deliberate return: future results must be deliverable
+            // again. Prior undeliverable rows stay terminal.
+            departedParticipants.Remove(participantId);
             SendJoinAccept(connectionId, participant, commandId, credential);
             BroadcastSessionState();
             OfferPending(now);
