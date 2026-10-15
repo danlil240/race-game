@@ -24,6 +24,12 @@ namespace FamilyRacing
             public float shortcutWillingness = 0.5f;
         }
 
+        // Ordered campaign worlds (M6 Task 1). The legacy single
+        // `campaign` field is the fallback only when this array is empty;
+        // populating both is an authoring error and is rejected rather
+        // than silently choosing one.
+        public CampaignDefinitionAsset[] campaigns =
+            new CampaignDefinitionAsset[0];
         public CampaignDefinitionAsset campaign;
         public BountyCatalogAsset bounties;
         public EconomyDefinitionAsset economy;
@@ -38,18 +44,48 @@ namespace FamilyRacing
                 error = name + ": missing driving catalog";
                 return null;
             }
-            if (campaign == null || bounties == null || economy == null
-                || gadgets == null)
+            var hasCampaigns = campaigns != null && campaigns.Length > 0;
+            if (hasCampaigns && campaign != null)
+            {
+                error = name + ": both campaign and campaigns are "
+                    + "populated";
+                return null;
+            }
+            if ((!hasCampaigns && campaign == null) || bounties == null
+                || economy == null || gadgets == null)
             {
                 error = name + ": missing catalog section reference";
                 return null;
             }
             string sectionError;
-            var campaignDef = campaign.ToDefinition(out sectionError);
-            if (campaignDef == null)
+            var campaignDefs = new List<CampaignDefinition>();
+            if (hasCampaigns)
             {
-                error = name + ": " + sectionError;
-                return null;
+                foreach (var campaignAsset in campaigns)
+                {
+                    if (campaignAsset == null)
+                    {
+                        error = name + ": null campaign asset";
+                        return null;
+                    }
+                    var def = campaignAsset.ToDefinition(out sectionError);
+                    if (def == null)
+                    {
+                        error = name + ": " + sectionError;
+                        return null;
+                    }
+                    campaignDefs.Add(def);
+                }
+            }
+            else
+            {
+                var def = campaign.ToDefinition(out sectionError);
+                if (def == null)
+                {
+                    error = name + ": " + sectionError;
+                    return null;
+                }
+                campaignDefs.Add(def);
             }
             var bountyDefs = bounties.ToDefinitions(out sectionError);
             if (bountyDefs == null)
@@ -94,8 +130,8 @@ namespace FamilyRacing
                     }
                     difficultyDefs.Add(difficulty);
                 }
-            if (!GameplayCatalog.TryCreate(driving, campaignDef, bountyDefs,
-                    economyDef, gadgetDefs, difficultyDefs,
+            if (!GameplayCatalog.TryCreate(driving, campaignDefs,
+                    bountyDefs, economyDef, gadgetDefs, difficultyDefs,
                     out var catalog, out sectionError))
             {
                 error = name + ": " + sectionError;

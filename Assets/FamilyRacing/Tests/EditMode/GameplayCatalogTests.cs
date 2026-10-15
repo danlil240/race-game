@@ -181,9 +181,15 @@ namespace FamilyRacing.Tests
 
         private static EventDefinition Finale(string classId, string courseId)
         {
+            return FinaleEvent("sunny-island", classId, courseId);
+        }
+
+        private static EventDefinition FinaleEvent(string worldId,
+            string classId, string courseId)
+        {
             return new EventDefinition
             {
-                id = "sunny-island-" + classId + "-finale",
+                id = worldId + "-" + classId + "-finale",
                 courseId = courseId,
                 laps = 3,
                 countdownTicks = 90,
@@ -388,6 +394,133 @@ namespace FamilyRacing.Tests
             Assert.That(ok, Is.False,
                 "catalog must be rejected (" + because + ") but was accepted");
             Assert.That(error, Is.Not.Null.And.Not.Empty);
+            Assert.That(catalog, Is.Null);
+        }
+
+        // --- multiworld fixtures (M6 Task 1) -------------------------------
+        // Three distinct worlds over six courses: sunny-island keeps the
+        // first-world pair, redrock-canyon and snowy-peaks each own two
+        // new courses, 24 regular events and two class finales that pay
+        // the world's unlock pair.
+
+        private static readonly string[] RedrockCourseIds =
+            { "canyon-dash", "mesa-skyway" };
+        private static readonly string[] SnowyCourseIds =
+            { "snowpine-circuit", "aurora-pass" };
+
+        private static CampaignDefinition World(string worldId,
+            string nameEn, string nameHe, string[] courseIds,
+            int rewardOrdinal)
+        {
+            var campaign = new CampaignDefinition
+            {
+                worldId = worldId,
+                nameEn = nameEn,
+                nameHe = nameHe,
+                requiredEventCompletions =
+                    courseIds.Length * ClassIds.Length * EventTypes.Length,
+                requiredRegionalStars = 30
+            };
+            foreach (var courseId in courseIds)
+                campaign.courseIds.Add(courseId);
+            foreach (var courseId in courseIds)
+                foreach (var classId in ClassIds)
+                    foreach (var eventType in EventTypes)
+                        campaign.regularEventIds.Add(
+                            RegularEventId(courseId, classId, eventType));
+            foreach (var classId in ClassIds)
+                campaign.finales.Add(new FinaleDefinition
+                {
+                    eventId = worldId + "-" + classId + "-finale",
+                    classId = classId,
+                    rivalId = worldId + "-" + classId + "-rival",
+                    rewardVehicleId = classId + "-0" + rewardOrdinal
+                });
+            return campaign;
+        }
+
+        // Internal so ContentFingerprintTests can bind the same fixture.
+        internal static List<CampaignDefinition> MultiCampaigns()
+        {
+            return new List<CampaignDefinition>
+            {
+                World("sunny-island", "Sunny Island", "האי השמשי",
+                    CourseIds, 2),
+                World("redrock-canyon", "Redrock Canyon", "קניון רדרוק",
+                    RedrockCourseIds, 3),
+                World("snowy-peaks", "Snowy Peaks", "הפסגות המושלגות",
+                    SnowyCourseIds, 4)
+            };
+        }
+
+        internal static DrivingContentCatalog MultiDriving()
+        {
+            var courses = new List<CourseDefinition>();
+            var events = new List<EventDefinition>();
+            var worlds = new[]
+            {
+                new KeyValuePair<string, string[]>("sunny-island", CourseIds),
+                new KeyValuePair<string, string[]>("redrock-canyon", RedrockCourseIds),
+                new KeyValuePair<string, string[]>("snowy-peaks", SnowyCourseIds)
+            };
+            foreach (var world in worlds)
+            {
+                foreach (var courseId in world.Value)
+                {
+                    courses.Add(Course(courseId));
+                    foreach (var classId in ClassIds)
+                        foreach (var eventType in EventTypes)
+                            events.Add(RegularEvent(courseId, classId,
+                                eventType));
+                }
+                foreach (var classId in ClassIds)
+                    events.Add(FinaleEvent(world.Key, classId,
+                        world.Value[0]));
+            }
+            return DrivingContentCatalog.Create(
+                "full-content-1",
+                new[]
+                {
+                    Vehicle("car-01"), Vehicle("car-02"),
+                    Vehicle("car-03"), Vehicle("car-04"),
+                    Vehicle("motorcycle-01"), Vehicle("motorcycle-02"),
+                    Vehicle("motorcycle-03"), Vehicle("motorcycle-04")
+                },
+                courses,
+                events);
+        }
+
+        internal static GameplayCatalog MultiCatalog(
+            IReadOnlyList<CampaignDefinition> campaigns = null,
+            DrivingContentCatalog driving = null)
+        {
+            var ok = GameplayCatalog.TryCreate(
+                driving ?? MultiDriving(),
+                campaigns ?? MultiCampaigns(),
+                Bounties(), Economy(), Gadgets(), Difficulties(),
+                out var catalog, out var error);
+            Assert.That(ok, Is.True,
+                "multiworld fixture catalog must validate: " + error);
+            return catalog;
+        }
+
+        private static void AssertMultiRejected(
+            IReadOnlyList<CampaignDefinition> campaigns = null,
+            DrivingContentCatalog driving = null,
+            string because = "",
+            string errorContains = null)
+        {
+            var ok = GameplayCatalog.TryCreate(
+                driving ?? MultiDriving(),
+                campaigns ?? MultiCampaigns(),
+                Bounties(), Economy(), Gadgets(), Difficulties(),
+                out var catalog, out var error);
+            Assert.That(ok, Is.False,
+                "catalog must be rejected (" + because + ") but was accepted");
+            Assert.That(error, Is.Not.Null.And.Not.Empty);
+            if (errorContains != null)
+                Assert.That(error, Does.Contain(errorContains),
+                    "the intended validation must fire (" + because + ")");
             Assert.That(catalog, Is.Null);
         }
 
@@ -602,7 +735,6 @@ namespace FamilyRacing.Tests
             // Campaign / gate values.
             Changes(c => c.Campaign.requiredRegionalStars = 31, "star gate");
             Changes(c => c.Campaign.requiredEventCompletions = 25, "completion gate");
-            Changes(c => c.Campaign.nameEn = "Sunny Isle", "world name");
             Changes(c => c.Campaign.finales[0].rewardVehicleId = "car-01",
                 "finale reward vehicle");
 
@@ -661,6 +793,16 @@ namespace FamilyRacing.Tests
             Changes(c =>
                 c.Driving.Events["harbor-hop-car-circuit"].laps = 3,
                 "event laps");
+
+            // M6 policy: translated/cosmetic display names are not
+            // gameplay content — retitling a world must never split the
+            // admission token.
+            var renamed = Catalog();
+            renamed.Campaign.nameEn = "Sunny Isle";
+            renamed.Campaign.nameHe = "אי שמשי";
+            Assert.That(renamed.CompatibilityFingerprint,
+                Is.EqualTo(baselineFingerprint),
+                "translated display names are presentation, not content");
         }
 
         [Test]
@@ -771,20 +913,228 @@ namespace FamilyRacing.Tests
                 "a legacy catalog still produces a stable token");
             Assert.That(legacy.CompatibilityFingerprint,
                 Is.Not.EqualTo(Catalog().CompatibilityFingerprint),
-                "M4 evidence identity stays distinguishable from gameplay-loop-1");
+                "M4 evidence identity stays distinguishable from the "
+                + "full-content catalog");
         }
 
         [Test]
-        public void GameplayIdentityIsVersionThree()
+        public void GameplayIdentityIsFullContent1AndGameplay4()
         {
-            // M5 Task 2 lands the first changed gameplay contract: peers must
-            // agree on objectives/difficulty/economy/gadgets, not just the
-            // M4 driving rules, so the gameplay identity is gameplay-3.
+            // M6 Task 1 lands the ordered multiworld campaign contract:
+            // the content identity moves to full-content-1 and the
+            // gameplay-rules identity to gameplay-4 so a gameplay-3 peer
+            // can never be silently admitted under the new rules set.
+            // LAN wire protocol 3, profile schema 3 and observation
+            // schema 6 are unchanged by this task.
             Assert.That(
                 FamilyRacing.Core.Networking.NetworkSettings.GameplayVersion,
-                Is.EqualTo("gameplay-3"));
-            Assert.That(Catalog().Version, Is.EqualTo("gameplay-loop-1"),
-                "first-world content identity");
+                Is.EqualTo("gameplay-4"));
+            Assert.That(
+                FamilyRacing.Core.Networking.NetworkSettings
+                    .LanProtocolVersion,
+                Is.EqualTo(3));
+            Assert.That(
+                FamilyRacing.Core.Networking.NetworkSettings
+                    .StateSchemaVersion,
+                Is.EqualTo(6));
+            Assert.That(Catalog().Version, Is.EqualTo("full-content-1"),
+                "full-content content identity");
+        }
+
+        // --- M6 Task 1: ordered multiworld catalogs ---------------------
+
+        [Test]
+        public void ThreeWorldsCreateOrderedCampaigns()
+        {
+            var catalog = MultiCatalog();
+
+            Assert.That(catalog.Campaigns.Count, Is.EqualTo(3));
+            Assert.That(catalog.Campaigns[0].worldId,
+                Is.EqualTo("sunny-island"));
+            Assert.That(catalog.Campaigns[1].worldId,
+                Is.EqualTo("redrock-canyon"));
+            Assert.That(catalog.Campaigns[2].worldId,
+                Is.EqualTo("snowy-peaks"));
+            Assert.That(catalog.Campaign, Is.SameAs(catalog.Campaigns[0]),
+                "Campaign stays the first-world alias for old consumers");
+            Assert.That(catalog.IsLegacy, Is.False);
+            Assert.That(catalog.Version, Is.EqualTo("full-content-1"));
+            Assert.That(catalog.PossibleRegularStars, Is.EqualTo(216),
+                "3 worlds x 24 events x 3 objective bits");
+            Assert.That(
+                Hex64.IsMatch(catalog.CompatibilityFingerprint), Is.True);
+        }
+
+        [Test]
+        public void SingleWorldOverloadStillProducesTheAlias()
+        {
+            var viaSingle = Catalog();
+            var ok = GameplayCatalog.TryCreate(Driving(),
+                new List<CampaignDefinition> { Campaign() },
+                Bounties(), Economy(), Gadgets(), Difficulties(),
+                out var viaList, out var error);
+            Assert.That(ok, Is.True, error);
+            Assert.That(viaList.Campaigns.Count, Is.EqualTo(1));
+            Assert.That(viaList.Campaign.worldId,
+                Is.EqualTo("sunny-island"));
+            Assert.That(viaList.CompatibilityFingerprint,
+                Is.EqualTo(viaSingle.CompatibilityFingerprint),
+                "the single-world overload is the one-element list path");
+        }
+
+        [Test]
+        public void LookupsResolveWorldAndEventOwnership()
+        {
+            var catalog = MultiCatalog();
+
+            Assert.That(catalog.FindCampaign("redrock-canyon"),
+                Is.SameAs(catalog.Campaigns[1]));
+            Assert.That(catalog.FindCampaign("sunny-island"),
+                Is.SameAs(catalog.Campaigns[0]));
+            Assert.That(catalog.FindCampaign("no-such-world"), Is.Null);
+            Assert.That(catalog.FindCampaign(null), Is.Null);
+            Assert.That(catalog.FindCampaign(""), Is.Null);
+
+            var redrockEvent = "canyon-dash-car-circuit";
+            Assert.That(
+                catalog.FindCampaignForEvent(redrockEvent).worldId,
+                Is.EqualTo("redrock-canyon"));
+            Assert.That(
+                catalog.FindCampaignForEvent("aurora-pass-motorcycle-stunt")
+                    .worldId,
+                Is.EqualTo("snowy-peaks"));
+            Assert.That(
+                catalog.FindCampaignForEvent("sunny-island-car-finale")
+                    .worldId,
+                Is.EqualTo("sunny-island"),
+                "finale events resolve to their owning world");
+            Assert.That(
+                catalog.FindCampaignForEvent("snowy-peaks-car-finale")
+                    .worldId,
+                Is.EqualTo("snowy-peaks"));
+            Assert.That(catalog.FindCampaignForEvent("lan-mixed"), Is.Null);
+            Assert.That(catalog.FindCampaignForEvent(null), Is.Null);
+            Assert.That(catalog.FindCampaignForEvent(""), Is.Null);
+
+            // The legacy catalog carries no worlds; lookups stay inert.
+            var legacy = GameplayCatalog.CreateLegacy(MultiDriving());
+            Assert.That(legacy.Campaigns, Is.Not.Null);
+            Assert.That(legacy.Campaigns.Count, Is.EqualTo(0));
+            Assert.That(legacy.Campaign, Is.Null);
+            Assert.That(legacy.FindCampaign("sunny-island"), Is.Null);
+            Assert.That(legacy.FindCampaignForEvent(redrockEvent), Is.Null);
+        }
+
+        [Test]
+        public void DuplicateWorldCourseOrEventOwnershipRejects()
+        {
+            var duplicateWorld = MultiCampaigns();
+            duplicateWorld[2].worldId = "redrock-canyon";
+            AssertMultiRejected(campaigns: duplicateWorld,
+                because: "two campaigns may not share a worldId",
+                errorContains: "worldId.duplicate");
+
+            var stolenCourse = MultiCampaigns();
+            stolenCourse[1].courseIds[0] = "harbor-hop";
+            AssertMultiRejected(campaigns: stolenCourse,
+                because: "a course id is owned by exactly one world",
+                errorContains: "course.duplicate");
+
+            var stolenEvent = MultiCampaigns();
+            stolenEvent[1].regularEventIds[0] = "harbor-hop-car-circuit";
+            AssertMultiRejected(campaigns: stolenEvent,
+                because: "a regular event id is owned by exactly one world",
+                errorContains: "event.duplicate");
+
+            var stolenFinale = MultiCampaigns();
+            stolenFinale[2].finales[0].eventId = "redrock-canyon-car-finale";
+            AssertMultiRejected(campaigns: stolenFinale,
+                because: "a finale event id is owned by exactly one world",
+                errorContains: "event.duplicate");
+
+            var crossClaimed = MultiCampaigns();
+            crossClaimed[1].finales[0].eventId = "harbor-hop-car-circuit";
+            AssertMultiRejected(campaigns: crossClaimed,
+                because: "a finale may not claim another world's regular "
+                    + "event",
+                errorContains: "event.duplicate");
+        }
+
+        [Test]
+        public void MissingFinaleCourseOrRewardReferenceRejects()
+        {
+            // A finale event hosted on a course the world does not claim
+            // (the course exists in the driving catalog — the world just
+            // never lists it).
+            var driving = MultiDriving();
+            driving.Events["redrock-canyon-car-finale"].courseId =
+                "harbor-hop";
+            AssertMultiRejected(driving: driving,
+                because: "finale event sits on a course outside the "
+                    + "world's courseIds",
+                errorContains: "finale redrock-canyon-car-finale course");
+
+            // A finale reward vehicle missing from the driving catalog.
+            var campaigns = MultiCampaigns();
+            campaigns[1].finales[1].rewardVehicleId = "motorcycle-99";
+            AssertMultiRejected(campaigns: campaigns,
+                because: "finale reward vehicle missing from the driving "
+                    + "catalog",
+                errorContains: "rewardVehicle");
+        }
+
+        [Test]
+        public void WrongClassRewardVehicleRejects()
+        {
+            var campaigns = MultiCampaigns();
+            campaigns[2].finales[0].rewardVehicleId = "motorcycle-04";
+            AssertMultiRejected(campaigns: campaigns,
+                because: "a car finale cannot grant a motorcycle reward",
+                errorContains: "rewardClass");
+        }
+
+        [Test]
+        public void RegularAndFinaleOverlapRejects()
+        {
+            // Within one world an event id cannot be both a regular event
+            // and a finale.
+            var campaigns = MultiCampaigns();
+            campaigns[0].finales[0].eventId = "harbor-hop-car-boost";
+            AssertMultiRejected(campaigns: campaigns,
+                because: "an event cannot be both a regular event and a "
+                    + "finale",
+                errorContains: "overlap");
+
+            // The same rule holds through the retained single-world path.
+            var single = Campaign();
+            single.finales[1].eventId = "lighthouse-loop-car-circuit";
+            AssertRejected(campaign: single,
+                because: "regular/finale overlap via the single-world "
+                    + "overload");
+        }
+
+        [Test]
+        public void EmptyOrNullCampaignListRejects()
+        {
+            Assert.That(GameplayCatalog.TryCreate(MultiDriving(),
+                new List<CampaignDefinition>(),
+                Bounties(), Economy(), Gadgets(), Difficulties(),
+                out var catalog, out var error), Is.False,
+                "a non-legacy catalog needs at least one world");
+            Assert.That(error, Is.Not.Null.And.Not.Empty);
+            Assert.That(catalog, Is.Null);
+
+            Assert.That(GameplayCatalog.TryCreate(MultiDriving(),
+                (IReadOnlyList<CampaignDefinition>)null,
+                Bounties(), Economy(), Gadgets(), Difficulties(),
+                out catalog, out error), Is.False);
+            Assert.That(error, Is.EqualTo("campaigns"));
+            Assert.That(catalog, Is.Null);
+
+            var nullWorld = MultiCampaigns();
+            nullWorld[1] = null;
+            AssertMultiRejected(campaigns: nullWorld,
+                because: "a null campaign slot is not a world");
         }
     }
 }

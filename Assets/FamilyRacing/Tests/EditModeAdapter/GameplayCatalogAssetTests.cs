@@ -283,7 +283,10 @@ namespace FamilyRacing.Tests
                 string error;
                 var catalog = root.ToCatalog(driving, out error);
                 Assert.That(catalog, Is.Not.Null, error);
-                Assert.That(catalog.Version, Is.EqualTo("gameplay-loop-1"));
+                Assert.That(catalog.Version, Is.EqualTo("full-content-1"));
+                Assert.That(catalog.Campaigns.Count, Is.EqualTo(1),
+                    "the legacy single-campaign field converts as one "
+                    + "world");
 
                 // Corrupt one gadget row -> the whole conversion fails.
                 gadgets.gadgets[0].kind = "warp-drive";
@@ -298,9 +301,36 @@ namespace FamilyRacing.Tests
 
         private static DrivingContentCatalog BuildDriving()
         {
+            var events = CarEvents("harbor-hop");
+            events.Add(CarFinale("sunny-island", "harbor-hop"));
+            return DrivingContentCatalog.Create(
+                "gameplay-loop-1",
+                new[] { VehicleTuning.Car01() },
+                new[] { TestCourse("harbor-hop") },
+                events);
+        }
+
+        // M6 Task 1: a second world (canyon-dash) beside the first so the
+        // campaigns array and the world lookups have real content to
+        // bind. Both worlds keep one class (car) and six event types.
+        private static DrivingContentCatalog BuildTwoWorldDriving()
+        {
+            var events = CarEvents("harbor-hop");
+            events.Add(CarFinale("sunny-island", "harbor-hop"));
+            events.AddRange(CarEvents("canyon-dash"));
+            events.Add(CarFinale("redrock-canyon", "canyon-dash"));
+            return DrivingContentCatalog.Create(
+                "full-content-1",
+                new[] { VehicleTuning.Car01() },
+                new[] { TestCourse("harbor-hop"), TestCourse("canyon-dash") },
+                events);
+        }
+
+        private static CourseDefinition TestCourse(string courseId)
+        {
             var course = new CourseDefinition
             {
-                id = "harbor-hop", spawnX = 0f, spawnY = 0f, spawnZ = -12f
+                id = courseId, spawnX = 0f, spawnY = 0f, spawnZ = -12f
             };
             course.checkpoints.Add(new CheckpointGate
             {
@@ -312,6 +342,11 @@ namespace FamilyRacing.Tests
                 id = "gate-1", x = 0f, z = 16f, halfWidth = 6f,
                 dirX = 0f, dirZ = 1f, recoverX = 0f, recoverZ = 13f
             });
+            return course;
+        }
+
+        private static List<EventDefinition> CarEvents(string courseId)
+        {
             var events = new List<EventDefinition>();
             var types = new[]
             {
@@ -320,10 +355,10 @@ namespace FamilyRacing.Tests
             };
             foreach (var eventType in types)
             {
-                var id = "harbor-hop-car-" + eventType;
+                var id = courseId + "-car-" + eventType;
                 var evt = new EventDefinition
                 {
-                    id = id, courseId = "harbor-hop", laps = 1,
+                    id = id, courseId = courseId, laps = 1,
                     countdownTicks = 90,
                     vehicleIds = new List<string> { "car-01" },
                     recovery = new RecoverySettings(),
@@ -369,20 +404,225 @@ namespace FamilyRacing.Tests
                 };
                 events.Add(evt);
             }
-            events.Add(new EventDefinition
+            return events;
+        }
+
+        private static EventDefinition CarFinale(string worldId,
+            string courseId)
+        {
+            return new EventDefinition
             {
-                id = "sunny-island-car-finale", courseId = "harbor-hop",
+                id = worldId + "-car-finale", courseId = courseId,
                 laps = 3, countdownTicks = 90,
                 vehicleIds = new List<string> { "car-01" },
                 recovery = new RecoverySettings(),
                 eventType = GameplayEventType.Finale, vehicleClass = "car",
                 isFinale = true
-            });
-            return DrivingContentCatalog.Create(
-                "gameplay-loop-1",
-                new[] { VehicleTuning.Car01() },
-                new[] { course },
-                events);
+            };
+        }
+
+        // One-car one-course campaign world asset: six regular events on
+        // the course plus the class finale, gated at 6 completions /
+        // 18 stars (the maximum the six events can award).
+        private static void FillWorld(CampaignDefinitionAsset asset,
+            string worldId, string nameEn, string nameHe, string courseId)
+        {
+            asset.worldId = worldId;
+            asset.nameEn = nameEn;
+            asset.nameHe = nameHe;
+            asset.requiredEventCompletions = 6;
+            asset.requiredRegionalStars = 18;
+            asset.courseIds = new[] { courseId };
+            asset.regularEventIds = new[]
+            {
+                courseId + "-car-circuit", courseId + "-car-boost",
+                courseId + "-car-stunt", courseId + "-car-time",
+                courseId + "-car-gadget", courseId + "-car-clean-driving"
+            };
+            asset.finales = new[]
+            {
+                new CampaignDefinitionAsset.FinaleRow
+                {
+                    eventId = worldId + "-car-finale", classId = "car",
+                    rivalId = worldId + "-car-rival",
+                    rewardVehicleId = "car-01"
+                }
+            };
+        }
+
+        private static void FillSections(GameplayCatalogAsset root,
+            BountyCatalogAsset bounties, EconomyDefinitionAsset economy,
+            GadgetCatalogAsset gadgets)
+        {
+            bounties.bounties = new[]
+            {
+                new BountyCatalogAsset.BountyRow
+                {
+                    bountyId = "drift-10s", family = "drift",
+                    metric = BountyMetric.DriftSeconds, threshold = 10,
+                    unit = "seconds", rewardCoins = 10
+                }
+            };
+            economy.upgradeCategories = new[]
+            {
+                new EconomyDefinitionAsset.CategoryRow
+                {
+                    categoryId = "acceleration",
+                    prices = new[] { 60, 120, 180 },
+                    tuningFields = new[] { "acceleration" }
+                }
+            };
+            gadgets.gadgets = new[]
+            {
+                new GadgetCatalogAsset.GadgetRow
+                {
+                    gadgetId = "turbo", kind = GadgetKind.Turbo,
+                    durationTicks = 60, accelerationMultiplier = 1.25f,
+                    speedCapMultiplier = 1.10f
+                }
+            };
+            root.bounties = bounties;
+            root.economy = economy;
+            root.gadgets = gadgets;
+            root.difficulties = new[]
+            {
+                new GameplayCatalogAsset.DifficultyRow
+                {
+                    difficultyId = "easy"
+                }
+            };
+        }
+
+        // --- M6 Task 1: the campaigns array -----------------------------
+
+        [Test]
+        public void CampaignsArrayConvertsEveryWorldInOrder()
+        {
+            var sunny = Asset<CampaignDefinitionAsset>();
+            var redrock = Asset<CampaignDefinitionAsset>();
+            var bounties = Asset<BountyCatalogAsset>();
+            var economy = Asset<EconomyDefinitionAsset>();
+            var gadgets = Asset<GadgetCatalogAsset>();
+            var root = Asset<GameplayCatalogAsset>();
+            try
+            {
+                FillWorld(sunny, "sunny-island", "Sunny Island",
+                    "האי השמשי", "harbor-hop");
+                FillWorld(redrock, "redrock-canyon", "Redrock Canyon",
+                    "קניון רדרוק", "canyon-dash");
+                FillSections(root, bounties, economy, gadgets);
+                root.campaigns = new[] { sunny, redrock };
+
+                var catalog = root.ToCatalog(BuildTwoWorldDriving(),
+                    out var error);
+                Assert.That(catalog, Is.Not.Null, error);
+                Assert.That(catalog.Campaigns.Count, Is.EqualTo(2));
+                Assert.That(catalog.Campaigns[0].worldId,
+                    Is.EqualTo("sunny-island"));
+                Assert.That(catalog.Campaigns[1].worldId,
+                    Is.EqualTo("redrock-canyon"));
+                Assert.That(catalog.Campaign,
+                    Is.SameAs(catalog.Campaigns[0]));
+                Assert.That(
+                    catalog.FindCampaignForEvent("canyon-dash-car-circuit")
+                        .worldId,
+                    Is.EqualTo("redrock-canyon"));
+                Assert.That(catalog.Version,
+                    Is.EqualTo("full-content-1"));
+            }
+            finally
+            {
+                Destroy(sunny, redrock, bounties, economy, gadgets, root);
+            }
+        }
+
+        [Test]
+        public void ConflictingLegacyAndArrayCampaignFieldsReject()
+        {
+            // The legacy `campaign` field and the new `campaigns` array
+            // must never both be populated — silently choosing one would
+            // hide an authoring error.
+            var legacy = Asset<CampaignDefinitionAsset>();
+            var listed = Asset<CampaignDefinitionAsset>();
+            var bounties = Asset<BountyCatalogAsset>();
+            var economy = Asset<EconomyDefinitionAsset>();
+            var gadgets = Asset<GadgetCatalogAsset>();
+            var root = Asset<GameplayCatalogAsset>();
+            try
+            {
+                FillWorld(legacy, "sunny-island", "Sunny Island",
+                    "האי השמשי", "harbor-hop");
+                FillWorld(listed, "redrock-canyon", "Redrock Canyon",
+                    "קניון רדרוק", "canyon-dash");
+                FillSections(root, bounties, economy, gadgets);
+                root.campaign = legacy;
+                root.campaigns = new[] { listed };
+
+                string error;
+                Assert.That(root.ToCatalog(BuildTwoWorldDriving(),
+                    out error), Is.Null);
+                Assert.That(error, Does.Contain("campaign"));
+            }
+            finally
+            {
+                Destroy(legacy, listed, bounties, economy, gadgets, root);
+            }
+        }
+
+        [Test]
+        public void EmptyCampaignsArrayFallsBackToLegacyField()
+        {
+            var campaign = Asset<CampaignDefinitionAsset>();
+            var bounties = Asset<BountyCatalogAsset>();
+            var economy = Asset<EconomyDefinitionAsset>();
+            var gadgets = Asset<GadgetCatalogAsset>();
+            var root = Asset<GameplayCatalogAsset>();
+            try
+            {
+                FillWorld(campaign, "sunny-island", "Sunny Island",
+                    "האי השמשי", "harbor-hop");
+                FillSections(root, bounties, economy, gadgets);
+                root.campaign = campaign;
+                root.campaigns = new CampaignDefinitionAsset[0];
+
+                string error;
+                var catalog = root.ToCatalog(BuildDriving(), out error);
+                Assert.That(catalog, Is.Not.Null, error);
+                Assert.That(catalog.Campaigns.Count, Is.EqualTo(1));
+                Assert.That(catalog.Campaign.worldId,
+                    Is.EqualTo("sunny-island"));
+            }
+            finally
+            {
+                Destroy(campaign, bounties, economy, gadgets, root);
+            }
+        }
+
+        [Test]
+        public void CampaignsArrayRejectsNullSlot()
+        {
+            var sunny = Asset<CampaignDefinitionAsset>();
+            var bounties = Asset<BountyCatalogAsset>();
+            var economy = Asset<EconomyDefinitionAsset>();
+            var gadgets = Asset<GadgetCatalogAsset>();
+            var root = Asset<GameplayCatalogAsset>();
+            try
+            {
+                FillWorld(sunny, "sunny-island", "Sunny Island",
+                    "האי השמשי", "harbor-hop");
+                FillSections(root, bounties, economy, gadgets);
+                root.campaigns = new CampaignDefinitionAsset[]
+                    { sunny, null };
+
+                string error;
+                Assert.That(root.ToCatalog(BuildDriving(), out error),
+                    Is.Null);
+                Assert.That(error, Does.Contain("campaign"));
+            }
+            finally
+            {
+                Destroy(sunny, bounties, economy, gadgets, root);
+            }
         }
     }
 }

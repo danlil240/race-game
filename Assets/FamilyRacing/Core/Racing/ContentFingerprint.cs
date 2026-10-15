@@ -55,6 +55,10 @@ namespace FamilyRacing.Core.Racing
         // gate, bounties, economy, gadgets, AI difficulty presets). Null
         // sections (the explicit legacy catalog) hash as absent markers
         // so a legacy catalog still gets a stable, distinguishable token.
+        // M6 Task 1 bumps the epoch to 3: the campaign section is now the
+        // ordered list of every world (membership/order/gates/rewards),
+        // and translated display names — cosmetic text — are no longer
+        // hashed at all.
         public static string Compute(GameplayCatalog catalog)
         {
             if (catalog == null) return "";
@@ -62,7 +66,7 @@ namespace FamilyRacing.Core.Racing
             {
                 using (var writer = new BinaryWriter(stream, Encoding.UTF8, true))
                 {
-                    writer.Write(2); // canonical schema epoch: gameplay stream
+                    writer.Write(3); // canonical schema epoch: multiworld stream
                     if (catalog.Driving == null)
                     {
                         writer.Write(false);
@@ -74,7 +78,7 @@ namespace FamilyRacing.Core.Racing
                         WriteEventGameplay(writer, catalog.Driving.Events);
                         WritePickupSites(writer, catalog.Driving.Courses);
                     }
-                    WriteCampaign(writer, catalog.Campaign);
+                    WriteCampaigns(writer, catalog.Campaigns);
                     WriteBounties(writer, catalog.Bounties);
                     WriteEconomy(writer, catalog.Economy);
                     WriteGadgets(writer, catalog.Gadgets);
@@ -389,31 +393,41 @@ namespace FamilyRacing.Core.Racing
             }
         }
 
-        private static void WriteCampaign(BinaryWriter writer,
-            CampaignDefinition campaign)
+        // M6 Task 1: every world in authored order. Membership lists
+        // keep their authored order — world progression order and event
+        // order are gameplay content. Display names are deliberately
+        // excluded: they are translated/cosmetic text, and retitling a
+        // world must never split compatibility.
+        private static void WriteCampaigns(BinaryWriter writer,
+            IReadOnlyList<CampaignDefinition> campaigns)
         {
-            writer.Write(campaign != null);
-            if (campaign == null) return;
-            Str(writer, campaign.worldId);
-            Str(writer, campaign.nameEn);
-            Str(writer, campaign.nameHe);
-            writer.Write(campaign.requiredEventCompletions);
-            writer.Write(campaign.requiredRegionalStars);
-            WriteStrings(writer, campaign.courseIds);
-            WriteStrings(writer, campaign.regularEventIds);
-            var finales = campaign.finales;
-            writer.Write(finales != null ? finales.Count : 0);
-            if (finales != null)
-                foreach (var finale in finales)
-                {
-                    var present = finale != null;
-                    writer.Write(present);
-                    if (!present) continue;
-                    Str(writer, finale.eventId);
-                    Str(writer, finale.classId);
-                    Str(writer, finale.rivalId);
-                    Str(writer, finale.rewardVehicleId);
-                }
+            writer.Write(campaigns != null);
+            if (campaigns == null) return;
+            writer.Write(campaigns.Count);
+            foreach (var campaign in campaigns)
+            {
+                var present = campaign != null;
+                writer.Write(present);
+                if (!present) continue;
+                Str(writer, campaign.worldId);
+                writer.Write(campaign.requiredEventCompletions);
+                writer.Write(campaign.requiredRegionalStars);
+                WriteStrings(writer, campaign.courseIds);
+                WriteStrings(writer, campaign.regularEventIds);
+                var finales = campaign.finales;
+                writer.Write(finales != null ? finales.Count : 0);
+                if (finales != null)
+                    foreach (var finale in finales)
+                    {
+                        var finalePresent = finale != null;
+                        writer.Write(finalePresent);
+                        if (!finalePresent) continue;
+                        Str(writer, finale.eventId);
+                        Str(writer, finale.classId);
+                        Str(writer, finale.rivalId);
+                        Str(writer, finale.rewardVehicleId);
+                    }
+            }
         }
 
         private static void WriteBounties(BinaryWriter writer,

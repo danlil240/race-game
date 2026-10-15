@@ -97,7 +97,7 @@ namespace FamilyRacing.Core.Foundation
     {
         public bool available;
         // The bound gameplay catalog's human-readable identity
-        // ("gameplay-loop-1|<driving token>"), "none" unbound.
+        // ("full-content-1|<driving token>"), "none" unbound.
         public string contentIdentity = "none";
         public string campaignWorldId = "";
         public int campaignCompletedEvents;

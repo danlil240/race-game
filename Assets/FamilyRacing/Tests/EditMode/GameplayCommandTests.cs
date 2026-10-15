@@ -878,7 +878,7 @@ namespace FamilyRacing.Tests
             // can never share a race.
             var link = new LanSessionTests.FakeLanLink();
             var probe = new LanSessionTests.FakeLanProbe();
-            var host = new LanSessionService(link, probe, "gameplay-3");
+            var host = new LanSessionService(link, probe, "gameplay-4");
             host.SetLocalContext("host-p", "fox", 0, true, true);
             host.SetContent(LanSessionTests.LanCatalog());
             var catalog = Catalog();
@@ -895,7 +895,7 @@ namespace FamilyRacing.Tests
             // incompatible peer — refused before any seat is allocated.
             host.OnLinkConnected(9);
             host.OnLinkMessage(9, LanSessionTests.JoinRequest("p-1",
-                gameplayVersion: "gameplay-3",
+                gameplayVersion: "gameplay-4",
                 fingerprint: LanSessionTests.LanCatalog()
                     .CompatibilityFingerprint));
             var rejects = link.DrainSent();
@@ -911,7 +911,7 @@ namespace FamilyRacing.Tests
             // The gameplay fingerprint is admitted.
             host.OnLinkConnected(10);
             host.OnLinkMessage(10, LanSessionTests.JoinRequest("p-2",
-                gameplayVersion: "gameplay-3",
+                gameplayVersion: "gameplay-4",
                 fingerprint: catalog.CompatibilityFingerprint));
             var replies = link.DrainSent();
             Assert.That(NetworkProtocol.TryDecode(replies[0], out type,
@@ -927,7 +927,7 @@ namespace FamilyRacing.Tests
             // remain interoperable.
             var link = new LanSessionTests.FakeLanLink();
             var probe = new LanSessionTests.FakeLanProbe();
-            var host = new LanSessionService(link, probe, "gameplay-3");
+            var host = new LanSessionService(link, probe, "gameplay-4");
             host.SetLocalContext("host-p", "fox", 0, true, true);
             host.SetContent(LanSessionTests.LanCatalog());
             host.SetGameplayContent(GameplayCatalog.CreateLegacy(
@@ -937,7 +937,7 @@ namespace FamilyRacing.Tests
                 Is.EqualTo(CommandResult.Applied));
             host.OnLinkConnected(9);
             host.OnLinkMessage(9, LanSessionTests.JoinRequest("p-1",
-                gameplayVersion: "gameplay-3",
+                gameplayVersion: "gameplay-4",
                 fingerprint: LanSessionTests.LanCatalog()
                     .CompatibilityFingerprint));
             var replies = link.DrainSent();

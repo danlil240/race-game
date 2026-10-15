@@ -215,7 +215,7 @@ namespace FamilyRacing
             lanLink = new Networking.LanSessionLink(lanTransport, lanDiscovery);
             // Admission binds the pinned gameplay contract, not the
             // app marketing version: every protocol-3 peer must report
-            // exactly "gameplay-3" plus the catalog compatibility token
+            // exactly "gameplay-4" plus the catalog compatibility token
             // and tuned-content fingerprint before a slot is dealt.
             var lan = new Core.Networking.LanSessionService(
                 lanLink, lanLink, Core.Networking.NetworkSettings.GameplayVersion);

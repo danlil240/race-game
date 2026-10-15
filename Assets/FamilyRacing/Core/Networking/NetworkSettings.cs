@@ -37,7 +37,11 @@ namespace FamilyRacing.Core.Networking
         // economy and gadget definitions — all bound by the catalog
         // compatibility fingerprint, so M4 gameplay-2 peers can never be
         // silently admitted under the new rules set.
-        public const string GameplayVersion = "gameplay-3";
+        // gameplay-4 (M6 Task 1): the campaign contract is now the ordered
+        // multiworld catalog — every world's membership, order, gates and
+        // rewards are fingerprinted — so a gameplay-3 peer holding a
+        // single-world catalog is fenced before a seat is dealt.
+        public const string GameplayVersion = "gameplay-4";
 
         // Four racers total; AI fills slots without a human (Task 4).
         public const int ParticipantCapacity = 4;
