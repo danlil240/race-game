@@ -409,8 +409,10 @@ authored purchase/equip.
   commits the authored-priced level atomically (receipt-keyed,
   idempotent on replay); `cosmetic.equip {slot, cosmeticId, equipped?}`
   requires `slot` to match the cosmetic's authored slot prefix and
-  defaults `equipped` to true. Both reject `rewardUnresolved` while a
-  result's save is pending.
+  defaults `equipped` to true. Only `upgrade.purchase` rejects
+  `rewardUnresolved` while a result's save is pending — an equip carries
+  no progression reward facts, so it stays legal alongside the retained
+  result+context pair.
 - `results.retrySave` replays the retained result+context pair after a
   failed save (`noPendingResult` when nothing is owed);
   `results.retry` replays the finished session's stored request under a

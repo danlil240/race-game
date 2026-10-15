@@ -6,7 +6,9 @@ using FamilyRacing.Core.Racing;
 
 namespace FamilyRacing.Core.Networking
 {
-    // LAN session wire vocabulary (protocol 2) and its bounded codec.
+    // LAN session wire vocabulary (protocol 3) and its bounded codec.
+    // The FRN2 magic is retained from the protocol-2 wire — the version
+    // field `v` on join.request is what fences older peers.
     //
     // A message is a single line:  FRN2|<type>|<key>=<value>|...
     // Values escape four characters with a backslash prefix so keys and
@@ -42,10 +44,11 @@ namespace FamilyRacing.Core.Networking
 
         // --- field keys -----------------------------------------------------
         // join.request: v, gv, cv, fp, pid, av, ci, cid, cred
-        // join.accept:  sid, ph, pid, slot, ev, cl, ep, cred, cid
+        // join.accept:  sid, ph, pid, slot, ev, cl, ep, cred, rcid, cid
         // join.reject:  code, cid
-        // session.state: sid, ph, ev, cl, pd, pr, p0..p3
-        //   (each pN is the comma-joined tuple
+        // session.state: sid, ph, ev, cl, pd, pr, occ, jn, rcid, p0..p3
+        //   (rcid is the allocated race identity, deliberately distinct
+        //    from the result-offer rid; each pN is the comma-joined tuple
         //    pid,slot,avatar,colorIndex,vehicle,connected,ready,control,epoch;
         //    empty means the slot is free)
         // session.closed: rsn

@@ -8,7 +8,8 @@ using UnityEngine;
 namespace FamilyRacing.Networking
 {
     /// <summary>
-    /// Task-9 replication spine (protocol 2): the authoritative Task-3
+    /// Task-9 replication spine (protocol 3 — the M5 gadget world rides
+    /// the snapshot): the authoritative Task-3
     /// <see cref="NetworkRace"/> on the host, replicated over the Task-1
     /// transport's two channels under Task-2 session/ownership policy.
     ///

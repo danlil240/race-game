@@ -25,7 +25,7 @@ namespace FamilyRacing.Core.Networking
     }
 
     // Versioned physical-state DTO carried inside each NetworkRacerState
-    // (protocol 2 / schema 4). It is a compact projection of the
+    // (added at protocol 2 / schema 4). It is a compact projection of the
     // authoritative MotorState: the full rule envelope plus the physical
     // body's pose, motion, controller histories, recovery bookkeeping and
     // wheel histories — everything client prediction/replay needs, and

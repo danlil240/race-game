@@ -71,8 +71,9 @@ namespace FamilyRacing.Networking
         private static readonly byte[] EventTag = Encoding.ASCII.GetBytes(TagEventBatch);
         private static readonly byte[] ResyncTag = Encoding.ASCII.GetBytes(TagResyncRequest);
 
-        /// <summary>True when the packet carries a protocol-2 gameplay
-        /// tag — used to split shared-channel traffic without parsing.
+        /// <summary>True when the packet carries a protocol-3 gameplay
+        /// tag — the P1** tag family kept its names across the protocol
+        /// bump. Used to split shared-channel traffic without parsing.
         /// Legacy N5** envelopes are not gameplay packets: they belong
         /// to protocol 1 and are fenced here before any body is read.
         /// </summary>

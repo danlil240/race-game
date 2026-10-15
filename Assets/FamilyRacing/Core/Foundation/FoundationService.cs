@@ -183,8 +183,10 @@ namespace FamilyRacing.Core.Foundation
             Schema("tutorial.exit"),
             // M5 Task 8 durable progression writes: the atomic upgrade
             // purchase (receipt-keyed, idempotent) and cosmetic
-            // equipment. Both refuse during a race or LAN session and
-            // honor the unresolved-reward gate.
+            // equipment. Both refuse during a race or LAN session; only
+            // the purchase honors the unresolved-reward gate — an equip
+            // carries no progression reward facts, so it can never
+            // interleave with the pending result transaction.
             Schema("upgrade.purchase",
                 Param("purchaseId", "string", null),
                 Param("vehicleId", "string", null),
