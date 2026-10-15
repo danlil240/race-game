@@ -138,7 +138,10 @@ def complete_reward_facts(records):
         victories.append({
             "rivalId": finale["rivalId"], "liveryId": finale["liveryId"],
             "resultId": "result-" + finale["eventId"],
-            "rewardVehicleId": finale["rewardVehicleId"]})
+            "rewardVehicleId": finale["rewardVehicleId"],
+            # Observed-grant facts: the livery/vehicle were actually
+            # seen in ownedCosmetics/unlockedVehicles after the win.
+            "liveryGranted": True, "vehicleGranted": True})
     return {"unlockedVehicles": list(inv["vehicles"]),
             "rivalVictories": victories}
 
@@ -564,7 +567,8 @@ def fc_fixture_server(validation_dir, profile_dir, mutant=None,
                       open_worlds=("sunny-island",),
                       unlocked=frozenset(), finales_open=frozenset(),
                       victory_events=frozenset(), grant_mask=None,
-                      mode_combos=frozenset(), mute_commands=False):
+                      mode_combos=frozenset(), mute_commands=False,
+                      trial_mints_credit=False):
     """One schema-7 protocol endpoint inside this process.
 
     The fixture authors the real 72+6 inventory (mutants remove/dup
@@ -807,6 +811,12 @@ def fc_fixture_server(validation_dir, profile_dir, mutant=None,
                 "classId": result_obj["classId"],
                 "bestTicks": 4500,
                 "bestResultId": result_obj["resultId"]})
+            if trial_mints_credit:
+                # Mutant: a non-campaign mode moves the campaign
+                # ledger — the scenario must catch it.
+                profile["eventProgress"].append({
+                    "eventId": "harbor-hop-car-circuit",
+                    "completed": True, "objectiveMask": 1})
         profile["pendingRaceContexts"] = [
             c for c in profile.get("pendingRaceContexts") or []
             if c.get("raceId") != result_obj["raceId"]]
@@ -1331,6 +1341,62 @@ class FixtureCampaignTests(unittest.TestCase):
             "timeout", "campaign", mute_commands=True)
         self.assertEqual(report["status"], "failed")
         self.assertTrue(report.get("error"))
+
+
+class FixtureModesTests(unittest.TestCase):
+    """Modes scope: all 12 course x class combos through Quick Race and
+    Time Trial — and neither mode may move the campaign ledger."""
+
+    def setUp(self):
+        self.fx = FixtureHarness(self)
+
+    def test_modes_runs_resolvable_combos_honestly(self):
+        report, evidence = self.fx.run(
+            "modes", "modes",
+            mode_combos={("harbor-hop", "car")})
+        self.assertTrue(report["fixture"])
+        self.assertIn(report["status"], ("partial", "failed"),
+                      report.get("error", "")
+                      + json.dumps(report["checks"]))
+        self.assertNotEqual(report["status"], "passed")
+        rows = {row["combo"] + ":" + row["mode"]: row
+                for row in report["modes"]}
+        self.assertEqual(len(rows), 24)
+        self.assertEqual(
+            rows["harbor-hop-car:quickRace"]["status"], "passed",
+            json.dumps(rows["harbor-hop-car:quickRace"], indent=2))
+        self.assertEqual(
+            rows["harbor-hop-car:timeTrial"]["status"], "passed",
+            json.dumps(rows["harbor-hop-car:timeTrial"], indent=2))
+        # Combos the fixture did not author stay honest.
+        self.assertEqual(
+            rows["aurora-pass-motorcycle:quickRace"]["status"],
+            "notVerified")
+        self.assertEqual(
+            rows["aurora-pass-motorcycle:timeTrial"]["status"],
+            "notVerified")
+        names = {row["name"]: row for row in report["checks"]}
+        self.assertEqual(
+            names["modes.noCampaignCredit"]["status"], "passed")
+        modes_file = json.loads(
+            (evidence / "modes.json").read_text(encoding="utf-8"))
+        self.assertEqual(len(modes_file["rows"]), 24)
+
+    def test_time_trial_minting_credit_fails(self):
+        """Mutant: a finished time trial mints campaign progress — the
+        ledger attestation must observe BOTH loops, not just Quick
+        Race."""
+        report, _ = self.fx.run(
+            "modes-mint", "modes",
+            mode_combos={("harbor-hop", "car")},
+            trial_mints_credit=True)
+        self.assertEqual(report["status"], "failed",
+                         report.get("error", "")
+                         + json.dumps(report["checks"]))
+        names = {row["name"]: row for row in report["checks"]}
+        self.assertEqual(
+            names["modes.noCampaignCredit"]["status"], "failed",
+            json.dumps(report["checks"], indent=2))
 
 
 def main():

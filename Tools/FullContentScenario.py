@@ -241,7 +241,7 @@ def new_event_record(row, fixture=False):
         "rewards": {"coinsAwarded": None, "receiptResultId": "",
                     "vehicleId": "", "liveryId": ""},
         "durationTicks": None, "durationSeconds": None,
-        "captureValid": True, "attribution": "",
+        "captureValid": None, "attribution": "",
         "fixture": bool(fixture),
         "humanGaps": list(HUMAN_ONLY_GAPS),
         "attempts": 0,
@@ -298,6 +298,9 @@ def _evaluate_record(record, row, fixture, capture_valid):
     duration = record.get("durationTicks")
     if not (type(duration) is int and duration > 0):
         problems.append("no measured duration")
+    if record.get("captureValid") is not True:
+        problems.append("capture validity was never measured on "
+                        "this record")
     mask = int(record.get("objectiveMaskAfter") or 0) & FULL_MASK
     proofs = record.get("objectiveProofs") or {}
     for bit, name in BIT_NAMES:
@@ -317,6 +320,12 @@ def _evaluate_record(record, row, fixture, capture_valid):
             "an event alone does not prove its objectives" % (
                 detail or "complete", ", ".join(missing))
     return "passed", detail or "proven"
+
+
+def observed_capture(client):
+    """The capture-health flag the endpoint streams on every boundary —
+    the measured fact feeding the reconcile gate, never a literal."""
+    return bool((client.state or {}).get("captureValid"))
 
 
 def reconcile_coverage(records, *, fixture=False, capture_valid=True,
@@ -543,8 +552,28 @@ def reconcile_coverage(records, *, fixture=False, capture_valid=True,
                             livery_id(world["worldId"],
                                       rid.rsplit("-", 2)[-2])))
                     continue
+                # The livery/vehicle grants must be OBSERVED in the
+                # profile (ownedCosmetics / unlockedVehicles) — a
+                # victory row alone never proves the reward landed.
+                # An explicit False is contradictory evidence; a
+                # missing key means the grant was never measured.
+                if proof.get("liveryGranted") is False \
+                        or proof.get("vehicleGranted") is False:
+                    fail("coverage.rivals." + rid,
+                         "victory recorded but the reward never "
+                         "landed (liveryGranted=%r, vehicleGranted=%r)"
+                         % (proof.get("liveryGranted"),
+                            proof.get("vehicleGranted")))
+                    continue
+                if proof.get("liveryGranted") is not True \
+                        or proof.get("vehicleGranted") is not True:
+                    gap("coverage.rivals." + rid,
+                        "reward grant never observed — liveryGranted"
+                        "/vehicleGranted facts missing from the proof")
+                    continue
                 ok("coverage.rivals." + rid,
-                   "rival victory proven by result %s" % proof_id)
+                   "rival victory and reward grants proven by "
+                   "result %s" % proof_id)
         for victory in victories:
             if isinstance(victory, dict) \
                     and victory.get("rivalId") not in inv["rivals"]:
@@ -744,7 +773,8 @@ def run_catalog_scope(client, checks, report, fixture, evidence_root):
     if not available:
         mark_events_unverified(records, CONTENT_UNAVAILABLE)
         coverage = reconcile_coverage(
-            records, fixture=fixture, capture_valid=True,
+            records, fixture=fixture,
+            capture_valid=observed_capture(client),
             world_rows=world_rows, reward_facts=None)
         publish_coverage(report, checks, evidence_root, records,
                          coverage)
@@ -841,6 +871,8 @@ def run_catalog_scope(client, checks, report, fixture, evidence_root):
                 continue
             # Published and contract-consistent — inventory verified,
             # coverage still unproven (catalog scope never drives).
+            record["captureValid"] = \
+                (client.state or {}).get("captureValid")
             record["completed"] = bool(obs.get("completed"))
             record["objectiveMaskAfter"] = \
                 obs.get("objectiveMask", 0) & FULL_MASK
@@ -855,7 +887,8 @@ def run_catalog_scope(client, checks, report, fixture, evidence_root):
     # refreshed it since the scope started.
     world_rows = (client.state.get("progression") or {}).get("worlds")
     coverage = reconcile_coverage(
-        records, fixture=fixture, capture_valid=True,
+        records, fixture=fixture,
+        capture_valid=observed_capture(client),
         world_rows=world_rows, reward_facts=None)
     publish_coverage(report, checks, evidence_root, records,
                      coverage)
@@ -903,6 +936,9 @@ def drive_campaign_event(client, record, checks, notes):
     else:
         record["durationTicks"] = None
         record["durationSeconds"] = None
+    # The observed capture-health flag the endpoint streams on every
+    # boundary — the honest measurement, never a default.
+    record["captureValid"] = (client.state or {}).get("captureValid")
     row_after = next((r for r in campaign_rows(client.state)
                       if r.get("eventId") == event_id), {})
     mask_after = row_after.get("objectiveMask", 0) & FULL_MASK
@@ -951,7 +987,8 @@ def run_campaign_scope(client, checks, report, fixture,
     if not progression.get("available"):
         mark_events_unverified(records, CONTENT_UNAVAILABLE)
         coverage = reconcile_coverage(
-            records, fixture=fixture, capture_valid=True,
+            records, fixture=fixture,
+            capture_valid=observed_capture(client),
             world_rows=world_rows, reward_facts=None)
         publish_coverage(report, checks, evidence_root, records,
                          coverage)
@@ -1059,7 +1096,8 @@ def run_campaign_scope(client, checks, report, fixture,
     }
     world_rows = (client.state.get("progression") or {}).get("worlds")
     coverage = reconcile_coverage(
-        records, fixture=fixture, capture_valid=True,
+        records, fixture=fixture,
+        capture_valid=observed_capture(client),
         world_rows=world_rows, reward_facts=reward_facts)
     publish_coverage(report, checks, evidence_root, records,
                      coverage)
@@ -1215,6 +1253,13 @@ def run_modes_scope(client, checks, report, fixture, evidence_root):
             checks.failed(name, row["detail"])
         else:
             checks.not_verified(name, row["detail"])
+        # A time trial can never mint campaign credit either — the
+        # attestation below must be fed by BOTH loops, not just the
+        # quick-race one.
+        ledger_now = {r["eventId"]: dict(r)
+                      for r in campaign_rows(client.state)}
+        if ledger_now != ledger_before:
+            campaign_ledger_stable = False
     if campaign_ledger_stable:
         checks.passed("modes.noCampaignCredit",
                       "Quick Race and Time Trial moved no campaign "
