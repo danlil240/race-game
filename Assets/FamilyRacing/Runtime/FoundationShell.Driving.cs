@@ -18,16 +18,24 @@ namespace FamilyRacing
 
         private void BuildPractice(FoundationState state)
         {
-            AddLabel(root, T("practice.title", state), 40, Deep);
-            AddLabel(root, T("practice.hint", state), 20, Deep);
-            var picker = Row(root);
+            // The garage rows make this screen taller than the panel;
+            // without a scroller Yoga compresses rows under their
+            // children and the next row picks over a button's lower
+            // half — scroll keeps every row at full touch height.
+            var scroll = new ScrollView();
+            scroll.name = "practice.scroll";
+            scroll.style.flexGrow = 1;
+            root.Add(scroll);
+            AddLabel(scroll, T("practice.title", state), 40, Deep);
+            AddLabel(scroll, T("practice.hint", state), 20, Deep);
+            var picker = Row(scroll);
             var car = AddButton(picker, T("practice.car", state), Coral,
                 () => StartRace("car-01"), "practice.car");
             var moto = AddButton(picker, T("practice.motorcycle", state), Seafoam,
                 () => StartRace("motorcycle-01"), "practice.motorcycle");
             // Optional onboarding entry: the same tutorial.start command
             // an agent uses, one button per vehicle class.
-            var tutorialRow = Row(root);
+            var tutorialRow = Row(scroll);
             AddLabel(tutorialRow, T("practice.tutorial", state), 22, Deep);
             var learnCar = AddButton(tutorialRow, T("practice.car", state), Ocean,
                 () => StartTutorial("car-01"), "tutorial.car");
@@ -43,13 +51,13 @@ namespace FamilyRacing
             garagePanel = new VisualElement();
             garagePanel.name = "garage.panel";
             garagePanel.style.marginTop = 8;
-            root.Add(garagePanel);
+            scroll.Add(garagePanel);
             // Same keyboard legend the race HUD carries, shown before the
             // child picks a vehicle so the keys are never a surprise.
-            var keys = AddLabel(root, T("hud.keys", state), 15, Deep);
+            var keys = AddLabel(scroll, T("hud.keys", state), 15, Deep);
             keys.name = "practice.keys";
             keys.style.opacity = 0.75f;
-            var actions = Row(root);
+            var actions = Row(scroll);
             var back = AddButton(actions, T("action.back", state), Deep,
                 () => app.Dispatch("ui.navigate", Screen("sandbox")), "action.back");
             ApplyAvailability(car, "race.start");
@@ -61,16 +69,24 @@ namespace FamilyRacing
             statusLabel.name = "status.persistence";
         }
 
-        // Refills the garage rows in place: coins, per-vehicle upgrade
-        // rows (level, next authored price, per-level effect, installed
-        // marker, buy button) and the owned-cosmetic strip. Every widget
-        // carries a stable semantic name so the surface is observable
-        // exactly like the rest of the shell. Rows are rebuilt in full
-        // on each refresh — the count is small and the result is always
-        // the live profile's truth.
+        // Refills the garage rows ONLY when the facts they render change:
+        // a real click spans frames (PointerDown on frame N, PointerUp on
+        // frame N+k) and a rebuilt button loses pointer capture, so
+        // rebuild-per-refresh would make buy/equip unclickable for real
+        // users. The signature mirrors LanRebuildSignature — every fact
+        // a row displays (coins, unlocks, levels, owned/equipped
+        // cosmetics, command availability) is part of it, so an
+        // unchanged signature provably renders an identical tree and the
+        // live widgets stay put. A purchase, equip, profile swap or
+        // availability flip rebuilds exactly once.
+        private string garageSignature = "";
+
         private void RefreshGarage(FoundationState state)
         {
             if (garagePanel == null) return;
+            var signature = GarageSignature(state);
+            if (signature == garageSignature) return;
+            garageSignature = signature;
             garagePanel.Clear();
             var gameplay = app != null && app.Service != null
                 ? app.Service.GameplayContent : null;
@@ -179,6 +195,59 @@ namespace FamilyRacing
                     "garage.cosmetics." + cosmeticId + ".equip");
                 ApplyAvailability(toggle, "cosmetic.equip");
             }
+        }
+
+        // Every fact RefreshGarage renders: profile presence and coins,
+        // the unlocked/locked tier marks, the per-vehicle upgrade
+        // counters (level, installed marker and next-cost derivation all
+        // read these), the owned+equipped cosmetics the strip binds, and
+        // the two command availabilities that disable the buttons.
+        private string GarageSignature(FoundationState state)
+        {
+            var gameplay = app != null && app.Service != null
+                ? app.Service.GameplayContent : null;
+            var profile = state != null ? state.savedProfile : null;
+            var key = (gameplay != null && gameplay.Economy != null
+                && gameplay.Driving != null ? "c" : "-")
+                + (profile != null ? "p" + profile.coins : "-");
+            if (profile != null)
+            {
+                if (profile.unlockedVehicles != null)
+                {
+                    var unlocked = new List<string>(
+                        profile.unlockedVehicles);
+                    unlocked.Sort(System.StringComparer.Ordinal);
+                    foreach (var id in unlocked)
+                        key += "|u:" + id;
+                }
+                if (profile.vehicleUpgrades != null)
+                    foreach (var row in profile.vehicleUpgrades)
+                        if (row != null)
+                            key += "|g:" + row.vehicleId + "="
+                                + row.acceleration + ","
+                                + row.handling + "," + row.boost;
+                if (profile.ownedCosmetics != null)
+                    foreach (var id in profile.ownedCosmetics)
+                        key += "|o:" + id;
+                if (profile.equippedCosmetics != null)
+                    foreach (var id in profile.equippedCosmetics)
+                        key += "|e:" + id;
+            }
+            return key + "|a:" + ActionAvailability("upgrade.purchase")
+                + "/" + ActionAvailability("cosmetic.equip");
+        }
+
+        // The discovery descriptor's available+reason for one action —
+        // part of the garage signature so a gate flip (rewardUnresolved,
+        // raceActive) rebuilds disabled buttons honestly.
+        private string ActionAvailability(string action)
+        {
+            if (app == null || app.Service == null) return "-";
+            foreach (var descriptor in app.Service.Discover())
+                if (descriptor.action == action)
+                    return descriptor.available + ":"
+                        + (descriptor.reason ?? "");
+            return "-";
         }
 
         private void PurchaseUpgrade(string vehicleId, string category,

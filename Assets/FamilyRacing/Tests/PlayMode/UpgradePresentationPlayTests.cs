@@ -479,6 +479,41 @@ namespace FamilyRacing.Tests
             }
         }
 
+        // The multi-frame press a real pointer performs: down, frames of
+        // refresh ticks, then up. Pointer capture must survive — that is
+        // exactly the promise the signature-gated garage rebuild makes.
+        private static void PointerDown(Button button, int fingerId = 0)
+        {
+            var touch = new Touch
+            {
+                fingerId = fingerId,
+                position = button.worldBound.center,
+                phase = TouchPhase.Began
+            };
+            using (var down = PointerDownEvent.GetPooled(touch,
+                EventModifiers.None))
+            {
+                down.target = button;
+                button.SendEvent(down);
+            }
+        }
+
+        private static void PointerUp(Button button, int fingerId = 0)
+        {
+            var touch = new Touch
+            {
+                fingerId = fingerId,
+                position = button.worldBound.center,
+                phase = TouchPhase.Ended
+            };
+            using (var up = PointerUpEvent.GetPooled(touch,
+                EventModifiers.None))
+            {
+                up.target = button;
+                button.SendEvent(up);
+            }
+        }
+
         // Seeds a profile straight to disk (slot caches bind at service
         // construction, so the service is rebuilt around it) and lands
         // on the garage's home screen.
@@ -696,6 +731,119 @@ namespace FamilyRacing.Tests
                 "a profile swap must re-scope the garage rows");
             Assert.That(Widget<Label>("garage.coins").text,
                 Does.Contain("0"));
+        }
+
+        [UnityTest]
+        public IEnumerator IdenticalFactsKeepGarageWidgetsAlive()
+        {
+            yield return SeedProfileAndGarage(500);
+            yield return WaitForWidget<Button>(
+                "garage.car-01.acceleration.buy");
+            var buy = Widget<Button>(
+                "garage.car-01.acceleration.buy");
+            var installed = Widget<VisualElement>(
+                "garage.car-01.acceleration.installed");
+
+            // A click spans frames: PointerDown on frame N, PointerUp on
+            // frame N+k. A rebuild-per-refresh destroys the widget
+            // mid-click and drops pointer capture — identical facts
+            // must keep the SAME elements alive.
+            Refresh();
+            yield return null;
+            Refresh();
+            yield return null;
+            Assert.That(
+                Widget<Button>("garage.car-01.acceleration.buy"),
+                Is.SameAs(buy),
+                "unchanged facts must not rebuild the garage rows");
+            Assert.That(
+                Widget<VisualElement>(
+                    "garage.car-01.acceleration.installed"),
+                Is.SameAs(installed));
+
+            // The press a real finger performs commits the purchase —
+            // the buy button runs the same upgrade.purchase command.
+            Press(buy);
+            yield return null;
+            Assert.That(Snapshot().savedProfile
+                    .vehicleUpgrades[0].acceleration,
+                Is.EqualTo(1),
+                "the buy button must commit the level-1 purchase");
+
+            // A committed purchase is a facts change: the row rebuilds
+            // exactly once and shows the new level.
+            Refresh();
+            yield return WaitForWidget<Button>(
+                "garage.car-01.acceleration.buy");
+            var rebuilt = Widget<Button>(
+                "garage.car-01.acceleration.buy");
+            Assert.That(rebuilt, Is.Not.Null);
+            Assert.That(rebuilt, Is.Not.SameAs(buy),
+                "a changed fact must rebuild the affected garage tree");
+            Assert.That(Widget<Label>(
+                    "garage.car-01.acceleration.level").text,
+                Does.Contain("1"));
+
+            // Publication keeps ticking after the purchase (save status
+            // and friends), so resolve the CURRENT widget once facts
+            // settle: the same instance must survive refresh ticks and
+            // sit under its own bounds before a real press can land
+            // (flex wrap + advanced text settle over a few layouts).
+            const string buyName = "garage.car-01.acceleration.buy";
+            Button live = null;
+            var diag = "not polled";
+            var settledUntil = Time.unscaledTime + 8f;
+            var settled = false;
+            while (Time.unscaledTime < settledUntil && !settled)
+            {
+                var w = Widget<Button>(buyName);
+                if (w == null || w.panel == null
+                    || w.worldBound.width <= 0f)
+                {
+                    live = null;
+                    diag = "widget=" + (w == null ? "null" : "panel="
+                        + (w.panel != null) + " bound=" + w.worldBound);
+                    yield return null;
+                    continue;
+                }
+                var hit = w.panel.Pick(w.worldBound.center);
+                var inside = false;
+                for (var p = hit; p != null; p = p.hierarchy.parent)
+                    if (ReferenceEquals(p, w)) { inside = true; break; }
+                var same = ReferenceEquals(w, live);
+                diag = "bound=" + w.worldBound + " picked="
+                    + (hit == null ? "null" : hit.name)
+                    + " inside=" + inside + " sameInstance=" + same;
+                if (!inside) live = null;
+                else if (!same) live = w;
+                else settled = true;
+                yield return null;
+            }
+            Assert.That(settled, Is.True,
+                "a settled, pickable buy button; " + diag);
+            Assert.That(live, Is.Not.SameAs(buy),
+                "a changed fact must rebuild the affected garage tree");
+            Assert.That(Widget<Label>(
+                    "garage.car-01.acceleration.level").text,
+                Does.Contain("1"));
+
+            // The settled widget still commits the next purchase — the
+            // multi-frame press holds pointer capture only because
+            // nothing rebuilds while facts stay identical.
+            var clicks = 0;
+            live.clicked += () => clicks++;
+            PointerDown(live);
+            yield return null;
+            Assert.That(Widget<Button>(buyName), Is.SameAs(live),
+                "a held pointer must keep the same widget across frames");
+            PointerUp(live);
+            yield return null;
+            Assert.That(clicks, Is.EqualTo(1),
+                "the pointer press never reached the rebuilt button");
+            Assert.That(Snapshot().savedProfile
+                    .vehicleUpgrades[0].acceleration,
+                Is.EqualTo(2),
+                "the rebuilt buy button still commits the purchase");
         }
     }
 }

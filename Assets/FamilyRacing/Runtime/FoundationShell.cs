@@ -133,6 +133,7 @@ namespace FamilyRacing
             finishVehicleLabel = null;
             tutorialPanel = null;
             garagePanel = null;
+            garageSignature = "";
             tutorialIconLabel = tutorialCueLabel = tutorialProgressLabel = null;
             lanTimeLabel = lanStandingsLabel = lanPhaseLabel = null;
             lanActionLabel = lanPauseLabel = null;
