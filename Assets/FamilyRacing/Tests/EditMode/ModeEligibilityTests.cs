@@ -293,6 +293,189 @@ namespace FamilyRacing.Tests
             Assert.That(none.allowed, Is.False);
         }
 
+        // --- world unlocks (M6 Task 2) ------------------------------------
+        // The shared verdict — used by every UI and command path — is
+        // the only place world access is enforced. Campaign and Quick
+        // Race refuse events/courses behind a closed world with a
+        // machine-safe reason no matter which id shape the caller
+        // uses; LAN and Time Trial expose every course from the start.
+
+        private static GameplayCatalog MultiCatalog()
+        {
+            return CampaignTestFixture.MultiCatalog();
+        }
+
+        private static string[] AllCourseIds()
+        {
+            var ids = new List<string>();
+            foreach (var worldId in CampaignTestFixture.WorldIds)
+                ids.AddRange(
+                    CampaignTestFixture.CoursesForWorld(worldId));
+            return ids.ToArray();
+        }
+
+        [Test]
+        public void LockedWorldRejectsCampaignQuickRaceAndRawStarts()
+        {
+            var catalog = MultiCatalog();
+            var profile = CampaignTestFixture.Profile();
+            var service = ServiceWithProfile(profile, catalog);
+
+            // Locked-world events refuse in campaign — the owning world
+            // is closed for regulars AND finales alike.
+            foreach (var eventId in new[]
+            {
+                "canyon-dash-car-circuit",
+                "redrock-canyon-car-finale",
+                "aurora-pass-motorcycle-stunt",
+                "snowy-peaks-motorcycle-finale"
+            })
+            {
+                var decision = RaceModeRules.CanEnter(RaceMode.Campaign,
+                    "", eventId, "car-01", profile, catalog);
+                Assert.That(decision.allowed, Is.False, eventId);
+                Assert.That(decision.code, Is.EqualTo("worldLocked"),
+                    eventId);
+            }
+
+            // Quick Race refuses a locked course — by course pick and
+            // by explicit event id.
+            var coursePick = RaceModeRules.CanEnter(RaceMode.QuickRace,
+                "canyon-dash", "", "car-01", profile, catalog);
+            Assert.That(coursePick.allowed, Is.False);
+            Assert.That(coursePick.code, Is.EqualTo("worldLocked"));
+            Assert.That(coursePick.eventId, Is.Null.Or.Empty);
+            var explicitEvent = RaceModeRules.CanEnter(
+                RaceMode.QuickRace, "", "canyon-dash-car-circuit",
+                "car-01", profile, catalog);
+            Assert.That(explicitEvent.allowed, Is.False);
+            Assert.That(explicitEvent.code, Is.EqualTo("worldLocked"));
+
+            // And the open world still behaves exactly as before.
+            var open = RaceModeRules.CanEnter(RaceMode.QuickRace,
+                "harbor-hop", "", "car-01", profile, catalog);
+            Assert.That(open.allowed, Is.True, open.code);
+            Assert.That(open.eventId,
+                Is.EqualTo("harbor-hop-car-circuit"));
+
+            // Raw ids can never bypass the world lock through the
+            // command/session paths either.
+            var raw = service.Execute(Cmd("solo.start", P(
+                "mode", "campaign",
+                "eventId", "canyon-dash-car-circuit",
+                "vehicleId", "car-01")));
+            Assert.That(raw.status, Is.EqualTo(CommandResult.Rejected));
+            Assert.That(raw.code, Is.EqualTo("worldLocked"));
+
+            var semantic = service.Execute(Cmd("campaign.start", P(
+                "eventId", "redrock-canyon-car-finale",
+                "vehicleId", "car-01", "difficulty", "easy")));
+            Assert.That(semantic.status,
+                Is.EqualTo(CommandResult.Rejected));
+            Assert.That(semantic.code, Is.EqualTo("worldLocked"));
+
+            var quick = service.Execute(Cmd("quickRace.start", P(
+                "courseId", "mesa-skyway", "classId", "car",
+                "vehicleId", "car-01", "difficulty", "easy")));
+            Assert.That(quick.status, Is.EqualTo(CommandResult.Rejected));
+            Assert.That(quick.code, Is.EqualTo("worldLocked"));
+
+            Assert.That(service.Snapshot().soloRace, Is.Null,
+                "a refused locked-world start never creates a session");
+        }
+
+        [Test]
+        public void CompletingAWorldOpensItsCoursesForProgressionModes()
+        {
+            var catalog = MultiCatalog();
+            var profile = CampaignTestFixture.Profile();
+            // Sunny Island done — wins were never required.
+            CampaignTestFixture.CompleteWorldFinales(profile,
+                "sunny-island", victorious: false);
+
+            var quick = RaceModeRules.CanEnter(RaceMode.QuickRace,
+                "canyon-dash", "", "car-01", profile, catalog);
+            Assert.That(quick.allowed, Is.True, quick.code);
+            Assert.That(quick.eventId,
+                Is.EqualTo("canyon-dash-car-circuit"));
+
+            var campaign = RaceModeRules.CanEnter(RaceMode.Campaign, "",
+                "canyon-dash-motorcycle-gadget", "motorcycle-01",
+                profile, catalog);
+            Assert.That(campaign.allowed, Is.True, campaign.code);
+
+            // Snowy Peaks remains behind redrock — the chain advances
+            // one world at a time.
+            var locked = RaceModeRules.CanEnter(RaceMode.Campaign, "",
+                "aurora-pass-car-circuit", "car-01", profile, catalog);
+            Assert.That(locked.allowed, Is.False);
+            Assert.That(locked.code, Is.EqualTo("worldLocked"));
+        }
+
+        [Test]
+        public void LanExposesEveryCourseAndModelRegardlessOfProgress()
+        {
+            var catalog = MultiCatalog();
+            var profile = CampaignTestFixture.Profile();
+            foreach (var worldId in CampaignTestFixture.WorldIds)
+                foreach (var courseId in
+                    CampaignTestFixture.CoursesForWorld(worldId))
+                {
+                    var car = RaceModeRules.CanEnter(RaceMode.Lan, "",
+                        CampaignTestFixture.RegularEventId(courseId,
+                            "car", GameplayEventType.Circuit),
+                        "car-04", profile, catalog);
+                    Assert.That(car.allowed, Is.True,
+                        courseId + " car-04: " + car.code);
+                    Assert.That(car.vehicleId, Is.EqualTo("car-04"));
+
+                    var moto = RaceModeRules.CanEnter(RaceMode.Lan, "",
+                        CampaignTestFixture.RegularEventId(courseId,
+                            "motorcycle", GameplayEventType.Circuit),
+                        "motorcycle-04", profile, catalog);
+                    Assert.That(moto.allowed, Is.True,
+                        courseId + " motorcycle-04: " + moto.code);
+                }
+
+            // The same locked tier-4 model refuses instantly under the
+            // progression modes — LAN is the exception, not the rule.
+            var gated = RaceModeRules.CanEnter(RaceMode.QuickRace, "",
+                "harbor-hop-car-circuit", "car-04", profile, catalog);
+            Assert.That(gated.allowed, Is.False);
+            Assert.That(gated.code, Is.EqualTo("vehicleLocked"));
+        }
+
+        [Test]
+        public void TimeTrialOpensEveryCourseWithItsNormalizedStarter()
+        {
+            var catalog = MultiCatalog();
+            var profile = CampaignTestFixture.Profile();
+            foreach (var courseId in AllCourseIds())
+            {
+                var car = RaceModeRules.CanEnter(RaceMode.TimeTrial,
+                    courseId, "", "car-01", profile, catalog);
+                Assert.That(car.allowed, Is.True,
+                    courseId + " car trial: " + car.code);
+                Assert.That(car.vehicleId, Is.EqualTo("car-01"));
+                Assert.That(car.classId, Is.EqualTo("car"));
+
+                var moto = RaceModeRules.CanEnter(RaceMode.TimeTrial,
+                    courseId, "", "motorcycle-01", profile, catalog);
+                Assert.That(moto.allowed, Is.True,
+                    courseId + " motorcycle trial: " + moto.code);
+                Assert.That(moto.vehicleId,
+                    Is.EqualTo("motorcycle-01"));
+            }
+
+            // A higher-tier explicit id refuses honestly — the trial
+            // normalizes the pick instead of honoring an unowned one.
+            var nonStarter = RaceModeRules.CanEnter(RaceMode.TimeTrial,
+                "", "aurora-pass-motorcycle-time", "motorcycle-04",
+                profile, catalog);
+            Assert.That(nonStarter.allowed, Is.False);
+            Assert.That(nonStarter.code, Is.EqualTo("invalidVehicle"));
+        }
+
         // --- service integration ---------------------------------------------------
 
         [Test]

@@ -12,6 +12,9 @@ namespace FamilyRacing.Tests
     // shape GameplayCatalogTests pins, plus the named-rival one-time
     // bounty rows. Builders are internal so BountyTests reuses them —
     // this fixture is test content, never the authored shipping catalog.
+    // M6 Task 2: a parallel three-world fixture (sunny/redrock/snowy,
+    // six courses, eight vehicles, six rivals) lives beside it so world
+    // progression, mode gating and reward tests share one shape.
     internal static class CampaignTestFixture
     {
         internal static readonly string[] CourseIds = { "harbor-hop", "lighthouse-loop" };
@@ -25,6 +28,16 @@ namespace FamilyRacing.Tests
         internal const long ParTicks = 3600; // 120 s at 30 Hz
         internal const int TicksPerSecond = 30;
 
+        // The authored world order and per-world course sets (M6 plan
+        // inventory): every world owns two courses, 24 regular events
+        // and two class finales paying the world's unlock pair.
+        internal static readonly string[] WorldIds =
+            { "sunny-island", "redrock-canyon", "snowy-peaks" };
+        internal static readonly string[] RedrockCourseIds =
+            { "canyon-dash", "mesa-skyway" };
+        internal static readonly string[] SnowyCourseIds =
+            { "snowpine-circuit", "aurora-pass" };
+
         internal static string RegularEventId(string courseId, string classId,
             string eventType)
         {
@@ -33,7 +46,104 @@ namespace FamilyRacing.Tests
 
         internal static string FinaleEventId(string classId)
         {
-            return "sunny-island-" + classId + "-finale";
+            return FinaleEventId("sunny-island", classId);
+        }
+
+        internal static string FinaleEventId(string worldId, string classId)
+        {
+            return worldId + "-" + classId + "-finale";
+        }
+
+        // The authored rival/livery/bounty naming convention for the
+        // multiworld fixture: <worldId>-<classId>-rival with a one-time
+        // bounty named after it.
+        internal static string RivalId(string worldId, string classId)
+        {
+            return worldId + "-" + classId + "-rival";
+        }
+
+        internal static string RivalBountyId(string worldId, string classId)
+        {
+            return "bounty-" + RivalId(worldId, classId);
+        }
+
+        internal static string[] CoursesForWorld(string worldId)
+        {
+            if (worldId == "sunny-island") return CourseIds;
+            if (worldId == "redrock-canyon") return RedrockCourseIds;
+            if (worldId == "snowy-peaks") return SnowyCourseIds;
+            return null;
+        }
+
+        // The world's completion unlock pair: sunny grants the -02
+        // tier, redrock -03, snowy -04 (starters are -01).
+        internal static int RewardOrdinalFor(string worldId)
+        {
+            if (worldId == "sunny-island") return 2;
+            if (worldId == "redrock-canyon") return 3;
+            if (worldId == "snowy-peaks") return 4;
+            return 0;
+        }
+
+        internal static List<string> RegularEventsFor(string worldId)
+        {
+            var ids = new List<string>();
+            var courses = CoursesForWorld(worldId);
+            if (courses == null) return ids;
+            foreach (var courseId in courses)
+                foreach (var classId in ClassIds)
+                    foreach (var eventType in EventTypes)
+                        ids.Add(RegularEventId(courseId, classId,
+                            eventType));
+            return ids;
+        }
+
+        // Writes durable rows onto `profile`: the first `completedEvents`
+        // regular events of the world completed, with `extraStars`
+        // additional introductory/mastery bits spread two per event —
+        // so the world's regional star count is completedEvents +
+        // extraStars exactly.
+        internal static void CompleteWorldEvents(ProfileSave profile,
+            string worldId, int completedEvents, int extraStars)
+        {
+            var index = 0;
+            var starsLeft = extraStars;
+            foreach (var eventId in RegularEventsFor(worldId))
+            {
+                if (index >= completedEvents) break;
+                var mask = ObjectiveEvaluator.CompletionBit;
+                if (starsLeft >= 2)
+                {
+                    mask = ObjectiveEvaluator.FullMask;
+                    starsLeft -= 2;
+                }
+                else if (starsLeft == 1)
+                {
+                    mask = ObjectiveEvaluator.CompletionBit
+                        | ObjectiveEvaluator.IntroductoryBit;
+                    starsLeft -= 1;
+                }
+                profile.eventProgress.Add(new EventProgress
+                {
+                    eventId = eventId, completed = true,
+                    objectiveMask = mask
+                });
+                index++;
+            }
+        }
+
+        // Durable finale rows for every class finale of the world —
+        // `victorious` models the rival-defeat fact; world completion
+        // is wins-optional.
+        internal static void CompleteWorldFinales(ProfileSave profile,
+            string worldId, bool victorious)
+        {
+            foreach (var classId in ClassIds)
+                profile.finaleProgress.Add(new FinaleProgress
+                {
+                    eventId = FinaleEventId(worldId, classId),
+                    completed = true, victorious = victorious
+                });
         }
 
         // Objective templates per the plan's authored table: completion
@@ -360,6 +470,147 @@ namespace FamilyRacing.Tests
                 Driving(), Campaign(), Bounties(), Economy(), Gadgets(),
                 difficulties, out var catalog, out var error);
             Assert.That(ok, Is.True, "fixture catalog must validate: " + error);
+            return catalog;
+        }
+
+        // --- the three-world fixture (M6 Task 2) -------------------------
+        // Six courses / eight vehicles / 72 regular events / six rival
+        // finales in authored order. Every regular event and finale seats
+        // all four class tiers so Quick Race and LAN can prove access for
+        // models the profile has not unlocked.
+
+        private static readonly string[] VehicleTiers =
+            { "-01", "-02", "-03", "-04" };
+
+        private static CampaignDefinition MultiWorld(string worldId,
+            string nameEn, string nameHe)
+        {
+            var courses = CoursesForWorld(worldId);
+            var campaign = new CampaignDefinition
+            {
+                worldId = worldId,
+                nameEn = nameEn,
+                nameHe = nameHe,
+                requiredEventCompletions =
+                    courses.Length * ClassIds.Length * EventTypes.Length,
+                requiredRegionalStars = 30
+            };
+            foreach (var courseId in courses)
+                campaign.courseIds.Add(courseId);
+            foreach (var eventId in RegularEventsFor(worldId))
+                campaign.regularEventIds.Add(eventId);
+            foreach (var classId in ClassIds)
+                campaign.finales.Add(new FinaleDefinition
+                {
+                    eventId = FinaleEventId(worldId, classId),
+                    classId = classId,
+                    rivalId = RivalId(worldId, classId),
+                    rewardVehicleId = classId + "-0"
+                        + RewardOrdinalFor(worldId)
+                });
+            return campaign;
+        }
+
+        internal static List<CampaignDefinition> Worlds()
+        {
+            return new List<CampaignDefinition>
+            {
+                MultiWorld("sunny-island", "Sunny Island", "האי השמשי"),
+                MultiWorld("redrock-canyon", "Redrock Canyon",
+                    "קניון רדרוק"),
+                MultiWorld("snowy-peaks", "Snowy Peaks", "הפסגות המושלגות")
+            };
+        }
+
+        private static List<string> AllClassTiers(string classId)
+        {
+            var ids = new List<string>();
+            foreach (var tier in VehicleTiers)
+                ids.Add(classId + tier);
+            return ids;
+        }
+
+        private static DrivingContentCatalog MultiDriving()
+        {
+            var courses = new List<CourseDefinition>();
+            var events = new List<EventDefinition>();
+            foreach (var worldId in WorldIds)
+            {
+                var worldCourses = CoursesForWorld(worldId);
+                foreach (var courseId in worldCourses)
+                {
+                    courses.Add(Course(courseId));
+                    foreach (var classId in ClassIds)
+                        foreach (var eventType in EventTypes)
+                        {
+                            var evt = RegularEvent(courseId, classId,
+                                eventType);
+                            evt.vehicleIds = AllClassTiers(classId);
+                            events.Add(evt);
+                        }
+                }
+                foreach (var classId in ClassIds)
+                    events.Add(new EventDefinition
+                    {
+                        id = FinaleEventId(worldId, classId),
+                        courseId = worldCourses[0],
+                        laps = 3,
+                        countdownTicks = 90,
+                        vehicleIds = AllClassTiers(classId),
+                        recovery = new RecoverySettings(),
+                        completionCoins = 20,
+                        eventType = GameplayEventType.Finale,
+                        vehicleClass = classId,
+                        isFinale = true
+                    });
+            }
+            return DrivingContentCatalog.Create(
+                "full-content-1",
+                new[]
+                {
+                    Vehicle("car-01"), Vehicle("car-02"),
+                    Vehicle("car-03"), Vehicle("car-04"),
+                    Vehicle("motorcycle-01"), Vehicle("motorcycle-02"),
+                    Vehicle("motorcycle-03"), Vehicle("motorcycle-04")
+                },
+                courses, events);
+        }
+
+        // The twelve repeatable challenges plus one one-time bounty per
+        // authored rival — six independent rival rewards.
+        private static List<BountyDefinition> MultiBounties()
+        {
+            var list = Bounties();
+            list.RemoveAll(b => b == null || !b.repeatable);
+            foreach (var worldId in WorldIds)
+                foreach (var classId in ClassIds)
+                    list.Add(new BountyDefinition
+                    {
+                        id = RivalBountyId(worldId, classId),
+                        family = "rival",
+                        metric = BountyMetric.HumanFinishes,
+                        threshold = 1,
+                        unit = "count", rewardCoins = 30,
+                        aggregation = BountyAggregation.Max,
+                        repeatable = false,
+                        rivalId = RivalId(worldId, classId)
+                    });
+            return list;
+        }
+
+        internal static GameplayCatalog MultiCatalog()
+        {
+            var difficulties = new List<AiDifficultyDefinition>
+            {
+                new AiDifficultyDefinition { id = "easy" },
+                new AiDifficultyDefinition { id = "medium" },
+                new AiDifficultyDefinition { id = "hard" }
+            };
+            var ok = GameplayCatalog.TryCreate(
+                MultiDriving(), Worlds(), MultiBounties(), Economy(),
+                Gadgets(), difficulties, out var catalog, out var error);
+            Assert.That(ok, Is.True,
+                "multiworld fixture catalog must validate: " + error);
             return catalog;
         }
 

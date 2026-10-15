@@ -488,6 +488,131 @@ namespace FamilyRacing.Tests
             AssertProgressEqual(profile, back);
         }
 
+        // M6 Task 2: a schema-3 file written by the M5 build — Sunny
+        // Island completed, plus ids no current catalog owns — must
+        // round-trip untouched and land on the ordered adventure: the
+        // durable completion opens Redrock; Snowy stays locked.
+        [Test]
+        public void SchemaThreeSunnyCompletionOpensOnlyRedrock()
+        {
+            var profile = ProfileFactory.Create(0, "en");
+            profile.coins = 141;
+            profile.unlockedVehicles.Add("car-02");
+            profile.unlockedVehicles.Add("motorcycle-02");
+            // A retained id this content build never authored — it must
+            // survive untouched, exactly like the milestone notes say.
+            profile.unlockedVehicles.Add("car-99");
+            profile.appliedResults.Add(new AppliedResultReceipt
+            {
+                resultId = "m5-race/result", participantId = profile.id,
+                awardedCoins = 20, fingerprint = new string('a', 64),
+                mode = "campaign"
+            });
+            foreach (var eventId in
+                CampaignTestFixture.RegularEventsFor("sunny-island"))
+                profile.eventProgress.Add(new EventProgress
+                {
+                    eventId = eventId, completed = true,
+                    objectiveMask = ObjectiveEvaluator.FullMask
+                });
+            profile.eventProgress.Add(new EventProgress
+            {
+                eventId = "retired-legacy-event", completed = true,
+                objectiveMask = 5
+            });
+            profile.worldProgress.Add(new WorldProgress
+            {
+                worldId = "sunny-island", completed = true
+            });
+            profile.worldProgress.Add(new WorldProgress
+            {
+                worldId = "retired-world", completed = true
+            });
+            profile.finaleProgress.Add(new FinaleProgress
+            {
+                eventId = "sunny-island-car-finale", completed = true,
+                victorious = true
+            });
+            profile.finaleProgress.Add(new FinaleProgress
+            {
+                eventId = "sunny-island-motorcycle-finale",
+                completed = true, victorious = false
+            });
+            profile.vehicleUpgrades.Add(new VehicleUpgrade
+            {
+                vehicleId = "car-01", acceleration = 1, handling = 2,
+                boost = 0
+            });
+            profile.ownedCosmetics.Add("livery-rival-car");
+            profile.bountyRotationCursor = 5;
+            profile.timeTrialRecords.Add(new TimeTrialRecord
+            {
+                courseId = "harbor-hop", classId = "car",
+                bestTicks = 12345
+            });
+            profile.purchaseReceipts.Add(new PurchaseReceipt
+            {
+                purchaseId = "purchase-1", kind = "upgrade",
+                vehicleId = "car-01", category = "acceleration",
+                level = 1, costCoins = 60
+            });
+            profile.localRaceOrdinal = 7;
+
+            File.WriteAllText(Primary(0), serializer.Serialize(profile));
+            var loaded = Store().Load(0);
+            Assert.That(loaded.Status,
+                Is.EqualTo(ProfileLoadStatus.Loaded),
+                "the schema-3 file must load without rejection");
+
+            // The adventure view on the ordered catalog: Sunny stays
+            // complete, Redrock opens, Snowy Peaks remains closed.
+            var catalog = CampaignTestFixture.MultiCatalog();
+            var access = AdventureRules.Evaluate(catalog, loaded.Profile);
+            Assert.That(access.worlds.Count, Is.EqualTo(3));
+            Assert.That(access.worlds[0].campaign.worldComplete, Is.True,
+                "sunny's durable completion survives the load");
+            Assert.That(access.worlds[0].campaign.victoriousFinaleIds,
+                Is.EqualTo(new[] { "sunny-island-car-finale" }));
+            Assert.That(access.worlds[1].available, Is.True,
+                "redrock opens from the carried completion");
+            Assert.That(access.worlds[2].available, Is.False,
+                "snowy still waits on redrock");
+            Assert.That(access.complete, Is.False);
+
+            // Round-trip: save through the store and reload — every
+            // fact survives, including the unknown retained ids.
+            Store().Save(loaded.Profile);
+            var reloaded = Store().Load(0).Profile;
+            Assert.That(reloaded.coins, Is.EqualTo(141));
+            Assert.That(reloaded.unlockedVehicles,
+                Does.Contain("car-99"));
+            Assert.That(reloaded.eventProgress.Count, Is.EqualTo(25));
+            Assert.That(reloaded.eventProgress.Exists(
+                r => r.eventId == "retired-legacy-event"), Is.True);
+            Assert.That(reloaded.worldProgress.Exists(
+                r => r.worldId == "retired-world" && r.completed),
+                Is.True);
+            Assert.That(reloaded.finaleProgress[0].victorious, Is.True);
+            Assert.That(reloaded.finaleProgress[1].victorious, Is.False);
+            Assert.That(reloaded.vehicleUpgrades[0].acceleration,
+                Is.EqualTo(1));
+            Assert.That(reloaded.vehicleUpgrades[0].handling,
+                Is.EqualTo(2));
+            Assert.That(reloaded.appliedResults[0].resultId,
+                Is.EqualTo("m5-race/result"));
+            Assert.That(reloaded.bountyRotationCursor, Is.EqualTo(5));
+            Assert.That(reloaded.timeTrialRecords[0].bestTicks,
+                Is.EqualTo(12345));
+            Assert.That(reloaded.purchaseReceipts[0].costCoins,
+                Is.EqualTo(60));
+            Assert.That(reloaded.localRaceOrdinal, Is.EqualTo(7));
+
+            // And the access verdict is identical after the round-trip.
+            var again = AdventureRules.Evaluate(catalog, reloaded);
+            Assert.That(again.worlds[1].available, Is.True);
+            Assert.That(again.worlds[2].available, Is.False);
+        }
+
         // --- helpers ------------------------------------------------------
 
         private static void ApplyViolation(ProfileSave profile, string invariant)

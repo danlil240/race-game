@@ -165,18 +165,36 @@ namespace FamilyRacing.Core.Racing
                 return Deny("unknownEvent");
             if (mode == RaceMode.Campaign)
             {
-                if (gameplay == null || gameplay.Campaign == null)
+                // The event resolves to its OWNING world (M6 Task 2):
+                // raw ids can never bypass a closed world — locked
+                // worlds deny "worldLocked" before the world's own
+                // event lock.
+                if (gameplay == null || gameplay.IsLegacy
+                    || gameplay.Campaigns == null
+                    || gameplay.Campaigns.Count == 0)
                     return Deny("contentUnavailable");
-                if (!IsCampaignEvent(gameplay, evt.id))
-                    return Deny("eventNotCampaign");
-                // The campaign progression gate: regular events are
-                // always enterable; finales join the available set only
-                // once the world's completion/star gate opens.
-                var access = CampaignRules.Evaluate(
-                    gameplay.Campaign, profile);
-                if (!access.availableEventIds.Contains(evt.id))
+                var owner = gameplay.FindCampaignForEvent(evt.id);
+                if (owner == null) return Deny("eventNotCampaign");
+                var world = AdventureRules.FindWorld(
+                    AdventureRules.Evaluate(gameplay, profile),
+                    owner.worldId);
+                if (world == null || !world.available)
+                    return Deny("worldLocked");
+                // The regional progression gate for that world:
+                // regular events are always enterable; finales join
+                // the available set only once the world's own
+                // completion/star gate opens.
+                if (!world.campaign.availableEventIds.Contains(evt.id))
                     return Deny("eventLocked");
             }
+            // Quick Race races the adventure's courses: a course inside
+            // a locked world (or claimed by none) refuses honestly —
+            // course pick and explicit event id alike (M6 Task 2). A
+            // driving-only catalog answers without the world rule.
+            if (mode == RaceMode.QuickRace && gameplay != null
+                && !AdventureRules.CanAccessCourse(gameplay, profile,
+                    evt.courseId))
+                return Deny("worldLocked");
             if (string.IsNullOrEmpty(vehicleId)
                 || !content.Vehicles.ContainsKey(vehicleId))
                 return Deny("unknownVehicle");
@@ -307,21 +325,6 @@ namespace FamilyRacing.Core.Racing
             if (!CourseExists(content, evt))
                 return Deny("unknownCourse");
             return Allow(vehicleId, evt.id, resolvedClass);
-        }
-
-        private static bool IsCampaignEvent(GameplayCatalog catalog,
-            string eventId)
-        {
-            var campaign = catalog != null ? catalog.Campaign : null;
-            if (campaign == null || eventId == null) return false;
-            if (campaign.regularEventIds != null
-                && campaign.regularEventIds.Contains(eventId))
-                return true;
-            if (campaign.finales != null)
-                foreach (var finale in campaign.finales)
-                    if (finale != null && finale.eventId == eventId)
-                        return true;
-            return false;
         }
 
         private static bool CourseExists(

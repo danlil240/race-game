@@ -174,10 +174,14 @@ namespace FamilyRacing.Core.Racing
             { error = "invalidVehicle"; return false; }
 
             // The authored rival of a class finale owns the first AI
-            // seat under a stable, honest participant identity.
+            // seat under a stable, honest participant identity — the
+            // finale resolves inside its OWNING world so every world's
+            // finale seats its own rival (M6 Task 2).
             string rivalId = null;
-            if (catalog.Campaign != null && catalog.Campaign.finales != null)
-                foreach (var finale in catalog.Campaign.finales)
+            var finaleWorld = catalog != null
+                ? catalog.FindCampaignForEvent(evt.id) : null;
+            if (finaleWorld != null && finaleWorld.finales != null)
+                foreach (var finale in finaleWorld.finales)
                     if (finale != null && finale.eventId == evt.id)
                         rivalId = finale.rivalId;
             var rivalParticipantId = rivalId != null

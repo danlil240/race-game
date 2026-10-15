@@ -369,10 +369,16 @@ namespace FamilyRacing.Core.Progression
         private static FinaleDefinition FindFinale(GameplayCatalog catalog,
             string eventId)
         {
-            if (catalog == null || catalog.Campaign == null
-                || catalog.Campaign.finales == null || eventId == null)
+            // Six independent rival rewards (M6 Task 2): the finale
+            // resolves inside the world that OWNS this result's event —
+            // never the first world — so each world's two rivals pay
+            // their own one-time bounty.
+            var world = catalog != null
+                ? catalog.FindCampaignForEvent(eventId) : null;
+            if (world == null || world.finales == null
+                || eventId == null)
                 return null;
-            foreach (var finale in catalog.Campaign.finales)
+            foreach (var finale in world.finales)
                 if (finale != null && finale.eventId == eventId)
                     return finale;
             return null;

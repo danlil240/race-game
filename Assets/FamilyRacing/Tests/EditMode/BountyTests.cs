@@ -531,6 +531,72 @@ namespace FamilyRacing.Tests
             Assert.That(eval.rivalRewardCoins, Is.EqualTo(0));
         }
 
+        // M6 Task 2: six independent rival rewards. Finale ownership
+        // resolves per event id across the ordered worlds — the second
+        // and third world's rivals must never look the first world up.
+        [Test]
+        public void RivalVictoryResolvesAcrossEveryWorld()
+        {
+            var catalog = CampaignTestFixture.MultiCatalog();
+            var profile = ProfileWithBounties(
+                Assignment("asg-1", "boost-3", progress: 0));
+            var context = BoundContext(profile, catalog, "race-mw",
+                "campaign");
+            foreach (var worldId in CampaignTestFixture.WorldIds)
+                foreach (var classId in CampaignTestFixture.ClassIds)
+                {
+                    var finaleId = CampaignTestFixture.FinaleEventId(
+                        worldId, classId);
+                    var rivalId = CampaignTestFixture.RivalId(worldId,
+                        classId);
+                    var eval = Eval(profile,
+                        CampaignTestFixture.Result("campaign", finaleId,
+                            P, "finished", 1,
+                            new RaceMetrics { rivalDefeated = true },
+                            raceId: "race-mw"),
+                        context, catalog);
+                    Assert.That(eval.rivalDefeated, Is.True, finaleId);
+                    Assert.That(eval.rivalRewardDue, Is.True, finaleId);
+                    Assert.That(eval.rivalId, Is.EqualTo(rivalId),
+                        finaleId + " must name its own world rival");
+                    Assert.That(eval.rivalEventId, Is.EqualTo(finaleId));
+                    Assert.That(eval.rivalBountyIds,
+                        Is.EqualTo(new[] { "bounty-" + rivalId }),
+                        finaleId);
+                    Assert.That(eval.rivalRewardCoins, Is.EqualTo(30),
+                        finaleId);
+                }
+
+            // A recorded victory never re-proposes, per world.
+            profile.finaleProgress.Add(new FinaleProgress
+            {
+                eventId = "redrock-canyon-car-finale",
+                completed = true, victorious = true
+            });
+            var repeat = Eval(profile,
+                CampaignTestFixture.Result("campaign",
+                    "redrock-canyon-car-finale", P, "finished", 1,
+                    new RaceMetrics { rivalDefeated = true },
+                    raceId: "race-mw2"),
+                BoundContext(profile, catalog, "race-mw2", "campaign"),
+                catalog);
+            Assert.That(repeat.rivalDefeated, Is.True);
+            Assert.That(repeat.rivalRewardDue, Is.False);
+            Assert.That(repeat.rivalBountyIds, Is.Empty);
+
+            // A rivalDefeated flag on a non-finale event proposes
+            // nothing — there is no finale row to bind it to.
+            var regular = Eval(profile,
+                CampaignTestFixture.Result("campaign",
+                    "canyon-dash-car-circuit", P, "finished", 1,
+                    new RaceMetrics { rivalDefeated = true },
+                    raceId: "race-mw3"),
+                BoundContext(profile, catalog, "race-mw3", "campaign"),
+                catalog);
+            Assert.That(regular.rivalDefeated, Is.True);
+            Assert.That(regular.rivalRewardDue, Is.False);
+        }
+
         // --- determinism / immutability ------------------------------------
 
         private static string EvaluationSnapshot(BountyEvaluation eval)

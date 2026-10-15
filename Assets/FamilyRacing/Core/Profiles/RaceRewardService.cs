@@ -453,7 +453,11 @@ namespace FamilyRacing.Core.Profiles
             var newStarBits = 0;
             var finaleCompleted = false;
             var finaleVictorious = false;
-            var campaign = catalog != null ? catalog.Campaign : null;
+            // Ownership resolves from the immutable result.eventId —
+            // never the current menu/world selection (M6 Task 2): a
+            // redrock finale commits against the redrock campaign.
+            var campaign = catalog != null
+                ? catalog.FindCampaignForEvent(result.eventId) : null;
             var isRegularEvent = campaign != null
                 && campaign.regularEventIds != null
                 && campaign.regularEventIds.Contains(result.eventId);

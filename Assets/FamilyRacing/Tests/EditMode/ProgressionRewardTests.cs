@@ -1164,6 +1164,255 @@ namespace FamilyRacing.Tests
             Assert.That(receipt.mode, Is.EqualTo("lan"));
         }
 
+        // --- multiworld rewards (M6 Task 2) --------------------------------
+        // Result ownership resolves from the immutable
+        // `result.eventId` — never the selected menu world — so a
+        // redrock finale commits against the redrock campaign: its own
+        // two reward vehicles, once, inside the same atomic save.
+
+        private static GameplayCatalog MultiCatalog()
+        {
+            return CampaignTestFixture.MultiCatalog();
+        }
+
+        [Test]
+        public void SecondFinaleSaveFailureCommitsNothingUntilRetry()
+        {
+            var catalog = MultiCatalog();
+            var store = Store();
+            // Sunny complete; redrock's car finale already finished —
+            // the motorcycle finale is the world's second and last.
+            var profile = CampaignTestFixture.Profile();
+            CampaignTestFixture.CompleteWorldFinales(profile,
+                "sunny-island", victorious: false);
+            profile.finaleProgress.Add(new FinaleProgress
+            {
+                eventId = "redrock-canyon-car-finale",
+                completed = true, victorious = false
+            });
+            store.Save(profile);
+            var loaded = store.Load(0).Profile;
+            var context = BoundContext(loaded, catalog, "race-rf2",
+                "campaign");
+            PersistContext(store, loaded, context);
+            var onDisk = File.ReadAllBytes(Primary(0));
+            var liveBefore = CampaignTestFixture.ProfileSnapshot(loaded);
+
+            var result = CampaignTestFixture.Result("campaign",
+                "redrock-canyon-motorcycle-finale", loaded.id,
+                "finished", 2,
+                new RaceMetrics { position = 2, finishTicks = 3900 },
+                raceId: "race-rf2");
+            result.rulesFingerprint = catalog.CompatibilityFingerprint;
+
+            RewardApplyResult failed;
+            using (new FileStream(Primary(0), FileMode.Open,
+                FileAccess.Read, FileShare.Read))
+            {
+                failed = RaceRewardService.Apply(result, loaded.id,
+                    loaded, store, catalog, context);
+            }
+            Assert.That(failed.status, Is.EqualTo(RaceRewardService.StatusFailed));
+            Assert.That(failed.code, Is.EqualTo("saveFailed"));
+
+            // Nothing moved: profile fields, unlocks, the world row,
+            // the receipt ledger, and the bound context.
+            Assert.That(CampaignTestFixture.ProfileSnapshot(loaded), Is.EqualTo(liveBefore));
+            Assert.That(File.ReadAllBytes(Primary(0)),
+                Is.EqualTo(onDisk));
+            Assert.That(loaded.unlockedVehicles,
+                Does.Not.Contain("car-03"));
+            Assert.That(WorldRow(loaded, "redrock-canyon"), Is.Null);
+            Assert.That(PendingContext(loaded, "race-rf2"), Is.Not.Null,
+                "the unresolved context survives for the retry");
+
+            // The retry commits the exact transaction: world complete,
+            // exactly the world's two reward vehicles, once.
+            var retried = RaceRewardService.Apply(result, loaded.id,
+                loaded, store, catalog, context);
+            Assert.That(retried.status, Is.EqualTo(RaceRewardService.StatusApplied));
+            Assert.That(retried.worldCompleted, Is.True);
+            Assert.That(retried.unlockedVehicleIds, Is.EquivalentTo(
+                new[] { "car-03", "motorcycle-03" }),
+                "the world grants exactly its two reward vehicles");
+            Assert.That(loaded.unlockedVehicles,
+                Does.Contain("car-03"));
+            Assert.That(loaded.unlockedVehicles,
+                Does.Contain("motorcycle-03"));
+            Assert.That(WorldRow(loaded, "redrock-canyon").completed,
+                Is.True);
+            Assert.That(PendingContext(loaded, "race-rf2"), Is.Null);
+
+            // The completed world opens its successor — and the
+            // adventure is still not complete.
+            var access = AdventureRules.Evaluate(catalog, loaded);
+            Assert.That(AdventureRules.FindWorld(access, "snowy-peaks")
+                .available, Is.True);
+            Assert.That(access.complete, Is.False);
+
+            // Duplicate delivery after the commit changes nothing.
+            var coins = loaded.coins;
+            var replay = RaceRewardService.Apply(result, loaded.id,
+                loaded, store, catalog, null);
+            Assert.That(replay.status,
+                Is.EqualTo(RaceRewardService.StatusAlreadyApplied));
+            Assert.That(loaded.coins, Is.EqualTo(coins));
+            Assert.That(loaded.unlockedVehicles
+                .FindAll(v => v == "car-03").Count, Is.EqualTo(1));
+            Assert.That(loaded.appliedResults.Count, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void EveryWorldsTwoRivalsPayIndependentOneTimeRewards()
+        {
+            var catalog = MultiCatalog();
+            var store = Store();
+            var profile = CampaignTestFixture.Profile();
+            // Keep the tray inert: a drift bounty these results never
+            // feed, so coin math is completion + placement + rival only.
+            profile.activeBounties = new List<BountyAssignment>
+            {
+                Assignment("asg-drift", "drift-30s", 0)
+            };
+            store.Save(profile);
+            var loaded = store.Load(0).Profile;
+
+            var rivals = new List<string>();
+            foreach (var worldId in CampaignTestFixture.WorldIds)
+                foreach (var classId in CampaignTestFixture.ClassIds)
+                {
+                    var finaleId = CampaignTestFixture.FinaleEventId(
+                        worldId, classId);
+                    var raceId = "race-" + finaleId;
+                    var context = BoundContext(loaded, catalog, raceId,
+                        "campaign");
+                    PersistContext(store, loaded, context);
+                    var result = CampaignTestFixture.Result("campaign",
+                        finaleId, loaded.id, "finished", 1,
+                        new RaceMetrics
+                        {
+                            position = 1, finishTicks = 3800,
+                            rivalDefeated = true
+                        },
+                        raceId: raceId);
+                    result.rulesFingerprint =
+                        catalog.CompatibilityFingerprint;
+                    var applied = RaceRewardService.Apply(result,
+                        loaded.id, loaded, store, catalog, context);
+                    Assert.That(applied.status, Is.EqualTo(RaceRewardService.StatusApplied),
+                        finaleId);
+                    // 20 completion + 5 first place + 30 rival.
+                    Assert.That(applied.rivalCoins, Is.EqualTo(30),
+                        finaleId);
+                    Assert.That(applied.awardedCoins, Is.EqualTo(55),
+                        finaleId);
+                    var rivalId = CampaignTestFixture.RivalId(worldId,
+                        classId);
+                    Assert.That(applied.rivalCosmeticId,
+                        Is.EqualTo("livery-" + rivalId), finaleId);
+                    Assert.That(applied.rivalBountyIds,
+                        Is.EqualTo(new[] { "bounty-" + rivalId }),
+                        finaleId);
+                    Assert.That(applied.finaleCompleted, Is.True,
+                        finaleId);
+                    Assert.That(applied.finaleVictorious, Is.True,
+                        finaleId);
+                    rivals.Add(rivalId);
+                }
+
+            // Six races: 6 * 55 coins, and every world's authored pair
+            // of reward vehicles granted exactly once.
+            Assert.That(loaded.coins, Is.EqualTo(6 * 55));
+            Assert.That(loaded.unlockedVehicles, Is.EquivalentTo(new[]
+            {
+                "car-01", "motorcycle-01",
+                "car-02", "motorcycle-02",
+                "car-03", "motorcycle-03",
+                "car-04", "motorcycle-04"
+            }), "each world granted exactly its two reward vehicles");
+            foreach (var rivalId in rivals)
+                Assert.That(loaded.ownedCosmetics,
+                    Does.Contain("livery-" + rivalId),
+                    "six independent rival liveries");
+            Assert.That(loaded.appliedResults.Count, Is.EqualTo(6));
+            foreach (var worldId in CampaignTestFixture.WorldIds)
+                Assert.That(WorldRow(loaded, worldId).completed,
+                    Is.True, worldId + " marked complete");
+
+            // All three worlds' finales completed: adventure complete —
+            // with replay access retained.
+            var access = AdventureRules.Evaluate(catalog, loaded);
+            Assert.That(access.complete, Is.True);
+            Assert.That(access.worlds.TrueForAll(
+                w => w != null && w.available), Is.True);
+
+            // Re-delivering the last result is a receipt dedup, never a
+            // repay.
+            var coins = loaded.coins;
+            var last = CampaignTestFixture.Result("campaign",
+                "snowy-peaks-motorcycle-finale", loaded.id, "finished",
+                1, new RaceMetrics
+                {
+                    position = 1, finishTicks = 3800,
+                    rivalDefeated = true
+                },
+                raceId: "race-snowy-peaks-motorcycle-finale");
+            last.rulesFingerprint = catalog.CompatibilityFingerprint;
+            var replay = RaceRewardService.Apply(last, loaded.id, loaded,
+                store, catalog, null);
+            Assert.That(replay.status,
+                Is.EqualTo(RaceRewardService.StatusAlreadyApplied));
+            Assert.That(replay.awardedCoins, Is.EqualTo(55),
+                "the stored award echoes — nothing is re-granted");
+            Assert.That(loaded.coins, Is.EqualTo(coins));
+            Assert.That(loaded.appliedResults.Count, Is.EqualTo(6));
+        }
+
+        [Test]
+        public void TimeTrialOnAnyCourseGrantsOnlyARecord()
+        {
+            var catalog = MultiCatalog();
+            var store = Store();
+            var profile = CampaignTestFixture.Profile();
+            store.Save(profile);
+            var loaded = store.Load(0).Profile;
+
+            // A finished trial on the LAST world's course: no unlocks
+            // exist and no world can open it — the record is the only
+            // progression a trial is allowed to move.
+            var result = CampaignTestFixture.Result("timeTrial",
+                "aurora-pass-car-time", loaded.id, "finished", 1,
+                new RaceMetrics { position = 1, finishTicks = 3600 },
+                raceId: "trial-snowy");
+            result.courseId = "aurora-pass";
+            result.classId = "car";
+            result.rulesFingerprint = catalog.CompatibilityFingerprint;
+
+            var applied = RaceRewardService.Apply(result, loaded.id,
+                loaded, store, catalog, null);
+            Assert.That(applied.status, Is.EqualTo(RaceRewardService.StatusApplied));
+            Assert.That(applied.awardedCoins, Is.EqualTo(0));
+            Assert.That(applied.recordImproved, Is.True);
+            Assert.That(applied.recordCourseId,
+                Is.EqualTo("aurora-pass"));
+            Assert.That(applied.recordClassId, Is.EqualTo("car"));
+            Assert.That(loaded.coins, Is.EqualTo(0));
+            Assert.That(loaded.eventProgress, Is.Empty,
+                "a trial writes no campaign credit");
+            Assert.That(loaded.timeTrialRecords.Count, Is.EqualTo(1));
+            Assert.That(loaded.timeTrialRecords[0].courseId,
+                Is.EqualTo("aurora-pass"));
+            Assert.That(loaded.timeTrialRecords[0].bestTicks,
+                Is.EqualTo(3600));
+
+            // The committed receipt still dedups the same delivery.
+            var replay = RaceRewardService.Apply(result, loaded.id,
+                loaded, store, catalog, null);
+            Assert.That(replay.status,
+                Is.EqualTo(RaceRewardService.StatusAlreadyApplied));
+            Assert.That(loaded.timeTrialRecords.Count, Is.EqualTo(1));
+        }
+
         // --- helpers ----------------------------------------------------
 
         private ProfileStore Store()
