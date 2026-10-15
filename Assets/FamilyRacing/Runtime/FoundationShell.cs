@@ -37,6 +37,11 @@ namespace FamilyRacing
             new Dictionary<string, VisualElement>();
         private VisualElement pauseOverlay;
         private VisualElement finishOverlay;
+        // The driving-screen restart affordances re-apply availability
+        // when the unresolved-reward gate flips — race.restart joins the
+        // results.* buttons in UpdateResultsOverlay's gate-key refresh.
+        private Button pauseRetryButton;
+        private Button finishRetryButton;
         private Label elapsedLabel;
         private Label phaseLabel;
         private Label speedLabel;
@@ -131,6 +136,7 @@ namespace FamilyRacing
             leds.Clear();
             statusLabel = warningLabel = steeringLabel = null;
             pauseOverlay = finishOverlay = boostFill = null;
+            pauseRetryButton = finishRetryButton = null;
             elapsedLabel = phaseLabel = speedLabel = null;
             driftLabel = null;
             gadgetLabel = null;
@@ -143,6 +149,8 @@ namespace FamilyRacing
             resultsPlaceLabel = resultsTimeLabel = resultsCoinsLabel = null;
             resultsBreakdownLabel = resultsRecordLabel = null;
             resultsRetrySaveButton = null;
+            resultsRetryButton = resultsContinueButton = null;
+            resultsAvailabilityKey = "?";
             tutorialIconLabel = tutorialCueLabel = tutorialProgressLabel = null;
             lanTimeLabel = lanStandingsLabel = lanPhaseLabel = null;
             lanActionLabel = lanPauseLabel = null;

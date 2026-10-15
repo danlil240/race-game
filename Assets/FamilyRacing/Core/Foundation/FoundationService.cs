@@ -1659,6 +1659,31 @@ namespace FamilyRacing.Core.Foundation
                     }
                     break;
                 case "race.restart":
+                    if (driving == null && soloRace == null)
+                    {
+                        available = false;
+                        reason = "noActiveRace";
+                    }
+                    else if (soloRace != null
+                        && unresolvedResult != null)
+                    {
+                        // SoloRestart refuses the same predicate: a
+                        // finished session (its overlay hosts retrySave)
+                        // or a progression replay while the debt holds.
+                        RaceMode restartMode;
+                        var stored = soloRace.Request;
+                        if (soloRace.Result != null
+                            || (stored != null
+                                && RaceModeRules.TryParse(stored.mode,
+                                    out restartMode)
+                                && RaceModeRules.IsProgression(
+                                    restartMode)))
+                        {
+                            available = false;
+                            reason = "rewardUnresolved";
+                        }
+                    }
+                    break;
                 case "race.exit":
                     if (driving == null && soloRace == null)
                     {
@@ -1712,10 +1737,40 @@ namespace FamilyRacing.Core.Foundation
                     }
                     break;
                 case "upgrade.purchase":
-                case "cosmetic.equip":
                     // Content first, exactly like solo.start: a missing
                     // or legacy catalog reports honest unavailability
                     // before any profile check.
+                    if (gameplayCatalog == null || gameplayCatalog.IsLegacy
+                        || gameplayCatalog.Driving == null
+                        || gameplayCatalog.Economy == null)
+                    {
+                        available = false;
+                        reason = "contentUnavailable";
+                    }
+                    else if (activeSlot < 0)
+                    {
+                        available = false;
+                        reason = "requiresSelectedProfile";
+                    }
+                    else if (driving != null || soloRace != null)
+                    {
+                        available = false;
+                        reason = "raceActive";
+                    }
+                    else if (unresolvedResult != null)
+                    {
+                        // The handler gates purchases on the unresolved
+                        // reward — the buy button must never light up
+                        // for a command that would reject.
+                        available = false;
+                        reason = "rewardUnresolved";
+                    }
+                    break;
+                case "cosmetic.equip":
+                    // Equips are not gated on the unresolved reward
+                    // (no progression write interleaves with the reward
+                    // transaction), so this mirrors CosmeticEquip's own
+                    // fences only.
                     if (gameplayCatalog == null || gameplayCatalog.IsLegacy
                         || gameplayCatalog.Driving == null
                         || gameplayCatalog.Economy == null)
@@ -1745,11 +1800,13 @@ namespace FamilyRacing.Core.Foundation
                 // handlers enforce: content, then profile, then the
                 // live-race fence.
                 case "campaign.open":
-                case "campaign.start":
                 case "quickRace.open":
-                case "quickRace.start":
                 case "timeTrial.open":
                 case "timeTrial.start":
+                    // Opens and the non-progression trial start never
+                    // gate on the unresolved reward — StartSoloSession
+                    // only fences progression modes, so discovery must
+                    // not either.
                     if (gameplayCatalog == null || gameplayCatalog.IsLegacy
                         || gameplayCatalog.Driving == null)
                     {
@@ -1765,6 +1822,32 @@ namespace FamilyRacing.Core.Foundation
                     {
                         available = false;
                         reason = "raceActive";
+                    }
+                    break;
+                case "campaign.start":
+                case "quickRace.start":
+                    if (gameplayCatalog == null || gameplayCatalog.IsLegacy
+                        || gameplayCatalog.Driving == null)
+                    {
+                        available = false;
+                        reason = "contentUnavailable";
+                    }
+                    else if (activeSlot < 0)
+                    {
+                        available = false;
+                        reason = "requiresSelectedProfile";
+                    }
+                    else if (driving != null || soloRace != null)
+                    {
+                        available = false;
+                        reason = "raceActive";
+                    }
+                    else if (unresolvedResult != null)
+                    {
+                        // Progression starts reject rewardUnresolved in
+                        // StartSoloSession — the picker must agree.
+                        available = false;
+                        reason = "rewardUnresolved";
                     }
                     break;
                 case "garage.open":
@@ -1793,6 +1876,15 @@ namespace FamilyRacing.Core.Foundation
                     {
                         available = false;
                         reason = "unavailable";
+                    }
+                    else if (unresolvedResult != null)
+                    {
+                        // The overlay's own gate: retry and continue
+                        // reject rewardUnresolved until the debt
+                        // resolves, so the buttons grey out with the
+                        // reason rather than silently refusing.
+                        available = false;
+                        reason = "rewardUnresolved";
                     }
                     break;
                 case "results.retrySave":

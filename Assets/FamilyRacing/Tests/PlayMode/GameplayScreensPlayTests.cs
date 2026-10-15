@@ -964,5 +964,130 @@ namespace FamilyRacing.Tests
             Refresh();
             yield return WaitForWidget<Label>("campaign.title");
         }
+
+        // Task 10 review fix: a finalized result whose commit failed
+        // must keep the overlay — and its retrySave remedy — mounted
+        // while replay/continue reject rewardUnresolved through BOTH
+        // the widget availability and the command path.
+        [UnityTest]
+        public IEnumerator FailedResultSaveKeepsRetrySaveReachable()
+        {
+            var toggling = new TogglingSerializer();
+            store = new ProfileStore(directory, toggling);
+            yield return SeedProfile("en");
+
+            var started = app.Dispatch("campaign.start", Params(
+                ("eventId", "harbor-car-circuit"),
+                ("vehicleId", "car-01"), ("difficulty", "easy")));
+            Assert.That(started.status, Is.EqualTo("applied"),
+                "campaign.start: " + started.code);
+            Step(3);
+            var snapshot = Snapshot();
+            world.ApplyFrame(snapshot);
+            RenderSoloRace(snapshot);
+            Physics.SyncTransforms();
+            snapshot = Pursue(snapshot, 6000);
+            Assert.That(HumanFinished(snapshot), Is.True,
+                "the scripted driver must finish the lap");
+            // The context bind committed at start; only the result
+            // transaction is allowed to fail.
+            toggling.failing = true;
+            var guard = 0;
+            while ((snapshot.soloRace == null
+                    || snapshot.soloRace.result == null)
+                && guard++ < 4000)
+            {
+                Step(1);
+                snapshot = Snapshot();
+            }
+            Assert.That(snapshot.soloRace.result, Is.Not.Null,
+                "the campaign race never finalized");
+            Assert.That(snapshot.progression.rewardUnresolved, Is.True,
+                "the failed commit retains the unresolved pair");
+            var raceId = snapshot.soloRace.raceId;
+
+            Refresh();
+            yield return WaitForWidget<VisualElement>("overlay.results");
+            var overlay = Widget<VisualElement>("overlay.results");
+            Assert.That(overlay.style.display.value,
+                Is.EqualTo(DisplayStyle.Flex),
+                "the finished result keeps the overlay mounted");
+            var retrySave = Widget<Button>("results.retrySave");
+            Assert.That(retrySave, Is.Not.Null);
+            Assert.That(retrySave.style.display.value,
+                Is.EqualTo(DisplayStyle.Flex),
+                "the save-failed remedy renders");
+            Assert.That(retrySave.enabledSelf, Is.True,
+                "the remedy button must actually press");
+            var retry = Widget<Button>("results.retry");
+            var cont = Widget<Button>("results.continue");
+            Assert.That(retry.enabledSelf, Is.False,
+                "replay greys out while the gate holds");
+            Assert.That(cont.enabledSelf, Is.False);
+            Assert.That(retry.tooltip, Does.Contain("rewardUnresolved"),
+                "the disabled button names the shared reason");
+
+            var rejectedRetry = app.Dispatch("results.retry", Params());
+            Assert.That(rejectedRetry.status, Is.EqualTo("rejected"));
+            Assert.That(rejectedRetry.code, Is.EqualTo("rewardUnresolved"));
+            var rejectedContinue = app.Dispatch("results.continue",
+                Params());
+            Assert.That(rejectedContinue.status, Is.EqualTo("rejected"));
+            Assert.That(rejectedContinue.code,
+                Is.EqualTo("rewardUnresolved"));
+            snapshot = Snapshot();
+            Assert.That(snapshot.soloRace, Is.Not.Null,
+                "rejected results commands must not tear the session");
+            Assert.That(snapshot.soloRace.raceId, Is.EqualTo(raceId));
+            Assert.That(snapshot.soloRace.result, Is.Not.Null);
+            Assert.That(snapshot.screen, Is.EqualTo("driving"));
+            Refresh();
+            Assert.That(Widget<VisualElement>("overlay.results")
+                    .style.display.value, Is.EqualTo(DisplayStyle.Flex),
+                "the overlay stays mounted so retrySave stays reachable");
+
+            toggling.failing = false;
+            Press(retrySave);
+            snapshot = Snapshot();
+            Assert.That(snapshot.progression.rewardUnresolved, Is.False,
+                "the retried save commits the retained transaction");
+            Refresh();
+            yield return WaitForWidget<Button>("results.retry");
+            var replay = Widget<Button>("results.retry");
+            Assert.That(replay.enabledSelf, Is.True,
+                "replay re-enables once the gate clears");
+            Press(replay);
+            snapshot = Snapshot();
+            Assert.That(snapshot.soloRace, Is.Not.Null);
+            Assert.That(snapshot.soloRace.raceId,
+                Is.Not.EqualTo(raceId),
+                "replay mints a fresh race identity");
+            Assert.That(snapshot.soloRace.result, Is.Null,
+                "the replay is a new run, not a replayed result");
+            Refresh();
+            Assert.That(Widget<VisualElement>("overlay.results")
+                    .style.display.value, Is.EqualTo(DisplayStyle.None),
+                "the overlay hides once a fresh run is live");
+        }
+
+        // Fails profile saves on demand — the PlayMode counterpart of
+        // the EditMode TogglingSerializer, wrapping the real JSON
+        // adapter so committed writes stay byte-identical.
+        private sealed class TogglingSerializer : IProfileSerializer
+        {
+            internal bool failing;
+            private readonly UnityProfileSerializer inner =
+                new UnityProfileSerializer();
+            public string Serialize(ProfileSave profile)
+            {
+                if (failing)
+                    throw new InvalidOperationException("down");
+                return inner.Serialize(profile);
+            }
+            public ProfileSave Deserialize(string json)
+            {
+                return inner.Deserialize(json);
+            }
+        }
     }
 }

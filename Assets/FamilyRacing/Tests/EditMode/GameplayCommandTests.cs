@@ -605,7 +605,170 @@ namespace FamilyRacing.Tests
                 "a campaign finish continues back to the map");
         }
 
-        // --- no free rewards / deep copies ---------------------------------
+        // Task 10 review fix: a finished result whose commit failed must
+        // gate replay/continue (and every progression write) BEFORE any
+        // session teardown — the finished session's overlay is the only
+        // retrySave surface, so a rejected command leaves it mounted.
+        [Test]
+        public void UnresolvedSaveGatesReplayContinueAndProgressionStarts()
+        {
+            var toggling = new TogglingSerializer();
+            var store = new ProfileStore(directory, toggling);
+            var service = ServiceWithProfile(Catalog(), store,
+                CampaignTestFixture.Profile());
+            Assert.That(service.Execute(Cmd("quickRace.start",
+                P("courseId", "harbor-hop", "classId", "car",
+                    "vehicleId", "car-01", "difficulty", "easy"))).status,
+                Is.EqualTo(CommandResult.Applied));
+            // The context bind already committed; only the RESULT
+            // transaction fails now.
+            toggling.failing = true;
+            var finished = StepUntilResult(service, 9000);
+            Assert.That(finished, Is.Not.Null);
+            Assert.That(finished.result, Is.Not.Null,
+                "the coordinator must finalize within the tick budget");
+            Assert.That(service.RewardUnresolved, Is.True,
+                "the failed commit retains the result+context pair");
+            var raceId = finished.raceId;
+
+            // Discovery and the handlers agree on every gated surface —
+            // an enabled affordance may never hide a rewardUnresolved
+            // rejection.
+            foreach (var action in new[] { "results.retry",
+                "results.continue", "race.restart" })
+            {
+                var availability = Availability(service, action);
+                Assert.That(availability.available, Is.False,
+                    action + " must advertise the unresolved gate");
+                Assert.That(availability.reason,
+                    Is.EqualTo("rewardUnresolved"),
+                    action + " availability reason");
+            }
+            Assert.That(
+                Availability(service, "results.retrySave").available,
+                Is.True, "the remedy itself never gates");
+
+            var retry = service.Execute(Cmd("results.retry", null));
+            Assert.That(retry.status, Is.EqualTo(CommandResult.Rejected));
+            Assert.That(retry.code, Is.EqualTo("rewardUnresolved"));
+            var kept = service.Snapshot();
+            Assert.That(kept.soloRace, Is.Not.Null,
+                "a rejected retry must not tear the session down");
+            Assert.That(kept.soloRace.raceId, Is.EqualTo(raceId));
+            Assert.That(kept.soloRace.result, Is.Not.Null,
+                "the finished result keeps retrySave mounted");
+            Assert.That(kept.screen, Is.EqualTo("driving"));
+
+            var continued = service.Execute(Cmd("results.continue", null));
+            Assert.That(continued.status,
+                Is.EqualTo(CommandResult.Rejected));
+            Assert.That(continued.code, Is.EqualTo("rewardUnresolved"));
+            Assert.That(service.Snapshot().soloRace.result,
+                Is.Not.Null);
+            Assert.That(service.Snapshot().screen,
+                Is.EqualTo("driving"),
+                "continue may not leave the driving screen while gated");
+
+            // The pause-overlay restart routes through SoloRestart —
+            // the same gate must fire before it could end the session.
+            var restart = service.Execute(Cmd("race.restart", null));
+            Assert.That(restart.status,
+                Is.EqualTo(CommandResult.Rejected));
+            Assert.That(restart.code, Is.EqualTo("rewardUnresolved"));
+            Assert.That(service.Snapshot().soloRace.raceId,
+                Is.EqualTo(raceId),
+                "restart must not retire the session");
+
+            // Resolve the debt: a still-failing store reports the honest
+            // save failure, then the committed retry frees the loop.
+            var stillFailing = service.Execute(
+                Cmd("results.retrySave", null));
+            Assert.That(stillFailing.status,
+                Is.EqualTo(CommandResult.Failed));
+            Assert.That(stillFailing.code, Is.EqualTo("saveFailed"));
+            toggling.failing = false;
+            var saved = service.Execute(Cmd("results.retrySave", null));
+            Assert.That(saved.status, Is.EqualTo(CommandResult.Applied),
+                "retrySave failed: " + saved.code);
+            Assert.That(service.RewardUnresolved, Is.False);
+            Assert.That(Availability(service, "results.retry").available,
+                Is.True, "replay re-advertises once the gate clears");
+            var retried = service.Execute(Cmd("results.retry", null));
+            Assert.That(retried.status, Is.EqualTo(CommandResult.Applied),
+                "results.retry after the save resolves: " + retried.code);
+            Assert.That(service.Snapshot().soloRace.raceId,
+                Is.Not.EqualTo(raceId),
+                "the replay mints a fresh race identity");
+        }
+
+        // Task 10 review fix (parity tail): race.exit stays the
+        // deliberate escape valve — the debt survives the session and
+        // keeps gating progression writes, which availability must now
+        // advertise with the same reason the handlers reject with.
+        [Test]
+        public void UnresolvedSaveStillGatesStartsAfterExit()
+        {
+            var toggling = new TogglingSerializer();
+            var store = new ProfileStore(directory, toggling);
+            var service = ServiceWithProfile(Catalog(), store,
+                CampaignTestFixture.Profile());
+            Assert.That(service.Execute(Cmd("quickRace.start",
+                P("courseId", "harbor-hop", "classId", "car",
+                    "vehicleId", "car-01", "difficulty", "easy"))).status,
+                Is.EqualTo(CommandResult.Applied));
+            toggling.failing = true;
+            var finished = StepUntilResult(service, 9000);
+            Assert.That(finished.result, Is.Not.Null);
+            Assert.That(service.RewardUnresolved, Is.True);
+
+            Assert.That(service.Execute(Cmd("race.exit", null)).status,
+                Is.EqualTo(CommandResult.Applied));
+            Assert.That(service.RewardUnresolved, Is.True,
+                "exit abandons the session, never the debt");
+            Assert.That(service.Snapshot().progression.rewardUnresolved,
+                Is.True);
+
+            foreach (var action in new[] { "campaign.start",
+                "quickRace.start", "upgrade.purchase" })
+            {
+                var availability = Availability(service, action);
+                Assert.That(availability.available, Is.False,
+                    action + " must advertise the gate after exit");
+                Assert.That(availability.reason,
+                    Is.EqualTo("rewardUnresolved"),
+                    action + " availability reason");
+            }
+            // The handlers allow these while the debt is pending —
+            // availability must not over-gate.
+            Assert.That(Availability(service, "timeTrial.start").available,
+                Is.True, "a trial binds no progression context");
+            Assert.That(Availability(service, "cosmetic.equip").available,
+                Is.True, "equips are not progression transactions");
+            Assert.That(
+                Availability(service, "results.retrySave").available,
+                Is.True);
+
+            var blockedStart = service.Execute(Cmd("campaign.start",
+                P("eventId", "harbor-hop-car-circuit",
+                    "vehicleId", "car-01", "difficulty", "easy")));
+            Assert.That(blockedStart.status,
+                Is.EqualTo(CommandResult.Rejected));
+            Assert.That(blockedStart.code,
+                Is.EqualTo("rewardUnresolved"));
+
+            toggling.failing = false;
+            var saved = service.Execute(Cmd("results.retrySave", null));
+            Assert.That(saved.status, Is.EqualTo(CommandResult.Applied),
+                "retrySave failed: " + saved.code);
+            var reattempt = service.Execute(Cmd("quickRace.start",
+                P("courseId", "harbor-hop", "classId", "car",
+                    "vehicleId", "car-01", "difficulty", "easy")));
+            Assert.That(reattempt.status,
+                Is.EqualTo(CommandResult.Applied),
+                "a resolved gate frees progression starts: "
+                    + reattempt.code);
+        }
+
 
         [Test]
         public void NoLoopCommandGrantsCoinsOrSkipsTraversal()

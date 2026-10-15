@@ -442,6 +442,25 @@ namespace FamilyRacing.Core.Foundation
             var stored = soloRace.Request;
             if (stored == null)
                 return Result(command, CommandResult.Rejected, "unavailable");
+            // The unresolved-reward gate fires BEFORE any teardown
+            // (Task 10 review): a finished session's results overlay is
+            // the only retrySave surface — ending it strands the
+            // remedy — and a progression-mode replay would fail the
+            // fresh context bind anyway, previously after teardown and
+            // reported as a dishonest "saveFailed". Rejecting here
+            // leaves the session, its result and the affordance
+            // untouched. A mid-run non-progression restart binds no
+            // context, so it stays legal while the debt is pending.
+            if (unresolvedResult != null)
+            {
+                RaceMode restartMode;
+                if (soloRace.Result != null
+                    || (RaceModeRules.TryParse(stored.mode,
+                            out restartMode)
+                        && RaceModeRules.IsProgression(restartMode)))
+                    return Result(command, CommandResult.Rejected,
+                        "rewardUnresolved");
+            }
             stored.raceId = MintSoloRaceId();
             stored.commandId = command.CommandId;
             string error;

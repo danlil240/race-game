@@ -269,6 +269,12 @@ namespace FamilyRacing
         private void EquipCosmetic(string cosmeticId, bool equipped)
         {
             var p = new Dictionary<string, string>();
+            // The required slot parameter names the cosmetic's authored
+            // slot prefix — the same CosmeticSlot seam the handler
+            // validates, so the button can never send a mismatched or
+            // missing slot.
+            p["slot"] = FamilyRacing.Core.Profiles.UpgradeService
+                .CosmeticSlot(cosmeticId);
             p["cosmeticId"] = cosmeticId;
             p["equipped"] = equipped ? "true" : "false";
             app.Dispatch("cosmetic.equip", p);
@@ -434,10 +440,12 @@ namespace FamilyRacing
             var pauseRow = Row(pauseOverlay);
             var resume = AddButton(pauseRow, T("hud.resume", state), Seafoam,
                 () => app.Dispatch("pause.toggle", emptyParams), "driving.resume");
-            var pauseRetry = AddButton(pauseRow, T("hud.retry", state), Coral,
-                () => app.Dispatch("race.restart", emptyParams), "driving.pauseRetry");
+            pauseRetryButton = AddButton(pauseRow, T("hud.retry", state),
+                Coral,
+                () => app.Dispatch("race.restart", emptyParams),
+                "driving.pauseRetry");
             ApplyAvailability(resume, "pause.toggle");
-            ApplyAvailability(pauseRetry, "race.restart");
+            ApplyAvailability(pauseRetryButton, "race.restart");
 
             finishOverlay = Overlay("overlay.finish");
             var finished = AddLabel(finishOverlay, T("hud.finished", state), 44, Coral);
@@ -449,11 +457,13 @@ namespace FamilyRacing
             finishVehicleLabel = AddLabel(finishOverlay, "", 26, Deep);
             finishVehicleLabel.name = "hud.finishVehicle";
             var finishRow = Row(finishOverlay);
-            var retry = AddButton(finishRow, T("hud.retry", state), Seafoam,
-                () => app.Dispatch("race.restart", emptyParams), "driving.finishRetry");
+            finishRetryButton = AddButton(finishRow, T("hud.retry", state),
+                Seafoam,
+                () => app.Dispatch("race.restart", emptyParams),
+                "driving.finishRetry");
             var finishExit = AddButton(finishRow, T("driving.exit", state), Deep,
                 () => app.Dispatch("race.exit", emptyParams), "driving.finishExit");
-            ApplyAvailability(retry, "race.restart");
+            ApplyAvailability(finishRetryButton, "race.restart");
             ApplyAvailability(finishExit, "race.exit");
 
             // M5 Task 10: the local-mode results surface — placement,

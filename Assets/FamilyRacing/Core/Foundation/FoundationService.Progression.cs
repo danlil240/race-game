@@ -124,8 +124,12 @@ namespace FamilyRacing.Core.Foundation
                 return Result(command, CommandResult.Failed,
                     applied.code ?? "saveFailed");
             }
-            if (applied.status != RaceRewardService.StatusApplied
-                && applied.status != RaceRewardService.StatusAlreadyApplied)
+            // The save retry did its durable work whenever the replayed
+            // transaction COMMITTED — award, deduped award, or the
+            // zero-award verdict a bound non-finish lands. Only a
+            // verdict that committed nothing (an ineligible result the
+            // gate already released) reports rejected.
+            if (!applied.committed)
                 return Result(command, CommandResult.Rejected,
                     applied.code ?? "unavailable");
             persistenceStatus = "saved";
@@ -135,20 +139,33 @@ namespace FamilyRacing.Core.Foundation
         // One-action replay: available exactly when a finished result
         // exists — a running or aborted session refuses honestly. The
         // replay binds a fresh race identity and its own reward context;
-        // the finished result's receipt stays the dedup record.
+        // the finished result's receipt stays the dedup record. While a
+        // finalized result's transaction is still uncommitted the replay
+        // refuses BEFORE SoloRestart may tear the session down: this
+        // overlay is the only retrySave surface, so a rejected retry
+        // leaves the result — and the remedy — mounted.
         private CommandResult ResultsRetry(GameCommand command)
         {
             if (soloRace == null || soloRace.Result == null)
                 return Result(command, CommandResult.Rejected,
                     "unavailable");
+            if (unresolvedResult != null)
+                return Result(command, CommandResult.Rejected,
+                    "rewardUnresolved");
             return SoloRestart(command);
         }
 
+        // Continue shares the unresolved-reward gate: retiring the
+        // finished session would strand the retrySave affordance this
+        // overlay hosts, so the rejection fires before any teardown.
         private CommandResult ResultsContinue(GameCommand command)
         {
             if (soloRace == null || soloRace.Result == null)
                 return Result(command, CommandResult.Rejected,
                     "unavailable");
+            if (unresolvedResult != null)
+                return Result(command, CommandResult.Rejected,
+                    "rewardUnresolved");
             var mode = soloRace.Mode;
             EndSoloRace("raceExit", command);
             // EndSoloRace lands on practice; continue returns to the

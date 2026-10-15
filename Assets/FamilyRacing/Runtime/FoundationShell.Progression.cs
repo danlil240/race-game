@@ -36,6 +36,15 @@ namespace FamilyRacing
         private Label resultsBreakdownLabel;
         private Label resultsRecordLabel;
         private Button resultsRetrySaveButton;
+        private Button resultsRetryButton;
+        private Button resultsContinueButton;
+        // Availability lands at build time, but the driving screen never
+        // rebuilds mid-session — without a re-apply on gate flips the
+        // overlay buttons keep the enabled state they were created with
+        // (all three disabled before a result exists). Re-applying when
+        // the finished/unresolved key changes keeps the buttons live
+        // exactly when discovery says their commands apply.
+        private string resultsAvailabilityKey = "?";
 
         private static bool IsLoopScreen(string screen)
         {
@@ -730,17 +739,33 @@ namespace FamilyRacing
                 T("results.retrySave", state), Coral,
                 () => app.Dispatch("results.retrySave", emptyParams),
                 "results.retrySave");
-            ApplyAvailability(resultsRetrySaveButton, "results.retrySave");
             var actions = Row(resultsOverlay);
-            var retry = AddButton(actions, T("results.again", state),
-                Seafoam,
+            resultsRetryButton = AddButton(actions,
+                T("results.again", state), Seafoam,
                 () => app.Dispatch("results.retry", emptyParams),
                 "results.retry");
-            var next = AddButton(actions, T("results.next", state), Ocean,
+            resultsContinueButton = AddButton(actions,
+                T("results.next", state), Ocean,
                 () => app.Dispatch("results.continue", emptyParams),
                 "results.continue");
-            ApplyAvailability(retry, "results.retry");
-            ApplyAvailability(next, "results.continue");
+            resultsAvailabilityKey = ResultsGateKey(state);
+            ApplyAvailability(resultsRetrySaveButton, "results.retrySave");
+            ApplyAvailability(resultsRetryButton, "results.retry");
+            ApplyAvailability(resultsContinueButton, "results.continue");
+        }
+
+        // The availability inputs the three overlay buttons depend on:
+        // whether a finished result is up and whether the unresolved-
+        // reward gate holds. A change means the buttons' enabled state
+        // is stale — UpdateResultsOverlay re-applies on the flip.
+        private string ResultsGateKey(FoundationState state)
+        {
+            var solo = state != null ? state.soloRace : null;
+            var done = solo != null && solo.result != null
+                && solo.phase == "finished";
+            return (done ? "d" : "-")
+                + (state != null && state.progression != null
+                    && state.progression.rewardUnresolved ? "u" : "-");
         }
 
         private void UpdateResultsOverlay(FoundationState state)
@@ -751,6 +776,21 @@ namespace FamilyRacing
             var done = result != null && solo.phase == "finished";
             resultsOverlay.style.display = done
                 ? DisplayStyle.Flex : DisplayStyle.None;
+            var gate = ResultsGateKey(state);
+            if (gate != resultsAvailabilityKey)
+            {
+                resultsAvailabilityKey = gate;
+                ApplyAvailability(resultsRetrySaveButton,
+                    "results.retrySave");
+                ApplyAvailability(resultsRetryButton, "results.retry");
+                ApplyAvailability(resultsContinueButton,
+                    "results.continue");
+                // The pause/finish restart buttons share SoloRestart's
+                // gate — they must grey out on the same flip or an
+                // enabled control would silently reject.
+                ApplyAvailability(pauseRetryButton, "race.restart");
+                ApplyAvailability(finishRetryButton, "race.restart");
+            }
             if (!done) return;
             FamilyRacing.Core.Racing.RaceResultEntry local = null;
             if (result.racers != null)
