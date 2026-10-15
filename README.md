@@ -69,8 +69,9 @@ and bounty evaluation, atomic exactly-once reward/purchase/record
 transactions, upgrade/cosmetic selection rules, the full bilingual loop
 UI and semantic commands (`campaign.*`, `quickRace.*`, `timeTrial.*`,
 `garage.open`, `bounties.open`, `upgrade.purchase`, `cosmetic.equip`,
-`results.*`), state schema 6 (`soloRace`/`progression` slices) and LAN
-protocol 3 with gameplay-fingerprint admission. Exercised externally by
+`results.*`), state schema 7 (`soloRace`/`progression` slices plus the
+ordered `progression.worlds` multiworld rows and `campaign.selectWorld`)
+and LAN protocol 3 with gameplay-fingerprint admission. Exercised externally by
 `Tools\GameplayLoopScenario.py` — **but the packaged player binds no
 gameplay catalog**: the authored two-course/26-event Sunny Island world
 (Task 9 of the plan) is gated on the M4 tablet evidence and was never

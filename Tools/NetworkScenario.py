@@ -56,13 +56,15 @@ from RestartScenario import file_hash, wait_connection, write_json
 
 
 # The observation schema this scenario requires — mirrors
-# NetworkSettings.StateSchemaVersion in the pinned build. Schema 6 (M5)
-# adds the local solo-race slice and the resolved progression surface on
-# top of the schema-5 presentation slice and the schema-4 protocol-2
-# epoch (physical LAN replication, content fingerprints on
+# NetworkSettings.StateSchemaVersion in the pinned build. Schema 7
+# (M6 Task 3) adds the ordered multiworld progression rows and the
+# selected-world marker on top of the schema-6 solo-race slice, the
+# schema-5 presentation slice and the schema-4 protocol-2 epoch
+# (physical LAN replication, content fingerprints on
 # descriptors/discovery, P1 gameplay envelopes).
-# Historical schema-3/4/5 evidence is not valid proof of a current build.
-REQUIRED_LAN_SCHEMA = 6
+# Historical schema-3/4/5/6 evidence is not valid proof of a current
+# build.
+REQUIRED_LAN_SCHEMA = 7
 
 # The schema-3+ session phases in their legal neighbourhood graph. A phase
 # may repeat or move only along an edge the session policy permits; any

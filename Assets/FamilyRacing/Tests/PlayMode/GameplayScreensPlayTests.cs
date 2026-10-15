@@ -422,6 +422,298 @@ namespace FamilyRacing.Tests
             return gameplay;
         }
 
+        // --- three-world fixture (M6 Task 3) ------------------------------
+        // The pickers and world cards read only the catalog, so worlds
+        // two and three ride synthetic Core courses/events next to the
+        // generated harbor-hop content — no extra physics worlds. Sunny
+        // keeps the authored fixture events so a real race still finishes.
+
+        private static CourseDefinition MultiCourse(string id)
+        {
+            var course = new CourseDefinition
+            {
+                id = id, spawnX = 0f, spawnY = 0f, spawnZ = -12f,
+                spawnHeading = 0f
+            };
+            course.checkpoints.Add(new CheckpointGate
+            {
+                id = "start", x = 0f, z = 0f, halfWidth = 6f,
+                dirX = 0f, dirZ = 1f, recoverX = 0f, recoverZ = -3f
+            });
+            course.checkpoints.Add(new CheckpointGate
+            {
+                id = "gate-1", x = 0f, z = 16f, halfWidth = 6f,
+                dirX = 0f, dirZ = 1f, recoverX = 0f, recoverZ = 13f
+            });
+            course.spawnSlots.Add(new MotorPose { x = -5f, z = -57f });
+            course.spawnSlots.Add(new MotorPose { x = 5f, z = -57f });
+            course.spawnSlots.Add(new MotorPose { x = -5f, z = -62f });
+            course.spawnSlots.Add(new MotorPose { x = 5f, z = -62f });
+            return course;
+        }
+
+        private static List<ObjectiveDefinition> MultiObjectives(string id)
+        {
+            var intro = new ObjectiveDefinition
+            {
+                id = id + "-intro", kind = ObjectiveKind.Introductory
+            };
+            intro.alternatives.Add(new ObjectiveCondition
+            {
+                metric = ObjectiveMetric.CleanLandings, threshold = 1
+            });
+            var mastery = new ObjectiveDefinition
+            {
+                id = id + "-mastery", kind = ObjectiveKind.Mastery
+            };
+            mastery.alternatives.Add(new ObjectiveCondition
+            {
+                metric = ObjectiveMetric.CleanLandings, threshold = 3
+            });
+            return new List<ObjectiveDefinition> { intro, mastery };
+        }
+
+        private static EventDefinition MultiEvent(string id,
+            string courseId, string classId, string eventType)
+        {
+            return new EventDefinition
+            {
+                id = id, courseId = courseId, laps = 1,
+                countdownTicks = 3,
+                vehicleIds = new List<string>
+                    { classId + "-01", classId + "-02" },
+                recovery = new RecoverySettings(), completionCoins = 20,
+                eventType = eventType, vehicleClass = classId,
+                parTicks = eventType == GameplayEventType.Time
+                    ? 3600 : 0,
+                objectives = MultiObjectives(id)
+            };
+        }
+
+        private static EventDefinition MultiFinale(string id,
+            string courseId, string classId)
+        {
+            return new EventDefinition
+            {
+                id = id, courseId = courseId, laps = 1,
+                countdownTicks = 3,
+                vehicleIds = new List<string>
+                    { classId + "-01", classId + "-02" },
+                recovery = new RecoverySettings(), completionCoins = 20,
+                eventType = GameplayEventType.Finale,
+                vehicleClass = classId, isFinale = true
+            };
+        }
+
+        private static List<EventDefinition> MultiWorldEvents(
+            string worldId, string courseId)
+        {
+            var events = new List<EventDefinition>();
+            var prefix = courseId.Substring(0, courseId.IndexOf('-'));
+            events.Add(MultiEvent(prefix + "-car-circuit", courseId,
+                "car", GameplayEventType.Circuit));
+            events.Add(MultiEvent(prefix + "-moto-circuit", courseId,
+                "motorcycle", GameplayEventType.Circuit));
+            events.Add(MultiEvent(prefix + "-car-time", courseId,
+                "car", GameplayEventType.Time));
+            events.Add(MultiEvent(prefix + "-moto-time", courseId,
+                "motorcycle", GameplayEventType.Time));
+            events.Add(MultiFinale(worldId + "-car-finale", courseId,
+                "car"));
+            events.Add(MultiFinale(worldId + "-moto-finale", courseId,
+                "motorcycle"));
+            return events;
+        }
+
+        private static CampaignDefinition MultiWorldDef(string worldId,
+            string nameEn, string nameHe, string courseId,
+            string regularPrefix)
+        {
+            var campaign = new CampaignDefinition
+            {
+                worldId = worldId, nameEn = nameEn, nameHe = nameHe,
+                requiredEventCompletions = 4, requiredRegionalStars = 1
+            };
+            campaign.courseIds.Add(courseId);
+            campaign.regularEventIds.Add(regularPrefix + "-car-circuit");
+            campaign.regularEventIds.Add(regularPrefix + "-moto-circuit");
+            campaign.regularEventIds.Add(regularPrefix + "-car-time");
+            campaign.regularEventIds.Add(regularPrefix + "-moto-time");
+            campaign.finales.Add(new FinaleDefinition
+            {
+                eventId = worldId + "-car-finale", classId = "car",
+                rivalId = worldId + "-car-rival",
+                rewardVehicleId = "car-02"
+            });
+            campaign.finales.Add(new FinaleDefinition
+            {
+                eventId = worldId + "-moto-finale", classId = "motorcycle",
+                rivalId = worldId + "-moto-rival",
+                rewardVehicleId = "motorcycle-01"
+            });
+            return campaign;
+        }
+
+        // The generated world's catalog extended with the two later
+        // worlds' courses and events — harbor-hop and its events carry
+        // over verbatim so real campaign races still finish.
+        private DrivingContentCatalog MultiWorldDriving()
+        {
+            var source = world.Catalog;
+            var vehicles = new List<VehicleTuning>(
+                source.Vehicles.Values);
+            vehicles.Add(VehicleTuning.Motorcycle01());
+            vehicles[vehicles.Count - 1].vehicleId = "motorcycle-02";
+            var courses = new List<CourseDefinition>(
+                source.Courses.Values);
+            courses.Add(MultiCourse("canyon-dash"));
+            courses.Add(MultiCourse("aurora-pass"));
+            var events = new List<EventDefinition>(
+                source.Events.Values);
+            // Sunny's authored trio plus a motorcycle time event so the
+            // fixture worlds share one shape.
+            events.Add(MultiEvent("harbor-moto-time", "harbor-hop",
+                "motorcycle", GameplayEventType.Time));
+            events.AddRange(MultiWorldEvents("redrock-canyon",
+                "canyon-dash"));
+            events.AddRange(MultiWorldEvents("snowy-peaks",
+                "aurora-pass"));
+            return DrivingContentCatalog.Create("loop-play-content-1",
+                vehicles, courses, events);
+        }
+
+        private GameplayCatalog MultiWorldGameplay(
+            DrivingContentCatalog driving, bool longNames = false)
+        {
+            var sunny = new CampaignDefinition
+            {
+                worldId = "sunny-island", nameEn = "Sunny Island",
+                nameHe = "האי השמשי",
+                requiredEventCompletions = 4, requiredRegionalStars = 1
+            };
+            sunny.courseIds.Add("harbor-hop");
+            sunny.regularEventIds.Add("harbor-car-circuit");
+            sunny.regularEventIds.Add("harbor-moto-circuit");
+            sunny.regularEventIds.Add("harbor-car-time");
+            sunny.regularEventIds.Add("harbor-moto-time");
+            sunny.finales.Add(new FinaleDefinition
+            {
+                eventId = "sunny-car-finale", classId = "car",
+                rivalId = "rival-car", rewardVehicleId = "car-02"
+            });
+            sunny.finales.Add(new FinaleDefinition
+            {
+                eventId = "sunny-moto-finale", classId = "motorcycle",
+                rivalId = "rival-motorcycle",
+                rewardVehicleId = "motorcycle-01"
+            });
+            var worlds = new List<CampaignDefinition>
+            {
+                sunny,
+                MultiWorldDef("redrock-canyon",
+                    longNames
+                        ? "Redrock Canyon of the Long Winding Road"
+                        : "Redrock Canyon",
+                    longNames
+                        ? "קניון רדרוק של הדרך המפותלת הארוכה מאוד"
+                        : "קניון רדרוק",
+                    "canyon-dash", "canyon"),
+                MultiWorldDef("snowy-peaks", "Snowy Peaks",
+                    "הפסגות המושלגות", "aurora-pass", "aurora")
+            };
+            var economy = new EconomyDefinition
+            {
+                completionCoins = 20,
+                challengeIntroductoryCoins = 10,
+                challengeMasteryCoins = 20,
+                rivalVictoryCoins = 30
+            };
+            economy.placementBonusCoins.Add(5);
+            economy.placementBonusCoins.Add(3);
+            economy.placementBonusCoins.Add(1);
+            economy.placementBonusCoins.Add(0);
+            var category = new UpgradeCategoryDefinition
+            {
+                id = "acceleration", maxLevel = 3
+            };
+            category.prices.Add(60);
+            category.prices.Add(120);
+            category.prices.Add(180);
+            category.tuningFields.Add("acceleration");
+            economy.upgradeCategories.Add(category);
+            var bounties = new List<BountyDefinition>
+            {
+                new BountyDefinition
+                {
+                    id = "drift-10s", family = "drift",
+                    metric = BountyMetric.DriftSeconds, threshold = 10,
+                    unit = "seconds", rewardCoins = 10,
+                    aggregation = BountyAggregation.Sum
+                }
+            };
+            var ok = GameplayCatalog.TryCreate(driving, worlds, bounties,
+                economy, new GadgetDefinitionCatalog(),
+                new List<AiDifficultyDefinition>
+                {
+                    new AiDifficultyDefinition { id = "easy" },
+                    new AiDifficultyDefinition { id = "medium" },
+                    new AiDifficultyDefinition { id = "hard" }
+                }, out var gameplay, out var error);
+            Assert.That(ok, Is.True, "multiworld catalog: " + error);
+            return gameplay;
+        }
+
+        // Completes a fixture world's authored rows on the profile — the
+        // durable facts AdventureRules reads to open the next world.
+        private static void CompleteFixtureWorld(ProfileSave profile,
+            string[] regularEventIds, string[] finaleEventIds)
+        {
+            foreach (var eventId in regularEventIds)
+                profile.eventProgress.Add(new EventProgress
+                {
+                    eventId = eventId, completed = true,
+                    objectiveMask = ObjectiveEvaluator.FullMask
+                });
+            foreach (var eventId in finaleEventIds)
+                profile.finaleProgress.Add(new FinaleProgress
+                {
+                    eventId = eventId, completed = true,
+                    victorious = true
+                });
+        }
+
+        private static readonly string[] SunnyRegulars =
+        {
+            "harbor-car-circuit", "harbor-moto-circuit",
+            "harbor-car-time", "harbor-moto-time"
+        };
+        private static readonly string[] SunnyFinales =
+            { "sunny-car-finale", "sunny-moto-finale" };
+
+        // Rebinds the service to the three-world catalog around a seeded
+        // profile, then lands on the sandbox — the same seam
+        // SeedProfile uses, pointed at the ordered adventure.
+        private IEnumerator SeedMultiProfile(string language,
+            ProfileSave profile = null, bool longNames = false)
+        {
+            store.Save(profile != null
+                ? profile : ProfileFactory.Create(0, language));
+            service = new FoundationService(store, language, RunId);
+            Inject(app, "service", service);
+            var driving = MultiWorldDriving();
+            service.SetDrivingContent(driving);
+            service.SetGameplayCatalog(
+                MultiWorldGameplay(driving, longNames));
+            service.SetDrivingSimulationFactory(world.CreateSimulation);
+            Assert.That(app.Dispatch("profile.select",
+                Params(("slot", "0"))).status, Is.EqualTo("applied"));
+            Assert.That(app.Dispatch("ui.navigate",
+                Params(("screen", "sandbox"))).status,
+                Is.EqualTo("applied"));
+            Refresh();
+            yield return WaitForWidget<Button>("loop.campaign");
+        }
+
         // --- helpers -------------------------------------------------------
 
         private FoundationState Snapshot()
@@ -532,9 +824,32 @@ namespace FamilyRacing.Tests
             var button = Widget<Button>(widgetName);
             Assert.That(button.enabledSelf, Is.True,
                 widgetName + " must be pressable");
+            yield return Reveal(button);
             Press(button);
             Refresh();
             yield return null;
+        }
+
+        // A synthesized press must land on a point the panel can pick:
+        // a button below a scroll viewport is clipped, its center is
+        // unpickable, and the down/up never activates Clickable. Scroll
+        // the nearest ScrollView ancestor first — the same gesture a
+        // real touch user performs — then press.
+        private IEnumerator Reveal(VisualElement element)
+        {
+            if (element == null) yield break;
+            var scroll = element.GetFirstAncestorOfType<ScrollView>();
+            if (scroll == null) yield break;
+            scroll.ScrollTo(element);
+            yield return null;
+        }
+
+        private IEnumerator PressWidget(string widgetName)
+        {
+            yield return WaitForWidget<Button>(widgetName);
+            var button = Widget<Button>(widgetName);
+            yield return Reveal(button);
+            Press(button);
         }
 
         private void Step(int ticks)
@@ -687,15 +1002,13 @@ namespace FamilyRacing.Tests
             };
             foreach (var (button, screen, title) in screens)
             {
-                yield return WaitForWidget<Button>(button);
-                Press(Widget<Button>(button));
+                yield return PressWidget(button);
                 Assert.That(Snapshot().screen, Is.EqualTo(screen),
                     "the " + button + " button must dispatch its gated "
                         + "*.open command");
                 Refresh();
                 yield return WaitForWidget<VisualElement>(title);
-                yield return WaitForWidget<Button>("loop.back");
-                Press(Widget<Button>("loop.back"));
+                yield return PressWidget("loop.back");
                 Assert.That(Snapshot().screen, Is.EqualTo("sandbox"),
                     "the back button navigates home through ui.navigate");
                 Refresh();
@@ -773,8 +1086,7 @@ namespace FamilyRacing.Tests
 
             yield return Tap("campaign.vehicle.car-01");
             yield return Tap("campaign.difficulty.easy");
-            yield return WaitForWidget<Button>("campaign.start");
-            Press(Widget<Button>("campaign.start"));
+            yield return PressWidget("campaign.start");
 
             var snapshot = Snapshot();
             Assert.That(snapshot.screen, Is.EqualTo("driving"),
@@ -799,8 +1111,7 @@ namespace FamilyRacing.Tests
             yield return Tap("quick.class.car");
             yield return WaitForWidget<Button>("quick.vehicle.car-01");
             yield return Tap("quick.vehicle.car-01");
-            yield return WaitForWidget<Button>("quick.start");
-            Press(Widget<Button>("quick.start"));
+            yield return PressWidget("quick.start");
 
             var snapshot = Snapshot();
             Assert.That(snapshot.screen, Is.EqualTo("driving"));
@@ -835,7 +1146,7 @@ namespace FamilyRacing.Tests
                 "the durable record row renders even with no record");
 
             yield return WaitForWidget<Button>("trial.start");
-            Press(Widget<Button>("trial.start"));
+            yield return PressWidget("trial.start");
             var snapshot = Snapshot();
             Assert.That(snapshot.screen, Is.EqualTo("driving"));
             Assert.That(snapshot.soloRace, Is.Not.Null);
@@ -931,8 +1242,7 @@ namespace FamilyRacing.Tests
                 Is.Not.Empty,
                 "a committed receipt renders its honest breakdown");
 
-            yield return WaitForWidget<Button>("results.retry");
-            Press(Widget<Button>("results.retry"));
+            yield return PressWidget("results.retry");
             snapshot = Snapshot();
             Assert.That(snapshot.soloRace, Is.Not.Null);
             Assert.That(snapshot.soloRace.raceId,
@@ -954,8 +1264,7 @@ namespace FamilyRacing.Tests
             Refresh();
             yield return WaitForWidget<VisualElement>("overlay.results");
 
-            yield return WaitForWidget<Button>("results.continue");
-            Press(Widget<Button>("results.continue"));
+            yield return PressWidget("results.continue");
             snapshot = Snapshot();
             Assert.That(snapshot.soloRace, Is.Null,
                 "continue retires the finished session");
@@ -1068,6 +1377,342 @@ namespace FamilyRacing.Tests
             Assert.That(Widget<VisualElement>("overlay.results")
                     .style.display.value, Is.EqualTo(DisplayStyle.None),
                 "the overlay hides once a fresh run is live");
+        }
+
+        // --- multiworld screens (M6 Task 3) -------------------------------
+        // The ordered world strip rides the campaign map: bilingual
+        // names, per-world swatch/icon/progress, an honest disabled lock
+        // reason that mirrors AdventureRules.Evaluate, and selection
+        // through the real campaign.selectWorld command.
+
+        [UnityTest]
+        public IEnumerator WorldCardsRenderNamesSwatchesAndLocksEnglish()
+        {
+            yield return SeedMultiProfile("en");
+            yield return Tap("loop.campaign");
+            yield return WaitForWidget<Label>("campaign.stars");
+
+            var strip = Widget<ScrollView>("campaign.worlds");
+            Assert.That(strip, Is.Not.Null,
+                "the world strip scrolls inside the campaign screen");
+
+            var snapshot = Snapshot();
+            var worlds = snapshot.progression.worlds;
+            Assert.That(worlds.Count, Is.EqualTo(3),
+                "worlds.Count == 3 — every authored world renders a card");
+            var access = AdventureRules.Evaluate(
+                app.Service.GameplayContent, snapshot.savedProfile);
+            var expected = new[] { "sunny-island", "redrock-canyon",
+                "snowy-peaks" };
+            var names = new[] { "Sunny Island", "Redrock Canyon",
+                "Snowy Peaks" };
+            for (var i = 0; i < worlds.Count; i++)
+            {
+                Assert.That(worlds[i].worldId, Is.EqualTo(expected[i]),
+                    "world rows keep authored order");
+                var card = Widget<Button>("campaign.world." + expected[i]);
+                Assert.That(card, Is.Not.Null,
+                    "world card: " + expected[i]);
+                // UI availability is the streamed availability — both
+                // equal the AdventureRules verdict, never a guess.
+                Assert.That(card.enabledSelf,
+                    Is.EqualTo(worlds[i].available),
+                    "card availability mirrors the streamed row");
+                Assert.That(access.worlds[i].available,
+                    Is.EqualTo(worlds[i].available),
+                    "the streamed row mirrors AdventureRules.Evaluate");
+                var name = Widget<Label>(
+                    "campaign.world." + expected[i] + ".name");
+                Assert.That(name, Is.Not.Null);
+                Assert.That(name.text, Is.EqualTo(names[i]));
+                Assert.That(Widget<VisualElement>(
+                    "campaign.world." + expected[i] + ".swatch"),
+                    Is.Not.Null, "every card carries its color swatch");
+                var icon = Widget<Label>(
+                    "campaign.world." + expected[i] + ".icon");
+                Assert.That(icon, Is.Not.Null,
+                    "every card carries its icon badge");
+                Assert.That(icon.text, Is.Not.Empty);
+                var progress = Widget<Label>(
+                    "campaign.world." + expected[i] + ".progress");
+                Assert.That(progress, Is.Not.Null);
+                Assert.That(progress.text, Does.Contain(
+                    worlds[i].completedEvents + "/"
+                        + worlds[i].requiredEvents));
+                if (!worlds[i].available)
+                {
+                    var lockLabel = Widget<Label>(
+                        "campaign.world." + expected[i] + ".lock");
+                    Assert.That(lockLabel, Is.Not.Null,
+                        "a closed world names its reason");
+                    Assert.That(lockLabel.text, Is.Not.Empty);
+                    Assert.That(card.tooltip, Is.Not.Empty,
+                        "the disabled card carries the same reason");
+                }
+            }
+            // The selected badge sits on the default world only.
+            Assert.That(Widget<Label>(
+                "campaign.world.sunny-island.selected"), Is.Not.Null);
+            Assert.That(Widget<Label>(
+                "campaign.world.redrock-canyon.selected"), Is.Null);
+            // A disabled card is a real dead end — tapping it mutates
+            // nothing.
+            yield return PressWidget("campaign.world.snowy-peaks");
+            Assert.That(Snapshot().progression.campaignWorldId,
+                Is.EqualTo("sunny-island"));
+        }
+
+        [UnityTest]
+        public IEnumerator WorldCardsRenderHebrewNamesAndReasons()
+        {
+            yield return SeedMultiProfile("he");
+            yield return Tap("loop.campaign");
+            yield return WaitForWidget<Label>("campaign.stars");
+
+            Assert.That(document.rootVisualElement.languageDirection,
+                Is.EqualTo(LanguageDirection.RTL),
+                "the Hebrew campaign map renders RTL");
+            var snapshot = Snapshot();
+            var expected = new[] { "sunny-island", "redrock-canyon",
+                "snowy-peaks" };
+            var names = new[] { "האי השמשי", "קניון רדרוק",
+                "הפסגות המושלגות" };
+            for (var i = 0; i < expected.Length; i++)
+            {
+                var card = Widget<Button>("campaign.world." + expected[i]);
+                Assert.That(card, Is.Not.Null);
+                var name = Widget<Label>(
+                    "campaign.world." + expected[i] + ".name");
+                Assert.That(name.text, Is.EqualTo(names[i]),
+                    "the Hebrew world name renders verbatim");
+                var progress = Widget<Label>(
+                    "campaign.world." + expected[i] + ".progress");
+                Assert.That(progress.text, Does.Contain("‎"),
+                    "the card counters stay LTR inside RTL");
+            }
+            var lockLabel = Widget<Label>(
+                "campaign.world.redrock-canyon.lock");
+            Assert.That(lockLabel, Is.Not.Null);
+            Assert.That(lockLabel.text,
+                Is.EqualTo(
+                    FamilyRacing.Core.Localization.ShellText.Get(
+                        "loop.reason.worldLocked", "he")),
+                "the lock reason is the localized shared reason");
+        }
+
+        [UnityTest]
+        public IEnumerator TappingAWorldCardRestacksTheSelectedEvents()
+        {
+            // Sunny complete -> the default selection is redrock and the
+            // map lists canyon events; tapping the sunny card reselects
+            // it through campaign.selectWorld.
+            var profile = ProfileFactory.Create(0, "en");
+            CompleteFixtureWorld(profile, SunnyRegulars, SunnyFinales);
+            yield return SeedMultiProfile("en", profile);
+            yield return Tap("loop.campaign");
+            yield return WaitForWidget<Label>("campaign.stars");
+
+            var snapshot = Snapshot();
+            Assert.That(snapshot.progression.campaignWorldId,
+                Is.EqualTo("redrock-canyon"),
+                "the first accessible unfinished world is selected");
+            Assert.That(Widget<VisualElement>(
+                "campaign.row.canyon-car-circuit"), Is.Not.Null,
+                "the selected world's events render");
+            Assert.That(Widget<VisualElement>(
+                "campaign.row.harbor-car-circuit"), Is.Null,
+                "another world's events stay off the map");
+
+            yield return Tap("campaign.world.sunny-island");
+            snapshot = Snapshot();
+            Assert.That(snapshot.progression.campaignWorldId,
+                Is.EqualTo("sunny-island"),
+                "the card tap dispatched campaign.selectWorld");
+            Assert.That(snapshot.progression.worlds[0].selected,
+                Is.True);
+            yield return WaitForWidget<VisualElement>(
+                "campaign.row.harbor-car-circuit");
+            Assert.That(Widget<VisualElement>(
+                "campaign.row.canyon-car-circuit"), Is.Null,
+                "the event rows restack onto the selected world");
+            // Sunny is complete: the card still carries its done badge.
+            Assert.That(Widget<Label>(
+                "campaign.world.sunny-island.done"), Is.Not.Null);
+        }
+
+        [UnityTest]
+        public IEnumerator LongWorldNamesWrapInsideTheCard()
+        {
+            yield return SeedMultiProfile("en", null, longNames: true);
+            yield return Tap("loop.campaign");
+            yield return WaitForWidget<Label>("campaign.stars");
+
+            var name = Widget<Label>(
+                "campaign.world.redrock-canyon.name");
+            Assert.That(name, Is.Not.Null);
+            Assert.That(name.text, Does.Contain("Long Winding Road"));
+            Assert.That(name.style.whiteSpace.value,
+                Is.EqualTo(WhiteSpace.Normal),
+                "a longer name wraps instead of clipping");
+            var card = Widget<Button>("campaign.world.redrock-canyon");
+            yield return WaitFor(() =>
+                card.worldBound.width > 0f, "world card layout");
+            Assert.That(card.worldBound.width,
+                Is.LessThanOrEqualTo(560f),
+                "a long name never grows the card past its cell");
+        }
+
+        [UnityTest]
+        public IEnumerator QuickRaceGroupsCoursesByWorldAndHonorsLocks()
+        {
+            yield return SeedMultiProfile("en");
+            yield return Tap("loop.quickRace");
+            yield return WaitForWidget<Label>("quick.title");
+
+            var snapshot = Snapshot();
+            var gameplay = app.Service.GameplayContent;
+            foreach (var pair in new[]
+            {
+                new { world = "sunny-island", course = "harbor-hop" },
+                new { world = "redrock-canyon", course = "canyon-dash" },
+                new { world = "snowy-peaks", course = "aurora-pass" }
+            })
+            {
+                var header = Widget<Label>("quick.world." + pair.world);
+                Assert.That(header, Is.Not.Null,
+                    "each world owns a course group header");
+                var button = Widget<Button>(
+                    "quick.course." + pair.course);
+                Assert.That(button, Is.Not.Null,
+                    "the course renders under its world group");
+                var allowed = AdventureRules.CanAccessCourse(
+                    gameplay, snapshot.savedProfile, pair.course);
+                Assert.That(button.enabledSelf, Is.EqualTo(allowed),
+                    pair.course + " availability mirrors the rules");
+                if (!allowed)
+                    Assert.That(button.tooltip, Is.Not.Empty,
+                        "a locked course names its reason");
+            }
+            // The locked pick refuses even when pressed directly.
+            yield return PressWidget("quick.course.canyon-dash");
+            Assert.That(Snapshot().screen, Is.EqualTo("quickRace"));
+        }
+
+        [UnityTest]
+        public IEnumerator TimeTrialListsEveryWorldCourseFromStart()
+        {
+            yield return SeedMultiProfile("en");
+            yield return Tap("loop.timeTrial");
+            yield return WaitForWidget<Label>("trial.title");
+
+            // Trials are the always-open lane: all six authored courses
+            // are enterable on a fresh profile regardless of the world
+            // gate (the command surface answers the same verdict).
+            foreach (var courseId in new[]
+                { "harbor-hop", "canyon-dash", "aurora-pass" })
+            {
+                var button = Widget<Button>(
+                    "trial.course." + courseId);
+                Assert.That(button, Is.Not.Null,
+                    "trial course: " + courseId);
+                Assert.That(button.enabledSelf, Is.True,
+                    courseId + " stays open for time trials");
+            }
+            // The world grouping is honest there too.
+            Assert.That(Widget<Label>("trial.world.snowy-peaks"),
+                Is.Not.Null);
+            yield return Tap("trial.course.canyon-dash");
+            yield return WaitForWidget<Button>("trial.class.car");
+            yield return Tap("trial.class.car");
+            yield return WaitForWidget<Label>("trial.starter");
+            var verdict = app.Service.CanEnter(RaceMode.TimeTrial,
+                "canyon-dash", "", "car", "");
+            Assert.That(verdict.allowed, Is.True,
+                "a locked-world course still seats the trial starter");
+        }
+
+        [UnityTest]
+        public IEnumerator AdventureCompleteBannerRendersOnFullRun()
+        {
+            var profile = ProfileFactory.Create(0, "en");
+            CompleteFixtureWorld(profile, SunnyRegulars, SunnyFinales);
+            CompleteFixtureWorld(profile, new[]
+            {
+                "canyon-car-circuit", "canyon-moto-circuit",
+                "canyon-car-time", "canyon-moto-time"
+            }, new[] { "redrock-canyon-car-finale",
+                "redrock-canyon-moto-finale" });
+            CompleteFixtureWorld(profile, new[]
+            {
+                "aurora-car-circuit", "aurora-moto-circuit",
+                "aurora-car-time", "aurora-moto-time"
+            }, new[] { "snowy-peaks-car-finale",
+                "snowy-peaks-moto-finale" });
+            yield return SeedMultiProfile("en", profile);
+            yield return Tap("loop.campaign");
+            yield return WaitForWidget<Label>("campaign.stars");
+
+            var snapshot = Snapshot();
+            Assert.That(snapshot.progression.adventureComplete, Is.True);
+            var banner = Widget<Label>("campaign.adventureComplete");
+            Assert.That(banner, Is.Not.Null,
+                "a finished adventure presents its completion banner");
+            Assert.That(banner.text,
+                Is.EqualTo(
+                    FamilyRacing.Core.Localization.ShellText.Get(
+                        "campaign.adventureComplete", "en")));
+            // The finished adventure keeps the last world selected and
+            // every card marked done.
+            Assert.That(snapshot.progression.campaignWorldId,
+                Is.EqualTo("snowy-peaks"));
+            Assert.That(Widget<Label>(
+                "campaign.world.snowy-peaks.done"), Is.Not.Null);
+        }
+
+        [UnityTest]
+        public IEnumerator ResultsContinueReturnsToTheRacedWorld()
+        {
+            var profile = ProfileFactory.Create(0, "en");
+            CompleteFixtureWorld(profile, SunnyRegulars, SunnyFinales);
+            yield return SeedMultiProfile("en", profile);
+            // Default selection is redrock; the raced event lives in
+            // sunny — continue must return the map to the raced world.
+            var snapshot = Snapshot();
+            Assert.That(snapshot.progression.campaignWorldId,
+                Is.EqualTo("redrock-canyon"));
+            var started = app.Dispatch("campaign.start", Params(
+                ("eventId", "harbor-car-circuit"),
+                ("vehicleId", "car-01"), ("difficulty", "easy")));
+            Assert.That(started.status, Is.EqualTo("applied"),
+                "campaign.start: " + started.code);
+            Step(3);
+            snapshot = Snapshot();
+            world.ApplyFrame(snapshot);
+            RenderSoloRace(snapshot);
+            Physics.SyncTransforms();
+            snapshot = Pursue(snapshot, 6000);
+            var guard = 0;
+            while ((snapshot.soloRace == null
+                    || snapshot.soloRace.result == null) && guard++ < 4000)
+            {
+                Step(1);
+                snapshot = Snapshot();
+            }
+            Assert.That(snapshot.soloRace.result, Is.Not.Null,
+                "the campaign race never finalized");
+            Assert.That(snapshot.soloRace.result.eventId,
+                Is.EqualTo("harbor-car-circuit"));
+            Refresh();
+            yield return PressWidget("results.continue");
+            snapshot = Snapshot();
+            Assert.That(snapshot.screen, Is.EqualTo("campaign"));
+            Assert.That(snapshot.progression.campaignWorldId,
+                Is.EqualTo("sunny-island"),
+                "continue lands the map on the world the result "
+                    + "belongs to");
+            Refresh();
+            yield return WaitForWidget<Label>(
+                "campaign.world.sunny-island.selected");
         }
 
         // Fails profile saves on demand — the PlayMode counterpart of

@@ -140,9 +140,10 @@ namespace FamilyRacing.Tests
         [Test]
         public void SchemaFiveRoundTripIncludesPresentation()
         {
-            Assert.That(NetworkSettings.StateSchemaVersion, Is.EqualTo(6),
+            Assert.That(NetworkSettings.StateSchemaVersion, Is.EqualTo(7),
                 "schema 5 introduced the presentation-observation epoch; " +
-                "schema 6 adds the local solo-race slice");
+                "schema 6 adds the local solo-race slice; schema 7 adds " +
+                "the ordered multiworld progression surface");
             var state = new FoundationState
             {
                 presentation = new PresentationState
@@ -188,7 +189,7 @@ namespace FamilyRacing.Tests
             var roundTrip = JsonSerializer.Deserialize<FoundationState>(
                 json, options);
 #endif
-            Assert.That(roundTrip.stateSchemaVersion, Is.EqualTo(6));
+            Assert.That(roundTrip.stateSchemaVersion, Is.EqualTo(7));
             Assert.That(roundTrip.presentation.renderProfileId,
                 Is.EqualTo("tablet"));
             Assert.That(roundTrip.presentation.renderScale,

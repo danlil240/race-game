@@ -74,7 +74,20 @@ namespace FamilyRacing
                 key += "|p:" + progression.available
                     + progression.campaignStars
                     + progression.campaignCompletedEvents
-                    + progression.rewardUnresolved;
+                    + progression.rewardUnresolved
+                    + progression.adventureComplete
+                    + progression.campaignWorldId;
+                // M6 Task 3: the world strip repaints on availability,
+                // selection or completion flips — a card tap lands in
+                // the stream and the next signature re-renders once.
+                foreach (var world in progression.worlds)
+                    if (world != null)
+                        key += "|w:" + world.worldId + "="
+                            + (world.available ? "A" : "L")
+                            + (world.selected ? "S" : "-")
+                            + (world.worldComplete ? "D" : "-")
+                            + world.completedEvents + "/"
+                            + world.stars;
                 foreach (var row in progression.campaignEvents)
                     if (row != null)
                         key += "|e:" + row.eventId + "=" + row.objectiveMask
@@ -161,7 +174,12 @@ namespace FamilyRacing
             root.Add(scroll);
             var progression = state.progression;
             var gameplay = LoopContent();
-            var campaign = gameplay != null ? gameplay.Campaign : null;
+            var campaign = gameplay != null
+                ? gameplay.FindCampaign(progression != null
+                    ? progression.campaignWorldId : null)
+                : null;
+            // The map titles itself after the SELECTED world — the same
+            // world whose rows the stream published in campaignEvents.
             var worldName = campaign != null
                 ? (state.language == "he" ? campaign.nameHe : campaign.nameEn)
                 : "";
@@ -169,6 +187,15 @@ namespace FamilyRacing
                 string.IsNullOrEmpty(worldName)
                     ? T("campaign.title", state) : worldName, 40, Deep);
             title.name = "campaign.title";
+            // Whole-adventure presentation: the banner appears only when
+            // every authored world reports complete.
+            if (progression != null && progression.adventureComplete)
+            {
+                var banner = AddLabel(scroll,
+                    T("campaign.adventureComplete", state), 30, Coral);
+                banner.name = "campaign.adventureComplete";
+            }
+            BuildWorldStrip(scroll, state, progression);
             if (progression != null && progression.available)
             {
                 var stars = AddLabel(scroll,
@@ -221,6 +248,15 @@ namespace FamilyRacing
             var setup = new VisualElement();
             setup.name = "campaign.setup";
             scroll.Add(setup);
+            // The pick belongs to the selected world's event view — a
+            // stale id from before a world switch (or a profile change)
+            // must not light the setup strip for a foreign event.
+            var streamed = false;
+            if (progression != null && progression.campaignEvents != null)
+                foreach (var row in progression.campaignEvents)
+                    if (row != null && row.eventId == campaignEventId)
+                        streamed = true;
+            if (!streamed) campaignEventId = "";
             if (!string.IsNullOrEmpty(campaignEventId)
                 && gameplay != null && gameplay.Driving != null)
             {
@@ -295,6 +331,136 @@ namespace FamilyRacing
             statusLabel.name = "status.persistence";
         }
 
+        // --- world strip (M6 Task 3) -------------------------------------
+        // One card per authored world inside a horizontal scroll strip.
+        // The catalog carries no authored swatch/icon art yet, so the
+        // card cycles the shell palette and a stable glyph set by world
+        // order — a deterministic identity until the content ships real
+        // art. Every card mirrors the streamed row: enabled exactly when
+        // the world is open, with the shared worldLocked reason on the
+        // disabled cards and the selected badge on the selected one.
+
+        // Stable per-order identity glyphs — deterministic across locales
+        // and rebuilds until authored world art lands.
+        private static readonly string[] WorldIcons =
+            { "☀", "🏜", "❄", "🌊", "🌋", "🌙" };
+
+        private void BuildWorldStrip(VisualElement parent,
+            FoundationState state, ProgressionState progression)
+        {
+            if (progression == null || progression.worlds == null
+                || progression.worlds.Count == 0)
+                return;
+            var header = AddLabel(parent, T("campaign.worlds", state),
+                24, Deep);
+            header.name = "campaign.worlds.header";
+            var strip = new ScrollView(ScrollViewMode.Horizontal);
+            strip.name = "campaign.worlds";
+            strip.style.minHeight = 190;
+            strip.style.flexShrink = 0;
+            parent.Add(strip);
+            for (var i = 0; i < progression.worlds.Count; i++)
+            {
+                var world = progression.worlds[i];
+                if (world == null) continue;
+                var worldId = world.worldId;
+                // A Button so the card is the tap target; the children
+                // are labels with picking ignored so taps land on the
+                // card itself. The click runs the REAL semantic command —
+                // never a local field write — so the streamed worldId is
+                // the only selection source of truth.
+                var card = new Button(() =>
+                {
+                    var p = new Dictionary<string, string>();
+                    p["worldId"] = worldId;
+                    app.Dispatch("campaign.selectWorld", p);
+                    // The event pick belonged to the previous world's
+                    // list; clear it so the setup strip cannot carry a
+                    // foreign event across the restack.
+                    campaignEventId = "";
+                    campaignVehicleId = "";
+                }) { name = "campaign.world." + worldId };
+                card.style.width = 300;
+                card.style.maxWidth = 560;
+                card.style.minHeight = 170;
+                card.style.marginTop = card.style.marginBottom = 6;
+                card.style.marginLeft = card.style.marginRight = 6;
+                card.style.backgroundColor = world.available
+                    ? (world.selected ? Coral : Ocean) : Off;
+                card.style.borderTopLeftRadius =
+                    card.style.borderTopRightRadius =
+                    card.style.borderBottomLeftRadius =
+                    card.style.borderBottomRightRadius = 14;
+                strip.Add(card);
+                var top = Row(card);
+                top.pickingMode = PickingMode.Ignore;
+                var swatch = new VisualElement();
+                swatch.name = "campaign.world." + worldId + ".swatch";
+                swatch.style.width = swatch.style.height = 26;
+                swatch.style.backgroundColor =
+                    CardColors[i % CardColors.Length];
+                swatch.style.borderTopLeftRadius =
+                    swatch.style.borderTopRightRadius =
+                    swatch.style.borderBottomLeftRadius =
+                    swatch.style.borderBottomRightRadius = 13;
+                swatch.pickingMode = PickingMode.Ignore;
+                top.Add(swatch);
+                var icon = AddLabel(top,
+                    WorldIcons[i % WorldIcons.Length], 26, Color.white);
+                icon.name = "campaign.world." + worldId + ".icon";
+                icon.pickingMode = PickingMode.Ignore;
+                var name = AddLabel(card,
+                    state.language == "he" ? world.nameHe : world.nameEn,
+                    24, Color.white);
+                name.name = "campaign.world." + worldId + ".name";
+                // Long world names wrap inside the fixed card cell —
+                // the card never grows past its slot.
+                name.style.whiteSpace = WhiteSpace.Normal;
+                name.pickingMode = PickingMode.Ignore;
+                var progress = AddLabel(card,
+                    T("campaign.events", state) + " "
+                        + Ltr(world.completedEvents + "/"
+                            + world.requiredEvents)
+                        + " · " + T("campaign.stars", state) + " "
+                        + Ltr(world.stars + "/" + world.requiredStars),
+                    18, Color.white);
+                progress.name = "campaign.world." + worldId + ".progress";
+                progress.pickingMode = PickingMode.Ignore;
+                if (world.selected)
+                {
+                    var badge = AddLabel(card,
+                        T("campaign.selected", state), 18, Seafoam);
+                    badge.name = "campaign.world." + worldId + ".selected";
+                    badge.pickingMode = PickingMode.Ignore;
+                }
+                if (world.worldComplete)
+                {
+                    var done = AddLabel(card,
+                        T("campaign.worldDone", state), 18, Sand);
+                    done.name = "campaign.world." + worldId + ".done";
+                    done.pickingMode = PickingMode.Ignore;
+                }
+                if (!world.available)
+                {
+                    var locked = AddLabel(card,
+                        LoopReason(world.lockedReason, state), 18, Cream);
+                    locked.name = "campaign.world." + worldId + ".lock";
+                    locked.pickingMode = PickingMode.Ignore;
+                }
+                // Command availability first (a LAN session fences the
+                // pick for every card); the streamed lock then overrides
+                // so a closed world shows its own reason, not the
+                // generic one.
+                ApplyAvailability(card, "campaign.selectWorld");
+                if (!world.available)
+                {
+                    card.SetEnabled(false);
+                    card.tooltip =
+                        LoopReason(world.lockedReason, state);
+                }
+            }
+        }
+
         private static FinaleDefinition FindFinale(CampaignDefinition campaign,
             string eventId)
         {
@@ -342,18 +508,72 @@ namespace FamilyRacing
             AddLabel(scroll, T("quick.hint", state), 20, Deep);
             var gameplay = LoopContent();
             if (gameplay == null || gameplay.Driving == null) return;
-            // Courses are honest: only those with an authored circuit.
+            // Courses are honest AND world-aware (M6 Task 3): only those
+            // with an authored circuit, grouped under their owning world
+            // in catalog order, and a course inside a locked world stays
+            // visible but disabled with the same worldLocked verdict
+            // quickRace.start would reject with — selection can never
+            // bypass the owning world's gate.
             var courses = CircuitCourses(gameplay.Driving);
-            var courseRow = Row(scroll);
-            courseRow.name = "quick.courses";
+            var grouped = new HashSet<string>(System.StringComparer.Ordinal);
+            if (gameplay.Campaigns != null)
+                foreach (var world in gameplay.Campaigns)
+                {
+                    if (world == null || world.courseIds == null) continue;
+                    var owned = new List<string>();
+                    foreach (var courseId in world.courseIds)
+                        if (courses.Contains(courseId)
+                            && grouped.Add(courseId))
+                            owned.Add(courseId);
+                    if (owned.Count == 0) continue;
+                    var header = AddLabel(scroll,
+                        state.language == "he"
+                            ? world.nameHe : world.nameEn,
+                        24, Deep);
+                    header.name = "quick.world." + world.worldId;
+                    var courseRow = Row(scroll);
+                    courseRow.name = "quick.courses." + world.worldId;
+                    foreach (var courseId in owned)
+                    {
+                        var id = courseId;
+                        var button = AddButton(courseRow, id,
+                            id == quickCourseId ? Coral : Ocean,
+                            () => { quickCourseId = id; quickClassId = "";
+                                quickVehicleId = ""; },
+                            "quick.course." + id);
+                        if (!AdventureRules.CanAccessCourse(gameplay,
+                                state.savedProfile, id))
+                        {
+                            button.SetEnabled(false);
+                            button.tooltip =
+                                LoopReason("worldLocked", state);
+                        }
+                    }
+                }
+            // A course authored outside every world still lists — the
+            // catalog gate, not the grouping, decides its availability.
+            var rest = new List<string>();
             foreach (var courseId in courses)
+                if (!grouped.Contains(courseId)) rest.Add(courseId);
+            if (rest.Count > 0)
             {
-                var id = courseId;
-                AddButton(courseRow, id,
-                    id == quickCourseId ? Coral : Ocean,
-                    () => { quickCourseId = id; quickClassId = "";
-                        quickVehicleId = ""; },
-                    "quick.course." + id);
+                var courseRow = Row(scroll);
+                courseRow.name = "quick.courses.other";
+                foreach (var courseId in rest)
+                {
+                    var id = courseId;
+                    var button = AddButton(courseRow, id,
+                        id == quickCourseId ? Coral : Ocean,
+                        () => { quickCourseId = id; quickClassId = "";
+                            quickVehicleId = ""; },
+                        "quick.course." + id);
+                    if (!AdventureRules.CanAccessCourse(gameplay,
+                            state.savedProfile, id))
+                    {
+                        button.SetEnabled(false);
+                        button.tooltip = LoopReason("worldLocked", state);
+                    }
+                }
             }
             if (string.IsNullOrEmpty(quickCourseId)) goto Actions;
             var classRow = Row(scroll);
@@ -503,15 +723,54 @@ namespace FamilyRacing
             AddLabel(scroll, T("trial.hint", state), 20, Deep);
             var gameplay = LoopContent();
             if (gameplay == null || gameplay.Driving == null) return;
-            var courseRow = Row(scroll);
-            courseRow.name = "trial.courses";
-            foreach (var courseId in TrialCourses(gameplay.Driving))
+            // Trials are the always-open lane: every authored trial
+            // course stays enterable on a fresh profile regardless of
+            // the world gate (timeTrial.start answers the same verdict —
+            // EvaluateTrial never consults the campaign), but the
+            // grouping still names the owning world honestly.
+            var courses = TrialCourses(gameplay.Driving);
+            var grouped = new HashSet<string>(System.StringComparer.Ordinal);
+            if (gameplay.Campaigns != null)
+                foreach (var world in gameplay.Campaigns)
+                {
+                    if (world == null || world.courseIds == null) continue;
+                    var owned = new List<string>();
+                    foreach (var courseId in world.courseIds)
+                        if (courses.Contains(courseId)
+                            && grouped.Add(courseId))
+                            owned.Add(courseId);
+                    if (owned.Count == 0) continue;
+                    var header = AddLabel(scroll,
+                        state.language == "he"
+                            ? world.nameHe : world.nameEn,
+                        24, Deep);
+                    header.name = "trial.world." + world.worldId;
+                    var courseRow = Row(scroll);
+                    courseRow.name = "trial.courses." + world.worldId;
+                    foreach (var courseId in owned)
+                    {
+                        var id = courseId;
+                        AddButton(courseRow, id,
+                            id == trialCourseId ? Coral : Ocean,
+                            () => { trialCourseId = id; trialClassId = ""; },
+                            "trial.course." + id);
+                    }
+                }
+            var rest = new List<string>();
+            foreach (var courseId in courses)
+                if (!grouped.Contains(courseId)) rest.Add(courseId);
+            if (rest.Count > 0)
             {
-                var id = courseId;
-                AddButton(courseRow, id,
-                    id == trialCourseId ? Coral : Ocean,
-                    () => { trialCourseId = id; trialClassId = ""; },
-                    "trial.course." + id);
+                var courseRow = Row(scroll);
+                courseRow.name = "trial.courses.other";
+                foreach (var courseId in rest)
+                {
+                    var id = courseId;
+                    AddButton(courseRow, id,
+                        id == trialCourseId ? Coral : Ocean,
+                        () => { trialCourseId = id; trialClassId = ""; },
+                        "trial.course." + id);
+                }
             }
             if (string.IsNullOrEmpty(trialCourseId)) goto Actions;
             var classRow = Row(scroll);

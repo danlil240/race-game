@@ -37,7 +37,8 @@ reports `graybox` while dressed content remains benchmark-only.
 | `lan.rematch` | host-only return to lobby keeping retained results | `network.phase` (`results`→`lobby`) | `NetworkResultsPlayTests` |
 | `lan.leave` | clean teardown; the only session exit | `network.role`→`none`, `screen`→`lan-browser` | `NetworkScreensPlayTests` |
 | `campaign.open` / `quickRace.open` / `timeTrial.open` / `garage.open` / `bounties.open` | gated navigation to the loop screens — the only route to them (not `ui.navigate` targets); requires non-legacy gameplay content + a selected profile | `screen`, `progression.*` | `GameplayCommandTests` (open gating, content/profile gates, race/LAN fencing); `GameplayScreensPlayTests` |
-| `campaign.start` | starts a campaign event through `SoloRaceSession`; enforces the campaign traversal gate + vehicle ownership, binds the durable reward context before the first boundary | `soloRace.*`, `screen` (`driving`), `drivingEvents`, `progression` | `GameplayCommandTests` (`CampaignStartSeatsTheSameSessionAsSoloStart`, finale lock), `SoloRacePlayTests` |
+| `campaign.selectWorld` | transient campaign-world pick (M6 Task 3): `unknownWorld`/`worldLocked` reject with no mutation; resets on profile switch; never persisted; `networkActive` inside LAN | `progression.campaignWorldId`, `progression.campaignEvents`, `progression.worlds[]` | `GameplayCommandTests` (schema/dedup/profile-switch/locked-world parity), `GameplayScreensPlayTests` (world cards) |
+| `campaign.start` | starts a campaign event through `SoloRaceSession`; enforces the OWNING world's gate (`worldLocked`) + the traversal gate + vehicle ownership — never the picker selection; binds the durable reward context before the first boundary | `soloRace.*`, `screen` (`driving`), `drivingEvents`, `progression` | `GameplayCommandTests` (`CampaignStartSeatsTheSameSessionAsSoloStart`, finale lock, `CampaignStartResolvesTheOwningWorldNotSelection`), `SoloRacePlayTests` |
 | `quickRace.start` | resolves the authored circuit for the course+class pick and starts the shared four-racer race | `soloRace.*` | `GameplayCommandTests` (`QuickRaceStartResolvesTheAuthoredCircuit`, `QuickRaceStartRejectsDishonestPicks`) |
 | `timeTrial.start` | lone-clock run seating the authored normalized starter (`tuningSource` = `normalized`) | `soloRace.trial`, `soloRace.tuningSource` | `GameplayCommandTests` (`TimeTrialStartSeatsNormalizedStarter`), `SoloRacePlayTests` |
 | `upgrade.purchase` | atomic authored-price upgrade commit (receipt-keyed, idempotent); gated on `rewardUnresolved` | `savedProfile.vehicleUpgrades/coins/purchaseReceipts`, `progression`, `persistenceStatus` | `UpgradeTests`, `GameplayCommandTests`, `UpgradePresentationPlayTests` |
@@ -72,7 +73,12 @@ four-racer coordinator, `trial` for the lone time trial, the finalized
 immutable `result`, and `tuningSource` naming the human seat's tune
 provenance) and `progression` (the resolved campaign access rows,
 active bounty tray and the `rewardUnresolved` save gate — present on
-every boundary, menus and failed saves included). Reconnect credentials
+every boundary, menus and failed saves included), and the schema-7
+multiworld surface `progression.worlds` (every authored world in order:
+bilingual names, `available`/`lockedReason`, regional completion/star
+totals, finale counts, `rewardVehicleIds`, `worldComplete` and the
+`selected` marker — `campaignWorldId`/`campaignEvents` describe the
+selected world) plus `progression.adventureComplete`. Reconnect credentials
 and transport identities never appear in observable state.
 Boundaries may also arrive as `delta` records
 (`base` = previous boundary sequence, recursive `changed` merge, dot-path

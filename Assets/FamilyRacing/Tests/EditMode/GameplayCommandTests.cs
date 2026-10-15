@@ -150,7 +150,7 @@ namespace FamilyRacing.Tests
             }
             foreach (var action in new[]
             {
-                "campaign.open", "campaign.start",
+                "campaign.open", "campaign.selectWorld", "campaign.start",
                 "quickRace.open", "quickRace.start",
                 "timeTrial.open", "timeTrial.start",
                 "garage.open", "bounties.open",
@@ -159,6 +159,8 @@ namespace FamilyRacing.Tests
             })
                 Assert.That(actions.ContainsKey(action), Is.True,
                     "missing semantic action: " + action);
+            Assert.That(actions["campaign.selectWorld"], Is.EquivalentTo(
+                new[] { "worldId" }));
             Assert.That(actions["campaign.start"], Is.EquivalentTo(
                 new[] { "eventId", "vehicleId", "difficulty" }));
             Assert.That(actions["quickRace.start"], Is.EquivalentTo(
@@ -271,6 +273,409 @@ namespace FamilyRacing.Tests
             Assert.That(locked.code, Is.EqualTo("eventLocked"));
             Assert.That(service.Snapshot().soloRace, Is.Null,
                 "a locked event must never start a session");
+        }
+
+        // --- multiworld campaign selection (M6 Task 3) ---------------------
+
+        private static ProfileSave MultiProfile(int slot)
+        {
+            var profile = ProfileFactory.Create(slot, "en");
+            // The starter unlocks the authored pairs only.
+            return profile;
+        }
+
+        private FoundationService MultiService(ProfileSave profile,
+            ProfileStore store = null)
+        {
+            return ServiceWithProfile(CampaignTestFixture.MultiCatalog(),
+                store ?? Store(), profile);
+        }
+
+        [Test]
+        public void SelectWorldPublishesOrderedWorldRows()
+        {
+            var service = MultiService(MultiProfile(0));
+            var applied = service.Execute(Cmd("campaign.selectWorld",
+                P("worldId", "sunny-island")));
+            Assert.That(applied.status, Is.EqualTo(CommandResult.Applied),
+                "campaign.selectWorld failed: " + applied.code);
+
+            var state = service.Snapshot();
+            Assert.That(state.stateSchemaVersion,
+                Is.EqualTo(7), "M6 ships observation schema 7");
+            Assert.That(state.progression, Is.Not.Null);
+            // The authored adventure: three worlds in progression order.
+            Assert.That(state.progression.worlds.Count, Is.EqualTo(3),
+                "every authored world publishes a row");
+            Assert.That(state.progression.worlds[0].worldId,
+                Is.EqualTo("sunny-island"));
+            Assert.That(state.progression.worlds[1].worldId,
+                Is.EqualTo("redrock-canyon"));
+            Assert.That(state.progression.worlds[2].worldId,
+                Is.EqualTo("snowy-peaks"));
+            // Fresh profile: only the first world is open; closed worlds
+            // carry the same machine code the command rejects with.
+            Assert.That(state.progression.worlds[0].available, Is.True);
+            Assert.That(state.progression.worlds[0].lockedReason,
+                Is.EqualTo(""));
+            Assert.That(state.progression.worlds[1].available, Is.False);
+            Assert.That(state.progression.worlds[1].lockedReason,
+                Is.EqualTo("worldLocked"));
+            Assert.That(state.progression.worlds[2].available, Is.False);
+            Assert.That(state.progression.worlds[2].lockedReason,
+                Is.EqualTo("worldLocked"));
+            // The selected world is marked and drives the campaign view.
+            Assert.That(state.progression.worlds[0].selected, Is.True);
+            Assert.That(state.progression.worlds[1].selected, Is.False);
+            Assert.That(state.progression.campaignWorldId,
+                Is.EqualTo("sunny-island"));
+            Assert.That(state.progression.adventureComplete, Is.False);
+        }
+
+        [Test]
+        public void SelectWorldRowsCarryRegionalTotals()
+        {
+            var service = MultiService(MultiProfile(0));
+            var state = service.Snapshot();
+            var sunny = state.progression.worlds[0];
+            Assert.That(sunny.completedEvents, Is.EqualTo(0));
+            Assert.That(sunny.requiredEvents, Is.EqualTo(24),
+                "24 authored regular events gate the finales");
+            Assert.That(sunny.stars, Is.EqualTo(0));
+            Assert.That(sunny.requiredStars, Is.EqualTo(30));
+            Assert.That(sunny.finalesOpen, Is.False);
+            Assert.That(sunny.completedFinales, Is.EqualTo(0));
+            Assert.That(sunny.totalFinales, Is.EqualTo(2));
+            Assert.That(sunny.worldComplete, Is.False);
+            Assert.That(sunny.rewardVehicleIds,
+                Is.EquivalentTo(new[] { "car-02", "motorcycle-02" }),
+                "the world-completion reward pair rides the row");
+            Assert.That(sunny.nameEn, Is.EqualTo("Sunny Island"));
+            Assert.That(sunny.nameHe, Is.Not.Empty,
+                "the bilingual name travels with the row");
+
+            // Locked worlds still report honest parked progress.
+            var progressing = MultiProfile(0);
+            CampaignTestFixture.CompleteWorldEvents(progressing,
+                "redrock-canyon", 3, 2);
+            var other = MultiService(progressing,
+                new ProfileStore(Path.Combine(directory, "other"),
+                    serializer));
+            var locked = other.Snapshot().progression.worlds[1];
+            Assert.That(locked.available, Is.False);
+            Assert.That(locked.lockedReason, Is.EqualTo("worldLocked"));
+            Assert.That(locked.completedEvents, Is.EqualTo(3),
+                "progress parked in a closed world stays observable");
+            Assert.That(locked.stars, Is.EqualTo(5));
+        }
+
+        [Test]
+        public void SelectWorldRejectsUnknownAndLockedWithoutMutation()
+        {
+            var service = MultiService(MultiProfile(0));
+            var before = service.Snapshot().progression.campaignWorldId;
+
+            var unknown = service.Execute(Cmd("campaign.selectWorld",
+                P("worldId", "nowhere")));
+            Assert.That(unknown.status,
+                Is.EqualTo(CommandResult.Rejected));
+            Assert.That(unknown.code, Is.EqualTo("unknownWorld"));
+            Assert.That(service.Snapshot().progression.campaignWorldId,
+                Is.EqualTo(before),
+                "a rejected selection must not mutate the current world");
+
+            var locked = service.Execute(Cmd("campaign.selectWorld",
+                P("worldId", "redrock-canyon")));
+            Assert.That(locked.status,
+                Is.EqualTo(CommandResult.Rejected));
+            Assert.That(locked.code, Is.EqualTo("worldLocked"),
+                "a closed world rejects with the same code its row carries");
+            Assert.That(service.Snapshot().progression.campaignWorldId,
+                Is.EqualTo(before),
+                "a locked pick must not partially mutate selection");
+            Assert.That(service.Snapshot().progression.worlds[0].selected,
+                Is.True, "the selected marker stays on the open world");
+        }
+
+        [Test]
+        public void SelectWorldDeduplicatesByCommandIdentity()
+        {
+            var service = MultiService(MultiProfile(0));
+            var first = service.Execute(Cmd("campaign.selectWorld",
+                P("worldId", "sunny-island"), "cmd-select-1"));
+            Assert.That(first.status, Is.EqualTo(CommandResult.Applied));
+            Assert.That(first.duplicate, Is.False);
+            var replay = service.Execute(Cmd("campaign.selectWorld",
+                P("worldId", "sunny-island"), "cmd-select-1"));
+            Assert.That(replay.duplicate, Is.True,
+                "an identical commandId replays the cached result");
+            Assert.That(replay.status, Is.EqualTo(first.status));
+            Assert.That(replay.tick, Is.EqualTo(first.tick),
+                "the duplicate returns the stored boundary tick — it is "
+                    + "not applied a second time");
+            // The same id with a different world is an identity conflict,
+            // never a second selection.
+            var conflict = service.Execute(Cmd("campaign.selectWorld",
+                P("worldId", "redrock-canyon"), "cmd-select-1"));
+            Assert.That(conflict.status,
+                Is.EqualTo(CommandResult.Rejected));
+            Assert.That(conflict.code, Is.EqualTo("identityConflict"));
+            Assert.That(service.Snapshot().progression.campaignWorldId,
+                Is.EqualTo("sunny-island"));
+        }
+
+        [Test]
+        public void SelectWorldResetsOnProfileSwitch()
+        {
+            var store = Store();
+            var fresh = MultiProfile(0);
+            store.Save(fresh);
+            var advancing = MultiProfile(1);
+            // Sunny complete -> redrock is the first accessible
+            // unfinished world for this profile.
+            CampaignTestFixture.CompleteWorldEvents(advancing,
+                "sunny-island", 24, 6);
+            CampaignTestFixture.CompleteWorldFinales(advancing,
+                "sunny-island", false);
+            store.Save(advancing);
+            var finished = MultiProfile(2);
+            foreach (var worldId in CampaignTestFixture.WorldIds)
+            {
+                CampaignTestFixture.CompleteWorldEvents(finished,
+                    worldId, 24, 6);
+                CampaignTestFixture.CompleteWorldFinales(finished,
+                    worldId, false);
+            }
+            store.Save(finished);
+
+            var service = Service(CampaignTestFixture.MultiCatalog(),
+                store);
+            Assert.That(service.Execute(Cmd("profile.select",
+                P("slot", "0"))).status, Is.EqualTo(CommandResult.Applied));
+            Assert.That(service.Snapshot().progression.campaignWorldId,
+                Is.EqualTo("sunny-island"),
+                "a fresh profile selects the first world");
+
+            // Switching to the advancing profile resets the transient
+            // selection to ITS first accessible unfinished world.
+            Assert.That(service.Execute(Cmd("profile.select",
+                P("slot", "1"))).status, Is.EqualTo(CommandResult.Applied));
+            var state = service.Snapshot();
+            Assert.That(state.progression.campaignWorldId,
+                Is.EqualTo("redrock-canyon"),
+                "profile switch selects the first accessible unfinished world");
+            Assert.That(state.progression.worlds[1].selected, Is.True);
+            Assert.That(state.progression.worlds[1].available, Is.True);
+            Assert.That(state.progression.adventureComplete, Is.False);
+
+            // An explicit pick sticks for the active profile but is
+            // transient — it does not follow the switch back.
+            Assert.That(service.Execute(Cmd("campaign.selectWorld",
+                P("worldId", "sunny-island"))).status,
+                Is.EqualTo(CommandResult.Applied));
+            Assert.That(service.Snapshot().progression.campaignWorldId,
+                Is.EqualTo("sunny-island"));
+            Assert.That(service.Execute(Cmd("profile.select",
+                P("slot", "0"))).status, Is.EqualTo(CommandResult.Applied));
+            Assert.That(service.Snapshot().progression.campaignWorldId,
+                Is.EqualTo("sunny-island"),
+                "the fresh profile's selection resets on switch");
+            Assert.That(service.Execute(Cmd("profile.select",
+                P("slot", "1"))).status, Is.EqualTo(CommandResult.Applied));
+            Assert.That(service.Snapshot().progression.campaignWorldId,
+                Is.EqualTo("redrock-canyon"),
+                "the explicit sunny pick must not leak across profiles");
+
+            // Every world complete: the adventure-complete fact lands and
+            // the selection falls back to the last world.
+            Assert.That(service.Execute(Cmd("profile.select",
+                P("slot", "2"))).status, Is.EqualTo(CommandResult.Applied));
+            state = service.Snapshot();
+            Assert.That(state.progression.adventureComplete, Is.True,
+                "all three worlds complete -> adventureComplete");
+            Assert.That(state.progression.campaignWorldId,
+                Is.EqualTo("snowy-peaks"),
+                "a finished adventure selects the last world");
+            Assert.That(state.progression.worlds[2].selected, Is.True);
+        }
+
+        [Test]
+        public void SelectWorldAppliesWhilePaused()
+        {
+            var advancing = MultiProfile(0);
+            CampaignTestFixture.CompleteWorldEvents(advancing,
+                "sunny-island", 24, 6);
+            CampaignTestFixture.CompleteWorldFinales(advancing,
+                "sunny-island", false);
+            var service = MultiService(advancing);
+            Assert.That(service.Execute(Cmd("ui.navigate",
+                P("screen", "sandbox"))).status,
+                Is.EqualTo(CommandResult.Applied));
+            Assert.That(service.Execute(Cmd("pause.toggle", null)).status,
+                Is.EqualTo(CommandResult.Applied));
+            Assert.That(service.Snapshot().paused, Is.True);
+            // Selection is transient menu state — the pause boundary
+            // never gates it.
+            var applied = service.Execute(Cmd("campaign.selectWorld",
+                P("worldId", "sunny-island")));
+            Assert.That(applied.status, Is.EqualTo(CommandResult.Applied),
+                "paused selection failed: " + applied.code);
+            Assert.That(service.Snapshot().progression.campaignWorldId,
+                Is.EqualTo("sunny-island"));
+        }
+
+        [Test]
+        public void CampaignStartResolvesTheOwningWorldNotSelection()
+        {
+            var profile = MultiProfile(0);
+            CampaignTestFixture.CompleteWorldEvents(profile,
+                "sunny-island", 24, 6);
+            CampaignTestFixture.CompleteWorldFinales(profile,
+                "sunny-island", false);
+            var service = MultiService(profile);
+            // Sunny is selected; a redrock event still resolves its own
+            // world and applies because redrock is open.
+            Assert.That(service.Snapshot().progression.campaignWorldId,
+                Is.EqualTo("redrock-canyon"),
+                "default selection is the first unfinished world");
+            Assert.That(service.Execute(Cmd("campaign.selectWorld",
+                P("worldId", "sunny-island"))).status,
+                Is.EqualTo(CommandResult.Applied));
+            var crossWorld = service.Execute(Cmd("campaign.start",
+                P("eventId", "canyon-dash-car-circuit",
+                    "vehicleId", "car-01", "difficulty", "easy")));
+            Assert.That(crossWorld.status,
+                Is.EqualTo(CommandResult.Applied),
+                "campaign.start checks the event's own world, not the "
+                    + "selected one: " + crossWorld.code);
+            Assert.That(service.Execute(Cmd("race.exit", null)).status,
+                Is.EqualTo(CommandResult.Applied));
+            // And the inverse: with redrock selected a sunny event still
+            // starts because sunny stays open once completed.
+            var back = service.Execute(Cmd("campaign.start",
+                P("eventId", "harbor-hop-car-circuit",
+                    "vehicleId", "car-01", "difficulty", "easy")));
+            Assert.That(back.status, Is.EqualTo(CommandResult.Applied),
+                "a completed world stays replayable: " + back.code);
+            Assert.That(service.Execute(Cmd("race.exit", null)).status,
+                Is.EqualTo(CommandResult.Applied));
+            // A locked world rejects through the same path regardless of
+            // what the picker shows.
+            var locked = service.Execute(Cmd("campaign.start",
+                P("eventId", "snowpine-circuit-car-circuit",
+                    "vehicleId", "car-01", "difficulty", "easy")));
+            Assert.That(locked.status,
+                Is.EqualTo(CommandResult.Rejected));
+            Assert.That(locked.code, Is.EqualTo("worldLocked"));
+        }
+
+        [Test]
+        public void ResultsContinueReturnsToTheRacedWorld()
+        {
+            var profile = MultiProfile(0);
+            CampaignTestFixture.CompleteWorldEvents(profile,
+                "sunny-island", 24, 6);
+            CampaignTestFixture.CompleteWorldFinales(profile,
+                "sunny-island", false);
+            var service = MultiService(profile);
+            // Select sunny, then race a redrock event through the raw
+            // command path — continue must return the map to the world
+            // the result belongs to.
+            Assert.That(service.Execute(Cmd("campaign.selectWorld",
+                P("worldId", "sunny-island"))).status,
+                Is.EqualTo(CommandResult.Applied));
+            Assert.That(service.Execute(Cmd("campaign.start",
+                P("eventId", "canyon-dash-car-circuit",
+                    "vehicleId", "car-01", "difficulty", "easy"))).status,
+                Is.EqualTo(CommandResult.Applied));
+            var finished = StepUntilResult(service, 9000);
+            Assert.That(finished.result, Is.Not.Null);
+            Assert.That(service.Execute(Cmd("results.continue", null))
+                .status, Is.EqualTo(CommandResult.Applied));
+            var state = service.Snapshot();
+            Assert.That(state.screen, Is.EqualTo("campaign"));
+            Assert.That(state.progression.campaignWorldId,
+                Is.EqualTo("redrock-canyon"),
+                "continue returns the map to the world that was raced");
+        }
+
+        [Test]
+        public void SelectWorldRejectsInsideLanAndHonestGates()
+        {
+            var service = MultiService(MultiProfile(0));
+            // No content / no profile gates, in order.
+            var bare = new FoundationService(Store(), "en", RunId);
+            var noContent = bare.Execute(Cmd("campaign.selectWorld",
+                P("worldId", "sunny-island")));
+            Assert.That(noContent.status,
+                Is.EqualTo(CommandResult.Rejected));
+            Assert.That(noContent.code, Is.EqualTo("contentUnavailable"));
+            var bound = Service(CampaignTestFixture.MultiCatalog(),
+                Store());
+            var noProfile = bound.Execute(Cmd("campaign.selectWorld",
+                P("worldId", "sunny-island")));
+            Assert.That(noProfile.status,
+                Is.EqualTo(CommandResult.Rejected));
+            Assert.That(noProfile.code,
+                Is.EqualTo("requiresSelectedProfile"));
+            var availability = Availability(bound, "campaign.selectWorld");
+            Assert.That(availability.available, Is.False);
+            Assert.That(availability.reason,
+                Is.EqualTo("requiresSelectedProfile"),
+                "discovery must mirror the handler's gate");
+
+            var link = new LanSessionTests.FakeLanLink();
+            var lan = LanSessionTests.StandaloneService(link,
+                new LanSessionTests.FakeLanProbe(),
+                service.Snapshot().savedProfile.id);
+            service.SetLanSession(lan);
+            Assert.That(service.Execute(Cmd("lan.host",
+                P("port", "47777"))).status,
+                Is.EqualTo(CommandResult.Applied));
+            var blocked = service.Execute(Cmd("campaign.selectWorld",
+                P("worldId", "sunny-island")));
+            Assert.That(blocked.status,
+                Is.EqualTo(CommandResult.Rejected));
+            Assert.That(blocked.code, Is.EqualTo("networkActive"),
+                "the solo picker stays fenced off a live LAN session");
+            Assert.That(service.Snapshot().progression.campaignWorldId,
+                Is.EqualTo("sunny-island"));
+        }
+
+        [Test]
+        public void WorldRowsAreDeepCopiedAcrossSnapshots()
+        {
+            var service = MultiService(MultiProfile(0));
+            var snapshot = service.Snapshot();
+            Assert.That(snapshot.progression.worlds.Count,
+                Is.EqualTo(3));
+            snapshot.progression.worlds[0].worldId = "tampered";
+            snapshot.progression.worlds[1].available = true;
+            snapshot.progression.worlds[1].lockedReason = "";
+            snapshot.progression.worlds[0].rewardVehicleIds.Add("x");
+            snapshot.progression.worlds.Clear();
+            snapshot.progression.adventureComplete = true;
+            var fresh = service.Snapshot();
+            Assert.That(fresh.progression.worlds.Count, Is.EqualTo(3));
+            Assert.That(fresh.progression.worlds[0].worldId,
+                Is.EqualTo("sunny-island"));
+            Assert.That(fresh.progression.worlds[1].available, Is.False);
+            Assert.That(fresh.progression.worlds[1].lockedReason,
+                Is.EqualTo("worldLocked"));
+            Assert.That(fresh.progression.worlds[0].rewardVehicleIds,
+                Is.EquivalentTo(new[] { "car-02", "motorcycle-02" }));
+            Assert.That(fresh.progression.adventureComplete, Is.False);
+
+            // ProgressionState.Copy must keep the new rows deeply
+            // independent too.
+            var copy = fresh.progression.Copy();
+            copy.worlds[0].stars = 99;
+            copy.worlds[0].rewardVehicleIds.Clear();
+            copy.worlds.Clear();
+            Assert.That(fresh.progression.worlds.Count, Is.EqualTo(3));
+            Assert.That(fresh.progression.worlds[0].stars, Is.EqualTo(0));
+            Assert.That(fresh.progression.worlds[0].rewardVehicleIds.Count,
+                Is.EqualTo(2));
         }
 
         // --- quick race / time trial --------------------------------------
@@ -396,13 +801,16 @@ namespace FamilyRacing.Tests
                 Is.EqualTo(CommandResult.Applied));
             foreach (var action in new[]
             {
-                "campaign.open", "quickRace.open", "timeTrial.open",
+                "campaign.open", "campaign.selectWorld", "quickRace.open",
+                "timeTrial.open",
                 "garage.open", "bounties.open",
                 "campaign.start", "quickRace.start", "timeTrial.start",
                 "results.retry", "results.continue"
             })
             {
-                var command = action == "campaign.start"
+                var command = action == "campaign.selectWorld"
+                    ? Cmd(action, P("worldId", "sunny-island"))
+                    : action == "campaign.start"
                     ? Cmd(action, P("eventId", "harbor-hop-car-circuit",
                         "vehicleId", "car-01", "difficulty", "easy"))
                     : action == "quickRace.start"

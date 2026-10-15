@@ -126,7 +126,7 @@ python Tools\DrivingScenario.py <dir>\connection.json --evidence <new-evidence-d
 python Tools\FinishDeliveryScenario.py <player.exe> --evidence <new-dir>
 # Real profile store + graceful exit (WM_CLOSE) + restart:
 python Tools\NormalProfileScenario.py <player.exe> --evidence <new-dir>
-# Complete external gameplay-loop qualification (schema 6): fresh
+# Complete external gameplay-loop qualification (schema 7): fresh
 # profile -> tutorial -> campaign/quick-race/time-trial progression,
 # real failed-save + retrySave, process-restart persistence, and a
 # hostile-delivery LAN segment (kill/AI-takeover/rejoin, dedup,
@@ -139,7 +139,8 @@ python Tools\GameplayLoopScenario.py --connections <run>\connection.json [more d
 python Tools\GameplayLoopScenario.py --launch <player.exe> [--players 2-4] --scope smoke|campaign|lan --evidence <new-dir>
 # Test-only fixture mode (--fixture) labels every trace and is never
 # real-player evidence.
-# Multi-instance LAN lifecycle over the real UDP transport (schema 5).
+# Multi-instance LAN lifecycle over the real UDP transport (schema 7 —
+# LAN protocol stays 3; the observation schema moved on).
 # The mandated interface attaches to 2-4 independently launched players —
 # the first connection is driven as the host; Android descriptors are
 # per-device ADB-forwarded loopback endpoints:
@@ -312,7 +313,7 @@ contiguous `sequence`, `monotonicMs`, `tick`: `snapshot`, `state`,
 `delta`, `result`, `discovery`, `lookup`, `health`, `screenshot`,
 `finished`.
 `snapshot`/`state` records carry a complete `state` payload and
-`stateSchemaVersion` (currently `6`: on top of the schema-2 `driving`
+`stateSchemaVersion` (currently `7`: on top of the schema-2 `driving`
 slice the state adds `network` (session role/phase, roster, shared pause,
 pending operations, discovered hosts, result deliveries — always
 populated, idle/none without a session), `networkRace` (host-confirmed
@@ -327,7 +328,13 @@ session — `race` for campaign/quickRace, `trial` for timeTrial, the
 finalized `result`, and `tuningSource` naming the human seat's tune
 provenance) and `progression` (the resolved campaign access rows, bounty
 tray and unresolved-reward gate — present on every boundary, menus and
-failed saves included)); consumers
+failed saves included); schema 7 adds `progression.worlds` (every
+authored campaign world in order — bilingual names, availability,
+`lockedReason`, regional completion/star totals, finale counts,
+completion reward vehicles, `worldComplete` and the `selected` marker)
+plus `progression.adventureComplete`, and retargets
+`progression.campaignWorldId`/`campaignEvents` at the SELECTED world));
+consumers
 must reject unsupported schemas before trusting driving evidence. The
 `hello` frame, `connection.json` and `discovery` records all advertise
 the same `stateSchemaVersion`.
@@ -378,7 +385,7 @@ input; after `finish` the run is closed (`captureClosed` rejects new
 controllers/commands); `capture-status.json` reports `captureComplete`
 only after the trace is flushed and the final status stamped.
 
-## Gameplay loop commands and screens (schema 6)
+## Gameplay loop commands and screens (schema 7)
 
 The M5 loop surface is command-first: every screen the family UI shows
 is reachable for an agent through the same `FoundationService.Execute`
@@ -392,9 +399,23 @@ authored purchase/equip.
   target them, each open checks gameplay content + a selected profile,
   and every open rejects `raceActive` while a race runs or
   `networkActive` inside a LAN session.
+- `campaign.selectWorld {worldId}` (M6 Task 3) moves the transient
+  campaign-world pick: `unknownWorld` for an id no authored world owns,
+  `worldLocked` for a world the profile has not unlocked — both reject
+  without touching the current selection. The pick is session state,
+  never persisted: profile switches re-derive it (the first accessible
+  unfinished world, or the last world once the whole adventure is
+  complete), it stays legal while paused, and a LAN session fences it
+  with `networkActive` like every other solo-lifecycle command. The
+  pick decides which world `progression.campaignWorldId` and
+  `campaignEvents` describe — it never gates event starts.
 - `campaign.start {eventId, vehicleId, difficulty}` enforces the
-  campaign traversal gate (`eventLocked` on unavailable regulars and
+  campaign traversal gate against the event's OWNING world
+  (`worldLocked` while that world is closed — independent of the
+  selected world, `eventLocked` on unavailable regulars and
   finales) and profile vehicle ownership (`vehicleLocked`).
+  `results.continue` from a campaign result re-selects the world the
+  raced event belongs to so the map returns to the raced context.
 - `quickRace.start {courseId, classId, vehicleId, difficulty}` resolves
   the authored circuit event for the course+class pick — a pick with no
   authored circuit rejects `unknownEvent`.
@@ -424,7 +445,7 @@ Loop screens reject `raceActive`/`networkActive` during a race or LAN
 session; progression writes (`upgrade.purchase`, `cosmetic.equip`) are
 additionally fenced off a running solo race.
 
-## LAN commands and screens (schema 6)
+## LAN commands and screens (schema 7)
 
 The five LAN screens are `lan-browser` (the only user-navigable LAN
 screen — a `ui.navigate` target), plus the phase-derived `lan-lobby`,

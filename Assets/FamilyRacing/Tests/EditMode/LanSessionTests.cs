@@ -431,7 +431,7 @@ namespace FamilyRacing.Tests
             Assert.That(NetworkSettings.LanProtocolVersion, Is.EqualTo(3));
             Assert.That(NetworkSettings.GameplayVersion,
                 Is.EqualTo("gameplay-4"));
-            Assert.That(NetworkSettings.StateSchemaVersion, Is.EqualTo(6));
+            Assert.That(NetworkSettings.StateSchemaVersion, Is.EqualTo(7));
         }
 
         [Test]

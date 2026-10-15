@@ -26,8 +26,11 @@ namespace FamilyRacing.Core.Networking
         // summary on PresentationState — never frame-sized buffers, and
         // nothing that crosses the gameplay wire DTO. Schema 6 (M5
         // Task 4) is again additive: the local solo-race slice and the
-        // network session's current-race identity.
-        public const int StateSchemaVersion = 6;
+        // network session's current-race identity. Schema 7 (M6 Task 3)
+        // is additive once more: the progression surface carries the
+        // ordered world rows (`progression.worlds`) and the
+        // adventure-complete verdict — pure observation, no wire change.
+        public const int StateSchemaVersion = 7;
 
         // Compatibility fingerprint for gameplay rules: peers must report
         // the exact same value before a slot is allocated. Content version

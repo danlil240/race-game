@@ -66,6 +66,66 @@ namespace FamilyRacing.Core.Foundation
             return Result(command, CommandResult.Applied, "");
         }
 
+        // M6 Task 3: the campaign world's transient pick. Every gate is
+        // evaluated BEFORE any mutation — an unknown id reports
+        // "unknownWorld", a closed world the same "worldLocked" its
+        // WorldAccess row (and every racing verdict) carries. The pick
+        // never writes the profile: it is session state the snapshot
+        // surface reflects, so pausing never fences it.
+        private CommandResult CampaignSelectWorld(GameCommand command)
+        {
+            if (gameplayCatalog == null || gameplayCatalog.IsLegacy
+                || gameplayCatalog.Driving == null)
+                return Result(command, CommandResult.Rejected,
+                    "contentUnavailable");
+            if (activeSlot < 0 || savedProfile == null)
+                return Result(command, CommandResult.Rejected,
+                    "requiresSelectedProfile");
+            var worldId = command.Parameters["worldId"];
+            if (gameplayCatalog.FindCampaign(worldId) == null)
+                return Result(command, CommandResult.Rejected,
+                    "unknownWorld");
+            var world = AdventureRules.FindWorld(
+                AdventureRules.Evaluate(gameplayCatalog, savedProfile),
+                worldId);
+            if (world == null || !world.available)
+                return Result(command, CommandResult.Rejected,
+                    AdventureRules.LockedWorldReason);
+            selectedWorldId = worldId;
+            return Result(command, CommandResult.Applied, "");
+        }
+
+        // The selected world for the observation surface: an explicit
+        // pick wins while it still names an open world (availability is
+        // monotonic — a completed world can never relock), otherwise the
+        // first accessible unfinished world, or the last world when the
+        // whole adventure is complete. The fallback also repairs a stale
+        // pick when a catalog rebind renamed the worlds.
+        private string ResolveSelectedWorldId(AdventureAccess access)
+        {
+            if (access == null || access.worlds == null
+                || access.worlds.Count == 0)
+                return "";
+            var current = AdventureRules.FindWorld(access,
+                selectedWorldId);
+            if (current != null && current.available)
+                return selectedWorldId;
+            WorldAccess last = null;
+            foreach (var world in access.worlds)
+            {
+                if (world == null) continue;
+                last = world;
+                if (world.available && world.campaign != null
+                    && !world.campaign.worldComplete)
+                {
+                    selectedWorldId = world.worldId;
+                    return selectedWorldId;
+                }
+            }
+            selectedWorldId = last != null ? last.worldId : "";
+            return selectedWorldId;
+        }
+
         // campaign.start / quickRace.start / timeTrial.start: build the
         // mode's pinned request from its own parameters and hand it to
         // the shared start path. Field mapping is the only difference
@@ -167,15 +227,34 @@ namespace FamilyRacing.Core.Foundation
                 return Result(command, CommandResult.Rejected,
                     "rewardUnresolved");
             var mode = soloRace.Mode;
+            // The campaign map re-opens on the world the finished result
+            // belongs to — racing another world's event directly (the
+            // owning world, never the picker selection, gates the start)
+            // must not strand the map on the wrong map view.
+            var racedEventId = mode == "campaign"
+                ? soloRace.Result.eventId : null;
             EndSoloRace("raceExit", command);
             // EndSoloRace lands on practice; continue returns to the
             // mode's own setup surface so the loop reads as a loop.
             if (screen == ScreenPractice)
                 screen = LoopReturnScreen(mode);
+            if (racedEventId != null && gameplayCatalog != null)
+            {
+                var owner = gameplayCatalog.FindCampaignForEvent(
+                    racedEventId);
+                if (owner != null)
+                {
+                    var world = AdventureRules.FindWorld(
+                        AdventureRules.Evaluate(gameplayCatalog,
+                            savedProfile), owner.worldId);
+                    if (world != null && world.available)
+                        selectedWorldId = owner.worldId;
+                }
+            }
             return Result(command, CommandResult.Applied, "");
         }
 
-        // --- progression observation slice (schema 6) ---------------------
+        // --- progression observation slice (schema 7) ---------------------
 
         // The resolved campaign/bounty/reward-gate view rebuilt from the
         // live profile + bound catalog on every snapshot. Reads the same
@@ -193,7 +272,53 @@ namespace FamilyRacing.Core.Foundation
             state.available = true;
             state.contentIdentity =
                 gameplayCatalog.CompatibilityVersion ?? "none";
-            var campaign = gameplayCatalog.Campaign;
+            // Schema-7 (M6 Task 3): every authored world publishes a row
+            // in catalog order, resolved through the same AdventureRules
+            // verdict campaign.selectWorld and the mode gates enforce —
+            // the stream, the UI cards and the command surface can never
+            // disagree about availability.
+            var adventure = AdventureRules.Evaluate(gameplayCatalog,
+                savedProfile);
+            state.adventureComplete = adventure.complete;
+            var selectedId = ResolveSelectedWorldId(adventure);
+            foreach (var world in adventure.worlds)
+            {
+                if (world == null || world.campaign == null) continue;
+                var definition = gameplayCatalog.FindCampaign(
+                    world.worldId);
+                var row = new WorldState
+                {
+                    worldId = world.worldId,
+                    nameEn = definition != null
+                        ? definition.nameEn ?? "" : "",
+                    nameHe = definition != null
+                        ? definition.nameHe ?? "" : "",
+                    selected = world.worldId == selectedId,
+                    available = world.available,
+                    lockedReason = world.lockedReason ?? "",
+                    completedEvents = world.campaign.completedEvents,
+                    requiredEvents =
+                        world.campaign.requiredEventCompletions,
+                    stars = world.campaign.regionalStars,
+                    requiredStars =
+                        world.campaign.requiredRegionalStars,
+                    finalesOpen = world.campaign.finalesAvailable,
+                    completedFinales =
+                        world.campaign.completedFinaleIds.Count,
+                    totalFinales = definition != null
+                        && definition.finales != null
+                            ? definition.finales.Count : 0,
+                    worldComplete = world.campaign.worldComplete
+                };
+                foreach (var vehicleId in
+                    world.campaign.worldRewardVehicleIds)
+                    row.rewardVehicleIds.Add(vehicleId);
+                state.worlds.Add(row);
+            }
+            // The campaign event view describes the SELECTED world; the
+            // per-event lock verdicts keep coming from that world's own
+            // CampaignRules read.
+            var campaign = gameplayCatalog.FindCampaign(selectedId);
             if (campaign != null)
             {
                 state.campaignWorldId = campaign.worldId ?? "";

@@ -51,6 +51,13 @@ namespace FamilyRacing.Core.Foundation
         // any terminal verdict and on profile switches.
         private RaceResult unresolvedResult;
         private RaceRewardContext unresolvedContext;
+        // M6 Task 3: the transient campaign-world pick — which world's
+        // events the campaign map and `campaignEvents` describe. Session
+        // state only, never persisted: it resets on profile switch to
+        // the new profile's first accessible unfinished world (the last
+        // authored world when the whole adventure is complete) and is
+        // re-derived defensively whenever it stops naming an open world.
+        private string selectedWorldId;
 
         // True while a finalized result's progression transaction has a
         // retryable commit outstanding — the gate every progression-race

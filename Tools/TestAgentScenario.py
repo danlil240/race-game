@@ -82,7 +82,7 @@ class IntegrityTests(unittest.TestCase):
             validate_state_schema(record, record["state"])
 
     def test_unsupported_schemas_are_rejected_before_driving_evidence(self):
-        for schema in (0, 7, "2", True):
+        for schema in (0, 8, "2", True):
             record = self.record()
             record["stateSchemaVersion"] = schema
             with self.subTest(schema=schema), self.assertRaises(AssertionError):
@@ -209,6 +209,74 @@ class IntegrityTests(unittest.TestCase):
             lambda s: s["progression"].update(campaignEvents=["evt"]),
         ):
             state = self.schema6_state()
+            mutate(state)
+            record["state"] = state
+            with self.subTest(mutate=mutate), self.assertRaises(AssertionError):
+                validate_state_schema(record, state)
+
+    def schema7_state(self, bound=False):
+        """A minimal schema-7 boundary: schema-6 shape plus the ordered
+        world surface (`worlds` rows + `adventureComplete`)."""
+        state = self.schema6_state()
+        state["stateSchemaVersion"] = 7
+        state["progression"]["worlds"] = []
+        state["progression"]["adventureComplete"] = False
+        if bound:
+            state["progression"].update({
+                "available": True,
+                "contentIdentity": "full-content-1|fixture",
+                "campaignWorldId": "sunny-island",
+            })
+            state["progression"]["worlds"] = [
+                {"worldId": "sunny-island", "nameEn": "Sunny Island",
+                 "nameHe": "האי השמשי", "selected": True,
+                 "available": True, "lockedReason": "",
+                 "completedEvents": 0, "requiredEvents": 4,
+                 "stars": 0, "requiredStars": 1,
+                 "finalesOpen": False, "completedFinales": 0,
+                 "totalFinales": 2, "worldComplete": False,
+                 "rewardVehicleIds": ["car-02", "motorcycle-02"]},
+                {"worldId": "redrock-canyon", "nameEn": "Redrock Canyon",
+                 "nameHe": "קניון אבן אדומה", "selected": False,
+                 "available": False, "lockedReason": "worldLocked",
+                 "completedEvents": 0, "requiredEvents": 4,
+                 "stars": 0, "requiredStars": 1,
+                 "finalesOpen": False, "completedFinales": 0,
+                 "totalFinales": 2, "worldComplete": False,
+                 "rewardVehicleIds": ["car-03", "motorcycle-03"]},
+            ]
+        return state
+
+    def test_schema_7_boundary_includes_world_rows(self):
+        record = self.record()
+        record["stateSchemaVersion"] = 7
+        # Unbound catalog: the keys exist with an empty world list.
+        record["state"] = self.schema7_state()
+        validate_state_schema(record, record["state"])
+        # Bound catalog: world rows carry selection + honest locks.
+        bound = self.schema7_state(bound=True)
+        record["state"] = bound
+        validate_state_schema(record, bound)
+
+    def test_schema_7_rejects_missing_or_forged_worlds(self):
+        record = self.record()
+        record["stateSchemaVersion"] = 7
+        for mutate in (
+            lambda s: s["progression"].pop("worlds"),
+            lambda s: s["progression"].pop("adventureComplete"),
+            lambda s: s["progression"].update(worlds="all"),
+            lambda s: s["progression"].update(adventureComplete="yes"),
+            lambda s: s["progression"]["worlds"][0].pop("lockedReason"),
+            lambda s: s["progression"]["worlds"][0].update(selected="yes"),
+            lambda s: s["progression"]["worlds"][0].update(worldId=""),
+            lambda s: s["progression"]["worlds"][0].update(available=False),
+            lambda s: s["progression"]["worlds"][1].update(available=True),
+            # Two selected rows are impossible: exactly one view is live.
+            lambda s: s["progression"]["worlds"][1].update(selected=True),
+            # A selected row must own the campaign view identity.
+            lambda s: s["progression"].update(campaignWorldId="redrock-canyon"),
+        ):
+            state = self.schema7_state(bound=True)
             mutate(state)
             record["state"] = state
             with self.subTest(mutate=mutate), self.assertRaises(AssertionError):

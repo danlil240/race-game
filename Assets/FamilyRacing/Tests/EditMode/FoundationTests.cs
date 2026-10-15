@@ -841,6 +841,8 @@ namespace FamilyRacing.Tests
                 // M5 Task 10: the semantic loop surface — screens,
                 // mode starts and results lifecycle.
                 "campaign.open", "campaign.start",
+                // M6 Task 3: the transient campaign-world pick.
+                "campaign.selectWorld",
                 "quickRace.open", "quickRace.start",
                 "timeTrial.open", "timeTrial.start",
                 "garage.open", "bounties.open",

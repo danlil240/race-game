@@ -9,13 +9,14 @@ namespace FamilyRacing.Core.Foundation
     // Serializable full-state DTO. Every Snapshot() call returns an
     // independent deep copy; callers can freely mutate what they receive.
     // stateSchemaVersion 3 adds the network session slice, 4 the physical
-    // surfaces, 5 the render-profile/performance presentation slice, and
-    // 6 the local solo-race slice plus the network current-race identity.
-    // Schema 6 is the M5 observation contract: the solo-race slice, the
-    // network current-race identity AND the resolved progression surface
-    // (campaign access, bounty tray, unresolved-reward gate) all belong
-    // to it; consumers must negotiate the schema, never silently
-    // reinterpret it.
+    // surfaces, 5 the render-profile/performance presentation slice, 6
+    // the local solo-race slice plus the resolved progression surface,
+    // and 7 the ordered multiworld rows on that surface
+    // (`progression.worlds` + `progression.adventureComplete`).
+    // Schema 7 is the M6 observation contract: the solo-race slice, the
+    // network current-race identity, the resolved progression surface
+    // AND the per-world availability/selection rows all belong to it;
+    // consumers must negotiate the schema, never silently reinterpret it.
     [Serializable]
     public sealed class FoundationState
     {
@@ -120,6 +121,13 @@ namespace FamilyRacing.Core.Foundation
         // purchases; `rewardUnresolvedRaceId` names the retained race.
         public bool rewardUnresolved;
         public string rewardUnresolvedRaceId = "";
+        // Schema-7 (M6 Task 3): every authored world in progression
+        // order with its availability, honest lock reason, regional
+        // counts and finale facts — the ordered multiworld surface the
+        // campaign selector and stream consumers share. `adventureComplete`
+        // is true only when every authored world is complete.
+        public List<WorldState> worlds = new List<WorldState>();
+        public bool adventureComplete;
 
         public ProgressionState Copy()
         {
@@ -135,12 +143,54 @@ namespace FamilyRacing.Core.Foundation
                 campaignFinalesOpen = campaignFinalesOpen,
                 campaignWorldComplete = campaignWorldComplete,
                 rewardUnresolved = rewardUnresolved,
-                rewardUnresolvedRaceId = rewardUnresolvedRaceId
+                rewardUnresolvedRaceId = rewardUnresolvedRaceId,
+                adventureComplete = adventureComplete
             };
             foreach (var row in campaignEvents)
                 copy.campaignEvents.Add(row != null ? row.Copy() : null);
             foreach (var row in bounties)
                 copy.bounties.Add(row != null ? row.Copy() : null);
+            foreach (var row in worlds)
+                copy.worlds.Add(row != null ? row.Copy() : null);
+            return copy;
+        }
+    }
+
+    // One authored campaign world's resolved state (schema 7): identity
+    // and display names, the availability verdict `campaign.selectWorld`
+    // would answer for it, the machine-safe lock reason, the regional
+    // completion/star counts against their required thresholds, finale
+    // availability plus completion counts, the completion reward
+    // vehicles and the world-complete fact. `selected` marks the world
+    // the `campaignWorldId`/`campaignEvents` view currently describes.
+    [Serializable]
+    public sealed class WorldState
+    {
+        public string worldId = "";
+        public string nameEn = "";
+        public string nameHe = "";
+        // True when this world is the transient selected world the
+        // campaign event view describes.
+        public bool selected;
+        public bool available;
+        // Stable machine code for a closed world ("" while open) —
+        // the same code campaign.selectWorld rejects with.
+        public string lockedReason = "";
+        public int completedEvents;
+        public int requiredEvents;
+        public int stars;
+        public int requiredStars;
+        public bool finalesOpen;
+        public int completedFinales;
+        public int totalFinales;
+        public bool worldComplete;
+        // The vehicles this world awards on completion (one per finale).
+        public List<string> rewardVehicleIds = new List<string>();
+
+        public WorldState Copy()
+        {
+            var copy = (WorldState)MemberwiseClone();
+            copy.rewardVehicleIds = new List<string>(rewardVehicleIds);
             return copy;
         }
     }

@@ -521,7 +521,7 @@ namespace FamilyRacing.Tests
             // benchmark epoch: the Task-2 additive presentation slice
             // (render profile/scale/frame-rate/performance summary) plus
             // the Task-3 courseVisualId; LAN protocol stays 2.
-            Assert.That(NetworkSettings.StateSchemaVersion, Is.EqualTo(6));
+            Assert.That(NetworkSettings.StateSchemaVersion, Is.EqualTo(7));
         }
     }
 }

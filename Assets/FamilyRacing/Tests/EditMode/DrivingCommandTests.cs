@@ -224,7 +224,7 @@ namespace FamilyRacing.Tests
             Assert.That(started.status, Is.EqualTo(CommandResult.Applied));
             var state = service.Snapshot();
             Assert.That(state.screen, Is.EqualTo("driving"));
-            Assert.That(state.stateSchemaVersion, Is.EqualTo(6));
+            Assert.That(state.stateSchemaVersion, Is.EqualTo(7));
             Assert.That(state.driving, Is.Not.Null);
             Assert.That(state.driving.vehicleId, Is.EqualTo("car-01"));
             Assert.That(state.driving.eventId, Is.EqualTo("intro-test"));

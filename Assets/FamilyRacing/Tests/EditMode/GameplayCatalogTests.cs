@@ -936,7 +936,7 @@ namespace FamilyRacing.Tests
             Assert.That(
                 FamilyRacing.Core.Networking.NetworkSettings
                     .StateSchemaVersion,
-                Is.EqualTo(6));
+                Is.EqualTo(7));
             Assert.That(Catalog().Version, Is.EqualTo("full-content-1"),
                 "full-content content identity");
         }

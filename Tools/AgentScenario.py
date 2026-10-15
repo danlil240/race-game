@@ -41,7 +41,11 @@ BOUNDARY_TYPES = {"snapshot", "state", "delta"}
 # the resolved progression surface (`progression`: campaign access,
 # bounty tray, unresolved-reward gate) — both present from the first
 # boundary, menus and failed saves included.
-SUPPORTED_STATE_SCHEMAS = {1, 2, 3, 4, 5, 6}
+# Schema 7 (M6 Task 3) adds the ordered multiworld surface:
+# `progression.worlds` carries every authored world row (availability,
+# lock reason, regional counts, finale facts, selection) and
+# `progression.adventureComplete` reports the whole-adventure verdict.
+SUPPORTED_STATE_SCHEMAS = {1, 2, 3, 4, 5, 6, 7}
 
 
 def _remove_path(state, path):
@@ -194,6 +198,68 @@ def validate_state_schema(event, state):
         validate_schema5_presentation(state)
     if schema >= 6:
         validate_schema6_progression(state)
+    if schema >= 7:
+        validate_schema7_worlds(state)
+
+
+def validate_schema7_worlds(state):
+    """The schema-7 ordered-multiworld contract a boundary must carry.
+
+    Additive over schema 6: `progression.worlds` publishes every
+    authored world in catalog order — identity, bilingual names,
+    availability with the machine-safe lock reason `campaign.selectWorld`
+    would reject with, regional completion/star counts, finale facts,
+    the completion reward vehicles and the world-complete verdict —
+    plus `progression.adventureComplete` for the whole-adventure state.
+    The keys exist on EVERY schema-7 boundary; an unbound catalog shows
+    an empty list, never a missing key.
+    """
+    progression = state["progression"]
+    for key in ("worlds", "adventureComplete"):
+        assert key in progression, "progression slice is missing " + key
+    assert type(progression["adventureComplete"]) is bool
+    worlds = progression["worlds"]
+    assert isinstance(worlds, list), "progression.worlds must be a list"
+    selected = []
+    for row in worlds:
+        assert isinstance(row, dict), "worlds rows are objects"
+        for key in ("worldId", "nameEn", "nameHe", "selected",
+                    "available", "lockedReason", "completedEvents",
+                    "requiredEvents", "stars", "requiredStars",
+                    "finalesOpen", "completedFinales", "totalFinales",
+                    "worldComplete", "rewardVehicleIds"):
+            assert key in row, "worlds row missing " + key
+        assert isinstance(row["worldId"], str) and row["worldId"], \
+            "worlds row worldId must be a non-empty string"
+        for key in ("nameEn", "nameHe", "lockedReason"):
+            assert isinstance(row[key], str), \
+                "worlds row " + key + " must be a string"
+        for key in ("selected", "available", "finalesOpen",
+                    "worldComplete"):
+            assert type(row[key]) is bool, \
+                "worlds row " + key + " must be a bool"
+        for key in ("completedEvents", "requiredEvents", "stars",
+                    "requiredStars", "completedFinales", "totalFinales"):
+            assert type(row[key]) is int, \
+                "worlds row " + key + " must be an int"
+        assert isinstance(row["rewardVehicleIds"], list), \
+            "worlds row rewardVehicleIds must be a list"
+        # The row's lock verdict mirrors the selectWorld rejection: a
+        # closed world must name its reason and an open one must not
+        # carry a stray code.
+        if row["available"]:
+            assert row["lockedReason"] == "", \
+                "an available world cannot report a lock reason"
+        else:
+            assert row["lockedReason"] != "", \
+                "a locked world must report its machine-safe reason"
+        if row["selected"]:
+            selected.append(row)
+    assert len(selected) <= 1, "at most one world row may be selected"
+    if selected:
+        assert progression.get("campaignWorldId") == \
+            selected[0]["worldId"], \
+            "campaignWorldId must name the selected world row"
 
 
 def validate_schema6_progression(state):

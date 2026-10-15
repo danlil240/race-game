@@ -20,15 +20,16 @@ from NetworkScenario import (LEGAL_PHASE_TRANSITIONS,
                              verify_lan_trace)
 
 
-def lan_state(tick=1, schema=6):
+def lan_state(tick=1, schema=7):
     """A minimal well-formed LAN state at the given schema marker.
 
     Schema 4 adds the compatibility surfaces (descriptor fingerprint,
     discovered-host compat). Schema 5 adds the additive presentation
     slice: the applied render profile and the bounded performance summary
-    key. Schema 6 (the current REQUIRED_LAN_SCHEMA) adds the local-loop
-    slices: `soloRace` (null inside a LAN session) and the resolved
-    `progression` surface present on every boundary."""
+    key. Schema 6 adds the local-loop slices: `soloRace` (null inside a
+    LAN session) and the resolved `progression` surface present on every
+    boundary. Schema 7 (the current REQUIRED_LAN_SCHEMA) adds the ordered
+    multiworld rows and `adventureComplete` on top of it."""
     descriptor = {"sessionId": "s-1", "eventId": "lan-car-01",
                   "classId": "car", "joinable": True}
     if schema >= 4:
@@ -120,6 +121,28 @@ def lan_state(tick=1, schema=6):
             "rewardUnresolved": False,
             "rewardUnresolvedRaceId": "",
         }
+    if schema >= 7:
+        # Ordered world rows ride every schema-7 boundary — inside a LAN
+        # session the selection marker stays honest (the solo picker is
+        # fenced, not hidden).
+        state["progression"]["adventureComplete"] = False
+        state["progression"]["worlds"] = [
+            {"worldId": "sunny-island", "nameEn": "Sunny Island",
+             "nameHe": "האי השמשי", "selected": True, "available": True,
+             "lockedReason": "", "completedEvents": 0,
+             "requiredEvents": 24, "stars": 0, "requiredStars": 30,
+             "finalesOpen": False, "completedFinales": 0,
+             "totalFinales": 2, "worldComplete": False,
+             "rewardVehicleIds": ["car-02", "motorcycle-02"]},
+            {"worldId": "redrock-canyon", "nameEn": "Redrock Canyon",
+             "nameHe": "קניון רדרוק", "selected": False,
+             "available": False, "lockedReason": "worldLocked",
+             "completedEvents": 0, "requiredEvents": 24, "stars": 0,
+             "requiredStars": 30, "finalesOpen": False,
+             "completedFinales": 0, "totalFinales": 2,
+             "worldComplete": False,
+             "rewardVehicleIds": ["car-03", "motorcycle-03"]},
+        ]
     return state
 
 
@@ -359,8 +382,13 @@ class Schema3ConsumerTests(unittest.TestCase):
         validate_state_schema(record, record["state"])
 
     def test_schema6_boundary_validates(self):
-        record = self.record()
+        record = self.record(state=lan_state(schema=6))
         record["stateSchemaVersion"] = 6
+        validate_state_schema(record, record["state"])
+
+    def test_schema7_boundary_validates(self):
+        record = self.record()
+        record["stateSchemaVersion"] = 7
         validate_state_schema(record, record["state"])
 
     def test_schema5_missing_presentation_is_rejected(self):
@@ -473,7 +501,7 @@ class TraceIntegrityTests(unittest.TestCase):
                 "type": kind, "protocolVersion": 1, "runId": "lan-trace",
                 "deviceId": "d", "participantId": "local",
                 "buildVersion": "b", "contentVersion": "c",
-                "stateSchemaVersion": 6,
+                "stateSchemaVersion": 7,
                 "sequence": index + 1, "monotonicMs": (index + 1) * 10,
                 "tick": index + 1, "state": state,
             }

@@ -205,6 +205,12 @@ namespace FamilyRacing.Core.Foundation
             // the only route to their gated screens; results.* manage
             // the finished session and the unresolved-save gate.
             Schema("campaign.open"),
+            // M6 Task 3: the transient world pick. The worldId names an
+            // authored campaign world; the handler gates it through
+            // AdventureRules so a locked or unknown world rejects with
+            // no mutation, and profile switches re-derive the default.
+            Schema("campaign.selectWorld",
+                Param("worldId", "string", null)),
             Schema("campaign.start",
                 Param("eventId", "string", null),
                 Param("vehicleId", "string", null),
@@ -772,6 +778,8 @@ namespace FamilyRacing.Core.Foundation
                         return OpenLoopScreen(command, ScreenGarage);
                     case "bounties.open":
                         return OpenLoopScreen(command, ScreenBounties);
+                    case "campaign.selectWorld":
+                        return CampaignSelectWorld(command);
                     case "campaign.start":
                         return LoopStart(command, RaceMode.Campaign);
                     case "quickRace.start":
@@ -816,6 +824,7 @@ namespace FamilyRacing.Core.Foundation
                 // legal: it resolves a durable debt (possibly produced
                 // BY this session) and mutates no session state.
                 case "campaign.open":
+                case "campaign.selectWorld":
                 case "quickRace.open":
                 case "timeTrial.open":
                 case "garage.open":
@@ -914,6 +923,9 @@ namespace FamilyRacing.Core.Foundation
             // produced it — the new selection must not inherit the gate.
             unresolvedResult = null;
             unresolvedContext = null;
+            // The world pick is profile-scoped transient state: the next
+            // snapshot resolves this profile's default world.
+            selectedWorldId = null;
             screen = ScreenSettings;
             pendingSettings = false;
             persistenceStatus = "saved";
@@ -940,6 +952,9 @@ namespace FamilyRacing.Core.Foundation
             activeSlot = slot;
             unresolvedResult = null;
             unresolvedContext = null;
+            // World selection is transient per-profile state: the next
+            // snapshot re-derives the default for THIS profile.
+            selectedWorldId = null;
             language = info.Profile.language;
             pendingSettings = false;
             persistenceStatus = info.Status == "RecoveredFromBackup" ? "recovered" : "";
@@ -1834,6 +1849,24 @@ namespace FamilyRacing.Core.Foundation
                     {
                         available = false;
                         reason = "raceActive";
+                    }
+                    break;
+                case "campaign.selectWorld":
+                    // Transient view selection: the content/profile
+                    // fences the handler enforces, and only those — the
+                    // pick writes nothing durable, so it stays legal
+                    // paused, and rejects inside a LAN session via the
+                    // SoloBlockedDuringLan fence above.
+                    if (gameplayCatalog == null || gameplayCatalog.IsLegacy
+                        || gameplayCatalog.Driving == null)
+                    {
+                        available = false;
+                        reason = "contentUnavailable";
+                    }
+                    else if (activeSlot < 0)
+                    {
+                        available = false;
+                        reason = "requiresSelectedProfile";
                     }
                     break;
                 case "campaign.start":

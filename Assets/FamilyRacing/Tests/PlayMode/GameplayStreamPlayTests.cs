@@ -16,12 +16,13 @@ using UnityEngine;
 
 namespace FamilyRacing.Tests
 {
-    // M5 Task 10 schema-6 stream tests: the local-mode `soloRace` slice
-    // and the `progression` surface ride the real StateStream writer —
-    // present from the first menu snapshot (failed-save states
-    // included), deep-copy isolated from producer mutation, and
-    // reconstructable through the independent snapshot+delta merge an
-    // external consumer performs.
+    // M5 Task 10 + M6 Task 3 stream tests: the local-mode `soloRace`
+    // slice and the `progression` surface — including the schema-7
+    // ordered `worlds` rows and `adventureComplete` — ride the real
+    // StateStream writer: present from the first menu snapshot
+    // (failed-save states included), deep-copy isolated from producer
+    // mutation, and reconstructable through the independent
+    // snapshot+delta merge an external consumer performs.
     public sealed class GameplayStreamPlayTests
     {
         private string directory;
@@ -88,7 +89,7 @@ namespace FamilyRacing.Tests
             };
         }
 
-        // A menu-level schema-6 state: every slice populated the way the
+        // A menu-level schema-7 state: every slice populated the way the
         // service publishes it on the FIRST snapshot — progression is
         // always present (available=false without a catalog), soloRace
         // stays null until a local mode runs.
@@ -197,6 +198,50 @@ namespace FamilyRacing.Tests
                 campaignWorldComplete = false,
                 rewardUnresolved = true,
                 rewardUnresolvedRaceId = "local-0-a0",
+                // Schema-7 ordered world rows: sunny selected and open,
+                // redrock/snowy behind the world gate.
+                worlds = new List<WorldState>
+                {
+                    new WorldState
+                    {
+                        worldId = "sunny-island", nameEn = "Sunny Island",
+                        nameHe = "האי השמשי", selected = true,
+                        available = true, lockedReason = "",
+                        completedEvents = 1, requiredEvents = 24,
+                        stars = 2, requiredStars = 30,
+                        finalesOpen = false, completedFinales = 0,
+                        totalFinales = 2, worldComplete = false,
+                        rewardVehicleIds = new List<string>
+                            { "car-02", "motorcycle-02" }
+                    },
+                    new WorldState
+                    {
+                        worldId = "redrock-canyon",
+                        nameEn = "Redrock Canyon", nameHe = "קניון רדרוק",
+                        selected = false, available = false,
+                        lockedReason = "worldLocked",
+                        completedEvents = 0, requiredEvents = 24,
+                        stars = 0, requiredStars = 30,
+                        finalesOpen = false, completedFinales = 0,
+                        totalFinales = 2, worldComplete = false,
+                        rewardVehicleIds = new List<string>
+                            { "car-03", "motorcycle-03" }
+                    },
+                    new WorldState
+                    {
+                        worldId = "snowy-peaks",
+                        nameEn = "Snowy Peaks", nameHe = "הפסגות המושלגות",
+                        selected = false, available = false,
+                        lockedReason = "worldLocked",
+                        completedEvents = 0, requiredEvents = 24,
+                        stars = 0, requiredStars = 30,
+                        finalesOpen = false, completedFinales = 0,
+                        totalFinales = 2, worldComplete = false,
+                        rewardVehicleIds = new List<string>
+                            { "car-04", "motorcycle-04" }
+                    }
+                },
+                adventureComplete = false,
                 campaignEvents = new List<CampaignEventState>
                 {
                     new CampaignEventState
@@ -276,10 +321,10 @@ namespace FamilyRacing.Tests
         }
 
         [Test]
-        public void MenuAndFailedSaveSnapshotsCarrySchema6Slices()
+        public void MenuAndFailedSaveSnapshotsCarrySchema7Slices()
         {
             // Menus — before any catalog binds or race runs — already
-            // publish the full schema-6 shape; a failed save keeps it.
+            // publish the full schema-7 shape; a failed save keeps it.
             stream.EmitDeltaBoundary(MenuState(1, ""), null);
             stream.EmitDeltaBoundary(MenuState(2, "saveFailed"), null);
             var records = ReadRecords(2);
@@ -288,8 +333,8 @@ namespace FamilyRacing.Tests
             Assert.That((int)records[0]["stateSchemaVersion"],
                 Is.EqualTo(NetworkSettings.StateSchemaVersion));
             Assert.That((int)first["stateSchemaVersion"],
-                Is.EqualTo(6),
-                "the loop ships on state schema 6");
+                Is.EqualTo(7),
+                "the loop ships on state schema 7");
             Assert.That(first["soloRace"], Is.Not.Null,
                 "the soloRace key exists from the first snapshot");
             Assert.That(first["soloRace"].Type,
@@ -300,6 +345,10 @@ namespace FamilyRacing.Tests
                 "the progression slice exists from the first snapshot");
             Assert.That(progression["campaignEvents"], Is.Not.Null);
             Assert.That(progression["bounties"], Is.Not.Null);
+            Assert.That(progression["worlds"], Is.Not.Null,
+                "the schema-7 world rows exist from the first snapshot");
+            Assert.That(progression["adventureComplete"], Is.Not.Null,
+                "adventureComplete is part of the schema-7 contract");
             Assert.That((bool)progression["rewardUnresolved"], Is.False);
 
             // A failed save still carries the loop slices — the reader
@@ -363,6 +412,27 @@ namespace FamilyRacing.Tests
             Assert.That((int)bounties[0]["threshold"], Is.EqualTo(10));
             Assert.That((string)bounties[0]["assignmentId"],
                 Is.EqualTo("assign-1"));
+
+            // Schema-7: the ordered worlds surface — availability, the
+            // machine-safe lock reason, regional counts and the
+            // adventure-complete fact all ride the same boundary.
+            var worlds = (JArray)progression["worlds"];
+            Assert.That(worlds, Is.Not.Null.And.Count.EqualTo(3),
+                "every authored world publishes a row");
+            Assert.That((string)worlds[0]["worldId"],
+                Is.EqualTo("sunny-island"));
+            Assert.That((bool)worlds[0]["selected"], Is.True);
+            Assert.That((bool)worlds[0]["available"], Is.True);
+            Assert.That((int)worlds[0]["requiredEvents"], Is.EqualTo(24));
+            Assert.That((int)worlds[0]["requiredStars"], Is.EqualTo(30));
+            Assert.That((bool)worlds[1]["available"], Is.False);
+            Assert.That((string)worlds[1]["lockedReason"],
+                Is.EqualTo("worldLocked"),
+                "a closed world carries the code the command rejects with");
+            Assert.That((int)worlds[1]["totalFinales"], Is.EqualTo(2));
+            Assert.That((JArray)worlds[2]["rewardVehicleIds"],
+                Is.Not.Null.And.Count.EqualTo(2));
+            Assert.That((bool)progression["adventureComplete"], Is.False);
         }
 
         [Test]
@@ -380,6 +450,15 @@ namespace FamilyRacing.Tests
             state.progression.campaignEvents[1].stars = 99;
             state.progression.bounties[0].progress = 999;
             state.progression.rewardUnresolvedRaceId = "mutated";
+            // The schema-7 world rows share the same isolation promise:
+            // mutating them after emission must never corrupt the
+            // recorded boundary.
+            state.progression.worlds[0].worldId = "mutated";
+            state.progression.worlds[1].available = true;
+            state.progression.worlds[1].lockedReason = "";
+            state.progression.worlds[0].rewardVehicleIds.Add("x");
+            state.progression.worlds.Clear();
+            state.progression.adventureComplete = true;
             var records = ReadRecords(1);
             var emitted = (JObject)records[0]["state"];
             Assert.That((string)emitted["soloRace"]["raceId"],
@@ -398,6 +477,134 @@ namespace FamilyRacing.Tests
                 ["progress"], Is.EqualTo(4));
             Assert.That((string)emitted["progression"]
                 ["rewardUnresolvedRaceId"], Is.EqualTo("local-0-a0"));
+            var emittedWorlds = (JArray)emitted["progression"]["worlds"];
+            Assert.That(emittedWorlds.Count, Is.EqualTo(3));
+            Assert.That((string)emittedWorlds[0]["worldId"],
+                Is.EqualTo("sunny-island"));
+            Assert.That((bool)emittedWorlds[1]["available"], Is.False);
+            Assert.That((string)emittedWorlds[1]["lockedReason"],
+                Is.EqualTo("worldLocked"));
+            Assert.That((JArray)emittedWorlds[0]["rewardVehicleIds"],
+                Has.Count.EqualTo(2));
+            Assert.That((bool)emitted["progression"]["adventureComplete"],
+                Is.False);
+        }
+
+        [Test]
+        public void WorldSelectionAndUnlockBoundariesReconstruct()
+        {
+            // Baseline: the paused menu — selection is transient state,
+            // so a paused boundary still carries the full world rows.
+            var first = SoloState(1);
+            first.soloRace = null;
+            first.screen = "campaign";
+            first.paused = true;
+            stream.EmitDeltaBoundary(first, "cmd-pause");
+
+            // Selection moves to redrock while paused: campaignWorldId
+            // and the per-row selected flags move together.
+            var second = SoloState(2);
+            second.soloRace = null;
+            second.screen = "campaign";
+            second.paused = true;
+            second.progression.campaignWorldId = "redrock-canyon";
+            second.progression.worlds[0].selected = false;
+            second.progression.worlds[1].selected = true;
+            second.progression.worlds[1].available = true;
+            second.progression.worlds[1].lockedReason = "";
+            stream.EmitDeltaBoundary(second, "cmd-selectWorld");
+
+            // A committed reward boundary unlocks the third world and
+            // completes the second — the unlock facts land mid-history.
+            var third = SoloState(3);
+            third.soloRace = null;
+            third.screen = "campaign";
+            third.paused = true;
+            third.progression.worlds[1].worldComplete = true;
+            third.progression.worlds[1].completedFinales = 2;
+            third.progression.worlds[2].available = true;
+            third.progression.worlds[2].lockedReason = "";
+            stream.EmitDeltaBoundary(third, "cmd-commit");
+
+            // A failed save keeps every world row — the reader never
+            // special-cases the error boundary — and the retry's commit
+            // boundary carries the finished facts again.
+            var fourth = SoloState(4);
+            fourth.soloRace = null;
+            fourth.screen = "campaign";
+            fourth.paused = true;
+            fourth.persistenceStatus = "saveFailed";
+            stream.EmitDeltaBoundary(fourth, "cmd-saveFail");
+            var fifth = SoloState(5);
+            fifth.soloRace = null;
+            fifth.screen = "campaign";
+            fifth.paused = true;
+            fifth.persistenceStatus = "saved";
+            fifth.progression = third.progression;
+            stream.EmitDeltaBoundary(fifth, "cmd-retrySave");
+
+            // A profile switch re-derives the selection: a fresh profile
+            // selects the first world again.
+            var sixth = SoloState(6);
+            sixth.soloRace = null;
+            sixth.screen = "campaign";
+            sixth.paused = false;
+            sixth.activeSlot = 1;
+            sixth.progression.campaignWorldId = "sunny-island";
+            sixth.progression.worlds[0].selected = true;
+            sixth.progression.worlds[1].selected = false;
+            sixth.progression.worlds[1].available = false;
+            sixth.progression.worlds[1].lockedReason = "worldLocked";
+            sixth.progression.worlds[1].worldComplete = false;
+            sixth.progression.worlds[1].completedFinales = 0;
+            sixth.progression.worlds[2].available = false;
+            sixth.progression.worlds[2].lockedReason = "worldLocked";
+            stream.EmitDeltaBoundary(sixth, "cmd-profile");
+
+            var records = ReadRecords(6);
+            var baseline = (JObject)records[0]["state"].DeepClone();
+            Assert.That((bool)baseline["paused"], Is.True);
+            var baseWorlds = (JArray)baseline["progression"]["worlds"];
+            Assert.That(baseWorlds.Count, Is.EqualTo(3));
+            Assert.That((bool)baseWorlds[0]["selected"], Is.True);
+
+            var selected = ApplyDelta(baseline, records[1]);
+            Assert.That((string)selected["progression"]["campaignWorldId"],
+                Is.EqualTo("redrock-canyon"),
+                "selection while paused must reconstruct");
+            var selWorlds = (JArray)selected["progression"]["worlds"];
+            Assert.That((bool)selWorlds[1]["selected"], Is.True);
+            Assert.That((bool)selWorlds[1]["available"], Is.True);
+
+            var unlocked = ApplyDelta(selected, records[2]);
+            var unWorlds = (JArray)unlocked["progression"]["worlds"];
+            Assert.That((bool)unWorlds[1]["worldComplete"], Is.True,
+                "the committed reward's world-complete fact reconstructs");
+            Assert.That((bool)unWorlds[2]["available"], Is.True);
+            Assert.That((string)unWorlds[2]["lockedReason"],
+                Is.EqualTo(""));
+
+            var failed = ApplyDelta(unlocked, records[3]);
+            Assert.That((string)failed["persistenceStatus"],
+                Is.EqualTo("saveFailed"));
+            Assert.That(((JArray)failed["progression"]["worlds"]).Count,
+                Is.EqualTo(3),
+                "the failed-save boundary still carries every world row");
+
+            var retried = ApplyDelta(failed, records[4]);
+            Assert.That((string)retried["persistenceStatus"],
+                Is.EqualTo("saved"));
+            Assert.That((bool)((JArray)retried["progression"]["worlds"])
+                [2]["available"], Is.True);
+
+            var switched = ApplyDelta(retried, records[5]);
+            Assert.That((int)switched["activeSlot"], Is.EqualTo(1));
+            var swWorlds = (JArray)switched["progression"]["worlds"];
+            Assert.That((string)switched["progression"]["campaignWorldId"],
+                Is.EqualTo("sunny-island"),
+                "the profile switch resets the selected world");
+            Assert.That((bool)swWorlds[0]["selected"], Is.True);
+            Assert.That((bool)swWorlds[1]["available"], Is.False);
         }
 
         [Test]

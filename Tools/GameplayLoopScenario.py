@@ -67,7 +67,7 @@ from NetworkScenario import (CLASS_EVENTS, LanDriver, pump_drivers,
 from DrivingScenario import Driver as WaypointDriver
 
 
-REQUIRED_SCHEMA = 6
+REQUIRED_SCHEMA = 7
 
 # The production first world (Task 9, hardware-gated): used only to label
 # how incomplete the loaded catalog is — never a fabricated requirement

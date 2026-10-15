@@ -183,6 +183,12 @@ namespace FamilyRacing.Core.Localization
             // left-to-right mark); every sentence here stays logical
             // order so the Hebrew reads naturally under RTL layout.
             ["campaign.title"] = new[] { "Campaign map", "מפת המירוצים" },
+            // M6 Task 3: the ordered world strip — the header, the badge
+            // on the selected card and the whole-adventure banner once
+            // every world reports complete.
+            ["campaign.worlds"] = new[] { "Worlds", "עולמות" },
+            ["campaign.selected"] = new[] { "Playing here", "משחקים כאן" },
+            ["campaign.adventureComplete"] = new[] { "You finished every world — the whole adventure is complete!", "סיימתם את כל העולמות — ההרפתקה כולה הושלמה!" },
             ["campaign.stars"] = new[] { "Stars", "כוכבים" },
             ["campaign.events"] = new[] { "Races", "מירוצים" },
             ["campaign.worldDone"] = new[] { "World complete!", "העולם הושלם!" },
@@ -242,6 +248,11 @@ namespace FamilyRacing.Core.Localization
             ["loop.reason.networkActive"] = new[] { "Leave the race session first.", "קודם עוזבים את המירוץ." },
             ["loop.reason.rewardUnresolved"] = new[] { "Save your last prize first.", "קודם שומרים את הפרס האחרון." },
             ["loop.reason.eventLocked"] = new[] { "Finish the earlier races first.", "קודם מסיימים את המירוצים הקודמים." },
+            // M6 Task 3: the world-gate reasons — campaign.selectWorld,
+            // the world cards and the world-aware course pickers all
+            // share these.
+            ["loop.reason.worldLocked"] = new[] { "Finish the previous world first.", "קודם סיימו את העולם הקודם." },
+            ["loop.reason.unknownWorld"] = new[] { "Unknown world.", "עולם לא ידוע." },
             ["loop.reason.vehicleLocked"] = new[] { "Win that vehicle first.", "קודם מנצחים את הרכב הזה." },
             ["loop.reason.unavailable"] = new[] { "Not available right now.", "לא זמין כרגע." }
         };

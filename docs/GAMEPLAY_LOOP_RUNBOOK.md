@@ -74,7 +74,7 @@ the Task-11 scenario evidence below ran on):
 ## Driving the loop externally
 
 `Tools/GameplayLoopScenario.py` is the external qualification harness
-(schema 6). Everything it drives goes through the normal command surface
+(schema 7). Everything it drives goes through the normal command surface
 — no command grants coins, stars or traversal. Where the loaded content
 cannot support a step, the row reports `notVerified` with the named
 reason; a run on the legacy/absent catalog reports `partial`, never
@@ -141,7 +141,7 @@ Tools\Test-AndroidOffline.ps1
 
 The gameplay-loop command/gating parity lives in
 `Tests/EditMode/GameplayCommandTests.cs`; screen parity in
-`Tests/PlayMode/GameplayScreensPlayTests.cs`; schema-6 stream coverage in
+`Tests/PlayMode/GameplayScreensPlayTests.cs`; schema-7 stream coverage in
 `Tests/PlayMode/GameplayStreamPlayTests.cs`; catalog/asset validation in
 `Tests/EditModeAdapter/GameplayCatalogAssetTests.cs`; pure rules in the
 Core suite (`CampaignObjectiveTests`, `BountyTests`, `UpgradeTests`,
