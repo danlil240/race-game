@@ -30,6 +30,13 @@ namespace FamilyRacing.Core.Racing
         public int boostActivations;
         public int cleanLandings;
         public int longestCleanStreakTicks;
+        // Human-attributed shortcut facts (M5 Task 6): the shared
+        // acceptedShortcuts/distinctShortcuts counters below record
+        // every traversal regardless of who drove; these variants count
+        // only human-attributed traversals so bounty/objective credit
+        // can never come from an AI-driven segment.
+        public int humanAcceptedShortcuts;
+        public int humanDistinctShortcuts;
         // Shared counters for every racer.
         public int acceptedShortcuts;
         public int distinctShortcuts;

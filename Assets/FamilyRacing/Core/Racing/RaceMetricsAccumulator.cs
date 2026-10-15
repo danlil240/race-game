@@ -30,6 +30,8 @@ namespace FamilyRacing.Core.Racing
             internal long lastBoundary = -1;
             internal readonly HashSet<string> shortcutIds =
                 new HashSet<string>(StringComparer.Ordinal);
+            internal readonly HashSet<string> humanShortcutIds =
+                new HashSet<string>(StringComparer.Ordinal);
             internal readonly HashSet<string> gadgetIds =
                 new HashSet<string>(StringComparer.Ordinal);
         }
@@ -95,6 +97,17 @@ namespace FamilyRacing.Core.Racing
                             if (!string.IsNullOrEmpty(ev.detail)
                                 && accum.shortcutIds.Add(ev.detail))
                                 metrics.distinctShortcuts++;
+                            // Human-scoped variants feed bounties and
+                            // objectives — an AI-driven traversal can
+                            // never earn human shortcut credit.
+                            if (ev.attribution == "human"
+                                || ev.attribution == "")
+                            {
+                                metrics.humanAcceptedShortcuts++;
+                                if (!string.IsNullOrEmpty(ev.detail)
+                                    && accum.humanShortcutIds.Add(ev.detail))
+                                    metrics.humanDistinctShortcuts++;
+                            }
                             broke = true;
                             break;
                         case "gadget.used":

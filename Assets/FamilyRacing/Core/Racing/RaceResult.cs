@@ -202,6 +202,14 @@ namespace FamilyRacing.Core.Racing
                         CultureInfo.InvariantCulture));
                     Field(builder, m.distinctShortcuts.ToString(
                         CultureInfo.InvariantCulture));
+                    // M5 Task 6 additive facts: human-attributed
+                    // shortcut counters ride the same fp-2 row so two
+                    // results differing in AI-vs-human traversal credit
+                    // never share a fingerprint.
+                    Field(builder, m.humanAcceptedShortcuts.ToString(
+                        CultureInfo.InvariantCulture));
+                    Field(builder, m.humanDistinctShortcuts.ToString(
+                        CultureInfo.InvariantCulture));
                     Field(builder, m.gadgetUses.ToString(
                         CultureInfo.InvariantCulture));
                     Field(builder, m.distinctGadgetTypes.ToString(
