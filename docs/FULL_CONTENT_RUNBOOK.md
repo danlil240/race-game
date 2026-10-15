@@ -1,13 +1,14 @@
-# Full Content Runbook (M6 Task 4, slice A)
+# Full Content Runbook (M6 Task 4, slice A; Task 9 slice A tooling)
 
 Validation and packaging contract for the full-content inventory:
 three worlds (`sunny-island`, `redrock-canyon`, `snowy-peaks`), six
 courses, eight vehicle models, 72 regular events plus six rival
 finales, bilingual display names and final bilingual voice prompts.
 
-This document is a skeleton — it covers the gates and flavors that
-exist today. The loader/runtime binding is Task 9 + slice B scope and
-is deliberately not implemented here.
+This document covers the gates and flavors that exist today plus the
+Task 9 slice-A scenario harness. The authored production inventory is
+still absent (Tasks 5–8), so every scenario scope reports `partial`
+with named gaps rather than `passed`.
 
 ## Inventory contract
 
@@ -92,6 +93,77 @@ Each successful flavor writes `manifest.json` at the root:
 `contentStage=complete` — a preview can never be promoted to an
 ordinary or accepted full-content candidate by relabeling.
 
+## Scenario evidence — `Tools/FullContentScenario.py` (Task 9 slice A)
+
+The external harness reconciles the fixed production contract above
+against captured observations on a real player's validation stream.
+The expected inventory is synthesized from the same constants
+`FullContentValidation.cs` enforces — never from observed rows, so a
+mutant that removes evidence can never shrink the expectation.
+
+```powershell
+# Development: the scenario owns the process(es).
+python Tools/FullContentScenario.py --launch Builds/Windows-FullContent/FamilyRacing.exe `
+    --evidence Logs/fc-catalog --scope catalog
+python Tools/FullContentScenario.py --launch <player.exe> `
+    --evidence Logs/fc-campaign --scope campaign
+python Tools/FullContentScenario.py --launch <player.exe> `
+    --evidence Logs/fc-modes --scope modes
+python Tools/FullContentScenario.py --launch <player.exe> `
+    --evidence Logs/fc-lan --scope lan --players 2
+
+# Qualification: attach to independently launched players (ADB-
+# forwarded Android descriptors accepted for the lan scope).
+python Tools/FullContentScenario.py --connections <run>/connection.json `
+    --evidence Logs/fc-attach --scope catalog
+```
+
+`--evidence` must name a **new** directory. `--fixture` marks every
+artifact `fixture:true` for harness development; fixture evidence can
+never produce a production `passed` verdict.
+
+Scopes:
+
+- `catalog` — inventory reconciliation only, no driving. Walks the
+  schema-7 `progression.worlds` rows, selects each available world via
+  `campaign.selectWorld`, and reconciles its published
+  `campaignEvents` against the 72+6 contract.
+- `campaign` — fresh synthetic profile through every authored campaign
+  event in order (regulars then class finales per world), each driven
+  through the real command surface; writes one evidence record per
+  event with identities, command/trace references, completion and
+  objective-bit proofs, rewards, duration and capture validity.
+- `modes` — Quick Race and Time Trial over all 12 course×class
+  combinations; time trials must seat the normalized starter and mint
+  zero campaign credit.
+- `lan` — the shared M5 LAN workload on 2–4 endpoints (normalization,
+  shared pause, gadget authority, disconnect/AI/rejoin, retained
+  results, host loss).
+
+Evidence layout under the evidence directory: `result.json` (verdict,
+checks, coverage totals, named human-only gaps), `events.ndjson`
+(one record per expected event), `coverage.json` (full reconciliation:
+per-cell status, defects, gaps, reward facts), `modes.json` (modes
+scope), and per-endpoint `<role>-evidence/` directories with
+`attach.json`/`process.json` plus the raw `commands.ndjson` /
+`state.ndjson` traces.
+
+Verdict rules: `passed` only when all 78 cells are proven on a
+non-fixture run with a valid capture — completed under a bound
+receipt, human attribution, measured duration, all objective bits with
+proofs, plus the reward-level facts (8 vehicles, 6 distinct rival
+victories, ≥6 non-victory extra stars per region). Missing evidence is
+a named gap (`partial`); contradictory evidence — duplicates,
+unexpected rows, AI-attributed finishes, proofs for unearned bits,
+dropped/corrupt stream records — is a defect (`failed`). Finishing an
+event alone never proves its objectives, and completion is never
+counted as objective achievement.
+
+Slice-B deferrals: authored per-course route/checkpoint observations
+(solo driving currently rides the shared graybox pursuit follower),
+the real 78-event traversal, the physical LAN matrix, pacing
+measurement and family playtests.
+
 ## Current state
 
 No production content is authored under `Generated/FullContent` yet.
@@ -104,4 +176,8 @@ and flip the gate.
 ## Evidence
 
 Row-level evidence lives in `docs/CONTENT_MATRIX.md`. All production
-rows are `notVerified` until Tasks 5–9 produce captured runs.
+rows are `notVerified` until Tasks 5–9 produce captured runs. When a
+`Tools/FullContentScenario.py` run produces evidence, link the row to
+its per-event record in `<evidence>/events.ndjson` and the
+reconciliation in `<evidence>/coverage.json` — never to
+`result.json`'s verdict alone, and never to a `--fixture` run.

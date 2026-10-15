@@ -331,6 +331,32 @@ acceptance. It also surfaced and fixed one product bound
 store previously invalidated any capture longer than ~33 min at
 60 fps, shorter than the mandated benchmark).
 
+## Tooling (M6 full-content scenario harness, Task 9 slice A)
+
+`Tools\FullContentScenario.py` is the external full-content
+qualification harness over the schema-7 stream — CLI contract and
+evidence layout in `docs/FULL_CONTENT_RUNBOOK.md` §Scenario evidence.
+Four scopes: `catalog` (inventory reconciliation through
+`campaign.selectWorld`, no driving), `campaign` (per-event evidence
+records for all 78 contract events: identities, command/state trace
+references, completion + objective-bit proofs, rewards, measured
+duration, capture validity, explicit human-only gaps), `modes` (all 12
+course×class Quick Race / Time Trial combinations with normalized
+starter and zero-campaign-credit checks) and `lan` (the shared M5 LAN
+workload on 2–4 attached or launched endpoints). The expected
+inventory is synthesized from the same constants
+`FullContentValidation.cs` enforces — never from observed rows — and
+the reconciler keeps `partial`/`notVerified` honest: missing evidence
+is a named gap; duplicates, unexpected rows, AI-attributed finishes,
+proofs for unearned bits and invalid captures are defects; fixture
+runs can never produce a production `passed`.
+`Tools\TestFullContentScenario.py` locks the mutation suite (32
+tests): removed world/event, duplicated cell, fixture substitution,
+dropped stream records, AI misattribution, omitted objective proof,
+77-of-78 completions, shared rival proofs — each prevented from
+passing. No live production run exists yet (no authored content); see
+the Known QA gaps entry below.
+
 ## Known QA gaps (`notVerified` — do not read as passed)
 
 - Physical input/UI parity is covered by synthetic PlayMode callbacks only
@@ -389,6 +415,10 @@ store previously invalidated any capture longer than ~33 min at
   see `docs/tasks/network-prototype-report.md`.
   The graybox driving slice (`drivingSimulation`, `drivingOnboarding`)
   is qualified by the DrivingScenario run and PlayMode suites above.
+- M6 full content: the `FullContentScenario` harness exists (section
+  above) but no authored production inventory exists under
+  `Generated/FullContent`, so every scope reports `partial` with named
+  gaps — no live run has been attempted and none is claimed.
 - A real 30-minute solo soak now exists — see the DrivingSoak section
   above (Windows dev player). The multi-player equivalent
   (`Tools\NetworkSoak.py`) is delivered and unit-covered

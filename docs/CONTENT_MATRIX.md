@@ -13,6 +13,16 @@ Every row carries:
 - `evidence`: link to the run/artifact proving the row
   (verification log, capture, device record). Empty = unproven.
 
+**Task 9 slice-A evidence convention** (`Tools/FullContentScenario.py`
+— see `docs/FULL_CONTENT_RUNBOOK.md` §Scenario evidence): an event row
+links its record line in `<evidence>/events.ndjson` plus the
+`<evidence>/coverage.json` cell; a world row links the same run's
+`coverage.world.<worldId>` check; a finale row additionally requires
+the rival-victory reward proof (`coverage.rivals.<rivalId>`). Fixture
+(`--fixture`) runs are development evidence only — they can be linked
+for review but can never flip a row to `passed`, and completion of an
+event alone never proves its objective bits.
+
 **Current state (this commit):** no production content is authored
 under `Generated/FullContent` yet — every row is honestly
 `notVerified` and the production gate fails the incomplete
