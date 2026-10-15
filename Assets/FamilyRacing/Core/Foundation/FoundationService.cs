@@ -1752,6 +1752,11 @@ namespace FamilyRacing.Core.Foundation
                         available = false;
                         reason = "requiresSelectedProfile";
                     }
+                    else if (!WritableSelected())
+                    {
+                        available = false;
+                        reason = "readOnlyProfile";
+                    }
                     else if (driving != null || soloRace != null)
                     {
                         available = false;
@@ -1782,6 +1787,11 @@ namespace FamilyRacing.Core.Foundation
                     {
                         available = false;
                         reason = "requiresSelectedProfile";
+                    }
+                    else if (!WritableSelected())
+                    {
+                        available = false;
+                        reason = "readOnlyProfile";
                     }
                     else if (driving != null || soloRace != null)
                     {

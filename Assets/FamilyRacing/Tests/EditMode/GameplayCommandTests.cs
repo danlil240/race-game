@@ -451,6 +451,37 @@ namespace FamilyRacing.Tests
                 Is.EquivalentTo(new[] { "livery-rival-car" }));
         }
 
+        // A selected-but-read-only profile (RecoveredFromBackup) must
+        // advertise the same reason the handlers reject with — an
+        // enabled buy/equip button would only fail on dispatch.
+        [Test]
+        public void ProgressionWritesAdvertiseReadOnlyProfile()
+        {
+            File.WriteAllText(
+                Path.Combine(directory, "profile-0.json"), "corrupt");
+            File.WriteAllText(
+                Path.Combine(directory, "profile-0.json.bak"),
+                serializer.Serialize(CampaignTestFixture.Profile()));
+            var service = Service(Catalog(), Store());
+            var selected = service.Execute(
+                Cmd("profile.select", P("slot", "0")));
+            Assert.That(selected.status, Is.EqualTo(CommandResult.Applied),
+                "profile.select setup failed: " + selected.code);
+            Assert.That(service.Snapshot().slots[0].status,
+                Is.EqualTo("RecoveredFromBackup"));
+
+            foreach (var action in new[]
+                { "upgrade.purchase", "cosmetic.equip" })
+            {
+                var availability = Availability(service, action);
+                Assert.That(availability.available, Is.False,
+                    action + " must advertise the read-only profile");
+                Assert.That(availability.reason,
+                    Is.EqualTo("readOnlyProfile"),
+                    action + " availability reason");
+            }
+        }
+
         // --- results / replay / save retry --------------------------------
 
         [Test]

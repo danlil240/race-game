@@ -233,6 +233,7 @@ namespace FamilyRacing.Core.Localization
             // raw code stays the fallback for anything unlisted.
             ["loop.reason.contentUnavailable"] = new[] { "This content is not in this build.", "התוכן הזה לא בגרסה הזאת." },
             ["loop.reason.requiresSelectedProfile"] = new[] { "Pick a driver first.", "קודם בוחרים נהג." },
+            ["loop.reason.readOnlyProfile"] = new[] { "This profile was restored from a backup and cannot save yet.", "הפרופיל נטען מגיבוי — אי אפשר לשמור עדיין." },
             ["loop.reason.raceActive"] = new[] { "Finish or leave the race first.", "קודם מסיימים את המירוץ." },
             ["loop.reason.networkActive"] = new[] { "Leave the race session first.", "קודם עוזבים את המירוץ." },
             ["loop.reason.rewardUnresolved"] = new[] { "Save your last prize first.", "קודם שומרים את הפרס האחרון." },
