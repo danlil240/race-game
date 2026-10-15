@@ -350,8 +350,24 @@ store previously invalidated any capture longer than ~33 min at
 - Windows IL2CPP module is now installed for the pinned editor
   (`CheckEnvironment` OK) but no IL2CPP build has been produced or qualified
   — preview remains Mono development.
-- Remaining racing gameplay: campaign, rewards/upgrades/cosmetics and
-  richer content stay `notImplemented`, later milestones. The LAN
+- M5 gameplay-loop surface: `campaign`, `rewardsUpgradesCosmetics` and
+  `lan` now report `implemented` — the shared local race modes,
+  gadgets, objectives/bounties, atomic rewards, upgrades/cosmetics and
+  the bilingual loop UI/commands all exist and are suite-covered
+  (`GameplayCommandTests`, `GameplayScreensPlayTests`,
+  `GameplayStreamPlayTests`, the Core progression/objective/bounty/
+  upgrade suites). **Caveat:** the packaged `Foundation.unity` build
+  binds no gameplay catalog (`gameplayCatalog: {fileID: 0}`) because
+  the Task-9 authored Sunny Island world is gated on M4 A7 Lite
+  evidence — `progression.available=false` and the loop commands reject
+  `contentUnavailable`. External evidence:
+  `Tools\GameplayLoopScenario.py` runs `partial` on this build —
+  `Logs\task11-smoke-2` (13 passed incl. tutorial+gadget+restart, 10
+  notVerified), `Logs\task11-campaign` (0 authored events, honest),
+  `Logs\task11-lan-2c`/`task11-lan-4` (LAN matrix passed on reachable
+  rows). Report: `docs\tasks\gameplay-loop-report.md`; runbook:
+  `docs/GAMEPLAY_LOOP_RUNBOOK.md`. M6+ content stays `notImplemented`.
+  The LAN
   slice (`lanScreens`, `lanSession`, `networkRace`, prediction /
   interpolation observation) is qualified by the EditMode/PlayMode
   suites plus `Tools\NetworkScenario.py`, which attaches to 2-4

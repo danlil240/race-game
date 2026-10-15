@@ -17,6 +17,7 @@ asset GUID).
 | 2026-10-14 | US$0 of US$100 | Vehicle and animal racer visuals (Task 4) are original, authored procedurally in-editor. No purchases made or needed. |
 | 2026-10-14 | US$0 of US$100 | Race presentation effects and audio (Task 5) are original — procedural sprites/prefabs authored in-editor, PCM WAVs synthesized offline by Tools/Generate-RaceAudio.py. No purchases made or needed. |
 | 2026-10-14 | US$0 of US$100 | Task 7 closeout: no new assets, no purchases. PC profiling found no actionable hotspot, so no replacement/optimized content was added. Inventory remains complete (`AllReferencedAssetsHaveInventoryEntries` green). |
+| 2026-10-15 | US$0 of US$100 | M5 gameplay loop (tasks 1–12): four gadget one-shot cues synthesized offline by Tools/Generate-RaceAudio.py and the generated gadget catalog bound in `Foundation.unity`; all original work. No purchases made or needed. Task 9's authored Sunny Island courses/campaign content was never produced (M4 device gate) — nothing further to inventory. |
 
 ## Referenced assets (machine-readable)
 
@@ -116,6 +117,11 @@ Columns: `guid` | `path` | `source` | `license` | `cost` | `role`.
 | d3f2061a315c26b4698cc61d6e5ada3c | Assets/FamilyRacing/Audio/VisualBenchmark/music-results.wav | Original — synthesized offline by Tools/Generate-RaceAudio.py (22050 Hz mono PCM, seamless bar loop) | Project-owned original work — no third-party license, no attribution required | US$0 | results-phase music bed |
 | 39f231f9e9befd84abb9b6f991b74300 | Assets/FamilyRacing/Audio/VisualBenchmark/skid.wav | Original — synthesized offline by Tools/Generate-RaceAudio.py (22050 Hz mono PCM, looped noise) | Project-owned original work — no third-party license, no attribution required | US$0 | drift skid loop |
 | f9473ab8d0e67d94f9c4e64845a90309 | Assets/FamilyRacing/Generated/VisualBenchmark/race-presentation-01.asset | Original — authored by RacePresentationAuthoring.cs (cue/effect bindings, pool/voice bounds) | Project-owned original work — no third-party license, no attribution required | US$0 | race presentation catalog (Task 5) |
+| 00139f866a9542e4895d5a9c9765c9c7 | Assets/FamilyRacing/Audio/VisualBenchmark/cue-gadget-pickup.wav | Original — synthesized offline by Tools/Generate-RaceAudio.py (22050 Hz mono PCM) | Project-owned original work — no third-party license, no attribution required | US$0 | gadget pickup + pickup-respawn one-shot cues |
+| e628e9312a017964b9f8d8de85666d59 | Assets/FamilyRacing/Audio/VisualBenchmark/cue-gadget-foam.wav | Original — synthesized offline by Tools/Generate-RaceAudio.py (22050 Hz mono PCM) | Project-owned original work — no third-party license, no attribution required | US$0 | foam-trap dropped + foam-hit one-shot cues |
+| 7f5a2fc948a395f4d837123385a95582 | Assets/FamilyRacing/Audio/VisualBenchmark/cue-gadget-shield.wav | Original — synthesized offline by Tools/Generate-RaceAudio.py (22050 Hz mono PCM) | Project-owned original work — no third-party license, no attribution required | US$0 | bubble-shield blocked-hit one-shot cue |
+| 87bc926397843194f87ee699adf17ced | Assets/FamilyRacing/Audio/VisualBenchmark/cue-gadget-use.wav | Original — synthesized offline by Tools/Generate-RaceAudio.py (22050 Hz mono PCM) | Project-owned original work — no third-party license, no attribution required | US$0 | gadget used one-shot cue |
+| 47f0a23a8f5bbe846a2cf9b24005b3ce | Assets/FamilyRacing/Generated/Driving/gadget-catalog-01.asset | Original — authored gadget catalog (turbo/bubble-shield/foam-trap definitions; bound as `gadgetCatalog` in Foundation.unity) | Project-owned original work — no third-party license, no attribution required | US$0 | gadget definition catalog (M5 Task 5) |
 <!-- INVENTORY-TABLE-END -->
 
 ## Authored-in-editor originals
