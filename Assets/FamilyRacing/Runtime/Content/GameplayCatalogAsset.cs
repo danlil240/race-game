@@ -35,6 +35,13 @@ namespace FamilyRacing
         public EconomyDefinitionAsset economy;
         public GadgetCatalogAsset gadgets;
         public DifficultyRow[] difficulties = new DifficultyRow[0];
+        // M6 Task 4: the authored bilingual voice-prompt table is
+        // production-only content — generic conversion deliberately
+        // ignores this slot so fixtures and mid-production trees keep
+        // converting; FullContentValidation is the gate that requires
+        // the complete clip set. Task 8's presenter resolves clips
+        // through this catalog at runtime.
+        public VoicePromptCatalogAsset voicePrompts;
 
         public GameplayCatalog ToCatalog(DrivingContentCatalog driving,
             out string error)

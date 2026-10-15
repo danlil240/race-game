@@ -1,14 +1,18 @@
 # Export with the pinned Unity editor, then invoke its bundled Gradle/JDK.
 # Missing cache entries fail under --offline; this script never retries online.
 # -Presentation selects the content flavor (Graybox default = the bootstrap
-# scene; VisualBenchmark = the M4 benchmark scene); -Configuration selects
-# Development (validation endpoints in) or Ordinary (compiled out). The
-# flavor decides the export entry point and every output directory, so a
-# benchmark run can never overwrite the graybox APK or mix export roots.
+# scene; VisualBenchmark = the M4 benchmark scene; FullContent = the M6
+# three-world production catalog; FullContentPreview = the development-only
+# partial-content check); -Configuration selects Development (validation
+# endpoints in) or Ordinary (compiled out). The flavor decides the export
+# entry point and every output directory, so a benchmark or full-content
+# run can never overwrite the graybox APK or mix export roots.
+# FullContentPreview is development-only: an ordinary preview is refused
+# outright rather than built as a quietly-partial candidate.
 param(
     [string]$ProjectPath = (Join-Path $PSScriptRoot '..'),
     [string]$EditorRoot = 'C:\Program Files\Unity\Hub\Editor',
-    [ValidateSet('Graybox', 'VisualBenchmark')]
+    [ValidateSet('Graybox', 'VisualBenchmark', 'FullContent', 'FullContentPreview')]
     [string]$Presentation = 'Graybox',
     [ValidateSet('Development', 'Ordinary')]
     [string]$Configuration = 'Development'
@@ -22,10 +26,14 @@ $android = Join-Path $EditorRoot "$editorVersion\Editor\Data\PlaybackEngines\And
 $java = Join-Path $android 'OpenJDK\bin\java.exe'
 $flavor = "$Presentation-$Configuration"
 $buildFlavor = switch ($flavor) {
-    'Graybox-Development'         { 'Android' }
-    'Graybox-Ordinary'            { 'Android-Ordinary' }
-    'VisualBenchmark-Development' { 'Android-VisualBenchmark' }
-    'VisualBenchmark-Ordinary'    { 'Android-VisualBenchmark-Ordinary' }
+    'Graybox-Development'            { 'Android' }
+    'Graybox-Ordinary'               { 'Android-Ordinary' }
+    'VisualBenchmark-Development'    { 'Android-VisualBenchmark' }
+    'VisualBenchmark-Ordinary'       { 'Android-VisualBenchmark-Ordinary' }
+    'FullContent-Development'        { 'Android-FullContent' }
+    'FullContent-Ordinary'           { 'Android-FullContent-Ordinary' }
+    'FullContentPreview-Development' { 'Android-FullContent-Preview' }
+    'FullContentPreview-Ordinary'    { throw "FullContentPreview is development-only; an ordinary preview can never be a full-content candidate." }
     default { throw "Unsupported presentation/configuration: $flavor" }
 }
 $exportMethod = switch ($buildFlavor) {
@@ -33,6 +41,9 @@ $exportMethod = switch ($buildFlavor) {
     'Android-Ordinary'                   { 'FamilyRacing.EditorTools.FoundationBuild.ExportAndroidOrdinary' }
     'Android-VisualBenchmark'            { 'FamilyRacing.EditorTools.FoundationBuild.ExportAndroidVisualBenchmark' }
     'Android-VisualBenchmark-Ordinary'   { 'FamilyRacing.EditorTools.FoundationBuild.ExportAndroidVisualBenchmarkOrdinary' }
+    'Android-FullContent'                { 'FamilyRacing.EditorTools.FoundationBuild.ExportAndroidFullContent' }
+    'Android-FullContent-Ordinary'       { 'FamilyRacing.EditorTools.FoundationBuild.ExportAndroidFullContentOrdinary' }
+    'Android-FullContent-Preview'        { 'FamilyRacing.EditorTools.FoundationBuild.ExportAndroidFullContentPreview' }
 }
 $runId = [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss') + '-' + [guid]::NewGuid().ToString('N')
 $runDirectory = Join-Path $project "Builds\$buildFlavor\offline\$runId"

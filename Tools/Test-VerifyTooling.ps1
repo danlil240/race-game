@@ -78,7 +78,11 @@ if ($LASTEXITCODE -eq 0) {
         foreach ($case in @(
             @{ Mode = 'VisualBenchmarkSetup';           Method = 'FamilyRacing.EditorTools.FoundationBuild.VisualBenchmarkSetup' },
             @{ Mode = 'WindowsVisualBenchmark';         Method = 'FamilyRacing.EditorTools.FoundationBuild.WindowsVisualBenchmark' },
-            @{ Mode = 'WindowsVisualBenchmarkOrdinary'; Method = 'FamilyRacing.EditorTools.FoundationBuild.WindowsVisualBenchmarkOrdinary' })) {
+            @{ Mode = 'WindowsVisualBenchmarkOrdinary'; Method = 'FamilyRacing.EditorTools.FoundationBuild.WindowsVisualBenchmarkOrdinary' },
+            @{ Mode = 'FullContentSetup';               Method = 'FamilyRacing.EditorTools.FoundationBuild.FullContentSetup' },
+            @{ Mode = 'WindowsFullContent';             Method = 'FamilyRacing.EditorTools.FoundationBuild.WindowsFullContent' },
+            @{ Mode = 'WindowsFullContentOrdinary';     Method = 'FamilyRacing.EditorTools.FoundationBuild.WindowsFullContentOrdinary' },
+            @{ Mode = 'WindowsFullContentPreview';      Method = 'FamilyRacing.EditorTools.FoundationBuild.WindowsFullContentPreview' })) {
             Remove-Item -LiteralPath $argumentsFile -Force -ErrorAction SilentlyContinue
             $output = & $pwsh -NoProfile -File $VerifyScript -Mode $case.Mode -EditorRoot $editorRoot 2>&1 | Out-String
             $code = $LASTEXITCODE
@@ -94,10 +98,12 @@ if ($LASTEXITCODE -eq 0) {
         Remove-Item -LiteralPath $argumentsFile -Force -ErrorAction SilentlyContinue
     }
 
-    # 6. Android benchmark modes reach the offline wrapper: with no editor
-    #    they fail at the prerequisite stage (proving dispatch happened);
-    #    full offline behavior is covered by Test-AndroidOffline.ps1.
-    foreach ($mode in @('AndroidVisualBenchmark', 'AndroidVisualBenchmarkOrdinary')) {
+    # 6. Android benchmark and full-content modes reach the offline
+    #    wrapper: with no editor they fail at the prerequisite stage
+    #    (proving dispatch happened); full offline behavior is covered
+    #    by Test-AndroidOffline.ps1.
+    foreach ($mode in @('AndroidVisualBenchmark', 'AndroidVisualBenchmarkOrdinary',
+        'AndroidFullContent', 'AndroidFullContentOrdinary', 'AndroidFullContentPreview')) {
         $output = & $pwsh -NoProfile -File $VerifyScript -Mode $mode -EditorRoot (Join-Path $temp 'no-editor') 2>&1 | Out-String
         Check "$mode dispatches to the offline Android wrapper" `
             ($LASTEXITCODE -ne 0 -and $output -notmatch 'Cannot validate argument' -and $output -match 'Pinned Unity editor') `

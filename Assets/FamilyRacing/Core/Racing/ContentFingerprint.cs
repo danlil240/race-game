@@ -59,6 +59,9 @@ namespace FamilyRacing.Core.Racing
         // ordered list of every world (membership/order/gates/rewards),
         // and translated display names — cosmetic text — are no longer
         // hashed at all.
+        // M6 Task 4 bumps the epoch to 4: authored shortcut lanes are
+        // gameplay content (the shortcut metrics credit their ids), so
+        // each course's zone set now hashes beside its pickup sites.
         public static string Compute(GameplayCatalog catalog)
         {
             if (catalog == null) return "";
@@ -66,7 +69,7 @@ namespace FamilyRacing.Core.Racing
             {
                 using (var writer = new BinaryWriter(stream, Encoding.UTF8, true))
                 {
-                    writer.Write(3); // canonical schema epoch: multiworld stream
+                    writer.Write(4); // canonical schema epoch: multiworld + shortcut lanes
                     if (catalog.Driving == null)
                     {
                         writer.Write(false);
@@ -77,6 +80,7 @@ namespace FamilyRacing.Core.Racing
                         WriteDrivingBody(writer, catalog.Driving);
                         WriteEventGameplay(writer, catalog.Driving.Events);
                         WritePickupSites(writer, catalog.Driving.Courses);
+                        WriteShortcutZones(writer, catalog.Driving.Courses);
                     }
                     WriteCampaigns(writer, catalog.Campaigns);
                     WriteBounties(writer, catalog.Bounties);
@@ -389,6 +393,41 @@ namespace FamilyRacing.Core.Racing
                     F(writer, site.z);
                     F(writer, site.radiusMeters);
                     F(writer, site.verticalRangeMeters);
+                }
+            }
+        }
+
+        // Authored optional shortcut lanes (M6 Task 4): like pickup
+        // sites they live on the course definition and hash only in the
+        // gameplay stream — the epoch-1 driving body stays bit-stable.
+        // Zones write canonically ordered by id per course.
+        private static void WriteShortcutZones(BinaryWriter writer,
+            IReadOnlyDictionary<string, CourseDefinition> courses)
+        {
+            var ids = SortedKeys(courses);
+            writer.Write(ids.Count);
+            foreach (var id in ids)
+            {
+                Str(writer, id);
+                var zones = new List<ShortcutZone>();
+                var authored = courses[id].shortcutZones;
+                if (authored != null) zones.AddRange(authored);
+                zones.Sort((a, b) => string.CompareOrdinal(
+                    a != null ? a.id : null,
+                    b != null ? b.id : null));
+                writer.Write(zones.Count);
+                foreach (var zone in zones)
+                {
+                    var present = zone != null;
+                    writer.Write(present);
+                    if (!present) continue;
+                    Str(writer, zone.id);
+                    F(writer, zone.x);
+                    F(writer, zone.y);
+                    F(writer, zone.z);
+                    F(writer, zone.halfWidth);
+                    F(writer, zone.dirX);
+                    F(writer, zone.dirZ);
                 }
             }
         }

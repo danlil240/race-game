@@ -117,6 +117,81 @@ namespace FamilyRacing.EditorTools
             };
         }
 
+        // --- M6 Task 4: full-content flavors ---------------------------
+        // The content gate runs BEFORE any other packaging step so an
+        // incomplete inventory can never emit a "full-content" player:
+        // on today's un-authored tree every flavor below fails at
+        // FullContentSetup — that is the intended, test-pinned behavior.
+        // The two preview flavors are development-only: they bind only
+        // authored content through generic catalog validation and stamp
+        // contentStage=partial, so a preview can never stand in as an
+        // ordinary or accepted full-content candidate.
+
+        public static void FullContentSetup()
+        {
+            FamilyRacing.EditorTools.FullContentSetup.Create();
+            FoundationProjectSetup.Create();
+            Debug.Log("FullContentSetup: production content valid");
+        }
+
+        public static void WindowsFullContent()
+        {
+            FamilyRacing.EditorTools.FullContentSetup.Create();
+            FoundationProjectSetup.Create();
+            NetworkPrototypeSetup.VerifyBuildConfiguration(BuildTarget.StandaloneWindows64);
+            var report = Build("Builds/Windows-FullContent/FamilyRacing.exe",
+                BuildTarget.StandaloneWindows64, BuildOptions.Development);
+            Report(report, "Windows Mono full-content development build");
+            FamilyRacing.EditorTools.FullContentSetup.WriteManifest(
+                "Builds/Windows-FullContent", "Development", "complete");
+        }
+
+        // Ordinary full-content build: same validated content, no
+        // development flag — validation endpoints are compiled out.
+        public static void WindowsFullContentOrdinary()
+        {
+            FamilyRacing.EditorTools.FullContentSetup.Create();
+            FoundationProjectSetup.Create();
+            NetworkPrototypeSetup.VerifyBuildConfiguration(BuildTarget.StandaloneWindows64);
+            var report = Build("Builds/Windows-FullContent-Ordinary/FamilyRacing.exe",
+                BuildTarget.StandaloneWindows64, BuildOptions.None);
+            Report(report, "Windows Mono full-content ordinary build (no validation)");
+            FamilyRacing.EditorTools.FullContentSetup.WriteManifest(
+                "Builds/Windows-FullContent-Ordinary", "Ordinary", "complete");
+        }
+
+        // Development-only intermediate check: generic catalog
+        // validation over whatever is authored, contentStage=partial.
+        public static void WindowsFullContentPreview()
+        {
+            FamilyRacing.EditorTools.FullContentSetup.CreatePreview();
+            FoundationProjectSetup.Create();
+            NetworkPrototypeSetup.VerifyBuildConfiguration(BuildTarget.StandaloneWindows64);
+            var report = Build("Builds/Windows-FullContent-Preview/FamilyRacing.exe",
+                BuildTarget.StandaloneWindows64, BuildOptions.Development);
+            Report(report, "Windows Mono full-content preview build (partial content)");
+            FamilyRacing.EditorTools.FullContentSetup.WriteManifest(
+                "Builds/Windows-FullContent-Preview", "Development", "partial");
+        }
+
+        public static void ExportAndroidFullContent()
+        {
+            ExportAndroid("Android-FullContent", development: true,
+                visualBenchmark: false, contentStage: "complete");
+        }
+
+        public static void ExportAndroidFullContentOrdinary()
+        {
+            ExportAndroid("Android-FullContent-Ordinary", development: false,
+                visualBenchmark: false, contentStage: "complete");
+        }
+
+        public static void ExportAndroidFullContentPreview()
+        {
+            ExportAndroid("Android-FullContent-Preview", development: true,
+                visualBenchmark: false, contentStage: "partial");
+        }
+
         public static void Android()
         {
             // Retain the old entry point, but never implicitly invoke online
@@ -152,8 +227,18 @@ namespace FamilyRacing.EditorTools
         }
 
         private static void ExportAndroid(string flavor, bool development,
-            bool visualBenchmark)
+            bool visualBenchmark, string contentStage = null)
         {
+            // Full-content flavors run their content gate before any
+            // plumbing so a catalog defect can never reach packaging.
+            if (contentStage == "complete")
+                FamilyRacing.EditorTools.FullContentSetup.Create();
+            else if (contentStage == "partial")
+                FamilyRacing.EditorTools.FullContentSetup.CreatePreview();
+            else if (contentStage != null)
+                throw new ArgumentException("Unknown content stage: "
+                    + contentStage);
+
             var args = Environment.GetCommandLineArgs();
             string exportPath = null;
             for (var i = 0; i < args.Length; i++)
@@ -192,6 +277,8 @@ namespace FamilyRacing.EditorTools
                 Report(report, "Android Gradle export"
                     + (development ? " (development" : " (ordinary")
                     + (visualBenchmark ? ", visual-benchmark" : "")
+                    + (contentStage != null
+                        ? ", full-content " + contentStage : "")
                     + "; APK build runs separately offline)");
             }
             finally
@@ -199,6 +286,13 @@ namespace FamilyRacing.EditorTools
                 EditorUserBuildSettings.exportAsGoogleAndroidProject = oldExport;
                 EditorUserBuildSettings.buildAppBundle = oldBundle;
             }
+            // The manifest lands only after a successful export — the
+            // packaging claim can never outlive a failed build.
+            if (contentStage != null)
+                FamilyRacing.EditorTools.FullContentSetup.WriteManifest(
+                    "Builds/" + flavor,
+                    development ? "Development" : "Ordinary",
+                    contentStage);
         }
 
         private static BuildReport Build(string location, BuildTarget target,

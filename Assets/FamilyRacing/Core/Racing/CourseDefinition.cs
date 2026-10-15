@@ -70,6 +70,30 @@ namespace FamilyRacing.Core.Racing
         }
     }
 
+    // One authored optional shortcut lane (M6 Task 4): a directional
+    // traversal detector that credits the "shortcut.accepted" metric by
+    // id without being a mandatory progress gate. Legality is an
+    // authoring contract enforced by FullContentValidation: the lane
+    // rejoins the main route before the next required gate — and its
+    // plane must never sit inside a mandatory gate's crossing region —
+    // so crossing it can never skip a checkpoint.
+    [Serializable]
+    public sealed class ShortcutZone
+    {
+        public string id;
+        public float x;
+        public float y;
+        public float z;
+        public float halfWidth;
+        public float dirX;
+        public float dirZ;
+
+        public ShortcutZone Copy()
+        {
+            return (ShortcutZone)MemberwiseClone();
+        }
+    }
+
     // One authored axis-aligned permitted volume for the physical
     // backend's outside-bounds recovery. Everything inside a volume is
     // legal space — ground, permitted jump airspace, the ramp — and any
@@ -140,6 +164,13 @@ namespace FamilyRacing.Core.Racing
         // pickups; gadgets stay inert there.
         public List<GadgetPickupSite> pickupSites =
             new List<GadgetPickupSite>();
+        // Authored optional shortcut lanes (M6 Task 4): traversal
+        // detectors distinct from the mandatory checkpoint order — the
+        // "distinctShortcuts"/"shortcut.accepted" metrics credit their
+        // ids. Empty means the course authors no optional shortcut;
+        // production validation requires two per full-content course.
+        public List<ShortcutZone> shortcutZones =
+            new List<ShortcutZone>();
 
         public bool Validate(out string error)
         {
@@ -228,6 +259,25 @@ namespace FamilyRacing.Core.Racing
                 if (pickupSites.Count > NetworkSettings.GadgetPickupCapacity)
                 { error = "pickupSites.capacity"; return false; }
             }
+            if (shortcutZones != null)
+            {
+                var seenZones = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var zone in shortcutZones)
+                {
+                    if (zone == null || string.IsNullOrEmpty(zone.id))
+                    { error = "shortcut.id"; return false; }
+                    if (!seenZones.Add(zone.id))
+                    { error = "shortcut.duplicate"; return false; }
+                    if (!Finite(zone.x) || !Finite(zone.y) || !Finite(zone.z)
+                        || !Finite(zone.halfWidth) || zone.halfWidth <= 0f
+                        || !Finite(zone.dirX) || !Finite(zone.dirZ))
+                    { error = "shortcut." + zone.id; return false; }
+                    // A zero direction cannot define a directional crossing.
+                    if (zone.dirX * zone.dirX + zone.dirZ * zone.dirZ
+                        < 0.0001f)
+                    { error = "shortcut.direction"; return false; }
+                }
+            }
             return true;
         }
 
@@ -288,6 +338,13 @@ namespace FamilyRacing.Core.Racing
                 foreach (var site in pickupSites)
                     copy.pickupSites.Add(
                         site == null ? null : site.Copy());
+            }
+            if (shortcutZones != null)
+            {
+                copy.shortcutZones = new List<ShortcutZone>();
+                foreach (var zone in shortcutZones)
+                    copy.shortcutZones.Add(
+                        zone == null ? null : zone.Copy());
             }
             return copy;
         }

@@ -72,6 +72,21 @@ namespace FamilyRacing
             public float verticalRangeMeters = 2.5f;
         }
 
+        // One authored optional shortcut lane (M6 Task 4): a named
+        // directional traversal region distinct from the mandatory
+        // gates — the shortcut metrics credit its id when a racer
+        // sweeps it forward. Legality (rejoin before the next required
+        // gate, never overlapping a mandatory gate plane) is the
+        // production validator's job; this asset carries the data.
+        [Serializable]
+        public sealed class ShortcutLane
+        {
+            public string id = "";
+            public Vector3 center;
+            public float halfWidth = 5f;
+            public Vector2 direction = new Vector2(0f, 1f);
+        }
+
         public string courseId = "graybox-01";
         public Vector3 spawnPosition = new Vector3(0f, 0f, -60f);
         public float spawnHeadingDegrees;
@@ -87,6 +102,12 @@ namespace FamilyRacing
         // Authored pickup trigger columns; empty keeps gadgets inert on
         // this course (the world object is never fabricated).
         public PickupSite[] pickupSites = new PickupSite[0];
+        [Header("Shortcuts")]
+        // Authored optional shortcut lanes (M6 Task 4): traversal
+        // detectors credited by the shortcut metrics, never part of the
+        // mandatory gate order. Full-content courses author exactly the
+        // two legal lanes the production contract requires.
+        public ShortcutLane[] shortcutLanes = new ShortcutLane[0];
 
         public CourseDefinition ToCourse(out string error)
         {
@@ -179,6 +200,21 @@ namespace FamilyRacing
                         z = site.center.z,
                         radiusMeters = site.radiusMeters,
                         verticalRangeMeters = site.verticalRangeMeters
+                    });
+                }
+            if (shortcutLanes != null)
+                foreach (var lane in shortcutLanes)
+                {
+                    if (lane == null) continue;
+                    course.shortcutZones.Add(new ShortcutZone
+                    {
+                        id = lane.id,
+                        x = lane.center.x,
+                        y = lane.center.y,
+                        z = lane.center.z,
+                        halfWidth = lane.halfWidth,
+                        dirX = lane.direction.x,
+                        dirZ = lane.direction.y
                     });
                 }
             if (!course.Validate(out error))

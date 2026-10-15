@@ -163,3 +163,4 @@ MonoBehaviour:
     center: {x: -60, y: 0, z: 42}
     radiusMeters: 2
     verticalRangeMeters: 2.5
+  shortcutLanes: []

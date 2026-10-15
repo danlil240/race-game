@@ -31,6 +31,21 @@
 #   -Mode AndroidVisualBenchmark / -Mode AndroidVisualBenchmarkOrdinary
 #                          Offline wrapper with -Presentation VisualBenchmark;
 #                          output under Builds\Android-VisualBenchmark[-Ordinary].
+#   -Mode FullContentSetup Validate the authored three-world full-content
+#                          inventory under Generated\FullContent; fails the
+#                          gate honestly while Tasks 5-8 content is missing.
+#   -Mode WindowsFullContent[Ordinary]
+#                          Windows Mono full-content player flavors ->
+#                          Builds\Windows-FullContent[-Ordinary] with a
+#                          contentStage=complete manifest.
+#   -Mode WindowsFullContentPreview / -Mode AndroidFullContentPreview
+#                          Development-only intermediate checks: generic
+#                          catalog validation over authored content only,
+#                          Builds\<Platform>-FullContent-Preview roots and a
+#                          contentStage=partial manifest — never a candidate.
+#   -Mode AndroidFullContent / -Mode AndroidFullContentOrdinary
+#                          Offline wrapper with -Presentation FullContent;
+#                          output under Builds\Android-FullContent[-Ordinary].
 #
 # All Unity modes use the pinned editor only; each writes its own log under
 # Logs\ and propagates failures. Android keeps distinct export/build logs
@@ -39,7 +54,10 @@ param(
     [Parameter(Mandatory = $true)]
     [ValidateSet("CoreOffline", "Core", "CheckEnvironment", "Setup", "EditMode", "PlayMode", "Windows", "WindowsOrdinary", "Android",
         "VisualBenchmarkSetup", "WindowsVisualBenchmark", "WindowsVisualBenchmarkOrdinary",
-        "AndroidVisualBenchmark", "AndroidVisualBenchmarkOrdinary")]
+        "AndroidVisualBenchmark", "AndroidVisualBenchmarkOrdinary",
+        "FullContentSetup", "WindowsFullContent", "WindowsFullContentOrdinary",
+        "WindowsFullContentPreview",
+        "AndroidFullContent", "AndroidFullContentOrdinary", "AndroidFullContentPreview")]
     [string]$Mode,
 
     [string]$EditorRoot = "C:\Program Files\Unity\Hub\Editor",
@@ -71,6 +89,21 @@ switch ($Mode) {
         exit $LASTEXITCODE
     }
 
+    { $_ -in "AndroidFullContent", "AndroidFullContentOrdinary" } {
+        $configuration = if ($Mode -eq "AndroidFullContentOrdinary") { "Ordinary" } else { "Development" }
+        & (Join-Path $repo "Tools\Build-AndroidOffline.ps1") -ProjectPath $repo -EditorRoot $EditorRoot `
+            -Presentation FullContent -Configuration $configuration
+        exit $LASTEXITCODE
+    }
+
+    # The preview is development-only; there is deliberately no ordinary
+    # preview flavor.
+    "AndroidFullContentPreview" {
+        & (Join-Path $repo "Tools\Build-AndroidOffline.ps1") -ProjectPath $repo -EditorRoot $EditorRoot `
+            -Presentation FullContentPreview -Configuration Development
+        exit $LASTEXITCODE
+    }
+
     "CoreOffline" {
         $runnerArgs = @{ EditorRoot = $EditorRoot }
         if ($NunitFrameworkPath) { $runnerArgs.NunitFrameworkPath = $NunitFrameworkPath }
@@ -86,7 +119,9 @@ switch ($Mode) {
     }
 
     { $_ -in "Setup", "EditMode", "PlayMode", "Windows", "WindowsOrdinary",
-        "VisualBenchmarkSetup", "WindowsVisualBenchmark", "WindowsVisualBenchmarkOrdinary" } {
+        "VisualBenchmarkSetup", "WindowsVisualBenchmark", "WindowsVisualBenchmarkOrdinary",
+        "FullContentSetup", "WindowsFullContent", "WindowsFullContentOrdinary",
+        "WindowsFullContentPreview" } {
         $editorExe = Join-Path $EditorRoot "$PinnedEditorVersion\Editor\Unity.exe"
         if (-not (Test-Path $editorExe)) {
             Write-Error "Pinned editor $PinnedEditorVersion not found at $editorExe."
@@ -114,6 +149,18 @@ switch ($Mode) {
             }
             "WindowsVisualBenchmarkOrdinary" {
                 $unityArgs += "-executeMethod", "FamilyRacing.EditorTools.FoundationBuild.WindowsVisualBenchmarkOrdinary", "-quit"
+            }
+            "FullContentSetup" {
+                $unityArgs += "-executeMethod", "FamilyRacing.EditorTools.FoundationBuild.FullContentSetup", "-quit"
+            }
+            "WindowsFullContent" {
+                $unityArgs += "-executeMethod", "FamilyRacing.EditorTools.FoundationBuild.WindowsFullContent", "-quit"
+            }
+            "WindowsFullContentOrdinary" {
+                $unityArgs += "-executeMethod", "FamilyRacing.EditorTools.FoundationBuild.WindowsFullContentOrdinary", "-quit"
+            }
+            "WindowsFullContentPreview" {
+                $unityArgs += "-executeMethod", "FamilyRacing.EditorTools.FoundationBuild.WindowsFullContentPreview", "-quit"
             }
             "EditMode" {
                 $unityArgs += "-runTests", "-testPlatform", "EditMode",
