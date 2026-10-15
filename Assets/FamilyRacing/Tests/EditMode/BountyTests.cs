@@ -226,6 +226,60 @@ namespace FamilyRacing.Tests
         }
 
         [Test]
+        public void DivergedBoundSlotReceivesNoFacts()
+        {
+            var catalog = CampaignTestFixture.Catalog();
+            // asg-1 was bound to drift-10s at race start, but its
+            // profile slot now holds shortcut-2 — corrupt or reassigned
+            // state. The bound drift facts must never fold onto the
+            // shortcut bounty, and no mismatched reward may pay out.
+            var profile = ProfileWithBounties(
+                Assignment("asg-1", "shortcut-2", progress: 0),
+                Assignment("asg-2", "boost-3", progress: 0));
+            var context = new RaceRewardContext
+            {
+                raceId = "race-div",
+                profileId = P,
+                mode = "campaign",
+                rulesFingerprint = new string('b', 64),
+                bountyAssignmentIds = new List<string>
+                    { "asg-1", "asg-2" },
+                bountyDefinitions = new List<BountyDefinition>
+                {
+                    Def(catalog, "drift-10s").Copy(),
+                    Def(catalog, "boost-3").Copy()
+                }
+            };
+            // 20 s of drift would complete drift-10s outright; three
+            // boosts complete boost-3 on its own honest row.
+            var result = CampaignTestFixture.Result("campaign",
+                "harbor-hop-car-stunt", P, "finished", 1, new RaceMetrics
+                {
+                    driftTicks = 600, boostActivations = 3
+                }, raceId: "race-div");
+
+            var eval = Eval(profile, result, context, catalog);
+
+            Assert.That(eval.eligible, Is.True);
+            var diverged = Row(eval, "asg-1");
+            Assert.That(diverged, Is.Not.Null,
+                "the diverged slot is left in place, not destroyed");
+            Assert.That(diverged.bountyId, Is.EqualTo("shortcut-2"));
+            Assert.That(diverged.progress, Is.EqualTo(0),
+                "facts bound to a different bounty never land here");
+            Assert.That(eval.divergedAssignmentIds,
+                Is.EqualTo(new[] { "asg-1" }),
+                "the divergence is recorded for diagnostics");
+            // The honest bound slot still folds and completes on its
+            // own definition's metric and reward.
+            Assert.That(eval.completions, Has.Count.EqualTo(1));
+            Assert.That(eval.completions[0].bountyId,
+                Is.EqualTo("boost-3"));
+            Assert.That(eval.completions[0].assignmentId,
+                Is.EqualTo("asg-2"));
+        }
+
+        [Test]
         public void RotationDoesNotFeedReplacementFromSameResult()
         {
             var catalog = CampaignTestFixture.Catalog();

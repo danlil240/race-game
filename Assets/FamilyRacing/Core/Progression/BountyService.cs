@@ -55,6 +55,14 @@ namespace FamilyRacing.Core.Progression
         public string rivalEventId = "";
         public List<string> rivalBountyIds = new List<string>();
         public int rivalRewardCoins;
+
+        // Bound assignment ids whose profile slot no longer holds the
+        // bounty id bound at race start — corrupt or reassigned state.
+        // Such slots are skipped (their facts have no honest landing
+        // place) and recorded here for diagnostics; they can neither
+        // accumulate mismatched facts nor pay a mismatched reward.
+        public List<string> divergedAssignmentIds =
+            new List<string>();
     }
 
     // Folds finalized human-attributed metrics into the three challenge
@@ -174,6 +182,13 @@ namespace FamilyRacing.Core.Progression
                 if (!slotByAssignment.TryGetValue(assignmentId, out slot))
                     continue; // bound assignment already retired
                 var row = eval.activeBounties[slot];
+                // The slot must still hold the bounty bound at race
+                // start — a reassigned or corrupt row would fold this
+                // definition's metric facts onto a different bounty and
+                // pay a mismatched reward. Skip it and record the
+                // divergence instead.
+                if (row == null || row.bountyId != definition.id)
+                { eval.divergedAssignmentIds.Add(assignmentId); continue; }
                 var amount = InDefinitionUnits(definition,
                     MetricAmount(definition, entry));
                 // A corrupt row must never mint negative progress.
