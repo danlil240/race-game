@@ -59,9 +59,9 @@ from AgentScenario import (BOUNDARY_TYPES, Client, StateReconstructor,
                            process_start_stamp, verify_trace)
 from RestartScenario import (build_fingerprint, file_hash,
                              write_json)
-from NetworkScenario import (LanDriver, pump_drivers, drive_join,
-                             drive_race, finish_handshake, launch,
-                             read_connection, settle_results,
+from NetworkScenario import (CLASS_EVENTS, LanDriver, pump_drivers,
+                             drive_join, drive_race, finish_handshake,
+                             launch, read_connection, settle_results,
                              validate_lan_state, verify_lan_trace,
                              wait_state, wait_terminal, _LAN_DRIVERS)
 from DrivingScenario import Driver as WaypointDriver
@@ -1390,17 +1390,25 @@ def run_lan_scope(host, clients, checks, notes, fault=None,
         checks.passed("lan.join.client-%d" % index, note)
 
     drive_race(host, clients, "car", notes)
-    # Normalization evidence: every racer of the class shares the same
-    # vehicle baseline — profiles can never leak purchased tune into a
-    # LAN seat. Observable through identical vehicleId/class pairing.
-    race = host.state["networkRace"]
-    assert all(r["attribution"] in ("human", "ai")
-               for r in race["racers"])
+    # Normalization evidence the stream can actually prove: every seat
+    # of the class race runs the identical vehicleId on the identical
+    # authored LAN event — the normalized session the host built while
+    # discarding each spec's requestedTuning. The wire carries no
+    # per-seat tuning object (NetworkRacerSpec.requestedTuning is
+    # documented ignored), so equal tuning baseline is asserted by
+    # Core tests, not independently observable here.
+    lan_assert_normalized_roster(host, "car")
     checks.passed(
         "lan.normalization",
-        "all four seats run the same %s class baseline "
-        "(requestedTuning ignored — authored rule observable on the "
-        "roster)" % "car")
+        "all four seats share vehicleId car-01 on the authored "
+        "lan-car-01 session — uniform vehicle+event observable on "
+        "the roster")
+    checks.not_verified(
+        "lan.tuningBaseline",
+        "the stream exposes no per-seat tuning/baseline object to "
+        "compare — equal tuning is enforced host-side (the wire "
+        "spec's requestedTuning is ignored) and covered by Core "
+        "normalization tests, not externally observable")
 
     first = clients[0]
     client_id = first.state["network"]["localParticipantId"]
@@ -1502,15 +1510,35 @@ def run_lan_scope(host, clients, checks, notes, fault=None,
         "— covered by Core dedup tests")
 
     # Fresh process attaches to retained result state: the rejoined
-    # generation re-serves the result without minting rewards again.
+    # generation's results.request must actually apply (the host
+    # re-serves the retained immutable result — a refusal would read
+    # noResult), the client's ledger must hold a settled delivery row
+    # for this race/participant, and no receipts may be re-minted.
     if fault is not None:
         rejoined = clients[0]
+        rejoined_id = rejoined.state["network"]["localParticipantId"]
         receipts_before = len(receipts(
             rejoined.state.get("savedProfile")))
         accepted, _ = rejoined.command(
             "lan.results.request", {"raceId": race_id})
         if accepted["status"] == "accepted":
-            wait_terminal(rejoined, accepted["commandId"], 30)
+            terminal = wait_terminal(rejoined, accepted["commandId"],
+                                     30)
+            assert terminal["status"] == "applied", \
+                "retained-result request did not apply: " + repr(
+                    terminal)
+        else:
+            assert accepted["status"] == "applied", \
+                "the host refused to re-serve the retained result: " \
+                + repr(accepted)
+        wait_state(
+            rejoined,
+            lambda s: any(
+                row.get("raceId") == race_id
+                and row.get("participantId") == rejoined_id
+                and row.get("state") in ("persisted", "failed")
+                for row in s["network"]["results"]),
+            30, "settled retained delivery row")
         wait_state(
             rejoined,
             lambda s: len(receipts(s.get("savedProfile")))
@@ -1518,8 +1546,9 @@ def run_lan_scope(host, clients, checks, notes, fault=None,
             30, "no re-minted receipts")
         checks.passed(
             "lan.retainedState",
-            "rejoined generation re-served the retained result with "
-            "no new receipts — dedup kept the award once-only")
+            "results.request applied — the host re-served the "
+            "retained immutable result, the rejoined ledger kept "
+            "the settled delivery row, and no receipts re-minted")
 
     # Rematch into the other class; race 2 carries the hostile rows.
     host.applied("lan.rematch")
@@ -1528,6 +1557,12 @@ def run_lan_scope(host, clients, checks, notes, fault=None,
                    lambda s: s["network"]["phase"] == "lobby", 15,
                    name + " rematch lobby")
     drive_race(host, active, "motorcycle", notes)
+    lan_assert_normalized_roster(host, "motorcycle")
+    checks.passed(
+        "lan.normalization.motorcycle",
+        "all four seats share vehicleId motorcycle-01 on the "
+        "authored lan-motorcycle-01 session — normalization holds "
+        "across the class rematch")
 
     # Permanent departure mid-race: the leaver's delivery must settle
     # failed/undeliverable, never pending or persisted-on-behalf. With
@@ -1603,6 +1638,29 @@ def run_lan_scope(host, clients, checks, notes, fault=None,
             assert result["code"] == "noSession", result
 
 
+def lan_assert_normalized_roster(host, class_id):
+    """Assert the externally observable half of class normalization:
+    every seat of the live race runs the identical vehicleId on the
+    identical authored LAN event — the normalized session the host
+    built after discarding each join spec's requestedTuning."""
+    expected_event, expected_vehicle = CLASS_EVENTS[class_id]
+    race = host.state["networkRace"]
+    racers = race["racers"]
+    assert len(racers) == 4, "AI fill must seat all four slots"
+    for racer in racers:
+        assert racer["attribution"] in ("human", "ai"), racer
+        assert racer["vehicleId"] == expected_vehicle, \
+            "seat %s runs %r, expected the normalized %s" % (
+                racer["slot"], racer["vehicleId"], expected_vehicle)
+        session = racer.get("session") or {}
+        assert session.get("vehicleId") == expected_vehicle, \
+            "seat %s session vehicle %r" % (
+                racer["slot"], session.get("vehicleId"))
+        assert session.get("eventId") == expected_event, \
+            "seat %s session event %r, expected %s" % (
+                racer["slot"], session.get("eventId"), expected_event)
+
+
 def lan_gadget_check(client, client_id, checks):
     """A held gadget press must surface as an authoritative gadget.used
     attributed to that participant — observed on its own stream."""
@@ -1611,18 +1669,28 @@ def lan_gadget_check(client, client_id, checks):
         checks.not_verified("lan.gadget",
                             "no live race for the gadget press")
         return
+    seen_ids = {entry.get("id")
+                for entry in client.events_of("gadget.used")}
     client.applied("input.set", inputs(steering=0.0, duration=8,
                                        gadget=True))
     deadline = time.monotonic() + 60
     while time.monotonic() < deadline:
         for event in client.events_of("gadget.used"):
-            assert event.get("participantId") in ("", client_id), \
-                "gadget.used attributed to %r, expected %s" % (
-                    event.get("participantId"), client_id)
+            # Only a use observed AFTER this press proves the press
+            # was heard; other seats (AI fill, other humans) use
+            # gadgets too.
+            if event.get("id") in seen_ids:
+                continue
+            if event.get("participantId") != client_id:
+                continue
+            assert event.get("attribution") == "human", \
+                "gadget.used for %s carries attribution %r" % (
+                    client_id, event.get("attribution"))
             checks.passed(
                 "lan.gadget",
                 "held gadget press became an authoritative "
-                "gadget.used attributed to the human participant")
+                "gadget.used attributed to participant %s "
+                "(human)" % client_id)
             return
         try:
             wait_state(client, lambda s: False, 2.0, "gadget used")
