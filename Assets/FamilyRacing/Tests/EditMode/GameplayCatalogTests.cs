@@ -664,6 +664,60 @@ namespace FamilyRacing.Tests
         }
 
         [Test]
+        public void PickupSitesBindTheGameplayFingerprintOnly()
+        {
+            // Authored pickup placement seeds the authoritative gadget
+            // world: two catalogs differing only in pickupSites must
+            // never share an admission fingerprint — yet the epoch-1
+            // driving fingerprint stays byte-identical because pickup
+            // sites change no simulation outcome the driving body owns.
+            var baseline = Catalog();
+            var baselineGameplay = baseline.CompatibilityFingerprint;
+            var baselineDriving = baseline.Driving.CompatibilityFingerprint;
+
+            var sited = Catalog();
+            sited.Driving.Courses["harbor-hop"].pickupSites.Add(
+                new GadgetPickupSite { id = "site-a", x = 4f, z = 8f });
+            Assert.That(sited.CompatibilityFingerprint,
+                Is.Not.EqualTo(baselineGameplay),
+                "an added pickup site is a gameplay-affecting delta");
+            Assert.That(sited.Driving.CompatibilityFingerprint,
+                Is.EqualTo(baselineDriving),
+                "pickup sites never touch the epoch-1 driving fingerprint");
+
+            var moved = Catalog();
+            moved.Driving.Courses["harbor-hop"].pickupSites.Add(
+                new GadgetPickupSite { id = "site-a", x = 4.5f, z = 8f });
+            Assert.That(moved.CompatibilityFingerprint,
+                Is.Not.EqualTo(sited.CompatibilityFingerprint),
+                "a moved pickup site must be detected");
+
+            // Canonical ordering: the same site set inserted in a
+            // different order fingerprints identically.
+            GadgetPickupSite Site(string id, float x)
+            {
+                return new GadgetPickupSite
+                {
+                    id = id, x = x, z = 8f,
+                    radiusMeters = 2f, verticalRangeMeters = 2.5f
+                };
+            }
+            var ordered = Catalog();
+            ordered.Driving.Courses["harbor-hop"].pickupSites.Add(
+                Site("site-a", 1f));
+            ordered.Driving.Courses["harbor-hop"].pickupSites.Add(
+                Site("site-b", 2f));
+            var reordered = Catalog();
+            reordered.Driving.Courses["harbor-hop"].pickupSites.Add(
+                Site("site-b", 2f));
+            reordered.Driving.Courses["harbor-hop"].pickupSites.Add(
+                Site("site-a", 1f));
+            Assert.That(reordered.CompatibilityFingerprint,
+                Is.EqualTo(ordered.CompatibilityFingerprint),
+                "site list order is presentation, not content");
+        }
+
+        [Test]
         public void UntypedLegacyEventCannotBeARegularCampaignEvent()
         {
             // An untyped event carries no objectives — as a regular event it

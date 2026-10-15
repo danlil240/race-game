@@ -51,10 +51,10 @@ namespace FamilyRacing.Core.Racing
         // M5 Task 2: canonical fingerprint of a GameplayCatalog. It is a
         // superset stream: the same driving body plus every new
         // gameplay-affecting value (event objectives/par/type/finale
-        // flag, campaign structure and gate, bounties, economy, gadgets,
-        // AI difficulty presets). Null sections (the explicit legacy
-        // catalog) hash as absent markers so a legacy catalog still gets
-        // a stable, distinguishable token.
+        // flag, authored gadget pickup sites, campaign structure and
+        // gate, bounties, economy, gadgets, AI difficulty presets). Null
+        // sections (the explicit legacy catalog) hash as absent markers
+        // so a legacy catalog still gets a stable, distinguishable token.
         public static string Compute(GameplayCatalog catalog)
         {
             if (catalog == null) return "";
@@ -72,6 +72,7 @@ namespace FamilyRacing.Core.Racing
                         writer.Write(true);
                         WriteDrivingBody(writer, catalog.Driving);
                         WriteEventGameplay(writer, catalog.Driving.Events);
+                        WritePickupSites(writer, catalog.Driving.Courses);
                     }
                     WriteCampaign(writer, catalog.Campaign);
                     WriteBounties(writer, catalog.Bounties);
@@ -348,6 +349,43 @@ namespace FamilyRacing.Core.Racing
                 Str(writer, condition.comparator);
                 writer.Write(condition.threshold);
                 WriteConditions(writer, condition.alsoRequires);
+            }
+        }
+
+        // Authored gadget pickup sites (M5 Task 5) live on the course
+        // definition but drive only the authoritative gadget rules —
+        // they hash in the epoch-2 gameplay stream, never the epoch-1
+        // driving body. Each course key binds its site set (a site moved
+        // between courses changes the fingerprint) and the sites write
+        // canonically ordered by site id, so serialized list order is
+        // presentation, never content.
+        private static void WritePickupSites(BinaryWriter writer,
+            IReadOnlyDictionary<string, CourseDefinition> courses)
+        {
+            var ids = SortedKeys(courses);
+            writer.Write(ids.Count);
+            foreach (var id in ids)
+            {
+                Str(writer, id);
+                var sites = new List<GadgetPickupSite>();
+                var authored = courses[id].pickupSites;
+                if (authored != null) sites.AddRange(authored);
+                sites.Sort((a, b) => string.CompareOrdinal(
+                    a != null ? a.id : null,
+                    b != null ? b.id : null));
+                writer.Write(sites.Count);
+                foreach (var site in sites)
+                {
+                    var present = site != null;
+                    writer.Write(present);
+                    if (!present) continue;
+                    Str(writer, site.id);
+                    F(writer, site.x);
+                    F(writer, site.y);
+                    F(writer, site.z);
+                    F(writer, site.radiusMeters);
+                    F(writer, site.verticalRangeMeters);
+                }
             }
         }
 
