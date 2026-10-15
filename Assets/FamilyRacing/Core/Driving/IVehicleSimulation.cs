@@ -51,6 +51,10 @@ namespace FamilyRacing.Core.Driving
     // coordinator applies to the body BEFORE the batch runs — such a
     // request is always frozen, so the reset tick never manufactures a
     // crossing.
+    // `modifiers` carries the authoritative rule layer's per-tick
+    // simulation scaling (M5 Task 5 gadgets — turbo accel/cap, foam
+    // slow). Null means neutral. Backends map it onto their own force
+    // model; it never bypasses the shared batch contract.
     public sealed class VehicleTickRequest
     {
         public string participantId;
@@ -58,6 +62,7 @@ namespace FamilyRacing.Core.Driving
         public MotorState rulesBefore;
         public bool simulateMotion = true;
         public VehicleReset reset;
+        public MotorModifiers modifiers;
     }
 
     // A pose sampled inside one Step's two fixed substeps: offsetSeconds

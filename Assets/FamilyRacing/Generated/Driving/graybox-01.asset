@@ -138,3 +138,28 @@ MonoBehaviour:
     headingDegrees: 180
   - position: {x: 55, y: 0, z: -52}
     headingDegrees: -90
+  pickupSites:
+  - id: pickup-south
+    center: {x: 0, y: 0, z: -20}
+    radiusMeters: 2
+    verticalRangeMeters: 2.5
+  - id: pickup-northwest
+    center: {x: 0, y: 0, z: 45}
+    radiusMeters: 2
+    verticalRangeMeters: 2.5
+  - id: pickup-northeast
+    center: {x: 78, y: 0, z: 55}
+    radiusMeters: 2
+    verticalRangeMeters: 2.5
+  - id: pickup-east
+    center: {x: 95, y: 0, z: -28}
+    radiusMeters: 2
+    verticalRangeMeters: 2.5
+  - id: pickup-southeast
+    center: {x: 32, y: 0, z: -55}
+    radiusMeters: 2
+    verticalRangeMeters: 2.5
+  - id: pickup-ramp
+    center: {x: -60, y: 0, z: 42}
+    radiusMeters: 2
+    verticalRangeMeters: 2.5

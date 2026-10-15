@@ -35,6 +35,11 @@ namespace FamilyRacing
         // driving content. Optional: absent means solo.start reports
         // contentUnavailable while practice/LAN keep working.
         [SerializeField] private GameplayCatalogAsset gameplayCatalog;
+        // M5 Task 5: the authored gadget catalog for practice/tutorial
+        // free-drive and LAN races, which do not gate on the gameplay
+        // catalog. When the gameplay catalog IS bound its gadget section
+        // wins so a single authored source owns the numbers.
+        [SerializeField] private GadgetCatalogAsset gadgetCatalog;
         [SerializeField] private GameObject coursePrefab;
         [SerializeField] private string contentVersion = "driving-0.1";
         // Developer-facing race-level backend selection, bound to this
@@ -179,6 +184,11 @@ namespace FamilyRacing
         // content (M5 Task 4); null when no asset is bound or conversion
         // failed — solo.start reports contentUnavailable honestly.
         public Core.Progression.GameplayCatalog Gameplay { get; private set; }
+        // The validated gadget catalog: the gameplay catalog's gadget
+        // section when bound, else the standalone gadget asset's
+        // conversion. Null means gadget-free races — honest absence,
+        // never a fabricated default.
+        public Core.Racing.GadgetDefinitionCatalog Gadgets { get; private set; }
         public RacePresentationCatalogAsset PresentationCatalog
         {
             get { return presentationCatalog; }
@@ -295,6 +305,19 @@ namespace FamilyRacing
                 Gameplay = gameplayCatalog.ToCatalog(catalog, out gameplayError);
                 if (Gameplay == null)
                     Debug.LogError("DrivingWorld: " + gameplayError);
+            }
+            // M5 Task 5: gadget content resolves once here — the bound
+            // gameplay catalog's gadget section wins over the standalone
+            // asset so the numbers have exactly one authored source.
+            Gadgets = null;
+            if (Gameplay != null && Gameplay.Gadgets != null)
+                Gadgets = Gameplay.Gadgets;
+            else if (gadgetCatalog != null)
+            {
+                string gadgetError;
+                Gadgets = gadgetCatalog.ToCatalog(out gadgetError);
+                if (Gadgets == null)
+                    Debug.LogError("DrivingWorld: " + gadgetError);
             }
             if (coursePrefab != null && courseInstance == null)
             {

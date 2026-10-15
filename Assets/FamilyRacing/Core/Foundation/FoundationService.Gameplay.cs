@@ -22,6 +22,11 @@ namespace FamilyRacing.Core.Foundation
     public sealed partial class FoundationService
     {
         private GameplayCatalog gameplayCatalog;
+        // M5 Task 5: the authored gadget catalog for sessions that do
+        // not gate on the gameplay catalog (practice, tutorial
+        // free-drive). The gameplay catalog's gadget section wins when
+        // bound — one authored source owns the numbers.
+        private GadgetDefinitionCatalog gadgetCatalog;
         private SoloRaceSession soloRace;
         // The injected vehicle simulation the local race steps through:
         // separate ownership from the practice `drivingSimulation` even
@@ -45,6 +50,15 @@ namespace FamilyRacing.Core.Foundation
         public void SetGameplayCatalog(GameplayCatalog catalog)
         {
             gameplayCatalog = catalog;
+        }
+
+        // The runtime injects the validated gadget content once —
+        // practice/tutorial sessions and LAN races use it when no
+        // gameplay catalog supplies a gadget section of its own.
+        public void SetGadgetCatalog(
+            GadgetDefinitionCatalog catalog)
+        {
+            gadgetCatalog = catalog;
         }
 
         // The local-mode catalog when one is bound (null otherwise) —

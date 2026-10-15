@@ -59,6 +59,19 @@ namespace FamilyRacing
             public Vector3 max;
         }
 
+        // One authored gadget pickup column (M5 Task 5): `center.y` is
+        // the road height, so elevated routes and flyovers never touch
+        // a ground-level site (DifferentHeightsNeverInteract). The host
+        // rules sweep the racers' real traveled segments against it.
+        [Serializable]
+        public sealed class PickupSite
+        {
+            public string id = "";
+            public Vector3 center;
+            public float radiusMeters = 2f;
+            public float verticalRangeMeters = 2.5f;
+        }
+
         public string courseId = "graybox-01";
         public Vector3 spawnPosition = new Vector3(0f, 0f, -60f);
         public float spawnHeadingDegrees;
@@ -70,6 +83,10 @@ namespace FamilyRacing
         // Deterministic fallback respawn candidates tried in order when
         // the checkpoint-derived safe pose is occupied.
         public SpawnSlot[] safePoses = new SpawnSlot[0];
+        [Header("Gadgets")]
+        // Authored pickup trigger columns; empty keeps gadgets inert on
+        // this course (the world object is never fabricated).
+        public PickupSite[] pickupSites = new PickupSite[0];
 
         public CourseDefinition ToCourse(out string error)
         {
@@ -148,6 +165,20 @@ namespace FamilyRacing
                         y = candidate.position.y,
                         z = candidate.position.z,
                         heading = candidate.headingDegrees * Mathf.Deg2Rad
+                    });
+                }
+            if (pickupSites != null)
+                foreach (var site in pickupSites)
+                {
+                    if (site == null) continue;
+                    course.pickupSites.Add(new GadgetPickupSite
+                    {
+                        id = site.id,
+                        x = site.center.x,
+                        y = site.center.y,
+                        z = site.center.z,
+                        radiusMeters = site.radiusMeters,
+                        verticalRangeMeters = site.verticalRangeMeters
                     });
                 }
             if (!course.Validate(out error))

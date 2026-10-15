@@ -320,7 +320,7 @@ namespace FamilyRacing.Tests
         // --- driving input --------------------------------------------------------
 
         [Test]
-        public void InputSetAllowedDuringDrivingAndGadgetRejected()
+        public void InputSetAllowedDuringDrivingIncludingGadget()
         {
             CreateProfile();
             StartRunning();
@@ -335,11 +335,11 @@ namespace FamilyRacing.Tests
                 P("steering", "0", "drift", "false", "boost", "false",
                     "gadget", "true", "recover", "false", "changeCamera", "false",
                     "pause", "false", "durationTicks", "10")));
-            Assert.That(gadget.status, Is.EqualTo(CommandResult.Rejected));
-            Assert.That(gadget.code, Is.EqualTo("unavailable"),
-                "gadget actions are explicitly unavailable while driving");
-            Assert.That(service.Snapshot().input.steering, Is.EqualTo(1f),
-                "the rejected gadget command must not clobber held input");
+            Assert.That(gadget.status, Is.EqualTo(CommandResult.Applied),
+                "gadget actions are live while driving (M5 Task 5)");
+            Assert.That(service.Snapshot().input.gadget, Is.True);
+            Assert.That(service.Snapshot().input.steering, Is.EqualTo(0f),
+                "an accepted gadget command updates held input");
         }
 
         [Test]

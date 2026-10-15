@@ -98,10 +98,18 @@ namespace FamilyRacing.Core.Racing
                             broke = true;
                             break;
                         case "gadget.used":
-                            metrics.gadgetUses++;
-                            if (!string.IsNullOrEmpty(ev.detail)
-                                && accum.gadgetIds.Add(ev.detail))
-                                metrics.distinctGadgetTypes++;
+                            // Gadget credit follows the control source
+                            // recorded at the action tick — an AI-
+                            // attributed use can never earn human
+                            // gadget credit (M5 Task 5).
+                            if (ev.attribution == "human"
+                                || ev.attribution == "")
+                            {
+                                metrics.gadgetUses++;
+                                if (!string.IsNullOrEmpty(ev.detail)
+                                    && accum.gadgetIds.Add(ev.detail))
+                                    metrics.distinctGadgetTypes++;
+                            }
                             break;
                     }
                 }

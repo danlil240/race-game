@@ -94,11 +94,19 @@ namespace FamilyRacing.Core.Racing
         private readonly RaceMetricsAccumulator metrics =
             new RaceMetricsAccumulator();
         private readonly LocalContext local;
+        // M5 Task 5: the shared authoritative gadget world — authored
+        // pickup sites on the course plus the seeded draw bag and every
+        // racer's gadget row. Null when the catalog supplies no gadget
+        // definitions or the course authors no sites; every consumer
+        // treats null as "gadgets inert".
+        private readonly GadgetDefinitionCatalog gadgets;
+        private GadgetWorldState gadgetWorld;
 
         private NetworkRace(string sessionId, string raceId,
             DrivingContentCatalog content, EventDefinition evt,
             CourseDefinition course, NetworkRacerSpec[] specs,
-            LocalContext local, VehicleTuning[] tunings)
+            LocalContext local, VehicleTuning[] tunings,
+            GadgetDefinitionCatalog gadgets)
         {
             this.sessionId = sessionId;
             this.raceId = raceId;
@@ -106,6 +114,7 @@ namespace FamilyRacing.Core.Racing
             this.evt = evt;
             this.course = course;
             this.local = local;
+            this.gadgets = gadgets;
             countdownRemaining = evt.countdownTicks;
             phase = countdownRemaining > 0 ? PhaseCountdown : PhaseRunning;
             // One canonical content identity + backend selection for the
@@ -171,6 +180,25 @@ namespace FamilyRacing.Core.Racing
             // Per-racer "race.started" events are already staged by the
             // sessions; no extra coordinator-level marker is emitted so
             // consumers can rely on one race.started per seated racer.
+
+            // The shared authoritative gadget world (M5 Task 5): one row
+            // per seated racer, pickups on the course's authored sites,
+            // and a draw bag seeded by the race identity — the same deal
+            // on every device and every replay, independent of
+            // standings. Absent catalog content or a site-free course
+            // leaves the world null so snapshots carry no dead payload.
+            if (gadgets != null && gadgets.gadgets != null
+                && gadgets.gadgets.Count > 0
+                && course.pickupSites != null
+                && course.pickupSites.Count > 0)
+            {
+                var roster = new List<string>(specs.Length);
+                foreach (var spec in specs)
+                    roster.Add(spec.participantId);
+                gadgetWorld = GadgetRules.Create(gadgets,
+                    course.pickupSites, GadgetRules.StableSeed(raceId),
+                    roster);
+            }
         }
 
         // Validates the whole roster before constructing anything: a
@@ -181,13 +209,14 @@ namespace FamilyRacing.Core.Racing
         public static bool TryCreate(string sessionId, string raceId,
             DrivingContentCatalog content, string eventId, string classId,
             IReadOnlyList<NetworkRacerSpec> racerSpecs,
-            out NetworkRace race, out string error)
+            out NetworkRace race, out string error,
+            GadgetDefinitionCatalog gadgets = null)
         {
             // The LAN factory always runs the normalized catalog
             // baseline (requestedTuning ignored) and produces legacy
             // format-1 results — the local seam owns both differences.
             return ValidateAndCreate(sessionId, raceId, content, eventId,
-                classId, racerSpecs, null, out race, out error);
+                classId, racerSpecs, null, gadgets, out race, out error);
         }
 
         // The local creation seam (M5 Task 4): same validation and roster
@@ -208,7 +237,8 @@ namespace FamilyRacing.Core.Racing
             IReadOnlyList<NetworkRacerSpec> racerSpecs, string mode,
             string rulesFingerprint, AiDifficultyDefinition difficulty,
             string rivalParticipantId,
-            out NetworkRace race, out string error)
+            out NetworkRace race, out string error,
+            GadgetDefinitionCatalog gadgets = null)
         {
             race = null;
             error = null;
@@ -220,7 +250,8 @@ namespace FamilyRacing.Core.Racing
                 rivalParticipantId = rivalParticipantId
             };
             if (!ValidateAndCreate(sessionId, raceId, content, eventId,
-                    classId, racerSpecs, local, out race, out error))
+                    classId, racerSpecs, local, gadgets, out race,
+                    out error))
                 return false;
             return true;
         }
@@ -231,6 +262,7 @@ namespace FamilyRacing.Core.Racing
         private static bool ValidateAndCreate(string sessionId, string raceId,
             DrivingContentCatalog content, string eventId, string classId,
             IReadOnlyList<NetworkRacerSpec> racerSpecs, LocalContext local,
+            GadgetDefinitionCatalog gadgets,
             out NetworkRace race, out string error)
         {
             race = null;
@@ -307,7 +339,7 @@ namespace FamilyRacing.Core.Racing
                 if (spec == null) { error = "invalidRoster"; return false; }
 
             race = new NetworkRace(sessionId, raceId, content, evt, course,
-                specs, local, tunings);
+                specs, local, tunings, gadgets);
             return true;
         }
 
@@ -394,7 +426,8 @@ namespace FamilyRacing.Core.Racing
                 if (racer.attribution == "ai")
                 {
                     input = racer.ai != null
-                        ? racer.ai.Sample(preStep[slot], course)
+                        ? racer.ai.Sample(preStep[slot], course,
+                            GadgetContextFor(racer, preStep))
                         : default(DriverInput);
                 }
                 else if (inputs == null
@@ -418,6 +451,13 @@ namespace FamilyRacing.Core.Racing
                         out _);
                 }
                 racer.recoverHeld = input.Recover;
+                // M5 Task 5: the shared world's per-racer modifier rides
+                // the prepared request into the simulation batch —
+                // host-authoritative effects reach both backends through
+                // exactly one seam.
+                racer.session.PendingModifiers =
+                    GadgetRules.ModifierFor(gadgetWorld,
+                        racer.participantId);
                 var request = racer.session.PrepareStep(input);
                 if (request == null) continue; // session finalized
                 request.participantId = racer.participantId;
@@ -444,6 +484,7 @@ namespace FamilyRacing.Core.Racing
                         byParticipant[result.participantId] = result;
 
             // --- 4) complete every rule in slot order -------------------
+            var completed = new DrivingStepResult[prepared.Count];
             for (var i = 0; i < prepared.Count; i++)
             {
                 var entry = prepared[i];
@@ -452,25 +493,120 @@ namespace FamilyRacing.Core.Racing
                 if (!byParticipant.TryGetValue(racer.participantId,
                         out result))
                     result = null;
-                var completed = racer.session.CompleteStep(result);
-                Stamp(racer, completed.events, emitted);
+                completed[i] = racer.session.CompleteStep(result);
+                Stamp(racer, completed[i].events, emitted);
+            }
+
+            // --- 4b) ONE authoritative gadget boundary ------------------
+            // After every session committed (poses/paths are final), the
+            // shared world advances exactly once: edge-triggered uses,
+            // swept-segment collections and patch hits all resolve in
+            // stable slot order off the committed boundary facts. Pause
+            // never reaches here — the early return above freezes the
+            // world whole. A frozen or recovery boundary participates
+            // with `recovering` so clocks tick but nothing collects.
+            Dictionary<string, List<DrivingEvent>> gadgetEvents = null;
+            if (gadgetWorld != null)
+            {
+                var gadgetInput = new GadgetStepInput { tick = hostTick };
+                for (var i = 0; i < prepared.Count; i++)
+                {
+                    var entry = prepared[i];
+                    var request = entry.request;
+                    var done = completed[i];
+                    var racerInput = new GadgetRacerInput
+                    {
+                        participantId = entry.racer.participantId,
+                        slot = entry.racer.slot,
+                        gadgetHeld = request.input.Gadget,
+                        recovering = !request.simulateMotion
+                            || request.reset != null
+                            || (done != null && done.reset != null),
+                        finished = done != null && done.state != null
+                            && done.state.finished
+                    };
+                    var committed = done != null ? done.state.motor : null;
+                    if (committed != null)
+                    {
+                        racerInput.x = committed.x;
+                        racerInput.y = committed.y;
+                        racerInput.z = committed.z;
+                    }
+                    // The swept segments are the boundary's real
+                    // substep path — a respawn teleport can never
+                    // manufacture a collection because teleports do
+                    // not appear in the traveled path.
+                    var path = done != null && done.state != null
+                        ? done.state.substepPath : null;
+                    if (path != null)
+                        for (var s = 1; s < path.Count; s++)
+                        {
+                            var a = path[s - 1].pose;
+                            var b = path[s].pose;
+                            racerInput.segments.Add(new GadgetSegment
+                            {
+                                ax = a.x, ay = a.y, az = a.z,
+                                bx = b.x, by = b.y, bz = b.z
+                            });
+                        }
+                    gadgetInput.racers.Add(racerInput);
+                }
+                var gadgetStep = GadgetRules.Step(gadgetInput,
+                    gadgetWorld, gadgets);
+                if (gadgetStep.state != null)
+                    gadgetWorld = gadgetStep.state;
+                foreach (var ev in gadgetStep.events)
+                {
+                    // Attribution rides at emission time — whoever owned
+                    // the slot this boundary, never re-derived later.
+                    var owner = FindRacer(ev.participantId);
+                    if (owner != null) ev.attribution = owner.attribution;
+                    emitted.Add(ev);
+                    if (!string.IsNullOrEmpty(ev.participantId))
+                    {
+                        if (gadgetEvents == null)
+                            gadgetEvents = new Dictionary<string,
+                                List<DrivingEvent>>(StringComparer.Ordinal);
+                        List<DrivingEvent> list;
+                        if (!gadgetEvents.TryGetValue(ev.participantId,
+                                out list))
+                            gadgetEvents[ev.participantId] = list =
+                                new List<DrivingEvent>();
+                        list.Add(ev);
+                    }
+                }
+            }
+
+            // --- 5) metrics, recovery resets, finish tracking -----------
+            for (var i = 0; i < prepared.Count; i++)
+            {
+                var entry = prepared[i];
+                var racer = entry.racer;
+                var done = completed[i];
                 // Metric facts count at the completed simulated boundary
                 // — attribution stamped at emission time, so facts a
                 // human earned stay human facts even if a takeover
-                // happens before the next boundary (Task 4).
+                // happens before the next boundary (Task 4). Gadget
+                // events merge into the same boundary view.
+                List<DrivingEvent> gadgetList;
+                var boundaryEvents = gadgetEvents != null
+                    && gadgetEvents.TryGetValue(racer.participantId,
+                        out gadgetList)
+                    ? Merged(done.events, gadgetList)
+                    : done.events;
                 metrics.RecordBoundary(hostTick, racer.participantId,
                     racer.attribution, phase == PhaseRunning,
-                    completed.state, completed.events);
-                // 5) a rule-requested recovery reset lands on the body
+                    done.state, boundaryEvents);
+                // A rule-requested recovery reset lands on the body
                 // before this boundary publishes — the committed state
                 // already shows the post-reset pose.
-                if (completed.reset != null)
-                    simulation.Restore(completed.reset.participantId,
-                        completed.reset.state);
-                if (!racer.finished && completed.state.finished)
+                if (done.reset != null)
+                    simulation.Restore(done.reset.participantId,
+                        done.reset.state);
+                if (!racer.finished && done.state.finished)
                 {
                     racer.finished = true;
-                    racer.finishTicks = completed.state.finishTicks;
+                    racer.finishTicks = done.state.finishTicks;
                     if (firstFinishElapsedTicks == 0)
                     {
                         firstFinishElapsedTicks = racer.finishTicks;
@@ -481,6 +617,74 @@ namespace FamilyRacing.Core.Racing
             }
             TryFinalize(emitted);
             return BuildState(emitted);
+        }
+
+        // Ordered concatenation for the metrics view: the session's own
+        // events first, then this boundary's gadget events.
+        private static List<DrivingEvent> Merged(List<DrivingEvent> events,
+            List<DrivingEvent> extra)
+        {
+            var merged = new List<DrivingEvent>(
+                (events != null ? events.Count : 0)
+                + (extra != null ? extra.Count : 0));
+            if (events != null) merged.AddRange(events);
+            if (extra != null) merged.AddRange(extra);
+            return merged;
+        }
+
+        // The gadget facts one AI sample needs (M5 Task 5): the seat's
+        // held item plus host-computed spatial facts — a rival near
+        // behind arms the trap, a live rival patch ahead arms the
+        // shield. A null/empty row yields null so Sample stays fast.
+        private AiGadgetContext GadgetContextFor(Racer racer,
+            DrivingSessionState[] preStep)
+        {
+            if (gadgetWorld == null) return null;
+            var row = gadgetWorld.Racer(racer.participantId);
+            if (row == null || string.IsNullOrEmpty(row.heldItemId))
+                return null;
+            var context = new AiGadgetContext
+            {
+                heldItemId = row.heldItemId,
+                heldGeneration = row.heldGeneration,
+                heldTicks = row.heldTicks
+            };
+            var def = gadgets != null ? gadgets.Gadget(row.heldItemId) : null;
+            context.kind = def != null ? def.kind : "";
+            var motor = preStep != null && racer.slot < preStep.Length
+                && preStep[racer.slot] != null
+                ? preStep[racer.slot].motor : null;
+            if (motor == null) return context;
+            var fx = (float)Math.Sin(motor.heading);
+            var fz = (float)Math.Cos(motor.heading);
+            var behind = NetworkSettings.AiGadgetRivalBehindMeters;
+            for (var i = 0; i < preStep.Length; i++)
+            {
+                if (i == racer.slot || preStep[i] == null) continue;
+                var peer = preStep[i].motor;
+                if (peer == null) continue;
+                var dx = peer.x - motor.x;
+                var dz = peer.z - motor.z;
+                if (dx * dx + dz * dz <= behind * behind
+                    && dx * fx + dz * fz < 0f)
+                    context.rivalNearBehind = true;
+            }
+            var ahead = NetworkSettings.AiGadgetPatchAheadMeters;
+            if (gadgetWorld.patches != null)
+                foreach (var patch in gadgetWorld.patches)
+                {
+                    if (patch == null
+                        || patch.ownerParticipantId == racer.participantId)
+                        continue;
+                    var dx = patch.x - motor.x;
+                    var dz = patch.z - motor.z;
+                    var forward = dx * fx + dz * fz;
+                    if (forward > 0f && forward <= ahead
+                        && Math.Abs(patch.y - motor.y)
+                            <= CourseDefinition.MinSpawnSeparationMeters)
+                        context.patchAhead = true;
+                }
+            return context;
         }
 
         private sealed class Prepared
@@ -772,7 +976,10 @@ namespace FamilyRacing.Core.Racing
                 firstFinishElapsedTicks = firstFinishElapsedTicks,
                 finishDeadlineElapsedTicks = finishDeadlineElapsedTicks,
                 result = result,
-                events = emitted ?? new List<DrivingEvent>()
+                events = emitted ?? new List<DrivingEvent>(),
+                // The published world is a deep copy — observation and
+                // wire paths can never mutate the host's live state.
+                gadgets = gadgetWorld != null ? gadgetWorld.Copy() : null
             };
             state.standings.AddRange(order);
             // One shared world serves the whole roster, so the same

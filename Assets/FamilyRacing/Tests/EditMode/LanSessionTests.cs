@@ -417,16 +417,18 @@ namespace FamilyRacing.Tests
         }
 
         [Test]
-        public void ProtocolTwoIsTheLanContract()
+        public void ProtocolThreeIsTheLanContract()
         {
-            // Task 9: the physical replication epoch — protocol 2 is the
-            // wire contract. Observation schema 5 (M4 Task 2) is additive
+            // Task 9: the physical replication epoch introduced protocol
+            // 2; M5 Task 5 bumps it to 3 — the snapshot body now carries
+            // the authoritative gadget world, so old peers must not join
+            // a gadget race. Observation schema 5 (M4 Task 2) is additive
             // presentation truth and does not touch either gameplay
             // binding. M5 Task 2 bumped the gameplay-rules identity to
             // gameplay-3: the GameplayCatalog contract (objectives,
             // difficulty, economy, gadgets) is now part of what peers
             // must agree on.
-            Assert.That(NetworkSettings.LanProtocolVersion, Is.EqualTo(2));
+            Assert.That(NetworkSettings.LanProtocolVersion, Is.EqualTo(3));
             Assert.That(NetworkSettings.GameplayVersion,
                 Is.EqualTo("gameplay-3"));
             Assert.That(NetworkSettings.StateSchemaVersion, Is.EqualTo(6));
@@ -439,7 +441,7 @@ namespace FamilyRacing.Tests
             Dictionary<string, string> fields;
             Assert.That(NetworkProtocol.TryDecode(
                 JoinRequest("p-1"), out type, out fields));
-            Assert.That(fields["v"], Is.EqualTo("2"));
+            Assert.That(fields["v"], Is.EqualTo("3"));
             Assert.That(fields["fp"],
                 Is.EqualTo(LanCatalog().CompatibilityFingerprint),
                 "join.request carries the canonical tuning fingerprint");
@@ -529,7 +531,7 @@ namespace FamilyRacing.Tests
         {
             var host = StandaloneHost(link, probe);
             var descriptor = host.Snapshot().descriptor;
-            Assert.That(descriptor.lanProtocol, Is.EqualTo(2));
+            Assert.That(descriptor.lanProtocol, Is.EqualTo(3));
             Assert.That(descriptor.contentVersion,
                 Is.EqualTo("lan-content-1"));
             Assert.That(descriptor.contentFingerprint,

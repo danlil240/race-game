@@ -5,6 +5,22 @@ using FamilyRacing.Core.Networking;
 
 namespace FamilyRacing.Core.Racing
 {
+    // Gadget facts the coordinator computes for one AI sample (M5 Task
+    // 5): the seat's held item plus the host's spatial facts the
+    // follower needs — a rival near behind for the foam trap, a live
+    // rival patch ahead for the shield, and a low-demand straight for
+    // the turbo. The AI never reads gadget state directly; the
+    // coordinator feeds it exactly what a human player could see.
+    public sealed class AiGadgetContext
+    {
+        public string heldItemId = "";
+        public long heldGeneration;  // unique per grant — arms one press
+        public int heldTicks;
+        public string kind = "";
+        public bool rivalNearBehind;
+        public bool patchAhead;
+    }
+
     // Honest fill-in driver for vacant or disconnected race slots: a
     // waypoint follower over the course's authored `route` loop. It emits
     // only the ordinary bounded DriverInput a human produces — steering
@@ -55,6 +71,11 @@ namespace FamilyRacing.Core.Racing
         private int wedgeSkips;
         private int lastNextCheckpoint = -1;
         private bool wasRecovering;
+        // M5 Task 5: the held-item generation this driver already spent
+        // its press pulse on. Emitting a pulse — not a held level —
+        // means a takeover that lands on a latched press still clears
+        // the rules' edge latch before this driver's own press arrives.
+        private long gadgetFiredGeneration = -1;
 
         public AiDriver()
             : this(0f, null)
@@ -94,7 +115,8 @@ namespace FamilyRacing.Core.Racing
                 : NetworkSettings.AiBoostMinCharge;
         }
 
-        public DriverInput Sample(DrivingSessionState racer, CourseDefinition course)
+        public DriverInput Sample(DrivingSessionState racer,
+            CourseDefinition course, AiGadgetContext gadgets = null)
         {
             if (racer == null || course == null || racer.motor == null)
                 return default;
@@ -281,7 +303,57 @@ namespace FamilyRacing.Core.Racing
                 progressAnchorX = motor.x;
                 progressAnchorZ = motor.z;
             }
-            return new DriverInput(steer, drift, boost, false, recover,
+            // M5 Task 5 gadget spend: the held bit the rules edge-latch
+            // — the follower presses once the authored willingness has
+            // "settled" the item (a deterministic hold-off: lower
+            // willingness waits longer) AND the kind's use window is
+            // real. Turbo waits for a straight, the trap for a rival
+            // near behind, the shield for a live threat ahead; unknown
+            // kinds fire once settled so the slot never deadlocks.
+            var gadget = false;
+            if (gadgets != null
+                && !string.IsNullOrEmpty(gadgets.heldItemId))
+            {
+                var willingness = difficulty != null
+                    ? Clamp01(difficulty.gadgetUseWillingness)
+                    : NetworkSettings.AiGadgetDefaultWillingness;
+                // A zero-willingness seat never spends; everyone else
+                // waits out a deterministic settle delay, then prefers
+                // the kind's real use window — and after a bounded
+                // patience window spends anyway so the held slot can
+                // never deadlock (the rules still decide the effect).
+                if (willingness > 0f
+                    && gadgets.heldGeneration != gadgetFiredGeneration)
+                {
+                    var settle = (int)((1f - willingness)
+                        * NetworkSettings.AiGadgetSettleTicks);
+                    var window = true;
+                    switch (gadgets.kind)
+                    {
+                        case GadgetKind.Turbo:
+                            // Straights only — the same steering-demand
+                            // gate boost uses, computed by this sample.
+                            window = Math.Abs(steer)
+                                <= NetworkSettings.AiBoostMaxSteer;
+                            break;
+                        case GadgetKind.FoamTrap:
+                            window = gadgets.rivalNearBehind;
+                            break;
+                        case GadgetKind.BubbleShield:
+                            window = gadgets.patchAhead;
+                            break;
+                    }
+                    if (gadgets.heldTicks >= settle
+                        && (window
+                            || gadgets.heldTicks >= settle
+                                + NetworkSettings.AiGadgetPatienceTicks))
+                    {
+                        gadget = true;
+                        gadgetFiredGeneration = gadgets.heldGeneration;
+                    }
+                }
+            }
+            return new DriverInput(steer, drift, boost, gadget, recover,
                 false, false, null, brake);
         }
 
@@ -527,6 +599,11 @@ namespace FamilyRacing.Core.Racing
             while (radians > Math.PI) radians -= TwoPi;
             while (radians <= -Math.PI) radians += TwoPi;
             return radians;
+        }
+
+        private static float Clamp01(float value)
+        {
+            return Clamp(value, 0f, 1f);
         }
 
         private static float Clamp(float value, float min, float max)

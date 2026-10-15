@@ -239,7 +239,8 @@ namespace FamilyRacing
                 {
                     if (!entry.active) continue;
                     WheelContactSolver.ApplySubstepForces(entry.body,
-                        entry.request.input, SubstepSeconds, world);
+                        entry.request.input, SubstepSeconds, world,
+                        entry.request.modifiers);
                 }
                 world.Simulate(SubstepSeconds);
                 SubstepsSimulated++;

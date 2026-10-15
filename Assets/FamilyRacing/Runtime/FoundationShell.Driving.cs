@@ -90,6 +90,12 @@ namespace FamilyRacing
             // answer instead of looking like it did nothing.
             driftLabel = AddLabel(top, "", 22, Seafoam);
             driftLabel.name = "hud.drift";
+            // Held-gadget readout (M5 Task 5): names the item the gadget
+            // button will spend, or the empty-slot marker when a gadget
+            // world exists but the slot is free. Empty text when the
+            // race authors no gadget content at all.
+            gadgetLabel = AddLabel(top, "", 22, Coral);
+            gadgetLabel.name = "hud.gadget";
 
             var boostRow = Row(root);
             var boostCaption = AddLabel(boostRow, T("input.boost", state), 20, Deep);
@@ -173,19 +179,18 @@ namespace FamilyRacing
                 () => app.Input.TouchRecover(), "driving.recover");
             var camera = AddButton(actions, T("settings.camera", state), Ocean,
                 () => app.Dispatch("camera.toggle", emptyParams), "driving.camera");
-            // Gadgets are deferred content: the affordance exists but is
-            // visibly disabled with an honest label/tooltip instead of
-            // promising input the command path would reject.
-            var gadget = AddButton(actions, T("hud.gadget.soon", state), Off,
-                () => { }, "driving.gadget");
-            gadget.SetEnabled(false);
-            gadget.tooltip = T("hud.gadget.unavailable", state);
+            // Gadgets are live (M5 Task 5): the button fires the held
+            // item through the same edge-latched input.set path the
+            // keyboard E key uses — the slot label names it.
+            var gadget = AddButton(actions, T("input.gadget", state), Seafoam,
+                () => app.Input.TouchGadget(), "driving.gadget");
             var pause = AddButton(actions, T("input.pause", state), Coral,
                 () => app.Dispatch("pause.toggle", emptyParams), "driving.pause");
             var exit = AddButton(actions, T("driving.exit", state), Deep,
                 () => app.Dispatch("race.exit", emptyParams), "driving.exit");
             ApplyAvailability(recover, "input.set");
             ApplyAvailability(camera, "camera.toggle");
+            ApplyAvailability(gadget, "input.set");
             ApplyAvailability(pause, "pause.toggle");
             ApplyAvailability(exit, "race.exit");
 
@@ -285,6 +290,8 @@ namespace FamilyRacing
             if (driftLabel != null)
                 driftLabel.text = session.motor != null && session.motor.drifting
                     ? T("input.drift", state) + "!" : "";
+            if (gadgetLabel != null)
+                gadgetLabel.text = GadgetSlotText(state);
             if (tutorialPanel != null)
             {
                 var tutorial = session.tutorial;
@@ -315,6 +322,65 @@ namespace FamilyRacing
                 if (done && finishVehicleLabel != null)
                     finishVehicleLabel.text = VehicleName(session.vehicleId, state);
             }
+        }
+
+        // The held-gadget readout: resolves the local racer's row in
+        // whichever authoritative world this screen presents — the
+        // session-owned solo world (practice/tutorial/time trial), the
+        // local-mode coordinator's shared world (campaign/quickRace) or
+        // the host-published LAN world. "" when no gadget world exists;
+        // the localized empty marker when the slot is free.
+        private string GadgetSlotText(FoundationState state)
+        {
+            var world = GadgetWorldFor(state);
+            if (world == null) return "";
+            var row = LocalGadgetRow(state, world);
+            if (row == null) return T("hud.gadget.empty", state);
+            if (string.IsNullOrEmpty(row.heldItemId))
+                return T("hud.gadget.empty", state);
+            var key = "gadget." + (row.heldKind ?? "");
+            try { return T(key, state); }
+            catch (KeyNotFoundException) { return row.heldItemId; }
+        }
+
+        // The live authoritative gadget world for the presented race —
+        // exactly the slices the state publishes; never a synthesized one.
+        private static FamilyRacing.Core.Racing.GadgetWorldState
+            GadgetWorldFor(FoundationState state)
+        {
+            if (state == null) return null;
+            if (state.driving != null && state.driving.gadgets != null)
+                return state.driving.gadgets;
+            var solo = state.soloRace;
+            if (solo != null)
+            {
+                if (solo.race != null && solo.race.gadgets != null)
+                    return solo.race.gadgets;
+                if (solo.trial != null && solo.trial.gadgets != null)
+                    return solo.trial.gadgets;
+            }
+            var race = state.networkRace;
+            return race != null ? race.gadgets : null;
+        }
+
+        private static FamilyRacing.Core.Racing.GadgetRacerState
+            LocalGadgetRow(FoundationState state,
+                FamilyRacing.Core.Racing.GadgetWorldState world)
+        {
+            if (world == null || world.racers == null) return null;
+            var localId = state != null && state.soloRace != null
+                && !string.IsNullOrEmpty(state.soloRace.participantId)
+                ? state.soloRace.participantId
+                : state != null && state.network != null
+                    ? state.network.localParticipantId : null;
+            if (!string.IsNullOrEmpty(localId))
+            {
+                var found = world.Racer(localId);
+                if (found != null) return found;
+            }
+            // Session-owned worlds carry exactly one row (solo seat);
+            // fall back to it when no participant id resolves.
+            return world.racers.Count == 1 ? world.racers[0] : null;
         }
 
         // Friendly vehicle name for the finish overlay: localized via

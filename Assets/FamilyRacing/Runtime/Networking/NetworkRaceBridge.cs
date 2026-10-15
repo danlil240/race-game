@@ -42,6 +42,10 @@ namespace FamilyRacing.Networking
         private readonly LanTransport transport;
         private readonly LanSessionService session;
         private DrivingContentCatalog content;
+        // M5 Task 5: the authored gadget catalog the host's race
+        // creation needs — same injection contract as the driving
+        // catalog; null leaves gadget worlds absent.
+        private GadgetDefinitionCatalog gadgets;
         // Task 4: the runtime injects the world provider once — backend
         // selection comes from the catalog's SimulationBackend at race
         // creation. Null keeps the legacy IMotorWorld arcade fallback.
@@ -156,6 +160,13 @@ namespace FamilyRacing.Networking
         public void SetContent(DrivingContentCatalog catalog)
         {
             content = catalog;
+        }
+
+        // The validated gadget catalog the host races against — absence
+        // produces gadget-free races, never a fabricated default.
+        public void SetGadgetContent(GadgetDefinitionCatalog catalog)
+        {
+            gadgets = catalog;
         }
 
         // --- diagnostics / observation -------------------------------------
@@ -462,7 +473,7 @@ namespace FamilyRacing.Networking
             NetworkRace created;
             if (!NetworkRace.TryCreate(hostSessionId, raceId, content,
                     descriptor.eventId, descriptor.classId, specs,
-                    out created, out error))
+                    out created, out error, gadgets))
             {
                 LastError = "raceCreate:" + (error ?? "unknown");
                 return;

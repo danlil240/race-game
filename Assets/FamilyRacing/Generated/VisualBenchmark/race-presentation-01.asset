@@ -74,6 +74,42 @@ MonoBehaviour:
     volumeCategory: effects
     volume: 0.9
     minIntervalSeconds: 0.1
+  - cueId: gadget-pickup
+    eventKind: gadget.pickup
+    clip: {fileID: 8300000, guid: 00139f866a9542e4895d5a9c9765c9c7, type: 3}
+    volumeCategory: effects
+    volume: 0.8
+    minIntervalSeconds: 0.1
+  - cueId: gadget-use
+    eventKind: gadget.used
+    clip: {fileID: 8300000, guid: 87bc926397843194f87ee699adf17ced, type: 3}
+    volumeCategory: effects
+    volume: 0.85
+    minIntervalSeconds: 0.15
+  - cueId: gadget-foam-drop
+    eventKind: gadget.foamDropped
+    clip: {fileID: 8300000, guid: e628e9312a017964b9f8d8de85666d59, type: 3}
+    volumeCategory: effects
+    volume: 0.7
+    minIntervalSeconds: 0.2
+  - cueId: gadget-foam-hit
+    eventKind: gadget.foamHit
+    clip: {fileID: 8300000, guid: e628e9312a017964b9f8d8de85666d59, type: 3}
+    volumeCategory: effects
+    volume: 0.85
+    minIntervalSeconds: 0.2
+  - cueId: gadget-shield
+    eventKind: gadget.shieldBlocked
+    clip: {fileID: 8300000, guid: 7f5a2fc948a395f4d837123385a95582, type: 3}
+    volumeCategory: effects
+    volume: 0.85
+    minIntervalSeconds: 0.2
+  - cueId: gadget-respawn
+    eventKind: gadget.respawn
+    clip: {fileID: 8300000, guid: 00139f866a9542e4895d5a9c9765c9c7, type: 3}
+    volumeCategory: effects
+    volume: 0.5
+    minIntervalSeconds: 0.4
   loops:
   - loopId: engine.car
     clip: {fileID: 8300000, guid: 620c74a26aaedb4448402ea24b532fcf, type: 3}
@@ -168,6 +204,24 @@ MonoBehaviour:
     count: 1
   - eventKind: race.finalized
     effectId: finish-burst
+    count: 1
+  - eventKind: gadget.pickup
+    effectId: checkpoint-sparkle
+    count: 2
+  - eventKind: gadget.used
+    effectId: boost-flare
+    count: 1
+  - eventKind: gadget.foamDropped
+    effectId: landing-puff
+    count: 1
+  - eventKind: gadget.foamHit
+    effectId: wall-shunt
+    count: 2
+  - eventKind: gadget.shieldBlocked
+    effectId: checkpoint-sparkle
+    count: 2
+  - eventKind: gadget.respawn
+    effectId: checkpoint-sparkle
     count: 1
   driftEffectId: drift-dust
   boostEffectId: boost-flare

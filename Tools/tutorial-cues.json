@@ -34,6 +34,10 @@
       "en": "Stuck or fell off? Press recovery to get back on track!",
       "he": "נתקעתם או נפלתם? לחצו על חזרה למסלול!"
     },
+    "gadget": {
+      "en": "Drive through a gadget box, then press gadget to use it!",
+      "he": "נסעו דרך קופסת גאדג'ט ואז לחצו על גאדג'ט כדי להשתמש בו!"
+    },
     "trial": {
       "en": "Great job! Now drive one whole lap to finish!",
       "he": "כל הכבוד! עכשיו השלימו הקפה שלמה כדי לסיים!"

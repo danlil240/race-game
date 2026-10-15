@@ -52,6 +52,7 @@ namespace FamilyRacing.Core.Localization
             ["tutorial.cue.boost"] = new[] { "Press Boost to zoom super fast!", "לחצו על האצה כדי לנסוע ממש מהר!" },
             ["tutorial.cue.jump"] = new[] { "Drive up the ramp and jump into the air!", "נסעו על הרמפה וקפצו באוויר!" },
             ["tutorial.cue.recovery"] = new[] { "Stuck or fell off? Press Recovery to get back on track!", "נתקעתם או נפלתם? לחצו על חזרה למסלול!" },
+            ["tutorial.cue.gadget"] = new[] { "Drive through a gadget box, then press Gadget to use it!", "נסעו דרך קופסת גאדג'ט ואז לחצו על גאדג'ט כדי להשתמש בו!" },
             ["tutorial.cue.trial"] = new[] { "Great job! Now drive one whole lap to finish!", "כל הכבוד! עכשיו השלימו הקפה שלמה כדי לסיים!" },
             ["tutorial.done"] = new[] { "You did it! You are ready to race!", "עשיתם את זה! אתם מוכנים למירוץ!" },
             ["driving.exit"] = new[] { "Exit", "יציאה" },
@@ -63,13 +64,19 @@ namespace FamilyRacing.Core.Localization
             ["hud.resume"] = new[] { "Resume", "המשך" },
             ["hud.retry"] = new[] { "Try again", "נסו שוב" },
             ["hud.finished"] = new[] { "Finished!", "הסתיים!" },
-            ["hud.gadget.soon"] = new[] { "Gadget (soon)", "גאדג'ט (בקרוב)" },
-            ["hud.gadget.unavailable"] = new[] { "Gadgets are not in this practice yet.", "גאדג'טים עוד לא באימון הזה." },
+            // Gadget slot readout (M5 Task 5): the held item's name, or
+            // the empty-slot marker. Item names key on the authored
+            // gadget kind so the HUD never shows a raw catalog id.
+            ["hud.gadget"] = new[] { "Gadget", "גאדג'ט" },
+            ["hud.gadget.empty"] = new[] { "empty", "ריק" },
+            ["gadget.turbo"] = new[] { "Turbo", "טורבו" },
+            ["gadget.bubble-shield"] = new[] { "Bubble shield", "מגן בועות" },
+            ["gadget.foam-trap"] = new[] { "Foam trap", "מלכודת קצף" },
             // Keyboard legend: key names stay Latin in both locales — they
             // name the physical key caps, not words to translate.
             ["hud.keys"] = new[] {
-                "Keys: ◀▶ steer · S/▼ brake · Space drift · Shift boost · R recover · C camera · Esc pause",
-                "מקשים: ◀▶ היגוי · S/▼ בלימה · Space דריפט · Shift האצה · R חזרה · C מצלמה · Esc השהיה" },
+                "Keys: ◀▶ steer · S/▼ brake · Space drift · Shift boost · E gadget · R recover · C camera · Esc pause",
+                "מקשים: ◀▶ היגוי · S/▼ בלימה · Space דריפט · Shift האצה · E גאדג'ט · R חזרה · C מצלמה · Esc השהיה" },
             ["action.back"] = new[] { "Back", "חזרה" },
             ["action.save"] = new[] { "Save", "שמירה" },
             ["status.saved"] = new[] { "Settings saved.", "ההגדרות נשמרו." },

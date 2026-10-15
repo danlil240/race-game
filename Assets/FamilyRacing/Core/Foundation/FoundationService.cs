@@ -935,11 +935,9 @@ namespace FamilyRacing.Core.Foundation
             var recover = IsTrue(command.Parameters["recover"]);
             var changeCamera = IsTrue(command.Parameters["changeCamera"]);
             var pausePulse = IsTrue(command.Parameters["pause"]);
-            // Gadget actions are explicitly unavailable while driving
-            // (gadget gameplay is deferred); the whole sample is refused
-            // before any input state is touched.
-            if ((drivingActive || lanRaceScreen) && gadget)
-                return Result(command, CommandResult.Rejected, "unavailable");
+            // M5 Task 5: gadget is a live held control — it rides the
+            // same input sample everywhere and the authoritative rules
+            // edge-latch it (one item per press, never two).
             // A recovery press is latched with its command identity until a
             // simulation boundary consumes it; overflow refuses before the
             // held-input sample mutates.
@@ -977,7 +975,10 @@ namespace FamilyRacing.Core.Foundation
                 // second one-shot beside the deduplicated action. The app
                 // submits recover as a one-shot action carrying this
                 // command's identity (see FoundationApp.ExecuteAndEmit).
-                input = new DriverInput(steering, drift, boost, false,
+                // Gadget DOES ride the frame (M5 Task 5): it is a held
+                // level the host's rules edge-latch — there is no
+                // one-shot acknowledgment contract for it.
+                input = new DriverInput(steering, drift, boost, gadget,
                     false, changeCamera, pausePulse, throttle, brake);
                 holdTicksRemaining = duration;
                 if (changeCamera && WritableSelected())
@@ -1333,7 +1334,9 @@ namespace FamilyRacing.Core.Foundation
                 command != null ? command.CommandId : "",
                 null, null,
                 drivingContent.CompatibilityFingerprint,
-                drivingContent.SimulationBackend);
+                drivingContent.SimulationBackend,
+                gameplayCatalog != null && gameplayCatalog.Gadgets != null
+                    ? gameplayCatalog.Gadgets : gadgetCatalog);
         }
 
         // Ends the active session: latched actions cancel with their

@@ -653,15 +653,20 @@ namespace FamilyRacing.Tests
         }
 
         [UnityTest]
-        public IEnumerator GadgetButtonIsHonestAboutBeingUnavailable()
+        public IEnumerator GadgetButtonDrivesTheSharedGadgetInput()
         {
+            // M5 Task 5: the gadget control is live — the touch button
+            // emits the same input.set gadget bit the E key does.
             yield return ToRunning();
             var gadget = Widget<Button>("driving.gadget");
             Assert.That(gadget, Is.Not.Null, "a gadget affordance exists in the HUD");
-            Assert.That(gadget.enabledSelf, Is.False,
-                "unimplemented gadget input must be visibly disabled");
-            Assert.That(gadget.text, Does.Contain("Gadget"),
-                "the label names the feature honestly rather than promising it works");
+            Assert.That(gadget.enabledSelf, Is.True,
+                "the gadget control is enabled — it is a live input");
+            Assert.That(gadget.text, Does.Contain("Gadget"));
+            Press(gadget);
+            Pump();
+            Assert.That(Snapshot().input.gadget, Is.True,
+                "the button press reaches the same input path as E");
         }
 
         // --- semantic controls ------------------------------------------------

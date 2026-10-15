@@ -10,7 +10,8 @@ using UnityEngine;
 namespace FamilyRacing.Networking
 {
     /// <summary>
-    /// Bounded typed codec for the Task-9 gameplay wire (protocol 2).
+    /// Bounded typed codec for the Task-9 gameplay wire (protocol 3 —
+    /// Task 5 gadget state extends the snapshot body).
     /// Every packet is a 4-byte ASCII tag followed by a UTF-8 JSON body
     /// produced by JsonUtility against the serializable Core DTOs:
     ///
@@ -232,6 +233,24 @@ namespace FamilyRacing.Networking
             // outcome.
             if (snapshot.state.result != null && !snapshot.state.result.finalized)
                 snapshot.state.result = null;
+            // Gadget world (protocol 3): a stripped or absent field
+            // decodes as the empty instance — normalize back to null so
+            // a gadget-free race never masquerades as gadget-enabled.
+            // A present world validates atomically: one malformed or
+            // unbounded payload kills the whole snapshot before any
+            // client state can observe a partial gadget application.
+            if (snapshot.state.gadgets != null)
+            {
+                if (IsEmptyGadgetWorld(snapshot.state.gadgets))
+                {
+                    snapshot.state.gadgets = null;
+                }
+                else if (!snapshot.state.gadgets.ValidateWire(out error))
+                {
+                    snapshot = null;
+                    return false;
+                }
+            }
             // A snapshot without a racer list is malformed wire content,
             // not a clean parse — reject before the fold can dereference
             // it. (JsonUtility materializes "racers":null as a null
@@ -275,7 +294,26 @@ namespace FamilyRacing.Networking
             if (state != null && !(state is JObject)) return true;
             var racers = state is JObject stateObject
                 ? stateObject["racers"] : null;
-            return racers != null && !(racers is JArray);
+            if (racers != null && !(racers is JArray)) return true;
+            var gadgets = state is JObject stateForGadgets
+                ? stateForGadgets["gadgets"] : null;
+            return gadgets != null && !(gadgets is JObject);
+        }
+
+        // True when a decoded GadgetWorldState is the absent-field
+        // artifact rather than a sent payload: a live authoritative
+        // world always carries its roster rows, so an empty racer list
+        // on an otherwise default instance means the wire carried no
+        // gadget content at all.
+        private static bool IsEmptyGadgetWorld(GadgetWorldState world)
+        {
+            return world.tick == 0 && world.rngState == 0
+                && world.bagCursor == 0 && world.nextPickupGeneration == 0
+                && world.nextPatchSerial == 0
+                && (world.itemBag == null || world.itemBag.Count == 0)
+                && (world.pickups == null || world.pickups.Count == 0)
+                && (world.patches == null || world.patches.Count == 0)
+                && (world.racers == null || world.racers.Count == 0);
         }
 
         // The DTO is the wire contract: when present it validates as a

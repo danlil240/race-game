@@ -39,6 +39,7 @@ namespace FamilyRacing
         // simulation state — they are listeners on the boundary.
         private RaceEffectsPresenter raceEffects;
         private RaceAudioPresenter raceAudio;
+        private GadgetPresenter gadgetPresenter;
         private ValidationBridge bridge;
         private FoundationInput driverInput;
         private FoundationShell shell;
@@ -132,6 +133,14 @@ namespace FamilyRacing
             raceAudio = GetComponent<RaceAudioPresenter>();
             if (raceAudio == null)
                 raceAudio = gameObject.AddComponent<RaceAudioPresenter>();
+            // M5 Task 5: the gadget world presenter mirrors the
+            // authoritative pickups/patches/shields onto pooled views —
+            // no catalog binding needed (primitive placeholders match
+            // the graybox course style; authored effects/cues still ride
+            // the presentation catalog through the event triggers).
+            gadgetPresenter = GetComponent<GadgetPresenter>();
+            if (gadgetPresenter == null)
+                gadgetPresenter = gameObject.AddComponent<GadgetPresenter>();
             raceEffects.Bind(
                 drivingWorld != null ? drivingWorld.PresentationCatalog : null);
             raceAudio.Bind(
@@ -221,6 +230,16 @@ namespace FamilyRacing
             service.SetLanSession(lan);
             raceBridge = new Networking.NetworkRaceBridge(lanTransport, lan);
             if (loadedCatalog != null) raceBridge.SetContent(loadedCatalog);
+            // M5 Task 5: the authored gadget catalog seeds the host's
+            // authoritative gadget world — absent catalog means
+            // gadget-free races, never fabricated defaults. The same
+            // validated catalog feeds solo session creation so
+            // practice/tutorial free-drive and LAN use one source.
+            if (drivingWorld != null)
+            {
+                raceBridge.SetGadgetContent(drivingWorld.Gadgets);
+                service.SetGadgetCatalog(drivingWorld.Gadgets);
+            }
             // Task 4: the vehicle-simulation seam is owned here — the solo
             // service and the replication bridge both build their worlds
             // through DrivingWorld, which maps the catalog's backend to an
@@ -397,6 +416,11 @@ namespace FamilyRacing
                 raceEffects.ApplyFrame(state, Time.unscaledDeltaTime);
             if (raceAudio != null)
                 raceAudio.ApplyFrame(state, Time.unscaledDeltaTime);
+            // The pooled gadget world views mirror the latest published
+            // state — pickups, foam patches and shield bubbles read the
+            // authoritative slice exactly like the effects presenter.
+            if (gadgetPresenter != null)
+                gadgetPresenter.ApplyFrame(state, Time.unscaledDeltaTime);
             // Entering the shared network pause neutralizes held local
             // input and requires re-arm, the same cleanup focus loss runs:
             // held steering must not seep through the resume boundary.

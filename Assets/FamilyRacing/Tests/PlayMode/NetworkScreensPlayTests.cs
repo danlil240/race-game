@@ -627,9 +627,16 @@ namespace FamilyRacing.Tests
             // is consumed by the action path rather than latched in the
             // observable held-input slice.
             Assert.That(state.input.recover, Is.False);
-            // Gadget is still refused during a race — the LAN HUD does
-            // not even render a gadget button.
-            Assert.That(Widget<Button>("lan.race.gadget"), Is.Null);
+            // M5 Task 5: the LAN HUD renders a live gadget button — the
+            // press rides the next input frame to the host as a pending
+            // request; only the host grants/spends items.
+            var gadgetButton = Widget<Button>("lan.race.gadget");
+            Assert.That(gadgetButton, Is.Not.Null);
+            Assert.That(gadgetButton.enabledSelf, Is.True);
+            Press(gadgetButton);
+            driverInput.Pump(false, "lan-race");
+            Assert.That(Snapshot().input.gadget, Is.True,
+                "the LAN gadget press emits the same input.set bit");
         }
 
         // --- client / recovery tests ----------------------------------------

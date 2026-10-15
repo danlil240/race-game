@@ -41,6 +41,7 @@ namespace FamilyRacing
         private Label phaseLabel;
         private Label speedLabel;
         private Label driftLabel;
+        private Label gadgetLabel;
         private Label lapLabel;
         private Label gateLabel;
         private Label finishTimeLabel;
@@ -126,6 +127,7 @@ namespace FamilyRacing
             pauseOverlay = finishOverlay = boostFill = null;
             elapsedLabel = phaseLabel = speedLabel = null;
             driftLabel = null;
+            gadgetLabel = null;
             lapLabel = gateLabel = finishTimeLabel = null;
             finishVehicleLabel = null;
             tutorialPanel = null;

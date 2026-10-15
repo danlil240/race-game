@@ -445,6 +445,10 @@ namespace FamilyRacing
             lanPhaseLabel.name = "lan.hud.phase";
             lanPauseLabel = AddLabel(top, "", 22, Coral);
             lanPauseLabel.name = "lan.hud.paused";
+            // Held-gadget readout (M5 Task 5) — same shared field the
+            // solo HUD uses; shows the host-published held item.
+            gadgetLabel = AddLabel(top, "", 22, Coral);
+            gadgetLabel.name = "lan.hud.gadget";
 
             lanActionLabel = AddLabel(root, "", 18, Seafoam);
             lanActionLabel.name = "lan.hud.action";
@@ -478,6 +482,10 @@ namespace FamilyRacing
             var actions = Row(root);
             var recover = AddButton(actions, T("input.recovery", state), Deep,
                 () => app.Input.TouchRecover(), "lan.race.recover");
+            // The gadget bit rides the next input frame to the host —
+            // the edge latch lives in the authoritative rules.
+            var gadget = AddButton(actions, T("input.gadget", state), Seafoam,
+                () => app.Input.TouchGadget(), "lan.race.gadget");
             var camera = AddButton(actions, T("settings.camera", state), Ocean,
                 () => app.Dispatch("camera.toggle", emptyParams), "lan.race.camera");
             var pause = AddButton(actions, T("input.pause", state), Coral,
@@ -485,6 +493,7 @@ namespace FamilyRacing
             var leave = AddButton(actions, T("lan.leave", state), Deep,
                 () => app.Dispatch("lan.leave", emptyParams), "lan.race.leave");
             ApplyAvailability(recover, "input.set");
+            ApplyAvailability(gadget, "input.set");
             ApplyAvailability(camera, "camera.toggle");
             ApplyAvailability(pause, "pause.toggle");
             ApplyAvailability(leave, "lan.leave");
@@ -548,6 +557,8 @@ namespace FamilyRacing
             // One-shot action acknowledgment: the newest action.* event
             // for the local participant proves the press reached the host
             // (queued), fired (consumed) or was honestly cancelled.
+            if (gadgetLabel != null)
+                gadgetLabel.text = GadgetSlotText(state);
             if (lanActionLabel != null)
             {
                 var localId = net != null ? net.localParticipantId : "";

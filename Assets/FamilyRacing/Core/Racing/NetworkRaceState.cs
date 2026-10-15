@@ -77,6 +77,10 @@ namespace FamilyRacing.Core.Racing
         public List<int> standings = new List<int>(); // slot indices in rank order
         public List<DrivingEvent> events = new List<DrivingEvent>();
         public RaceResult result;           // assigned once at finalization
+        // M5 Task 5: the shared authoritative gadget world (pickups,
+        // patches, per-racer rows, seeded bag). Null when the race has
+        // no authored gadget content — consumers must not invent one.
+        public GadgetWorldState gadgets;
 
         // Deep copy so observation/state-stream consumers can never alias
         // the coordinator's or the wire decoder's live objects.
@@ -93,7 +97,8 @@ namespace FamilyRacing.Core.Racing
                 paused = paused,
                 firstFinishElapsedTicks = firstFinishElapsedTicks,
                 finishDeadlineElapsedTicks = finishDeadlineElapsedTicks,
-                result = result != null ? result.Copy() : null
+                result = result != null ? result.Copy() : null,
+                gadgets = gadgets != null ? gadgets.Copy() : null
             };
             copy.standings.AddRange(standings);
             foreach (var racer in racers)

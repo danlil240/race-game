@@ -218,7 +218,8 @@ namespace FamilyRacing.Core.Driving
                     var body = bodies[request.participantId];
                     var step = ArcadeMotor.Step(befores[i], request.input,
                         body.tuning, world, 1f / 30f,
-                        contacts.ForParticipant(request.participantId));
+                        contacts.ForParticipant(request.participantId),
+                        request.modifiers);
                     result.step = step;
                     var end = step != null && step.state != null
                         ? step.state.Pose : befores[i].Pose;

@@ -14,9 +14,13 @@ namespace FamilyRacing.Core.Driving
         private const float SweepBackoffFraction = 0.02f;
         private const float TwoPi = (float)(Math.PI * 2.0);
 
+        // `modifiers` is the rule layer's per-tick scaling (M5 Task 5):
+        // turbo raises acceleration and the speed cap; a foam slow only
+        // lowers the cap. Null means neutral — every pre-gadget caller
+        // keeps its exact step.
         public static MotorStepResult Step(MotorState previous, DriverInput input,
             VehicleTuning tuning, IMotorWorld world, float deltaSeconds,
-            IRacerContactSource racers = null)
+            IRacerContactSource racers = null, MotorModifiers modifiers = null)
         {
             if (tuning == null || !tuning.Validate(out _))
                 return MotorStepResult.Rejected(previous, "invalidTuning");
@@ -90,8 +94,15 @@ namespace FamilyRacing.Core.Driving
             // any positive brake suppresses drive force entirely, the same
             // suppression the physical backend's wheel solver applies.
             var throttle = input.Brake > 0f ? 0f : input.Throttle;
-            var speedLimit = state.boostActive ? tuning.boostMaxSpeed : tuning.maxSpeed;
-            var accel = state.boostActive ? tuning.boostAcceleration : tuning.acceleration;
+            var gadgetAccel = modifiers != null
+                ? modifiers.accelerationMultiplier : 1f;
+            var gadgetCap = modifiers != null
+                ? modifiers.speedCapMultiplier : 1f;
+            var speedLimit = (state.boostActive
+                ? tuning.boostMaxSpeed : tuning.maxSpeed) * gadgetCap;
+            var accel = (state.boostActive
+                ? tuning.boostAcceleration : tuning.acceleration)
+                * gadgetAccel;
             if (state.grounded)
             {
                 if (throttle > 0f)

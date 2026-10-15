@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using FamilyRacing.Core.Driving;
+using FamilyRacing.Core.Networking;
 
 namespace FamilyRacing.Core.Racing
 {
@@ -132,6 +133,13 @@ namespace FamilyRacing.Core.Racing
         public List<RouteWaypoint> route = new List<RouteWaypoint>();
         public List<RecoveryVolume> recoveryBounds = new List<RecoveryVolume>();
         public List<MotorPose> safePoses = new List<MotorPose>();
+        // Authored gadget pickup sites (M5 Task 5): vertical trigger
+        // columns the authoritative gadget rules sweep racer segments
+        // against. `y` is road height — pickups on different-height
+        // routes never interact. Empty means the course authors no
+        // pickups; gadgets stay inert there.
+        public List<GadgetPickupSite> pickupSites =
+            new List<GadgetPickupSite>();
 
         public bool Validate(out string error)
         {
@@ -207,6 +215,19 @@ namespace FamilyRacing.Core.Racing
                         || !Finite(pose.z) || !Finite(pose.heading))
                     { error = "safePoses"; return false; }
                 }
+            if (pickupSites != null)
+            {
+                var seenSites = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var site in pickupSites)
+                {
+                    if (site == null || !site.Validate(out error))
+                    { error = "pickupSites." + error; return false; }
+                    if (!seenSites.Add(site.id))
+                    { error = "pickupSites.duplicate"; return false; }
+                }
+                if (pickupSites.Count > NetworkSettings.GadgetPickupCapacity)
+                { error = "pickupSites.capacity"; return false; }
+            }
             return true;
         }
 
@@ -260,6 +281,13 @@ namespace FamilyRacing.Core.Racing
                         z = pose.z,
                         heading = pose.heading
                     });
+            }
+            if (pickupSites != null)
+            {
+                copy.pickupSites = new List<GadgetPickupSite>();
+                foreach (var site in pickupSites)
+                    copy.pickupSites.Add(
+                        site == null ? null : site.Copy());
             }
             return copy;
         }

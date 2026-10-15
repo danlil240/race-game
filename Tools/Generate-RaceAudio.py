@@ -177,6 +177,21 @@ CLIPS = {
     "cue-go.wav": lambda: envelope_hit(0.35,
         lambda t, p: tone(660, t) * math.exp(-t * 7)
             + tone(990, t) * math.exp(-t * 9) * 0.5),
+    # --- M5 Task 5 gadget cues -------------------------------------------------
+    # Pickup: a bright two-note "got it" chime. Use: a quick whoosh up.
+    # Foam: a soft squelch. Shield block: a glassy ping.
+    "cue-gadget-pickup.wav": lambda: envelope_hit(0.3,
+        lambda t, p: (tone(1040, t) if t < 0.1 else tone(1560, t - 0.1))
+            * math.exp(-t * 8)),
+    "cue-gadget-use.wav": lambda: envelope_hit(0.28,
+        lambda t, p: tone(360 + p * 720, t) * math.exp(-t * 6)),
+    "cue-gadget-foam.wav": lambda: envelope_hit(0.22,
+        lambda t, p: tone(90, t) * math.exp(-t * 20)
+            + noise_loop(0.22, 100, 600, seed=11)[int(t * RATE)]
+            * math.exp(-t * 16) * 0.5),
+    "cue-gadget-shield.wav": lambda: envelope_hit(0.3,
+        lambda t, p: tone(1240, t) * math.exp(-t * 10)
+            + tone(1860, t) * math.exp(-t * 14) * 0.4),
 }
 
 

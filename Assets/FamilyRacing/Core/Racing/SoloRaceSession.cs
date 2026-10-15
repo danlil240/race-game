@@ -128,7 +128,7 @@ namespace FamilyRacing.Core.Racing
             if (mode == RaceMode.TimeTrial)
                 return CreateTrial(requestCopy, content, sessionId, raceId,
                     participantId, difficultyId, rulesFingerprint,
-                    out session, out error);
+                    catalog.Gadgets, out session, out error);
             return CreateRace(requestCopy, mode, catalog, content, sessionId,
                 raceId, participantId, difficulty, rulesFingerprint,
                 profile, out session, out error);
@@ -236,7 +236,7 @@ namespace FamilyRacing.Core.Racing
             if (!NetworkRace.TryCreateLocal(sessionId, raceId, content,
                     evt.id, classId, specs, RaceModeRules.ModeId(mode),
                     rulesFingerprint, difficulty, rivalParticipantId,
-                    out race, out error))
+                    out race, out error, catalog.Gadgets))
                 return false;
 
             session = new SoloRaceSession(request,
@@ -252,7 +252,7 @@ namespace FamilyRacing.Core.Racing
         private static bool CreateTrial(SoloRaceRequest request,
             DrivingContentCatalog content, string sessionId, string raceId,
             string participantId, string difficultyId,
-            string rulesFingerprint,
+            string rulesFingerprint, GadgetDefinitionCatalog gadgets,
             out SoloRaceSession session, out string error)
         {
             session = null;
@@ -307,10 +307,13 @@ namespace FamilyRacing.Core.Racing
                 && request.vehicleId != starterId)
             { error = "invalidVehicle"; return false; }
 
+            // The lone trial session owns its gadget world when the
+            // course authors pickup sites — same authoritative rules,
+            // roster of one.
             var trialSession = new DrivingSession(raceId, tuning, course,
                 evt, content.Version, request.commandId, null,
                 participantId, content.CompatibilityFingerprint,
-                content.SimulationBackend);
+                content.SimulationBackend, gadgets);
             var world = new TrialWorld { session = trialSession, evt = evt };
             session = new SoloRaceSession(request, "timeTrial", sessionId,
                 raceId, participantId, difficultyId, rulesFingerprint,
