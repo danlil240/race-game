@@ -271,9 +271,15 @@ namespace FamilyRacing.Core.Foundation
         // resolves the durable reward context the race was bound under
         // and runs the full atomic transaction — coins, progression
         // facts, record, receipt and context consumption in one save.
-        // A Failed outcome retains the immutable result with its exact
-        // bound context so RetryUnresolvedRewards replays the identical
-        // transaction; the pair also gates every new progression race.
+        // A saveFailed outcome retains the immutable result with its
+        // exact bound context so RetryUnresolvedRewards replays the
+        // identical transaction; the pair also gates every new
+        // progression race. Terminal failures (conflict, overflow,
+        // invalid) can NEVER commit on retry — latching them would wedge
+        // every later progression start, so they never set the gate and
+        // they release any retained pair for the same result identity.
+        // The durable context row stays pending in the profile either
+        // way — the honest forensic record of what was bound.
         private RewardApplyResult ApplyNetworkResult(RaceResult result)
         {
             if (savedProfile == null)
@@ -285,8 +291,21 @@ namespace FamilyRacing.Core.Foundation
                 gameplayCatalog, context);
             if (applied.status == RaceRewardService.StatusFailed)
             {
-                unresolvedResult = result != null ? result.Copy() : null;
-                unresolvedContext = context != null ? context.Copy() : null;
+                if (applied.code == "saveFailed")
+                {
+                    unresolvedResult =
+                        result != null ? result.Copy() : null;
+                    unresolvedContext =
+                        context != null ? context.Copy() : null;
+                }
+                else if (unresolvedResult != null && result != null
+                    && unresolvedResult.resultId == result.resultId)
+                {
+                    // A terminal verdict on a retained result ends its
+                    // retry — it can never commit, so the gate frees.
+                    unresolvedResult = null;
+                    unresolvedContext = null;
+                }
                 return applied;
             }
             // Terminal verdicts (applied, alreadyApplied, ineligible —
@@ -298,10 +317,13 @@ namespace FamilyRacing.Core.Foundation
                 unresolvedResult = null;
                 unresolvedContext = null;
             }
-            if (applied.status != RaceRewardService.StatusApplied
-                && applied.status != RaceRewardService.StatusAlreadyApplied)
-                return applied;
-            RefreshProgressionCaches();
+            // Refresh whenever facts durably committed — awards AND the
+            // committed non-award adjudications (bound DNF) alike. An
+            // ineligible-but-committed verdict must still update the
+            // slot cache, or a profile reselect resurrects the consumed
+            // context and drops the receipt.
+            if (applied.committed)
+                RefreshProgressionCaches();
             return applied;
         }
 

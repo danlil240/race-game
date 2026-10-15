@@ -72,14 +72,17 @@ namespace FamilyRacing.Core.Foundation
             var applied = RaceRewardService.Apply(unresolvedResult,
                 savedProfile.id, savedProfile, store, gameplayCatalog,
                 unresolvedContext);
-            if (applied.status == RaceRewardService.StatusFailed)
+            if (applied.status == RaceRewardService.StatusFailed
+                && applied.code == "saveFailed")
                 // Still unresolved — the identical inputs stay retained
                 // for the next retry; nothing was guessed or dropped.
+                // Any OTHER outcome (terminal failure or verdict) can
+                // never become a commit on a later identical replay, so
+                // the retained pair releases below.
                 return applied;
             unresolvedResult = null;
             unresolvedContext = null;
-            if (applied.status == RaceRewardService.StatusApplied
-                || applied.status == RaceRewardService.StatusAlreadyApplied)
+            if (applied.committed)
                 RefreshProgressionCaches();
             return applied;
         }

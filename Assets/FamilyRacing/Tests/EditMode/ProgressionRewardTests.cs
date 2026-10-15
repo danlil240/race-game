@@ -1016,6 +1016,154 @@ namespace FamilyRacing.Tests
                 "the resolved transaction frees the start: " + started.code);
         }
 
+        // Review fix round 1: a conflicting redelivery is a TERMINAL
+        // failure — the durable receipt owns that resultId forever, so
+        // it must never latch the unresolved gate. Only saveFailed is
+        // retryable.
+        [Test]
+        public void ConflictingRedeliveryNeverLatchesUnresolvedGate()
+        {
+            var catalog = CampaignTestFixture.Catalog();
+            var service = new FoundationService(Store(), "en", "prog-test");
+            service.SetDrivingContent(catalog.Driving);
+            service.SetGameplayCatalog(catalog);
+            Assert.That(service.Execute(Cmd("profile.create",
+                P("slot", "0", "language", "en"))).status,
+                Is.EqualTo(CommandResult.Applied));
+            var participantId = service.Snapshot().savedProfile.id;
+
+            // Session 1 binds and publishes a finished result — the
+            // receipt and context consumption commit together.
+            var link = new LanSessionTests.FakeLanLink();
+            var lan = LanSessionTests.StandaloneService(link,
+                new LanSessionTests.FakeLanProbe(), participantId);
+            service.SetLanSession(lan);
+            Assert.That(service.Execute(Cmd("lan.host",
+                P("port", "47777"))).status,
+                Is.EqualTo(CommandResult.Applied));
+            Assert.That(lan.Execute(Cmd("lan.configure",
+                P("eventId", "harbor-hop-car-circuit",
+                    "classId", "car"))).status,
+                Is.EqualTo(CommandResult.Applied));
+            Assert.That(lan.Execute(Cmd("lan.ready",
+                P("ready", "true"))).status,
+                Is.EqualTo(CommandResult.Applied));
+            Assert.That(lan.Execute(Cmd("lan.start", null)).status,
+                Is.EqualTo(CommandResult.Applied));
+            var raceId = lan.Snapshot().currentRaceId;
+            Assert.That(lan.PublishResult(LanResult(raceId,
+                participantId)), Is.True);
+            Assert.That(service.Snapshot().savedProfile.coins,
+                Is.EqualTo(25));
+            Assert.That(lan.Execute(Cmd("lan.leave", null)).status,
+                Is.EqualTo(CommandResult.Applied));
+
+            // A second session (fresh retention ledger) delivers a
+            // CONFLICTING result under the same resultId: the durable
+            // receipt rejects it before any context evaluation. The
+            // terminal failure must leave the gate free.
+            var link2 = new LanSessionTests.FakeLanLink();
+            var lan2 = LanSessionTests.StandaloneService(link2,
+                new LanSessionTests.FakeLanProbe(), participantId);
+            service.SetLanSession(lan2);
+            Assert.That(service.Execute(Cmd("lan.host",
+                P("port", "47778"))).status,
+                Is.EqualTo(CommandResult.Applied));
+            Assert.That(lan2.Execute(Cmd("lan.configure",
+                P("eventId", "harbor-hop-car-circuit",
+                    "classId", "car"))).status,
+                Is.EqualTo(CommandResult.Applied));
+            Assert.That(lan2.Execute(Cmd("lan.ready",
+                P("ready", "true"))).status,
+                Is.EqualTo(CommandResult.Applied));
+            Assert.That(lan2.Execute(Cmd("lan.start", null)).status,
+                Is.EqualTo(CommandResult.Applied));
+            var conflict = LanResult(raceId, participantId);
+            // Same resultId, different immutable facts → different
+            // fingerprint → the stored receipt rejects the replay.
+            conflict.finalizedHostTick = 301;
+            Assert.That(lan2.PublishResult(conflict), Is.True);
+            Assert.That(service.RewardUnresolved, Is.False,
+                "a terminal conflict must never latch the retry gate");
+            Assert.That(lan2.Execute(Cmd("lan.leave", null)).status,
+                Is.EqualTo(CommandResult.Applied));
+
+            // A legitimate progression race starts immediately after.
+            var started = service.Execute(Cmd("solo.start",
+                P("mode", "campaign",
+                    "eventId", "harbor-hop-car-circuit",
+                    "vehicleId", "car-01")));
+            Assert.That(started.status, Is.EqualTo(CommandResult.Applied),
+                "conflicting redelivery wedged progression: "
+                    + started.code);
+        }
+
+        // Review fix round 1: a bound DNF COMMITS (receipt + context
+        // retirement land inside one save) even though the verdict is
+        // ineligible. The slot cache must observe the commit, or a
+        // profile reselect resurrects the consumed context and drops
+        // the receipt.
+        [Test]
+        public void BoundDnfCommitSurvivesProfileReselect()
+        {
+            var catalog = CampaignTestFixture.Catalog();
+            var service = new FoundationService(Store(), "en", "prog-test");
+            service.SetDrivingContent(catalog.Driving);
+            service.SetGameplayCatalog(catalog);
+            Assert.That(service.Execute(Cmd("profile.create",
+                P("slot", "0", "language", "en"))).status,
+                Is.EqualTo(CommandResult.Applied));
+            var participantId = service.Snapshot().savedProfile.id;
+
+            var link = new LanSessionTests.FakeLanLink();
+            var lan = LanSessionTests.StandaloneService(link,
+                new LanSessionTests.FakeLanProbe(), participantId);
+            service.SetLanSession(lan);
+            Assert.That(service.Execute(Cmd("lan.host",
+                P("port", "47777"))).status,
+                Is.EqualTo(CommandResult.Applied));
+            Assert.That(lan.Execute(Cmd("lan.configure",
+                P("eventId", "harbor-hop-car-circuit",
+                    "classId", "car"))).status,
+                Is.EqualTo(CommandResult.Applied));
+            Assert.That(lan.Execute(Cmd("lan.ready",
+                P("ready", "true"))).status,
+                Is.EqualTo(CommandResult.Applied));
+            Assert.That(lan.Execute(Cmd("lan.start", null)).status,
+                Is.EqualTo(CommandResult.Applied));
+            var raceId = lan.Snapshot().currentRaceId;
+
+            // The bound race ends in a DNF: a zero-award adjudication
+            // commits the receipt and retires the context atomically.
+            var dnf = LanResult(raceId, participantId);
+            dnf.racers[0].outcome = "dnf";
+            dnf.racers[0].position = 4;
+            dnf.racers[0].finishTicks = 0;
+            dnf.racers[0].coinsAwarded = 0;
+            Assert.That(lan.PublishResult(dnf), Is.True);
+            var live = service.Snapshot().savedProfile;
+            Assert.That(live.coins, Is.EqualTo(0));
+            Assert.That(PendingContext(live, raceId), Is.Null);
+            Assert.That(ReceiptFor(live, raceId + "/result"),
+                Is.Not.Null);
+            Assert.That(lan.Execute(Cmd("lan.leave", null)).status,
+                Is.EqualTo(CommandResult.Applied));
+
+            // Reselect reloads from the slot cache: it must observe the
+            // committed adjudication, not the pre-award snapshot.
+            Assert.That(service.Execute(Cmd("profile.select",
+                P("slot", "0"))).status,
+                Is.EqualTo(CommandResult.Applied));
+            var reloaded = service.Snapshot().savedProfile;
+            Assert.That(PendingContext(reloaded, raceId), Is.Null,
+                "the consumed context resurrected through the slot cache");
+            var receipt = ReceiptFor(reloaded, raceId + "/result");
+            Assert.That(receipt, Is.Not.Null,
+                "the committed DNF receipt vanished on reselect");
+            Assert.That(receipt.awardedCoins, Is.EqualTo(0));
+            Assert.That(receipt.mode, Is.EqualTo("lan"));
+        }
+
         // --- helpers ----------------------------------------------------
 
         private ProfileStore Store()

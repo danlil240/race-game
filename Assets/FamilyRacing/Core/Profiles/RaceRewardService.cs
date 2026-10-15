@@ -24,6 +24,13 @@ namespace FamilyRacing.Core.Profiles
         public string code = "";
         public int awardedCoins;
         public string fingerprint = "";
+        // True when this verdict's facts are durably committed in the
+        // profile — every applied/alreadyApplied award AND a committed
+        // non-award adjudication such as a bound DNF (receipt + context
+        // retirement landed, status stays ineligible). Cache refreshers
+        // key on this, never on status alone: a stale slot cache would
+        // resurrect a consumed context and drop the receipt on reselect.
+        public bool committed;
 
         // The mode vocabulary id the verdict ran under ("campaign" |
         // "quickRace" | "lan" | "timeTrial"); "" for the legacy path.
@@ -61,7 +68,8 @@ namespace FamilyRacing.Core.Profiles
             return new RewardApplyResult
             {
                 status = RaceRewardService.StatusApplied,
-                awardedCoins = coins, fingerprint = fingerprint ?? ""
+                awardedCoins = coins, fingerprint = fingerprint ?? "",
+                committed = true
             };
         }
 
@@ -70,7 +78,8 @@ namespace FamilyRacing.Core.Profiles
             return new RewardApplyResult
             {
                 status = RaceRewardService.StatusAlreadyApplied,
-                awardedCoins = coins, fingerprint = fingerprint ?? ""
+                awardedCoins = coins, fingerprint = fingerprint ?? "",
+                committed = true
             };
         }
 
@@ -327,6 +336,9 @@ namespace FamilyRacing.Core.Profiles
             ProfileCopy.CopyProgression(candidate, savedProfile);
             var verdict = RewardApplyResult.Ineligible("dnf", fingerprint);
             verdict.mode = modeId;
+            // The zero-award adjudication COMMITTED — receipt and context
+            // retirement are durable even though nothing was earned.
+            verdict.committed = true;
             return verdict;
         }
 
