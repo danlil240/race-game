@@ -59,9 +59,9 @@ namespace FamilyRacing.Tests
             }
             Assert.That(state.featureCoverage.tutorial, Is.EqualTo("notImplemented"));
             Assert.That(state.featureCoverage.drivingSimulation, Is.EqualTo("implemented"));
-            Assert.That(state.featureCoverage.campaign, Is.EqualTo("notImplemented"));
+            Assert.That(state.featureCoverage.campaign, Is.EqualTo("implemented"));
             Assert.That(state.featureCoverage.rewardsUpgradesCosmetics, Is.EqualTo("implemented"));
-            Assert.That(state.featureCoverage.lan, Is.EqualTo("notImplemented"));
+            Assert.That(state.featureCoverage.lan, Is.EqualTo("implemented"));
             Assert.That(state.featureCoverage.content, Is.EqualTo("graybox"));
         }
 
@@ -838,6 +838,13 @@ namespace FamilyRacing.Tests
                 "tutorial.start", "tutorial.replay", "tutorial.exit",
                 // M5 Task 8: the durable progression writes.
                 "upgrade.purchase", "cosmetic.equip",
+                // M5 Task 10: the semantic loop surface — screens,
+                // mode starts and results lifecycle.
+                "campaign.open", "campaign.start",
+                "quickRace.open", "quickRace.start",
+                "timeTrial.open", "timeTrial.start",
+                "garage.open", "bounties.open",
+                "results.retrySave", "results.retry", "results.continue",
                 "lan.host", "lan.discover", "lan.discovery.stop", "lan.join",
                 "lan.configure", "lan.vehicle", "lan.ready", "lan.start",
                 "lan.pause.request", "lan.pause.set", "lan.reconnect",

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using FamilyRacing.Core.Automation;
 using FamilyRacing.Core.Profiles;
+using FamilyRacing.Core.Progression;
 using FamilyRacing.Core.Racing;
 
 namespace FamilyRacing.Core.Networking
@@ -147,6 +148,13 @@ namespace FamilyRacing.Core.Networking
         private string preparedRaceId = "";
 
         private DrivingContentCatalog content;
+        // The bound gameplay catalog (M5 Task 10): when non-legacy it
+        // supplies the admission fingerprint so peers prove identical
+        // rules — objectives, economy, gadgets and difficulty — before
+        // a seat is allocated, not just identical driving data. Null or
+        // legacy catalogs keep driving-fingerprint admission so
+        // unupgraded peers stay interoperable.
+        private GameplayCatalog gameplayContent;
         private string role = RoleNone;
         private string phase = PhaseIdle;
         private double now;
@@ -197,6 +205,14 @@ namespace FamilyRacing.Core.Networking
         public void SetContent(DrivingContentCatalog catalog)
         {
             content = catalog;
+        }
+
+        // The gameplay catalog that owns the admission fingerprint when
+        // bound and non-legacy; null clears the binding back to
+        // driving-fingerprint admission.
+        public void SetGameplayContent(GameplayCatalog catalog)
+        {
+            gameplayContent = catalog;
         }
 
         // Composition seam for private reconnect-credential persistence —
@@ -505,7 +521,7 @@ namespace FamilyRacing.Core.Networking
                     "v", NetworkSettings.LanProtocolVersion.ToString(CultureInfo.InvariantCulture),
                     "gv", gameplayVersion,
                     "cv", ContentVersion(),
-                    "fp", ContentFingerprint(),
+                    "fp", AdmissionFingerprint(),
                     "pid", localParticipantId,
                     "av", localAvatar,
                     "ci", localColorIndex.ToString(CultureInfo.InvariantCulture),
@@ -689,7 +705,7 @@ namespace FamilyRacing.Core.Networking
                 lanProtocol = NetworkSettings.LanProtocolVersion,
                 gameplayVersion = gameplayVersion,
                 contentVersion = ContentVersion(),
-                contentFingerprint = ContentFingerprint()
+                contentFingerprint = AdmissionFingerprint()
             };
             var host = slots[0];
             host.participantId = localParticipantId;
@@ -1546,7 +1562,7 @@ namespace FamilyRacing.Core.Networking
                     CultureInfo.InvariantCulture)
                 || gameplay != gameplayVersion
                 || contentVersion != ContentVersion()
-                || fingerprint != ContentFingerprint())
+                || fingerprint != AdmissionFingerprint())
             {
                 SendJoinReject(connectionId, "incompatible", commandId);
                 return;
@@ -1767,7 +1783,7 @@ namespace FamilyRacing.Core.Networking
                 lanProtocol = NetworkSettings.LanProtocolVersion,
                 gameplayVersion = gameplayVersion,
                 contentVersion = ContentVersion(),
-                contentFingerprint = ContentFingerprint(),
+                contentFingerprint = AdmissionFingerprint(),
                 eventId = Field(fields, "ev"),
                 classId = Field(fields, "cl")
             };
@@ -2297,12 +2313,26 @@ namespace FamilyRacing.Core.Networking
         }
 
         // The canonical tuned-data fingerprint of the local catalog —
-        // the admission token both sides must hold bit-identically. An
-        // absent catalog fingerprints empty, which is still a valid
-        // token: only peers whose content state matches exactly agree.
+        // retained for legacy/unbound admission and for peers that
+        // carry no gameplay identity at all.
         private string ContentFingerprint()
         {
             return content != null ? content.CompatibilityFingerprint : "";
+        }
+
+        // The admission fingerprint both sides must hold bit-identically
+        // before a seat is allocated (M5 Task 10): the gameplay
+        // catalog's fingerprint when one is bound and non-legacy — it
+        // covers the driving body plus objectives, campaign, bounties,
+        // economy, gadgets and difficulties — and the driving
+        // fingerprint otherwise, so legacy content stays compatible
+        // with unupgraded peers and an absent catalog fingerprints
+        // empty (still a valid token).
+        private string AdmissionFingerprint()
+        {
+            return gameplayContent != null && !gameplayContent.IsLegacy
+                ? gameplayContent.CompatibilityFingerprint
+                : ContentFingerprint();
         }
 
         // The whole discovery-advertised compatibility token in one
@@ -2312,7 +2342,7 @@ namespace FamilyRacing.Core.Networking
         private string CompatToken()
         {
             return gameplayVersion + "|" + ContentVersion()
-                + "|" + ContentFingerprint();
+                + "|" + AdmissionFingerprint();
         }
 
         private static bool PausePhase(string phase)

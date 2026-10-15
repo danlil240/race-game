@@ -29,6 +29,14 @@ namespace FamilyRacing.Core.Foundation
         private const string ScreenSandbox = "sandbox";
         private const string ScreenPractice = "practice";
         private const string ScreenDriving = "driving";
+        // M5 Task 10 loop screens: reachable only through their gated
+        // *.open commands — never through ui.navigate — so a screen can
+        // never exist without its content/profile availability verdict.
+        public const string ScreenCampaign = "campaign";
+        public const string ScreenQuickRace = "quickRace";
+        public const string ScreenTimeTrial = "timeTrial";
+        public const string ScreenGarage = "garage";
+        public const string ScreenBounties = "bounties";
         // Task 9 LAN screens: the browser is the only navigable entry
         // point; lobby/race/results/recovery are phase-derived (see
         // FoundationService.Network.cs SyncLanScreen) so a rendered screen
@@ -183,8 +191,37 @@ namespace FamilyRacing.Core.Foundation
                 Param("category", "string", null),
                 Param("expectedLevel", "integer", null)),
             Schema("cosmetic.equip",
+                Param("slot", "string", null),
                 Param("cosmeticId", "string", null),
-                Param("equipped", "boolean", Bools)),
+                // Omitting `equipped` equips; an explicit "false" is the
+                // unequip affordance.
+                OptionalParam("equipped", "boolean", Bools)),
+            // M5 Task 10: the semantic loop surface — every mode entry,
+            // setup screen and results affordance the family UI and the
+            // agent channel share. Starts converge on the same
+            // SoloRaceSession path solo.start uses; *.open commands are
+            // the only route to their gated screens; results.* manage
+            // the finished session and the unresolved-save gate.
+            Schema("campaign.open"),
+            Schema("campaign.start",
+                Param("eventId", "string", null),
+                Param("vehicleId", "string", null),
+                Param("difficulty", "string", null)),
+            Schema("quickRace.open"),
+            Schema("quickRace.start",
+                Param("courseId", "string", null),
+                Param("classId", "string", null),
+                Param("vehicleId", "string", null),
+                Param("difficulty", "string", null)),
+            Schema("timeTrial.open"),
+            Schema("timeTrial.start",
+                Param("courseId", "string", null),
+                Param("classId", "string", null)),
+            Schema("garage.open"),
+            Schema("bounties.open"),
+            Schema("results.retrySave"),
+            Schema("results.retry"),
+            Schema("results.continue"),
             // LAN session surface (Core/Networking): asynchronous commands
             // return accepted and complete through DrainNetworkOutcomes +
             // CompleteNetworkCommand on a later boundary.
@@ -516,7 +553,11 @@ namespace FamilyRacing.Core.Foundation
                     ? networkLinkState.Copy() : null,
                 // M5 Task 4 local modes: the live solo race session —
                 // null unless campaign/quickRace/timeTrial is active.
-                soloRace = soloRace != null ? soloRace.Snapshot() : null
+                soloRace = soloRace != null ? soloRace.Snapshot() : null,
+                // M5 Task 10: the resolved progression surface rides
+                // every snapshot — menus, races and failed-save states
+                // alike, always a fresh deep copy.
+                progression = BuildProgressionState()
             };
             if (driving != null)
             {
@@ -678,7 +719,8 @@ namespace FamilyRacing.Core.Foundation
                 // own availability answers.
                 if ((driving != null || soloRace != null)
                     && (LanEntryBlockedDuringRace(command.Action)
-                        || ProgressionWriteBlockedDuringRace(command.Action)))
+                        || ProgressionWriteBlockedDuringRace(command.Action)
+                        || LoopScreenBlockedDuringRace(command.Action)))
                     return Result(command, CommandResult.Rejected, "raceActive");
                 // LAN commands route to the session service; pause.toggle
                 // is a shared toggle on the host and a pause request on a
@@ -713,6 +755,30 @@ namespace FamilyRacing.Core.Foundation
                     case "tutorial.exit": return TutorialExit(command);
                     case "upgrade.purchase": return UpgradePurchase(command);
                     case "cosmetic.equip": return CosmeticEquip(command);
+                    // M5 Task 10 loop surface (FoundationService.
+                    // Progression.cs): screens through gated *.open
+                    // commands, mode starts through the shared solo
+                    // session path, results lifecycle on the finished
+                    // session and the unresolved-save gate.
+                    case "campaign.open":
+                        return OpenLoopScreen(command, ScreenCampaign);
+                    case "quickRace.open":
+                        return OpenLoopScreen(command, ScreenQuickRace);
+                    case "timeTrial.open":
+                        return OpenLoopScreen(command, ScreenTimeTrial);
+                    case "garage.open":
+                        return OpenLoopScreen(command, ScreenGarage);
+                    case "bounties.open":
+                        return OpenLoopScreen(command, ScreenBounties);
+                    case "campaign.start":
+                        return LoopStart(command, RaceMode.Campaign);
+                    case "quickRace.start":
+                        return LoopStart(command, RaceMode.QuickRace);
+                    case "timeTrial.start":
+                        return LoopStart(command, RaceMode.TimeTrial);
+                    case "results.retrySave": return ResultsRetrySave(command);
+                    case "results.retry": return ResultsRetry(command);
+                    case "results.continue": return ResultsContinue(command);
                     default: return Result(command, CommandResult.Rejected, "unknownAction");
                 }
             }
@@ -742,6 +808,41 @@ namespace FamilyRacing.Core.Foundation
                 case "tutorial.exit":
                 case "upgrade.purchase":
                 case "cosmetic.equip":
+                // M5 Task 10: loop screens and local starts are
+                // session-exclusive too — they could tear down or
+                // shadow the shared LAN state. results.retrySave stays
+                // legal: it resolves a durable debt (possibly produced
+                // BY this session) and mutates no session state.
+                case "campaign.open":
+                case "quickRace.open":
+                case "timeTrial.open":
+                case "garage.open":
+                case "bounties.open":
+                case "campaign.start":
+                case "quickRace.start":
+                case "timeTrial.start":
+                case "results.retry":
+                case "results.continue":
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        // Loop-screen entries that must not fire while a race is live:
+        // they are navigation — a running race is never abandoned
+        // silently (the same rule Navigate enforces for the driving
+        // screen). results.retrySave stays legal: the failed commit it
+        // retries can belong to THIS still-open session's result.
+        private static bool LoopScreenBlockedDuringRace(string action)
+        {
+            switch (action)
+            {
+                case "campaign.open":
+                case "quickRace.open":
+                case "timeTrial.open":
+                case "garage.open":
+                case "bounties.open":
                     return true;
                 default:
                     return false;
@@ -1638,6 +1739,67 @@ namespace FamilyRacing.Core.Foundation
                     {
                         available = false;
                         reason = "useRaceExit";
+                    }
+                    break;
+                // M5 Task 10 loop surface — the same gating order the
+                // handlers enforce: content, then profile, then the
+                // live-race fence.
+                case "campaign.open":
+                case "campaign.start":
+                case "quickRace.open":
+                case "quickRace.start":
+                case "timeTrial.open":
+                case "timeTrial.start":
+                    if (gameplayCatalog == null || gameplayCatalog.IsLegacy
+                        || gameplayCatalog.Driving == null)
+                    {
+                        available = false;
+                        reason = "contentUnavailable";
+                    }
+                    else if (activeSlot < 0)
+                    {
+                        available = false;
+                        reason = "requiresSelectedProfile";
+                    }
+                    else if (driving != null || soloRace != null)
+                    {
+                        available = false;
+                        reason = "raceActive";
+                    }
+                    break;
+                case "garage.open":
+                case "bounties.open":
+                    if (gameplayCatalog == null || gameplayCatalog.IsLegacy
+                        || gameplayCatalog.Driving == null
+                        || gameplayCatalog.Economy == null)
+                    {
+                        available = false;
+                        reason = "contentUnavailable";
+                    }
+                    else if (activeSlot < 0)
+                    {
+                        available = false;
+                        reason = "requiresSelectedProfile";
+                    }
+                    else if (driving != null || soloRace != null)
+                    {
+                        available = false;
+                        reason = "raceActive";
+                    }
+                    break;
+                case "results.retry":
+                case "results.continue":
+                    if (soloRace == null || soloRace.Result == null)
+                    {
+                        available = false;
+                        reason = "unavailable";
+                    }
+                    break;
+                case "results.retrySave":
+                    if (unresolvedResult == null)
+                    {
+                        available = false;
+                        reason = "noPendingResult";
                     }
                     break;
             }

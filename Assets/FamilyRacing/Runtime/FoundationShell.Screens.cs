@@ -211,6 +211,26 @@ namespace FamilyRacing
             ApplyAvailability(practice, "race.start");
             ApplyAvailability(lan, "ui.navigate");
             ApplyAvailability(back, "ui.navigate");
+            // M5 Task 10: the gameplay-loop entries — gated *.open
+            // commands, exactly like an agent dispatching them. A
+            // disabled button carries the discovery reason as its tooltip.
+            var loop = Row(root);
+            loop.name = "loop.entries";
+            var campaign = AddButton(loop, T("campaign.title", state), Coral,
+                () => app.Dispatch("campaign.open", emptyParams), "loop.campaign");
+            var quick = AddButton(loop, T("quick.title", state), Seafoam,
+                () => app.Dispatch("quickRace.open", emptyParams), "loop.quickRace");
+            var trial = AddButton(loop, T("trial.title", state), Ocean,
+                () => app.Dispatch("timeTrial.open", emptyParams), "loop.timeTrial");
+            var garage = AddButton(loop, T("garage.title", state), Deep,
+                () => app.Dispatch("garage.open", emptyParams), "loop.garage");
+            var bounties = AddButton(loop, T("bounties.title", state), Seafoam,
+                () => app.Dispatch("bounties.open", emptyParams), "loop.bounties");
+            ApplyAvailability(campaign, "campaign.open");
+            ApplyAvailability(quick, "quickRace.open");
+            ApplyAvailability(trial, "timeTrial.open");
+            ApplyAvailability(garage, "garage.open");
+            ApplyAvailability(bounties, "bounties.open");
             pauseOverlay = AddLabel(root, T("input.pause", state), 40, Coral);
             pauseOverlay.name = "overlay.pause";
             statusLabel = AddLabel(root, "", 18, Deep);

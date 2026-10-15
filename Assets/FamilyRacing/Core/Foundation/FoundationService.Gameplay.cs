@@ -93,6 +93,12 @@ namespace FamilyRacing.Core.Foundation
         public void SetGameplayCatalog(GameplayCatalog catalog)
         {
             gameplayCatalog = catalog;
+            // The LAN admission fingerprint binds the gameplay catalog
+            // identity when one is bound (driving-only fallback for
+            // legacy/unbound content) — admission can never agree on a
+            // ruleset a peer does not actually hold.
+            if (lanSession != null)
+                lanSession.SetGameplayContent(catalog);
         }
 
         // The runtime injects the validated gadget content once —
@@ -189,6 +195,19 @@ namespace FamilyRacing.Core.Foundation
                 vehicleId, savedProfile, gameplayCatalog);
         }
 
+        // The class-explicit verdict for pickers that select a class
+        // rather than a vehicle (the time-trial screen): the same
+        // internal Evaluate seam the start commands land on, so a
+        // rendered starter can never disagree with the session's.
+        public EntryDecision CanEnter(RaceMode mode, string courseId,
+            string eventId, string classId, string vehicleId)
+        {
+            return RaceModeRules.Evaluate(mode, courseId, eventId,
+                classId, vehicleId, savedProfile,
+                gameplayCatalog != null ? gameplayCatalog.Driving : null,
+                gameplayCatalog);
+        }
+
         // The atomic upgrade purchase: the whole tuple (debit, level,
         // receipt) lands inside one profile save through UpgradeService.
         // The unresolved-reward gate fences purchases exactly like
@@ -250,9 +269,23 @@ namespace FamilyRacing.Core.Foundation
             if (!WritableSelected())
                 return Result(command, CommandResult.Rejected,
                     "readOnlyProfile");
+            // The slot parameter must name the cosmetic's authored slot
+            // prefix — a mismatched slot is rejected before ownership is
+            // even consulted so the command can never silently widen the
+            // equipment surface.
+            var slot = command.Parameters["slot"];
+            var cosmeticId = command.Parameters["cosmeticId"];
+            if (!string.Equals(slot,
+                    UpgradeService.CosmeticSlot(cosmeticId),
+                    StringComparison.Ordinal))
+                return Result(command, CommandResult.Rejected,
+                    "slotMismatch");
+            // `equipped` defaults to the equip direction; only an
+            // explicit "false" unequips.
+            var equippedParam = OptionalParam(command, "equipped");
+            var equipped = equippedParam == "" || IsTrue(equippedParam);
             var outcome = UpgradeService.SetCosmeticEquipped(savedProfile,
-                command.Parameters["cosmeticId"],
-                IsTrue(command.Parameters["equipped"]), store);
+                cosmeticId, equipped, store);
             if (outcome.status == UpgradeService.StatusFailed)
             {
                 persistenceStatus = "saveFailed";
@@ -279,23 +312,7 @@ namespace FamilyRacing.Core.Foundation
         // preparation seam enforces).
         private CommandResult SoloStart(GameCommand command)
         {
-            if (gameplayCatalog == null || gameplayCatalog.IsLegacy
-                || gameplayCatalog.Driving == null)
-                return Result(command, CommandResult.Rejected, "contentUnavailable");
-            if (activeSlot < 0)
-                return Result(command, CommandResult.Rejected, "unavailable");
-            if (driving != null || soloRace != null)
-                return Result(command, CommandResult.Rejected, "raceActive");
             var mode = command.Parameters["mode"];
-            // Task 7: a progression race may not start while a finalized
-            // result's transaction is still uncommitted — its fresh
-            // context would interleave with the unresolved one.
-            RaceMode requestedMode;
-            if (unresolvedResult != null
-                && RaceModeRules.TryParse(mode, out requestedMode)
-                && RaceModeRules.IsProgression(requestedMode))
-                return Result(command, CommandResult.Rejected,
-                    "rewardUnresolved");
             var request = new SoloRaceRequest
             {
                 mode = mode,
@@ -304,14 +321,44 @@ namespace FamilyRacing.Core.Foundation
                 classId = OptionalParam(command, "classId"),
                 vehicleId = OptionalParam(command, "vehicleId"),
                 difficultyId = OptionalParam(command, "difficulty"),
-                participantId = savedProfile != null ? savedProfile.id : "",
-                // Profile-salted, monotonically minted: the durable
-                // ordinal floor keeps identities unique across process
-                // restarts, so a crashed run's pending context can never
-                // be silently adopted by a fresh "race-N".
-                raceId = MintSoloRaceId(),
-                commandId = command.CommandId
             };
+            return StartSoloSession(request, command);
+        }
+
+        // The shared session-start path every local-mode command funnels
+        // through (M5 Task 10): solo.start, campaign.start,
+        // quickRace.start and timeTrial.start build their request and
+        // land here — catalog/profile/race fences, the unresolved-reward
+        // gate, TryCreate, the durable reward-context bind before the
+        // first boundary, and the driving screen. A semantic command can
+        // never take a different (or weaker) path than the raw one.
+        private CommandResult StartSoloSession(SoloRaceRequest request,
+            GameCommand command)
+        {
+            if (gameplayCatalog == null || gameplayCatalog.IsLegacy
+                || gameplayCatalog.Driving == null)
+                return Result(command, CommandResult.Rejected, "contentUnavailable");
+            if (activeSlot < 0)
+                return Result(command, CommandResult.Rejected, "unavailable");
+            if (driving != null || soloRace != null)
+                return Result(command, CommandResult.Rejected, "raceActive");
+            // Task 7: a progression race may not start while a finalized
+            // result's transaction is still uncommitted — its fresh
+            // context would interleave with the unresolved one.
+            RaceMode requestedMode;
+            if (unresolvedResult != null
+                && RaceModeRules.TryParse(request.mode, out requestedMode)
+                && RaceModeRules.IsProgression(requestedMode))
+                return Result(command, CommandResult.Rejected,
+                    "rewardUnresolved");
+            request.participantId = savedProfile != null
+                ? savedProfile.id : "";
+            // Profile-salted, monotonically minted: the durable
+            // ordinal floor keeps identities unique across process
+            // restarts, so a crashed run's pending context can never
+            // be silently adopted by a fresh "race-N".
+            request.raceId = MintSoloRaceId();
+            request.commandId = command.CommandId;
             string error;
             SoloRaceSession created;
             if (!SoloRaceSession.TryCreate(request, savedProfile,

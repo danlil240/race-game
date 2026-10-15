@@ -662,12 +662,13 @@ namespace FamilyRacing.Tests
             yield return SeedProfileAndGarage(500, "livery-rival-car",
                 "accessory-flag");
             Assert.That(app.Dispatch("cosmetic.equip", Params(
-                ("cosmeticId", "accessory-flag"), ("equipped", "true")))
+                ("slot", "accessory"), ("cosmeticId", "accessory-flag"),
+                ("equipped", "true")))
                 .status, Is.EqualTo("applied"));
             // The unowned cosmetic can never equip — cosmetics never
             // bypass ownership.
             Assert.That(app.Dispatch("cosmetic.equip", Params(
-                ("cosmeticId", "livery-rival-motorcycle"),
+                ("slot", "livery"), ("cosmeticId", "livery-rival-motorcycle"),
                 ("equipped", "true"))).status, Is.EqualTo("rejected"));
 
             var started = app.Dispatch("solo.start", Params(

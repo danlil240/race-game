@@ -208,7 +208,12 @@ Actions: `profile.create`, `profile.select`, `ui.navigate`, `ui.language`,
 `settings.update`, `settings.save`, `input.set`, `input.clear`,
 `camera.toggle`, `pause.toggle`, `app.focusLost`, `race.start`,
 `race.restart`,
-`race.exit`, `tutorial.start`, `tutorial.replay`, `tutorial.exit`, and the
+`race.exit`, `tutorial.start`, `tutorial.replay`, `tutorial.exit`,
+`solo.start`, `upgrade.purchase`, `cosmetic.equip`, and the
+M5 gameplay-loop surface `campaign.open`, `campaign.start`,
+`quickRace.open`, `quickRace.start`, `timeTrial.open`, `timeTrial.start`,
+`garage.open`, `bounties.open`, `results.retrySave`, `results.retry`,
+`results.continue`, plus the
 LAN surface `lan.host`, `lan.discover`, `lan.discovery.stop`, `lan.join`,
 `lan.configure`, `lan.vehicle`, `lan.ready`, `lan.start`,
 `lan.pause.request`, `lan.pause.set`, `lan.reconnect`,
@@ -294,7 +299,7 @@ contiguous `sequence`, `monotonicMs`, `tick`: `snapshot`, `state`,
 `delta`, `result`, `discovery`, `lookup`, `health`, `screenshot`,
 `finished`.
 `snapshot`/`state` records carry a complete `state` payload and
-`stateSchemaVersion` (currently `4`: on top of the schema-2 `driving`
+`stateSchemaVersion` (currently `6`: on top of the schema-2 `driving`
 slice the state adds `network` (session role/phase, roster, shared pause,
 pending operations, discovered hosts, result deliveries — always
 populated, idle/none without a session), `networkRace` (host-confirmed
@@ -303,7 +308,13 @@ local prediction facts; null on the host and outside a LAN race) and
 `remotePresentation` (per-remote interpolation diagnostics); schema 4 adds
 the protocol-2 surfaces — the session descriptor's `contentFingerprint`,
 a `compat` token on every discovered host, and per-racer physical state
-inside LAN race snapshots); consumers
+inside LAN race snapshots; schema 5 adds the `presentation` render
+profile/performance slice; schema 6 adds `soloRace` (the local-mode
+session — `race` for campaign/quickRace, `trial` for timeTrial, the
+finalized `result`, and `tuningSource` naming the human seat's tune
+provenance) and `progression` (the resolved campaign access rows, bounty
+tray and unresolved-reward gate — present on every boundary, menus and
+failed saves included)); consumers
 must reject unsupported schemas before trusting driving evidence. The
 `hello` frame, `connection.json` and `discovery` records all advertise
 the same `stateSchemaVersion`.
@@ -354,7 +365,51 @@ input; after `finish` the run is closed (`captureClosed` rejects new
 controllers/commands); `capture-status.json` reports `captureComplete`
 only after the trace is flushed and the final status stamped.
 
-## LAN commands and screens (schema 4)
+## Gameplay loop commands and screens (schema 6)
+
+The M5 loop surface is command-first: every screen the family UI shows
+is reachable for an agent through the same `FoundationService.Execute`
+path, and no command grants coins, stars or traversal — durable
+progression only ever lands through a finalized race result or an
+authored purchase/equip.
+
+- `campaign.open`, `quickRace.open`, `timeTrial.open`, `garage.open`,
+  `bounties.open` are the ONLY route to their screens (`campaign`,
+  `quickRace`, `timeTrial`, `garage`, `bounties`): `ui.navigate` cannot
+  target them, each open checks gameplay content + a selected profile,
+  and every open rejects `raceActive` while a race runs or
+  `networkActive` inside a LAN session.
+- `campaign.start {eventId, vehicleId, difficulty}` enforces the
+  campaign traversal gate (`eventLocked` on unavailable regulars and
+  finales) and profile vehicle ownership (`vehicleLocked`).
+- `quickRace.start {courseId, classId, vehicleId, difficulty}` resolves
+  the authored circuit event for the course+class pick — a pick with no
+  authored circuit rejects `unknownEvent`.
+- `timeTrial.start {courseId, classId}` seats the authored normalized
+  starter for the class (`soloRace.tuningSource` reports `normalized`
+  versus `purchased` for the upgrade-resolved seats).
+- All three funnel into the same `SoloRaceSession` path `solo.start`
+  uses: progression modes bind the durable reward context before the
+  first simulated boundary, aborted runs produce no result, and the
+  finalized result feeds the same exactly-once reward seam LAN uses.
+- `upgrade.purchase {purchaseId, vehicleId, category, expectedLevel}`
+  commits the authored-priced level atomically (receipt-keyed,
+  idempotent on replay); `cosmetic.equip {slot, cosmeticId, equipped?}`
+  requires `slot` to match the cosmetic's authored slot prefix and
+  defaults `equipped` to true. Both reject `rewardUnresolved` while a
+  result's save is pending.
+- `results.retrySave` replays the retained result+context pair after a
+  failed save (`noPendingResult` when nothing is owed);
+  `results.retry` replays the finished session's stored request under a
+  fresh race identity; `results.continue` retires the session back to
+  the mode's own setup screen. `results.retry`/`results.continue`
+  reject `unavailable` without a finished result.
+
+Loop screens reject `raceActive`/`networkActive` during a race or LAN
+session; progression writes (`upgrade.purchase`, `cosmetic.equip`) are
+additionally fenced off a running solo race.
+
+## LAN commands and screens (schema 6)
 
 The five LAN screens are `lan-browser` (the only user-navigable LAN
 screen — a `ui.navigate` target), plus the phase-derived `lan-lobby`,

@@ -42,6 +42,12 @@ namespace FamilyRacing.Core.Racing
         public string phase = "";       // countdown | running | finished | aborted
         public bool paused;
         public string difficultyId = "";
+        // Where the local human seat's tune came from: "purchased" when
+        // the profile's durable upgrades resolved onto the catalog
+        // baseline (campaign | quickRace), "normalized" when the mode
+        // seats the authored starter (timeTrial). AI seats always run
+        // the catalog baseline; this label describes the human seat.
+        public string tuningSource = "";
         public NetworkRaceState race;   // campaign | quickRace only
         public DrivingSessionState trial;// timeTrial | practice only
         public RaceResult result;
@@ -60,6 +66,7 @@ namespace FamilyRacing.Core.Racing
                 phase = phase,
                 paused = paused,
                 difficultyId = difficultyId,
+                tuningSource = tuningSource,
                 race = race != null ? race.Copy() : null,
                 trial = trial != null ? trial.Copy() : null,
                 result = result != null ? result.Copy() : null,

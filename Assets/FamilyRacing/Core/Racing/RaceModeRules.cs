@@ -126,8 +126,8 @@ namespace FamilyRacing.Core.Racing
             {
                 case RaceMode.Campaign:
                 case RaceMode.QuickRace:
-                    return EvaluateRace(mode, eventId, vehicleId,
-                        profile, content, gameplay);
+                    return EvaluateRace(mode, courseId, eventId, classId,
+                        vehicleId, profile, content, gameplay);
                 case RaceMode.TimeTrial:
                     return EvaluateTrial(courseId, eventId, classId,
                         vehicleId, content);
@@ -142,13 +142,25 @@ namespace FamilyRacing.Core.Racing
         // Campaign/Quick Race: event membership, campaign progression,
         // ownership and class — the same precedence SoloRaceSession
         // enforced inline before this rule became the shared seam.
+        // M5 Task 10: a quick race may name only course + class — the
+        // authored circuit event for that pick resolves here so the
+        // quickRace.start command, the UI picker and raw solo.start all
+        // agree; a pick with no authored circuit reports unknownEvent.
         private static EntryDecision EvaluateRace(RaceMode mode,
-            string eventId, string vehicleId, ProfileSave profile,
+            string courseId, string eventId, string classId,
+            string vehicleId, ProfileSave profile,
             DrivingContentCatalog content, GameplayCatalog gameplay)
         {
             EventDefinition evt;
-            if (string.IsNullOrEmpty(eventId)
-                || !content.Events.TryGetValue(eventId, out evt)
+            if (string.IsNullOrEmpty(eventId))
+            {
+                if (mode != RaceMode.QuickRace)
+                    return Deny("unknownEvent");
+                evt = ResolveCircuitEvent(content, courseId, classId,
+                    vehicleId);
+                if (evt == null) return Deny("unknownEvent");
+            }
+            else if (!content.Events.TryGetValue(eventId, out evt)
                 || evt == null)
                 return Deny("unknownEvent");
             if (mode == RaceMode.Campaign)
@@ -178,14 +190,37 @@ namespace FamilyRacing.Core.Racing
                 return Deny("vehicleLocked");
             if (!evt.AllowsVehicle(vehicleId))
                 return Deny("vehicleNotForEvent");
-            var classId = !string.IsNullOrEmpty(evt.vehicleClass)
+            var resolvedClass = !string.IsNullOrEmpty(evt.vehicleClass)
                 ? evt.vehicleClass
                 : VehicleTuning.ClassIdOf(vehicleId);
-            if (VehicleTuning.ClassIdOf(vehicleId) != classId)
+            if (VehicleTuning.ClassIdOf(vehicleId) != resolvedClass)
                 return Deny("invalidVehicle");
             if (!CourseExists(content, evt))
                 return Deny("unknownCourse");
-            return Allow(vehicleId, evt.id, classId);
+            return Allow(vehicleId, evt.id, resolvedClass);
+        }
+
+        // The authored circuit event for a course+class pick: the
+        // explicit class wins, the asked vehicle's class derives it
+        // otherwise. Deterministic across catalog edits — candidates
+        // sort by id.
+        private static EventDefinition ResolveCircuitEvent(
+            DrivingContentCatalog content, string courseId,
+            string classId, string vehicleId)
+        {
+            var derived = !string.IsNullOrEmpty(classId)
+                ? classId : VehicleTuning.ClassIdOf(vehicleId);
+            if (string.IsNullOrEmpty(derived)) return null;
+            var matches = new List<EventDefinition>();
+            if (content.Events != null)
+                foreach (var candidate in content.Events.Values)
+                    if (candidate != null
+                        && candidate.eventType == GameplayEventType.Circuit
+                        && candidate.courseId == courseId
+                        && candidate.vehicleClass == derived)
+                        matches.Add(candidate);
+            matches.Sort((a, b) => string.CompareOrdinal(a.id, b.id));
+            return matches.Count > 0 ? matches[0] : null;
         }
 
         // Time Trial: the authored `time` event for course+class (or an

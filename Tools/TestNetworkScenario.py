@@ -20,13 +20,15 @@ from NetworkScenario import (LEGAL_PHASE_TRANSITIONS,
                              verify_lan_trace)
 
 
-def lan_state(tick=1, schema=5):
+def lan_state(tick=1, schema=6):
     """A minimal well-formed LAN state at the given schema marker.
 
     Schema 4 adds the compatibility surfaces (descriptor fingerprint,
-    discovered-host compat). Schema 5 (the current REQUIRED_LAN_SCHEMA)
-    adds the additive presentation slice: the applied render profile and
-    the bounded performance summary key."""
+    discovered-host compat). Schema 5 adds the additive presentation
+    slice: the applied render profile and the bounded performance summary
+    key. Schema 6 (the current REQUIRED_LAN_SCHEMA) adds the local-loop
+    slices: `soloRace` (null inside a LAN session) and the resolved
+    `progression` surface present on every boundary."""
     descriptor = {"sessionId": "s-1", "eventId": "lan-car-01",
                   "classId": "car", "joinable": True}
     if schema >= 4:
@@ -98,6 +100,25 @@ def lan_state(tick=1, schema=5):
             "renderingAvailable": True,
             "performance": None,
             "racers": [],
+        }
+    if schema >= 6:
+        # A LAN session never publishes a local race; the progression
+        # surface still rides every boundary (menus included).
+        state["soloRace"] = None
+        state["progression"] = {
+            "available": True,
+            "contentIdentity": "gameplay-loop-1|test",
+            "campaignWorldId": "sunny-island",
+            "campaignCompletedEvents": 0,
+            "campaignStars": 0,
+            "campaignRequiredEvents": 2,
+            "campaignRequiredStars": 1,
+            "campaignFinalesOpen": False,
+            "campaignWorldComplete": False,
+            "campaignEvents": [],
+            "bounties": [],
+            "rewardUnresolved": False,
+            "rewardUnresolvedRaceId": "",
         }
     return state
 
@@ -333,12 +354,17 @@ class Schema3ConsumerTests(unittest.TestCase):
         validate_state_schema(record, record["state"])
 
     def test_schema5_boundary_validates(self):
-        record = self.record()
+        record = self.record(state=lan_state(schema=5))
         record["stateSchemaVersion"] = 5
         validate_state_schema(record, record["state"])
 
+    def test_schema6_boundary_validates(self):
+        record = self.record()
+        record["stateSchemaVersion"] = 6
+        validate_state_schema(record, record["state"])
+
     def test_schema5_missing_presentation_is_rejected(self):
-        state = lan_state()
+        state = lan_state(schema=5)
         del state["presentation"]
         record = self.record(state=state)
         record["stateSchemaVersion"] = 5
@@ -447,7 +473,7 @@ class TraceIntegrityTests(unittest.TestCase):
                 "type": kind, "protocolVersion": 1, "runId": "lan-trace",
                 "deviceId": "d", "participantId": "local",
                 "buildVersion": "b", "contentVersion": "c",
-                "stateSchemaVersion": 5,
+                "stateSchemaVersion": 6,
                 "sequence": index + 1, "monotonicMs": (index + 1) * 10,
                 "tick": index + 1, "state": state,
             }

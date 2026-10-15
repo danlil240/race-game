@@ -456,6 +456,12 @@ namespace FamilyRacing
             ApplyAvailability(retry, "race.restart");
             ApplyAvailability(finishExit, "race.exit");
 
+            // M5 Task 10: the local-mode results surface — placement,
+            // honest coin breakdown, retry-save and one-action
+            // replay/continue — replaces the practice finish overlay for
+            // campaign/quickRace/timeTrial sessions.
+            BuildResultsOverlay(state);
+
             statusLabel = AddLabel(root, "", 18, Deep);
             statusLabel.name = "status.persistence";
         }
@@ -480,7 +486,7 @@ namespace FamilyRacing
         private void UpdateDrivingIndicators(FoundationState state)
         {
             if (state.screen != "driving") return;
-            var session = state.driving;
+            var session = PresentedSession(state);
             if (session == null) return;
             if (elapsedLabel != null)
                 elapsedLabel.text = T("hud.time", state) + " " +
@@ -545,7 +551,11 @@ namespace FamilyRacing
             }
             if (finishOverlay != null)
             {
-                var done = session.phase == "finished";
+                // The practice finish card belongs to the legacy driving
+                // session only — a solo-mode finish shows the results
+                // overlay instead, so the two never stack.
+                var done = state.driving != null
+                    && session.phase == "finished";
                 finishOverlay.style.display = done ? DisplayStyle.Flex : DisplayStyle.None;
                 if (done && finishTimeLabel != null)
                     finishTimeLabel.text = T("hud.time", state) + " " +
@@ -555,6 +565,26 @@ namespace FamilyRacing
                 if (done && finishVehicleLabel != null)
                     finishVehicleLabel.text = VehicleName(session.vehicleId, state);
             }
+        }
+
+        // The per-racer session the HUD reads: the legacy practice
+        // `driving` slice, the time trial's lone session, or the local
+        // seat's session inside the four-racer coordinator — whatever the
+        // published state actually carries, never a synthesized one.
+        private static FamilyRacing.Core.Racing.DrivingSessionState
+            PresentedSession(FoundationState state)
+        {
+            if (state == null) return null;
+            if (state.driving != null) return state.driving;
+            var solo = state.soloRace;
+            if (solo == null) return null;
+            if (solo.trial != null) return solo.trial;
+            if (solo.race != null && solo.race.racers != null)
+                foreach (var racer in solo.race.racers)
+                    if (racer != null
+                        && racer.participantId == solo.participantId)
+                        return racer.session;
+            return null;
         }
 
         // The held-gadget readout: resolves the local racer's row in

@@ -37,7 +37,11 @@ BOUNDARY_TYPES = {"snapshot", "state", "delta"}
 # Schema 5 (M4) is additive presentation truth: the applied render
 # profile and a bounded render-performance summary on `presentation` —
 # bounded scalars only, never frame-sized buffers.
-SUPPORTED_STATE_SCHEMAS = {1, 2, 3, 4, 5}
+# Schema 6 (M5 Task 10) adds the local solo-race slice (`soloRace`) and
+# the resolved progression surface (`progression`: campaign access,
+# bounty tray, unresolved-reward gate) — both present from the first
+# boundary, menus and failed saves included.
+SUPPORTED_STATE_SCHEMAS = {1, 2, 3, 4, 5, 6}
 
 
 def _remove_path(state, path):
@@ -188,6 +192,54 @@ def validate_state_schema(event, state):
                 "Schema-4 discovered host is missing compat"
     if schema >= 5:
         validate_schema5_presentation(state)
+    if schema >= 6:
+        validate_schema6_progression(state)
+
+
+def validate_schema6_progression(state):
+    """The schema-6 local-loop contract a boundary state must carry.
+
+    Additive over schema 5: `soloRace` (null outside a local mode —
+    campaign and quickRace populate `race`, timeTrial `trial`; a
+    finalized run carries the immutable `result`) and `progression`,
+    the resolved campaign/bounty/reward-gate view rebuilt from durable
+    profile facts. Both keys exist on EVERY schema-6 boundary — a menu
+    snapshot or a failed save must never omit them.
+    """
+    for key in ("soloRace", "progression"):
+        assert key in state, "Schema-6 state is missing " + key
+    solo = state["soloRace"]
+    if solo is not None:
+        assert isinstance(solo, dict), "soloRace must be an object or null"
+        for key in ("mode", "raceId", "phase", "race", "trial",
+                    "result", "tuningSource"):
+            assert key in solo, "soloRace slice is missing " + key
+        assert solo["mode"] in ("campaign", "quickRace", "timeTrial",
+                                "practice"), \
+            "Unknown solo mode " + repr(solo["mode"])
+        # A running LAN race never publishes a local session either.
+        assert state.get("networkRace") is None or solo is None, \
+            "LAN race state must not masquerade as a local solo session"
+    progression = state["progression"]
+    assert isinstance(progression, dict), \
+        "progression must be an object on every boundary"
+    for key in ("available", "contentIdentity", "campaignEvents",
+                "bounties", "rewardUnresolved", "rewardUnresolvedRaceId"):
+        assert key in progression, "progression slice is missing " + key
+    assert type(progression["available"]) is bool
+    assert type(progression["rewardUnresolved"]) is bool
+    assert isinstance(progression["campaignEvents"], list)
+    assert isinstance(progression["bounties"], list)
+    for row in progression["campaignEvents"]:
+        assert isinstance(row, dict), "campaignEvents rows are objects"
+        for key in ("eventId", "stars", "locked", "lockReason",
+                    "completed", "objectiveMask"):
+            assert key in row, "campaignEvents row missing " + key
+    for row in progression["bounties"]:
+        assert isinstance(row, dict), "bounties rows are objects"
+        for key in ("assignmentId", "bountyId", "progress", "threshold",
+                    "rewardCoins", "completed", "resolved"):
+            assert key in row, "bounties row missing " + key
 
 
 def validate_schema5_presentation(state):

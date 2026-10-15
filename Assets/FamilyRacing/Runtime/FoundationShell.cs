@@ -110,6 +110,11 @@ namespace FamilyRacing
             // structure, never per-tick race readouts.
             if (IsLanScreen(state.screen) && state.network != null)
                 key += "|" + LanRebuildSignature(state);
+            // Loop screens repaint on picker/progression changes too —
+            // identical signatures keep live widgets (and their pointer
+            // captures) exactly like the LAN signature does.
+            if (IsLoopScreen(state.screen))
+                key += "|" + LoopSignature(state);
             if (key != rebuildKey)
             {
                 rebuildKey = key;
@@ -134,6 +139,10 @@ namespace FamilyRacing
             tutorialPanel = null;
             garagePanel = null;
             garageSignature = "";
+            resultsOverlay = null;
+            resultsPlaceLabel = resultsTimeLabel = resultsCoinsLabel = null;
+            resultsBreakdownLabel = resultsRecordLabel = null;
+            resultsRetrySaveButton = null;
             tutorialIconLabel = tutorialCueLabel = tutorialProgressLabel = null;
             lanTimeLabel = lanStandingsLabel = lanPhaseLabel = null;
             lanActionLabel = lanPauseLabel = null;
@@ -159,6 +168,14 @@ namespace FamilyRacing
                 case "lan-race":
                 case "lan-results":
                 case "lan-recovery": BuildLanScreen(state); break;
+                // M5 Task 10 loop screens — reachable only through the
+                // gated *.open commands, rendered from the published
+                // progression slice.
+                case FoundationService.ScreenCampaign: BuildCampaign(state); break;
+                case FoundationService.ScreenQuickRace: BuildQuickRace(state); break;
+                case FoundationService.ScreenTimeTrial: BuildTimeTrial(state); break;
+                case FoundationService.ScreenGarage: BuildGarageScreen(state); break;
+                case FoundationService.ScreenBounties: BuildBounties(state); break;
                 default: BuildProfiles(state); break;
             }
         }
@@ -316,8 +333,10 @@ namespace FamilyRacing
                 SetLed("recover", state.input.recover);
             }
             UpdateDrivingIndicators(state);
-            if (garagePanel != null && state.screen == "practice")
+            if (garagePanel != null && (state.screen == "practice"
+                || state.screen == FoundationService.ScreenGarage))
                 RefreshGarage(state);
+            UpdateResultsOverlay(state);
             if (state.screen == "lan-race")
                 UpdateLanRaceIndicators(state);
             if (pauseOverlay != null)

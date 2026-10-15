@@ -13,7 +13,7 @@ namespace FamilyRacing.Core.Localization
         private static readonly Dictionary<string, string[]> Catalog = new Dictionary<string, string[]>
         {
             ["shell.title"] = new[] { "Family Racing", "מירוץ משפחתי" },
-            ["shell.disclaimer"] = new[] { "Foundation preview: profiles, settings, and controls only — no racing yet.", "גרסת יסודות בלבד: פרופילים, הגדרות ופקדים — עדיין אין מירוץ." },
+            ["shell.disclaimer"] = new[] { "Family preview: campaign races, quick race, time trial, garage and home-network racing are all playable.", "גרסת תצוגה משפחתית: מירוצי המסע, מירוץ מהיר, מירוץ נגד זמן, המוסך ומירוץ הרשת הביתית — הכל פתוח למשחק." },
             ["profile.select"] = new[] { "Choose your driver", "בחרו נהג" },
             ["profile.animal.fox"] = new[] { "Fox", "שועל" },
             ["profile.animal.rabbit"] = new[] { "Rabbit", "ארנב" },
@@ -175,7 +175,70 @@ namespace FamilyRacing.Core.Localization
             ["lan.reason.duplicatePending"] = new[] { "Already sent.", "כבר נשלח." },
             ["lan.reason.unknownEvent"] = new[] { "Unknown course.", "מסלול לא ידוע." },
             ["lan.reason.missingParameter"] = new[] { "Missing details.", "חסרים פרטים." },
-            ["lan.reason.invalidParameter"] = new[] { "Bad details.", "פרטים שגויים." }
+            ["lan.reason.invalidParameter"] = new[] { "Bad details.", "פרטים שגויים." },
+            // --- gameplay loop screens (M5 Task 10) ----------------------
+            // Campaign map, quick-race and time-trial pickers, bounty
+            // board and the local results overlay. Numbers and times are
+            // composed LTR by the callers (FormatRaceTime prefixes a
+            // left-to-right mark); every sentence here stays logical
+            // order so the Hebrew reads naturally under RTL layout.
+            ["campaign.title"] = new[] { "Campaign map", "מפת המירוצים" },
+            ["campaign.stars"] = new[] { "Stars", "כוכבים" },
+            ["campaign.events"] = new[] { "Races", "מירוצים" },
+            ["campaign.worldDone"] = new[] { "World complete!", "העולם הושלם!" },
+            ["campaign.reward"] = new[] { "Win to unlock", "נצחו כדי לפתוח" },
+            ["event.type.circuit"] = new[] { "Race", "מירוץ" },
+            ["event.type.time"] = new[] { "Time challenge", "אתגר זמן" },
+            ["event.type.finale"] = new[] { "Rival finale", "גמר מול יריב" },
+            ["event.locked"] = new[] { "Finish the earlier races first", "קודם סיימו את המירוצים הקודמים" },
+            ["quick.title"] = new[] { "Quick race", "מירוץ מהיר" },
+            ["quick.hint"] = new[] { "Pick a course, a class and your vehicle.", "בחרו מסלול, סוג רכב ואת הרכב שלכם." },
+            ["trial.title"] = new[] { "Time trial", "מירוץ נגד הזמן" },
+            ["trial.hint"] = new[] { "Beat the clock in the starter vehicle!", "נצחו את השעון עם רכב ההתחלה!" },
+            ["trial.record"] = new[] { "Best time", "השיא שלכם" },
+            ["trial.noRecord"] = new[] { "No record yet", "אין עדיין שיא" },
+            ["trial.starter"] = new[] { "Race vehicle", "רכב המירוץ" },
+            ["trial.par"] = new[] { "Goal time", "זמן המטרה" },
+            ["difficulty.title"] = new[] { "Difficulty", "רמת קושי" },
+            ["difficulty.easy"] = new[] { "Easy", "קל" },
+            ["difficulty.medium"] = new[] { "Medium", "בינוני" },
+            ["difficulty.hard"] = new[] { "Hard", "קשה" },
+            ["bounties.title"] = new[] { "Challenges", "אתגרים" },
+            ["bounties.hint"] = new[] { "Finish challenges to earn coins!", "השלימו אתגרים כדי להרוויח מטבעות!" },
+            ["bounties.reward"] = new[] { "Reward", "פרס" },
+            ["bounties.done"] = new[] { "Done!", "בוצע!" },
+            ["bounties.progress"] = new[] { "Progress", "התקדמות" },
+            ["bounty.family.drift"] = new[] { "Drift time", "זמן דריפט" },
+            ["bounty.family.boost"] = new[] { "Boosts used", "האצות" },
+            ["bounty.family.landing"] = new[] { "Clean landings", "נחיתות נקיות" },
+            ["bounty.family.rival"] = new[] { "Rival victory", "ניצחון מול יריב" },
+            ["bounty.unit.count"] = new[] { "times", "פעמים" },
+            ["bounty.unit.seconds"] = new[] { "seconds", "שניות" },
+            ["bounty.unit.ticks"] = new[] { "ticks", "טיקים" },
+            ["results.title"] = new[] { "Race results", "תוצאות המירוץ" },
+            ["results.place"] = new[] { "Place", "מקום" },
+            ["results.coins"] = new[] { "Coins won", "מטבעות שהושגו" },
+            ["results.coins.finish"] = new[] { "Finish", "סיום" },
+            ["results.coins.place"] = new[] { "Place bonus", "בונוס מיקום" },
+            ["results.coins.star"] = new[] { "Star bonus", "בונוס כוכבים" },
+            ["results.coins.bounty"] = new[] { "Challenge bonus", "בונוס אתגרים" },
+            ["results.coins.rival"] = new[] { "Rival bonus", "בונוס יריב" },
+            ["results.newRecord"] = new[] { "New best time!", "שיא חדש!" },
+            ["results.retrySave"] = new[] { "Try saving again", "נסיון שמירה נוסף" },
+            ["results.again"] = new[] { "Race again", "עוד מירוץ" },
+            ["results.next"] = new[] { "Continue", "המשך" },
+            ["loop.race"] = new[] { "Race!", "למרוץ!" },
+            ["loop.pick"] = new[] { "Pick one", "בוחרים אחד" },
+            // Loop-screen reason codes shown under disabled buttons; the
+            // raw code stays the fallback for anything unlisted.
+            ["loop.reason.contentUnavailable"] = new[] { "This content is not in this build.", "התוכן הזה לא בגרסה הזאת." },
+            ["loop.reason.requiresSelectedProfile"] = new[] { "Pick a driver first.", "קודם בוחרים נהג." },
+            ["loop.reason.raceActive"] = new[] { "Finish or leave the race first.", "קודם מסיימים את המירוץ." },
+            ["loop.reason.networkActive"] = new[] { "Leave the race session first.", "קודם עוזבים את המירוץ." },
+            ["loop.reason.rewardUnresolved"] = new[] { "Save your last prize first.", "קודם שומרים את הפרס האחרון." },
+            ["loop.reason.eventLocked"] = new[] { "Finish the earlier races first.", "קודם מסיימים את המירוצים הקודמים." },
+            ["loop.reason.vehicleLocked"] = new[] { "Win that vehicle first.", "קודם מנצחים את הרכב הזה." },
+            ["loop.reason.unavailable"] = new[] { "Not available right now.", "לא זמין כרגע." }
         };
 
         public static IReadOnlyCollection<string> Keys

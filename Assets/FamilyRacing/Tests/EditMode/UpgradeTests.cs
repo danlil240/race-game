@@ -578,7 +578,8 @@ namespace FamilyRacing.Tests
             Assert.That(during.status, Is.EqualTo(CommandResult.Rejected));
             Assert.That(during.code, Is.EqualTo("raceActive"));
             var equip = service.Execute(Cmd("cosmetic.equip",
-                P("cosmeticId", "livery-rival-car", "equipped", "true")));
+                P("slot", "livery", "cosmeticId", "livery-rival-car",
+                    "equipped", "true")));
             Assert.That(equip.status, Is.EqualTo(CommandResult.Rejected));
             Assert.That(equip.code, Is.EqualTo("raceActive"));
             Assert.That(service.Execute(Cmd("race.exit", null)).status,
@@ -606,7 +607,8 @@ namespace FamilyRacing.Tests
             Assert.That(during.status, Is.EqualTo(CommandResult.Rejected));
             Assert.That(during.code, Is.EqualTo("networkActive"));
             var equip = service.Execute(Cmd("cosmetic.equip",
-                P("cosmeticId", "livery-rival-car", "equipped", "true")));
+                P("slot", "livery", "cosmeticId", "livery-rival-car",
+                    "equipped", "true")));
             Assert.That(equip.status, Is.EqualTo(CommandResult.Rejected));
             Assert.That(equip.code, Is.EqualTo("networkActive"));
         }
@@ -822,12 +824,13 @@ namespace FamilyRacing.Tests
             profile.ownedCosmetics.Add("livery-rival-car");
             var service = ServiceWithProfile(profile, catalog);
             var locked = service.Execute(Cmd("cosmetic.equip",
-                P("cosmeticId", "livery-rival-motorcycle",
+                P("slot", "livery", "cosmeticId", "livery-rival-motorcycle",
                     "equipped", "true")));
             Assert.That(locked.status, Is.EqualTo(CommandResult.Rejected));
             Assert.That(locked.code, Is.EqualTo("cosmeticLocked"));
             var equipped = service.Execute(Cmd("cosmetic.equip",
-                P("cosmeticId", "livery-rival-car", "equipped", "true")));
+                P("slot", "livery", "cosmeticId", "livery-rival-car",
+                    "equipped", "true")));
             Assert.That(equipped.status,
                 Is.EqualTo(CommandResult.Applied));
             var state = service.Snapshot();

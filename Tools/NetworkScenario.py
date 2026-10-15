@@ -56,12 +56,13 @@ from RestartScenario import file_hash, wait_connection, write_json
 
 
 # The observation schema this scenario requires — mirrors
-# NetworkSettings.StateSchemaVersion in the pinned build. Schema 5 (M4)
-# adds the additive render-profile/performance presentation slice on top
-# of the schema-4 protocol-2 epoch (physical LAN replication, content
-# fingerprints on descriptors/discovery, P1 gameplay envelopes).
-# Historical schema-3/4 evidence is not valid proof of a current build.
-REQUIRED_LAN_SCHEMA = 5
+# NetworkSettings.StateSchemaVersion in the pinned build. Schema 6 (M5)
+# adds the local solo-race slice and the resolved progression surface on
+# top of the schema-5 presentation slice and the schema-4 protocol-2
+# epoch (physical LAN replication, content fingerprints on
+# descriptors/discovery, P1 gameplay envelopes).
+# Historical schema-3/4/5 evidence is not valid proof of a current build.
+REQUIRED_LAN_SCHEMA = 6
 
 # The schema-3+ session phases in their legal neighbourhood graph. A phase
 # may repeat or move only along an edge the session policy permits; any
@@ -149,6 +150,20 @@ def validate_lan_state(state):
     # presentation slice — the render profile this endpoint actually
     # applied and its bounded performance summary contract.
     validate_schema5_presentation(state)
+
+    # Schema 6 (M5 Task 10): the local-loop slices exist on every
+    # boundary even inside a LAN session — `soloRace` stays null (a LAN
+    # race never masquerades as a local session) and `progression`
+    # carries the resolved campaign/bounty/reward-gate view.
+    assert "soloRace" in state, "Schema-6 state is missing soloRace"
+    assert state["soloRace"] is None or state.get("networkRace") is None, \
+        "LAN race state must not masquerade as a local solo session"
+    progression = state.get("progression")
+    assert isinstance(progression, dict), \
+        "Schema-6 state is missing the progression slice"
+    for key in ("available", "campaignEvents", "bounties",
+                "rewardUnresolved"):
+        assert key in progression, "progression slice missing " + key
 
     # The result/reward ledger is unique per (resultId, participantId):
     # a duplicated row is a duplicated reward claim. The immutable result

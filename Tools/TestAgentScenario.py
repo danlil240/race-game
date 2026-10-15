@@ -82,7 +82,7 @@ class IntegrityTests(unittest.TestCase):
             validate_state_schema(record, record["state"])
 
     def test_unsupported_schemas_are_rejected_before_driving_evidence(self):
-        for schema in (0, 6, "2", True):
+        for schema in (0, 7, "2", True):
             record = self.record()
             record["stateSchemaVersion"] = schema
             with self.subTest(schema=schema), self.assertRaises(AssertionError):
@@ -152,6 +152,63 @@ class IntegrityTests(unittest.TestCase):
             lambda s: s["presentation"]["performance"].pop("reportStatus"),
         ):
             state = self.schema5_state()
+            mutate(state)
+            record["state"] = state
+            with self.subTest(mutate=mutate), self.assertRaises(AssertionError):
+                validate_state_schema(record, state)
+
+    def schema6_state(self):
+        """A minimal schema-6 boundary: schema-5 shape plus the solo
+        race and resolved-progression slices the loop contract adds."""
+        state = self.schema5_state()
+        state["stateSchemaVersion"] = 6
+        state["soloRace"] = None
+        state["progression"] = {
+            "available": False,
+            "contentIdentity": "none",
+            "campaignWorldId": "",
+            "campaignCompletedEvents": 0,
+            "campaignStars": 0,
+            "campaignRequiredEvents": 0,
+            "campaignRequiredStars": 0,
+            "campaignFinalesOpen": False,
+            "campaignWorldComplete": False,
+            "campaignEvents": [],
+            "bounties": [],
+            "rewardUnresolved": False,
+            "rewardUnresolvedRaceId": "",
+        }
+        return state
+
+    def test_schema_6_boundary_includes_loop_slices(self):
+        record = self.record()
+        record["stateSchemaVersion"] = 6
+        record["state"] = self.schema6_state()
+        validate_state_schema(record, record["state"])
+        # A live solo race carries its mode identity and honest branch
+        # (the four-racer `race` or the lone `trial`).
+        live = self.schema6_state()
+        live["soloRace"] = {
+            "mode": "campaign", "raceId": "race-x-1",
+            "phase": "running", "race": {"sessionId": "s"},
+            "trial": None, "result": None, "tuningSource": "purchased",
+        }
+        record["state"] = live
+        validate_state_schema(record, live)
+
+    def test_schema_6_rejects_missing_or_forged_progression(self):
+        record = self.record()
+        record["stateSchemaVersion"] = 6
+        for mutate in (
+            lambda s: s.pop("progression"),
+            lambda s: s.pop("soloRace"),
+            lambda s: s["progression"].pop("campaignEvents"),
+            lambda s: s["progression"].pop("bounties"),
+            lambda s: s["progression"].update(rewardUnresolved="yes"),
+            lambda s: s.update(soloRace={"mode": "unknown"}),
+            lambda s: s["progression"].update(campaignEvents=["evt"]),
+        ):
+            state = self.schema6_state()
             mutate(state)
             record["state"] = state
             with self.subTest(mutate=mutate), self.assertRaises(AssertionError):

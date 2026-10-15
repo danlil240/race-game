@@ -42,7 +42,14 @@ namespace FamilyRacing.Core.Foundation
         public void SetLanSession(LanSessionService session)
         {
             lanSession = session;
-            if (lanSession != null) lanSession.SetContent(drivingContent);
+            if (lanSession != null)
+            {
+                lanSession.SetContent(drivingContent);
+                // The gameplay catalog binds the admission fingerprint
+                // (M5 Task 10): a session attached after the catalog
+                // still admits only exact gameplay-identity peers.
+                lanSession.SetGameplayContent(gameplayCatalog);
+            }
         }
 
         // True while a LAN session is in progress (connecting, lobby,

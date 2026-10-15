@@ -154,8 +154,13 @@ namespace FamilyRacing.Core.Racing
         {
             session = null;
             error = null;
-            var decision = RaceModeRules.CanEnter(mode, request.courseId,
-                request.eventId, request.vehicleId, profile, catalog);
+            // The classId-explicit seam: quickRace.start names course +
+            // class and lets the rules resolve the authored circuit
+            // event — the same verdict the UI pickers and raw
+            // solo.start consult.
+            var decision = RaceModeRules.Evaluate(mode, request.courseId,
+                request.eventId, request.classId, request.vehicleId,
+                profile, content, catalog);
             if (!decision.allowed)
             { error = decision.code; return false; }
             EventDefinition evt = content.Events[decision.eventId];
@@ -495,6 +500,13 @@ namespace FamilyRacing.Core.Racing
                 participantId = participantId,
                 paused = paused,
                 difficultyId = difficultyId,
+                // The human seat's tuning provenance: progression modes
+                // run the profile-resolved purchased tune; the trial
+                // runs the authored normalized starter.
+                tuningSource = mode == "timeTrial"
+                    ? "normalized"
+                    : mode == "campaign" || mode == "quickRace"
+                        ? "purchased" : "",
                 result = result != null ? result.Copy() : null,
                 abortReason = abortReason
             };

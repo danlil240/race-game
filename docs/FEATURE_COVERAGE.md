@@ -4,8 +4,11 @@ Registry mapping the foundation and LAN commands to the actual state
 fields they control and the evidence that actually covers them. Proof column
 reads the frozen lead scenario (`Logs/evidence-lead/result.json`, all 9
 checks passed on the wave-3 Windows build, run-validation-lead) plus the
-Unity suites. The six later-gameplay categories named in `FeatureCoverage`
-are explicitly `notImplemented`; additional QA gaps are listed below.
+Unity suites. `FeatureCoverage` now reports `implemented` for
+`drivingOnboarding`, `drivingSimulation`, `campaign`,
+`rewardsUpgradesCosmetics` and `lan`; only the full-release `tutorial`
+(incl. gadget onboarding) is still `notImplemented`, and `content`
+reports `graybox` while dressed content remains benchmark-only.
 
 ## Command → state-field map
 
@@ -33,6 +36,14 @@ are explicitly `notImplemented`; additional QA gaps are listed below.
 | `lan.results.request` / `lan.results.retrySave` | client result re-offer / local persistence retry | `network.results[]` delivery states | `NetworkResultsPlayTests`, `NetworkRewardTests` |
 | `lan.rematch` | host-only return to lobby keeping retained results | `network.phase` (`results`→`lobby`) | `NetworkResultsPlayTests` |
 | `lan.leave` | clean teardown; the only session exit | `network.role`→`none`, `screen`→`lan-browser` | `NetworkScreensPlayTests` |
+| `campaign.open` / `quickRace.open` / `timeTrial.open` / `garage.open` / `bounties.open` | gated navigation to the loop screens — the only route to them (not `ui.navigate` targets); requires non-legacy gameplay content + a selected profile | `screen`, `progression.*` | `GameplayCommandTests` (open gating, content/profile gates, race/LAN fencing); `GameplayScreensPlayTests` |
+| `campaign.start` | starts a campaign event through `SoloRaceSession`; enforces the campaign traversal gate + vehicle ownership, binds the durable reward context before the first boundary | `soloRace.*`, `screen` (`driving`), `drivingEvents`, `progression` | `GameplayCommandTests` (`CampaignStartSeatsTheSameSessionAsSoloStart`, finale lock), `SoloRacePlayTests` |
+| `quickRace.start` | resolves the authored circuit for the course+class pick and starts the shared four-racer race | `soloRace.*` | `GameplayCommandTests` (`QuickRaceStartResolvesTheAuthoredCircuit`, `QuickRaceStartRejectsDishonestPicks`) |
+| `timeTrial.start` | lone-clock run seating the authored normalized starter (`tuningSource` = `normalized`) | `soloRace.trial`, `soloRace.tuningSource` | `GameplayCommandTests` (`TimeTrialStartSeatsNormalizedStarter`), `SoloRacePlayTests` |
+| `upgrade.purchase` | atomic authored-price upgrade commit (receipt-keyed, idempotent); gated on `rewardUnresolved` | `savedProfile.vehicleUpgrades/coins/purchaseReceipts`, `progression`, `persistenceStatus` | `UpgradeTests`, `GameplayCommandTests`, `UpgradePresentationPlayTests` |
+| `cosmetic.equip` | ownership-checked equip/unequip; `slot` must name the authored cosmetic slot | `savedProfile.ownedCosmetics/equippedCosmetics` | `UpgradeTests`, `GameplayCommandTests` (`CosmeticEquipRequiresItsAuthoredSlot`) |
+| `results.retrySave` | replays the retained result+context through the exactly-once reward seam | `progression.rewardUnresolved*`, `persistenceStatus`, `savedProfile.appliedResults` | `GameplayCommandTests` (`ResultsRetrySaveReplaysTheRetainedContext`) |
+| `results.retry` / `results.continue` | one-action replay under a fresh race identity / retire the finished session to its mode's setup screen | `soloRace`, `screen`, `drivingEvents` | `GameplayCommandTests` (`ResultsCommandsGateOnAFinishedRace`, `ResultsContinueReturnsToCampaignMap`) |
 
 ## Streamed state (every record carries)
 
@@ -55,8 +66,14 @@ lists; null when no race-presentation catalog is bound),
 `networkRace` (host-confirmed race state; null outside a LAN race),
 `prediction` (client-side predicted motor/ack/correction facts; null on
 the host and outside a LAN race) and `remotePresentation` (per-remote
-interpolation diagnostics). Reconnect credentials and transport
-identities never appear in observable state.
+interpolation diagnostics), plus the schema-6 loop slices `soloRace`
+(the local session — `race` for campaign/quickRace through the shared
+four-racer coordinator, `trial` for the lone time trial, the finalized
+immutable `result`, and `tuningSource` naming the human seat's tune
+provenance) and `progression` (the resolved campaign access rows,
+active bounty tray and the `rewardUnresolved` save gate — present on
+every boundary, menus and failed saves included). Reconnect credentials
+and transport identities never appear in observable state.
 Boundaries may also arrive as `delta` records
 (`base` = previous boundary sequence, recursive `changed` merge, dot-path
 `removed` list) — an independent reconstructor rebuilds the full state at
