@@ -792,6 +792,101 @@ namespace FamilyRacing.Tests
                 "a lane sharing a mandatory gate plane is not a shortcut");
         }
 
+        // The old point-in-circle check tested only the lane's centre
+        // against the gate radius, so a lane whose body reached into
+        // the crossing region while its centre cleared passed
+        // unchecked. Detectors are directed segments (centre ± tangent
+        // × halfWidth, per CheckpointProgress.TryCross) — a segment
+        // meeting the gate's segment fails even when the centres are
+        // farther apart than either half-width.
+        [Test]
+        public void ShortcutBodyOverlappingGateFails()
+        {
+            var fixture = CompleteFixture();
+            var course = fixture.driving.Courses["snowpine-circuit"];
+            var gate = course.checkpoints[1];
+            var zone = course.shortcutZones[0];
+            // Collinear with the gate: centre 3 m past the gate's own
+            // half-width, but the zone's extent reaches back into the
+            // crossing region.
+            zone.x = gate.x + gate.halfWidth + 3f;
+            zone.z = gate.z;
+            zone.dirX = gate.dirX;
+            zone.dirZ = gate.dirZ;
+            var reasons = FullContentValidation.Validate(fixture.catalog,
+                fixture.driving);
+            AssertHasReason(reasons, "shortcut",
+                "a lane body overlapping the gate plane is not legal");
+            AssertHasReason(reasons, gate.id,
+                "the reason must name the overlapped mandatory gate");
+        }
+
+        // A legitimate lane rejoining near a gate: parallel to the gate
+        // plane and 3 m past it. The centres sit inside the old radius
+        // test, but the segments never meet — the hardened check must
+        // not flag it.
+        [Test]
+        public void ShortcutParallelBeyondGatePlanePasses()
+        {
+            var fixture = CompleteFixture();
+            var course = fixture.driving.Courses["harbor-hop"];
+            var gate = course.checkpoints[1];
+            var zone = course.shortcutZones[0];
+            zone.x = gate.x;
+            zone.z = gate.z + 3f;
+            zone.dirX = gate.dirX;
+            zone.dirZ = gate.dirZ;
+            var reasons = FullContentValidation.Validate(fixture.catalog,
+                fixture.driving);
+            Assert.That(Joined(reasons), Is.EqualTo(""),
+                "a lane 3 m past a gate plane overlaps nothing; got:\n"
+                + Joined(reasons));
+        }
+
+        // Two lanes sharing a ground-plane segment at the same height
+        // are one shortcut authored twice — the dedup compares segment
+        // extents (a 0.5 m offset of coincident lanes still flags), not
+        // only centre distance.
+        [Test]
+        public void SamePlaneShortcutLanesFail()
+        {
+            var fixture = CompleteFixture();
+            var course = fixture.driving.Courses["canyon-dash"];
+            var lower = course.shortcutZones[0];
+            var twin = course.shortcutZones[1];
+            twin.x = lower.x + 0.5f;
+            twin.z = lower.z;
+            twin.y = lower.y;
+            twin.dirX = lower.dirX;
+            twin.dirZ = lower.dirZ;
+            var reasons = FullContentValidation.Validate(fixture.catalog,
+                fixture.driving);
+            AssertHasReason(reasons, "same plane",
+                "coincident lanes at one height are one shortcut");
+        }
+
+        // Stacked lanes on elevated routes (Mesa Skyway / Aurora Pass)
+        // share ground-plane extent while legally separated in height —
+        // they are distinct shortcuts, not a duplicate plane.
+        [Test]
+        public void StackedShortcutLanesAtDifferentHeightsPass()
+        {
+            var fixture = CompleteFixture();
+            var course = fixture.driving.Courses["mesa-skyway"];
+            var lower = course.shortcutZones[0];
+            var upper = course.shortcutZones[1];
+            upper.x = lower.x;
+            upper.z = lower.z;
+            upper.dirX = lower.dirX;
+            upper.dirZ = lower.dirZ;
+            upper.y = lower.y + 8f;
+            var reasons = FullContentValidation.Validate(fixture.catalog,
+                fixture.driving);
+            Assert.That(Joined(reasons), Is.EqualTo(""),
+                "vertically separated stacked lanes are two legal "
+                + "shortcuts; got:\n" + Joined(reasons));
+        }
+
         [Test]
         public void ExtraVehicleFails()
         {

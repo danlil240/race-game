@@ -192,10 +192,33 @@ namespace FamilyRacing.EditorTools
             }
         }
 
-        // Two distinct legal optional shortcuts per course: a lane that
-        // shares a mandatory gate's crossing region is not a shortcut —
-        // crossing it IS the main route — and two lanes on the same
-        // plane are one shortcut authored twice.
+        // Two distinct legal optional shortcuts per course, checked
+        // against the same directed-segment model the runtime sweep
+        // uses (CheckpointProgress.TryCross): each detector is the
+        // segment centre +/- tangent * halfWidth on the ground plane,
+        // the tangent being the authored direction rotated 90 degrees.
+        // A lane whose segment meets a mandatory gate's segment shares
+        // the gate's crossing region — crossing it IS the main route —
+        // and two lanes sharing a segment at the same height are one
+        // shortcut authored twice.
+        //
+        // Domains are chosen to match runtime semantics: the gate sweep
+        // ignores y (TryCross projects onto the course plane), so a lane
+        // threaded under an elevated gate still counts as overlapping —
+        // height cannot clear a zone/gate overlap. The lane-vs-lane
+        // dedup DOES use height, because stacked lanes on elevated
+        // routes (Mesa Skyway/Aurora Pass) are legitimately distinct
+        // shortcuts sharing ground-plane extent.
+        //
+        // Not enforceable here: "rejoins before the next required gate"
+        // — ShortcutZone carries no ordering or rejoin geometry (no
+        // gate indices, no entry/exit points), so that legality half
+        // stays an authoring contract proven by traversal evidence,
+        // never by this validator.
+        private const float GateOverlapMeters = 0.05f;
+        private const float SamePlaneDistanceMeters = 1f;
+        private const float SamePlaneHeightMeters = 1f;
+
         private static void CheckShortcuts(CourseDefinition course,
             List<string> reasons)
         {
@@ -211,13 +234,22 @@ namespace FamilyRacing.EditorTools
             {
                 var zone = zones[i];
                 if (zone == null) continue;
+                float ztx, ztz;
+                // A zero direction bounds no segment — Validate() names
+                // that defect as "shortcut.direction" itself.
+                if (!DetectorTangent(zone.dirX, zone.dirZ,
+                        out ztx, out ztz))
+                    continue;
                 foreach (var gate in gates)
                 {
                     if (gate == null) continue;
-                    var dx = zone.x - gate.x;
-                    var dz = zone.z - gate.z;
-                    if (dx * dx + dz * dz
-                        < gate.halfWidth * gate.halfWidth)
+                    float gtx, gtz;
+                    if (!DetectorTangent(gate.dirX, gate.dirZ,
+                            out gtx, out gtz))
+                        continue;
+                    if (SegmentDistanceXz(zone.x, zone.z, ztx, ztz,
+                            zone.halfWidth, gate.x, gate.z, gtx, gtz,
+                            gate.halfWidth) < GateOverlapMeters)
                     {
                         reasons.Add("course '" + course.id + "': shortcut '"
                             + zone.id + "' overlaps mandatory gate '"
@@ -229,14 +261,96 @@ namespace FamilyRacing.EditorTools
                 {
                     var other = zones[j];
                     if (other == null) continue;
-                    var dx = zone.x - other.x;
-                    var dz = zone.z - other.z;
-                    if (dx * dx + dz * dz < 1f)
+                    if (Math.Abs(zone.y - other.y) >= SamePlaneHeightMeters)
+                        continue; // different elevation: distinct lanes
+                    float otx, otz;
+                    if (!DetectorTangent(other.dirX, other.dirZ,
+                            out otx, out otz))
+                        continue;
+                    if (SegmentDistanceXz(zone.x, zone.z, ztx, ztz,
+                            zone.halfWidth, other.x, other.z, otx, otz,
+                            other.halfWidth) < SamePlaneDistanceMeters)
                         reasons.Add("course '" + course.id + "': shortcut '"
-                            + zone.id + "' occupies the same plane as '"
-                            + other.id + "'");
+                            + zone.id + "' occupies the same plane at "
+                            + "the same height as '" + other.id + "'");
                 }
             }
+        }
+
+        // Unit tangent of a detector's lateral extent: a crossing plane
+        // runs through the centre perpendicular to the authored
+        // direction, so the segment's half-extents lie along (-nz, nx).
+        private static bool DetectorTangent(float dirX, float dirZ,
+            out float tx, out float tz)
+        {
+            tx = 0f; tz = 0f;
+            var length = Math.Sqrt(dirX * dirX + dirZ * dirZ);
+            // NaN fails the comparison too, so this covers zero/NaN.
+            if (!(length >= 0.001)) return false;
+            tx = (float)(-dirZ / length);
+            tz = (float)(dirX / length);
+            return true;
+        }
+
+        // Shortest distance between two detector segments on the ground
+        // plane — centre +/- tangent * halfWidth, the full crossing
+        // region the sweep credits, never just the centre point.
+        private static float SegmentDistanceXz(
+            float ax, float az, float atx, float atz, float aHalf,
+            float bx, float bz, float btx, float btz, float bHalf)
+        {
+            var a1x = ax - atx * aHalf; var a1z = az - atz * aHalf;
+            var a2x = ax + atx * aHalf; var a2z = az + atz * aHalf;
+            var b1x = bx - btx * bHalf; var b1z = bz - btz * bHalf;
+            var b2x = bx + btx * bHalf; var b2z = bz + btz * bHalf;
+            if (ProperlyCrossXz(a1x, a1z, a2x, a2z,
+                    b1x, b1z, b2x, b2z))
+                return 0f;
+            var distance = PointSegmentDistanceXz(a1x, a1z,
+                b1x, b1z, b2x, b2z);
+            distance = Math.Min(distance, PointSegmentDistanceXz(
+                a2x, a2z, b1x, b1z, b2x, b2z));
+            distance = Math.Min(distance, PointSegmentDistanceXz(
+                b1x, b1z, a1x, a1z, a2x, a2z));
+            distance = Math.Min(distance, PointSegmentDistanceXz(
+                b2x, b2z, a1x, a1z, a2x, a2z));
+            return (float)distance;
+        }
+
+        // Strict interior crossing of two ground-plane segments.
+        // Endpoint distances alone miss an X where no endpoint sits
+        // near the other segment; collinear overlaps and endpoint
+        // touches are caught by the point distances instead.
+        private static bool ProperlyCrossXz(
+            float a1x, float a1z, float a2x, float a2z,
+            float b1x, float b1z, float b2x, float b2z)
+        {
+            var d1 = CrossXz(b1x, b1z, b2x, b2z, a1x, a1z);
+            var d2 = CrossXz(b1x, b1z, b2x, b2z, a2x, a2z);
+            var d3 = CrossXz(a1x, a1z, a2x, a2z, b1x, b1z);
+            var d4 = CrossXz(a1x, a1z, a2x, a2z, b2x, b2z);
+            return ((d1 > 0f && d2 < 0f) || (d1 < 0f && d2 > 0f))
+                && ((d3 > 0f && d4 < 0f) || (d3 < 0f && d4 > 0f));
+        }
+
+        // Signed cross of (p-o) x (q-o) projected on the ground plane.
+        private static float CrossXz(float ox, float oz,
+            float px, float pz, float qx, float qz)
+        {
+            return (px - ox) * (qz - oz) - (pz - oz) * (qx - ox);
+        }
+
+        private static float PointSegmentDistanceXz(float px, float pz,
+            float ax, float az, float bx, float bz)
+        {
+            var abx = bx - ax; var abz = bz - az;
+            var lengthSq = abx * abx + abz * abz;
+            var t = lengthSq < 1e-9f ? 0f
+                : ((px - ax) * abx + (pz - az) * abz) / lengthSq;
+            if (t < 0f) t = 0f; else if (t > 1f) t = 1f;
+            var dx = px - (ax + abx * t);
+            var dz = pz - (az + abz * t);
+            return (float)Math.Sqrt(dx * dx + dz * dz);
         }
 
         private static void CheckEvents(DrivingContentCatalog driving,

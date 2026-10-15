@@ -41,8 +41,13 @@ never by editing this file alone.
 
 Each course requires: 4 separated spawn slots, validated recovery
 poses, gadget pickup sites, a landmark jump, and **two distinct
-legal optional shortcuts** (rejoin before the next required gate,
-never overlapping a mandatory gate plane).
+legal optional shortcuts**. The validator enforces the geometric
+half of legality — no lane's detector segment (centre ± tangent ×
+halfWidth) overlapping a mandatory gate's crossing region, no two
+lanes sharing a plane at the same height. "Rejoins before the next
+required gate" is not expressed in `ShortcutZone` (no ordering or
+rejoin geometry exists), so it stays an authoring contract proven by
+the traversal evidence rows — never by the structural gate.
 
 | worldId | courseId | spawn slots | recovery | pickups | shortcut lanes | status | evidence |
 | --- | --- | --- | --- | --- | --- | --- | --- |

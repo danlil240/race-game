@@ -39,8 +39,16 @@ IReadOnlyList<string>`) enforces the fixed production contract:
   codepoints in `nameHe`);
 - per course: exactly 4 spawn slots, at least one authored recovery
   fallback pose, at least one gadget pickup column, and at least two
-  legal optional shortcut lanes (no lane inside a mandatory gate's
-  crossing region, no two lanes on the same plane);
+  legal optional shortcut lanes. The validator enforces the geometric
+  half of legality: each lane is a directed detector segment (centre ±
+  tangent × halfWidth, the `CheckpointProgress` crossing model) that
+  must never touch a mandatory gate's segment — the gate sweep is
+  XZ-only, so height cannot clear an overlap — and no two lanes may
+  share a plane at the same height (stacked lanes on elevated routes
+  stay distinct). The "rejoins before the next required gate" half is
+  not machine-checkable — `ShortcutZone` carries no ordering or rejoin
+  geometry — so it remains an authoring contract proven by the
+  campaign/traversal evidence rows, not by this gate;
 - the full required voice cue set (14 cues) resolved in both locales —
   missing final clips fail final-content validation.
 

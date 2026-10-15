@@ -73,10 +73,13 @@ namespace FamilyRacing.Core.Racing
     // One authored optional shortcut lane (M6 Task 4): a directional
     // traversal detector that credits the "shortcut.accepted" metric by
     // id without being a mandatory progress gate. Legality is an
-    // authoring contract enforced by FullContentValidation: the lane
-    // rejoins the main route before the next required gate — and its
-    // plane must never sit inside a mandatory gate's crossing region —
-    // so crossing it can never skip a checkpoint.
+    // authoring contract so crossing can never skip a checkpoint: the
+    // lane rejoins the main route before the next required gate and its
+    // plane never sits inside a mandatory gate's crossing region.
+    // FullContentValidation enforces the geometric half — segment
+    // overlap against every gate plus same-plane-at-same-height dedup;
+    // the rejoin ordering is not expressed in this record and is proven
+    // by traversal evidence, not by the structural validator.
     [Serializable]
     public sealed class ShortcutZone
     {

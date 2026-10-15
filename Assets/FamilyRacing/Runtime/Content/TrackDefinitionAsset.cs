@@ -75,9 +75,12 @@ namespace FamilyRacing
         // One authored optional shortcut lane (M6 Task 4): a named
         // directional traversal region distinct from the mandatory
         // gates — the shortcut metrics credit its id when a racer
-        // sweeps it forward. Legality (rejoin before the next required
-        // gate, never overlapping a mandatory gate plane) is the
-        // production validator's job; this asset carries the data.
+        // sweeps it forward. Legality is an authoring contract: the
+        // production validator enforces the geometric half (no detector
+        // segment overlapping a mandatory gate's, no two lanes sharing
+        // a plane at the same height); "rejoins before the next
+        // required gate" is not expressed in this data and is proven by
+        // traversal evidence instead.
         [Serializable]
         public sealed class ShortcutLane
         {

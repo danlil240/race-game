@@ -63,7 +63,7 @@ they carry are catalog/hardware-gated, unchanged by HEAD.
 | Packaged player binds no gameplay catalog | Confirmed — `Assets/FamilyRacing/Generated/Foundation.unity`: `gameplayCatalog: {fileID: 0}` (line 426); `track`/`coursePrefab` still single-bind the shared graybox course (lines 417, 428) |
 | `CourseLoader`, `GameplayLoopSetup`, `SunnyIslandCampaignAuthoring` do not exist | Confirmed absent — no `Runtime/Driving/CourseLoader.cs`, `Editor/GameplayLoopSetup.cs`, or `Editor/SunnyIslandCampaignAuthoring.cs`; no `CourseLoader` references in source |
 | GameplayLoop build flavors do not exist | Confirmed — `Tools\Verify.ps1` `ValidateSet` (line 40) has no GameplayLoop modes; `Build-Windows.ps1` accepts only `Development|Ordinary|Physics`; `Build-AndroidOffline.ps1` has no `-Presentation GameplayLoop` |
-| Contract identities | LAN wire protocol **3**, observation schema **6**, gameplay rules **gameplay-3**, profile schema **3** (`NetworkSettings.cs` lines 17/30/40) — matching the M6 plan's baseline, unchanged since M5 |
+| Contract identities | LAN wire protocol **3**, observation schema **6**, gameplay rules **gameplay-3** (`NetworkSettings.cs` lines 17/30/40), profile schema **3** (`Core/Profiles/ProfileValidation.cs` line 20) — matching the M6 plan's baseline, unchanged since M5 |
 | No Android device | Confirmed — bundled platform-tools `adb devices` lists zero devices (re-run 2026-10-15) |
 | No real lightmap bake | Confirmed — `VisualBenchmark.unity` `m_LightingDataAsset` resolves to the built-in default; no `LightingDataAsset`/`.exr` in Assets |
 | Voice-clip credential | `AZURE_SPEECH_KEY` unset — the EditMode `[Ignore]` is still environmental |
