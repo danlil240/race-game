@@ -126,6 +126,19 @@ python Tools\DrivingScenario.py <dir>\connection.json --evidence <new-evidence-d
 python Tools\FinishDeliveryScenario.py <player.exe> --evidence <new-dir>
 # Real profile store + graceful exit (WM_CLOSE) + restart:
 python Tools\NormalProfileScenario.py <player.exe> --evidence <new-dir>
+# Complete external gameplay-loop qualification (schema 6): fresh
+# profile -> tutorial -> campaign/quick-race/time-trial progression,
+# real failed-save + retrySave, process-restart persistence, and a
+# hostile-delivery LAN segment (kill/AI-takeover/rejoin, dedup,
+# undeliverable departure, host loss). Every emitted trace is finished
+# and re-verified by independent reconstruction; runs are honestly
+# "partial" when the build binds no gameplay catalog (progression
+# commands reject contentUnavailable and the rows stay notVerified).
+# Attach to independently launched players, or self-launch:
+python Tools\GameplayLoopScenario.py --connections <run>\connection.json [more descriptors] --scope smoke|campaign|lan --evidence <new-dir>
+python Tools\GameplayLoopScenario.py --launch <player.exe> [--players 2-4] --scope smoke|campaign|lan --evidence <new-dir>
+# Test-only fixture mode (--fixture) labels every trace and is never
+# real-player evidence.
 # Multi-instance LAN lifecycle over the real UDP transport (schema 5).
 # The mandated interface attaches to 2-4 independently launched players —
 # the first connection is driven as the host; Android descriptors are
