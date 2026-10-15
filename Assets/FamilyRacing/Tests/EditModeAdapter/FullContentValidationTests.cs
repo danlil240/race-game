@@ -616,6 +616,32 @@ namespace FamilyRacing.Tests
         }
 
         [Test]
+        public void StrayUntypedEventFails()
+        {
+            var fixture = CompleteFixture();
+            // A bonus race nobody claims: untyped, unreferenced by any
+            // campaign. Generic conversion never requires unclaimed
+            // events to be typed, so only the production gate can catch
+            // this inventory drift — the shipped set is exactly 78.
+            fixture.events.Add(new EventDefinition
+            {
+                id = "harbor-hop-car-bonus",
+                courseId = "harbor-hop",
+                laps = 1,
+                countdownTicks = 90,
+                vehicleIds = ClassVehicleIds("car", 4),
+                recovery = new RecoverySettings()
+            });
+            fixture.Bake(this);
+            var reasons = FullContentValidation.Validate(fixture.catalog,
+                fixture.driving);
+            AssertHasReason(reasons, "harbor-hop-car-bonus",
+                "a stray untyped event must be named, not skipped");
+            AssertHasReason(reasons, "found 79",
+                "the authored inventory is exactly 78 event definitions");
+        }
+
+        [Test]
         public void CleanEventMustUseShortSuffix()
         {
             var fixture = CompleteFixture();

@@ -255,6 +255,16 @@ namespace FamilyRacing.EditorTools
             foreach (var suffix in TypeSuffixes)
                 expectedTypes.Add(EventTypeOfSuffix(suffix));
 
+            // The authored inventory is exactly 72 regular + 6 finale
+            // events — a stray row no campaign claims is drift the
+            // gate must name, never silently ignore.
+            if (driving.Events.Count != RegularEventCount + FinaleCount)
+                reasons.Add("events: expected exactly "
+                    + (RegularEventCount + FinaleCount)
+                    + " authored event definitions (" + RegularEventCount
+                    + " regular + " + FinaleCount + " finales), found "
+                    + driving.Events.Count);
+
             // Bucket every typed non-finale event by its
             // (course, class, type) cell.
             var cells = new Dictionary<string, List<EventDefinition>>(
@@ -266,7 +276,15 @@ namespace FamilyRacing.EditorTools
                 var isFinale = evt.isFinale
                     || evt.eventType == GameplayEventType.Finale;
                 if (isFinale) { finaleCount++; continue; }
-                if (string.IsNullOrEmpty(evt.eventType)) continue;
+                // Generic conversion only validates campaign-claimed
+                // events, so an untyped stray would slip the matrix
+                // check below — name it instead of skipping it.
+                if (string.IsNullOrEmpty(evt.eventType))
+                {
+                    reasons.Add("event '" + evt.id + "': untyped events "
+                        + "are not production content");
+                    continue;
+                }
                 if (!expectedCourses.Contains(evt.courseId)
                     || !expectedClasses.Contains(evt.vehicleClass)
                     || !expectedTypes.Contains(evt.eventType))
