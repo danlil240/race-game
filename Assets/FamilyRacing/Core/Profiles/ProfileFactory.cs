@@ -39,7 +39,8 @@ namespace FamilyRacing.Core.Profiles
                 bountyRotationCursor = 0,
                 timeTrialRecords = new List<TimeTrialRecord>(),
                 purchaseReceipts = new List<PurchaseReceipt>(),
-                pendingRaceContexts = new List<RaceRewardContext>()
+                pendingRaceContexts = new List<RaceRewardContext>(),
+                localRaceOrdinal = 0
             };
         }
     }

@@ -131,7 +131,7 @@ namespace FamilyRacing.Core.Racing
                     out session, out error);
             return CreateRace(requestCopy, mode, catalog, content, sessionId,
                 raceId, participantId, difficulty, rulesFingerprint,
-                out session, out error);
+                profile, out session, out error);
         }
 
         // Campaign and Quick Race: one human + three same-class AI through
@@ -143,6 +143,7 @@ namespace FamilyRacing.Core.Racing
             GameplayCatalog catalog, DrivingContentCatalog content,
             string sessionId, string raceId, string participantId,
             AiDifficultyDefinition difficulty, string rulesFingerprint,
+            ProfileSave profile,
             out SoloRaceSession session, out string error)
         {
             session = null;
@@ -159,6 +160,17 @@ namespace FamilyRacing.Core.Racing
                 || !content.Vehicles.TryGetValue(request.vehicleId, out tuning)
                 || tuning == null)
             { error = "unknownVehicle"; return false; }
+            // The spec's "owned vehicles" rule: a progression race seats
+            // the local human only in an unlock the profile holds — a
+            // missing profile cannot prove ownership and an unowned id
+            // refuses honestly. Time Trial normalizes to the starter
+            // vehicle and LAN validates its own admission, so neither
+            // reaches this check.
+            if (profile == null)
+            { error = "requiresSelectedProfile"; return false; }
+            if (profile.unlockedVehicles == null
+                || !profile.unlockedVehicles.Contains(request.vehicleId))
+            { error = "vehicleLocked"; return false; }
             if (!evt.AllowsVehicle(request.vehicleId))
             { error = "vehicleNotForEvent"; return false; }
             var classId = !string.IsNullOrEmpty(evt.vehicleClass)

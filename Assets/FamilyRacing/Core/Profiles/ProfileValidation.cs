@@ -64,6 +64,7 @@ namespace FamilyRacing.Core.Profiles
             if (!IsValidVolume(profile.musicVolume)
                 || !IsValidVolume(profile.effectsVolume)
                 || !IsValidVolume(profile.voiceVolume)) return ProfileCheck.Invalid;
+            if (profile.localRaceOrdinal < 0) return ProfileCheck.Invalid;
             if (profile.unlockedVehicles == null) return ProfileCheck.Invalid;
             foreach (var vehicle in profile.unlockedVehicles)
                 if (string.IsNullOrEmpty(vehicle) || !VehicleId.IsMatch(vehicle)) return ProfileCheck.Invalid;

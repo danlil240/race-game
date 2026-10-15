@@ -39,5 +39,11 @@ namespace FamilyRacing.Core.Profiles
         public List<TimeTrialRecord> timeTrialRecords;
         public List<PurchaseReceipt> purchaseReceipts;
         public List<RaceRewardContext> pendingRaceContexts;
+        // Durable floor for locally minted solo-race identities: every
+        // bound reward context advances it inside the same atomic save,
+        // so a crashed run's pending row can never be silently adopted
+        // by a fresh process re-minting the same identity. Older files
+        // deserialize it as 0 — additive within schema 3.
+        public int localRaceOrdinal;
     }
 }

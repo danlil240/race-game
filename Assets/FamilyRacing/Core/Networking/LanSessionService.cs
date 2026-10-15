@@ -1793,9 +1793,11 @@ namespace FamilyRacing.Core.Networking
             // Credentialed reclaim into a live race presents the same
             // allocated identity: binding is idempotent so a prepared
             // participant is a no-op and a device that never prepared
-            // binds now, before any further racing boundaries.
-            var acceptedRace = Field(fields, "rid");
-            if (acceptedRace.Length > 0) currentRaceId = acceptedRace;
+            // binds now, before any further racing boundaries. The
+            // accept packet is authoritative — an empty field clears a
+            // stale identity rather than leaving it bound.
+            var acceptedRace = Field(fields, "rcid");
+            currentRaceId = acceptedRace;
             if (acceptedRace.Length > 0
                 && (phase == PhaseCountdown || phase == PhaseRacing))
             {
@@ -1812,6 +1814,7 @@ namespace FamilyRacing.Core.Networking
                         + NetworkSettings.SessionCloseFlushSeconds;
                     role = RoleNone;
                     phase = PhaseIdle;
+                    currentRaceId = "";
                     return;
                 }
             }
@@ -1840,8 +1843,12 @@ namespace FamilyRacing.Core.Networking
             // phase: the local reward context binds against it BEFORE
             // the race clock may start — a preparation failure keeps
             // this participant from starting (Task 4).
-            var offeredRace = Field(fields, "rid");
+            var offeredRace = Field(fields, "rcid");
             var offeredPhase = NormalizePhase(Field(fields, "ph"));
+            // The broadcast identity is authoritative in both
+            // directions: an empty field clears the concluded race's id
+            // so lobby/rematch snapshots can never carry a stale one.
+            currentRaceId = offeredRace;
             if (offeredRace.Length > 0
                 && (offeredPhase == PhaseCountdown || offeredPhase == PhaseRacing)
                 && !PrepareForRace(offeredRace))
@@ -1856,9 +1863,9 @@ namespace FamilyRacing.Core.Networking
                     + NetworkSettings.SessionCloseFlushSeconds;
                 role = RoleNone;
                 phase = PhaseIdle;
+                currentRaceId = "";
                 return;
             }
-            if (offeredRace.Length > 0) currentRaceId = offeredRace;
             int occupied;
             if (NetworkProtocol.IntField(fields, "occ", out occupied))
                 descriptor.occupancy = occupied;
@@ -1972,7 +1979,9 @@ namespace FamilyRacing.Core.Networking
                 // A reclaim into countdown/racing must learn the
                 // allocated race identity to bind its reward context
                 // (Task 4) — empty while the lobby has not started.
-                "rid", currentRaceId,
+                // "rcid" is deliberately distinct from the result-offer
+                // "rid" so no decode path can ever confuse the two.
+                "rcid", currentRaceId,
                 "cid", commandId ?? ""));
         }
 
@@ -2008,8 +2017,10 @@ namespace FamilyRacing.Core.Networking
                 "jn", descriptor.joinable ? "1" : "0",
                 // The allocated race identity rides the broadcast so each
                 // local device binds its reward context against the same
-                // id the coordinator will run (Task 4).
-                "rid", currentRaceId
+                // id the coordinator will run (Task 4). "rcid" is
+                // deliberately distinct from the result-offer "rid" so no
+                // decode path can ever confuse the two.
+                "rcid", currentRaceId
             };
             for (var i = 0; i < slots.Length; i++)
             {

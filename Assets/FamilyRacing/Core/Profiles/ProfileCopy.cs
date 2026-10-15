@@ -64,6 +64,7 @@ namespace FamilyRacing.Core.Profiles
                 row => row.Copy());
             target.pendingRaceContexts = CopyRows(source.pendingRaceContexts,
                 row => row.Copy());
+            target.localRaceOrdinal = source.localRaceOrdinal;
         }
 
         // The user-facing settings slice — the only fields a settings

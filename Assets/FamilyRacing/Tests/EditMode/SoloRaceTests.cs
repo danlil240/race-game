@@ -384,9 +384,14 @@ namespace FamilyRacing.Tests
 
         private FoundationService Service(GameplayCatalog catalog)
         {
-            var service = new FoundationService(
-                new ProfileStore(directory, new TestJsonSerializer()),
-                "en", RunId);
+            return Service(catalog,
+                new ProfileStore(directory, new TestJsonSerializer()));
+        }
+
+        private FoundationService Service(GameplayCatalog catalog,
+            ProfileStore store)
+        {
+            var service = new FoundationService(store, "en", RunId);
             service.SetDrivingContent(catalog.Driving);
             service.SetGameplayCatalog(catalog);
             service.SetDrivingSimulationFactory(
@@ -902,6 +907,176 @@ namespace FamilyRacing.Tests
             Assert.That(noContent.status,
                 Is.EqualTo(CommandResult.Rejected));
             Assert.That(noContent.code, Is.EqualTo("contentUnavailable"));
+        }
+
+        [Test]
+        public void SoloStartRejectsVehiclesTheProfileDoesNotOwn()
+        {
+            // The spec's "owned vehicles" rule for Campaign and Quick
+            // Race: a progression race seats the local human only in an
+            // unlock the profile holds. car-02 is catalog-legal for the
+            // event but absent from the profile's unlocks — both the
+            // raw TryCreate seam and the solo.start command refuse.
+            var profile = Profile();
+            Assert.That(profile.unlockedVehicles,
+                Does.Not.Contain("car-02"), "fixture must start unowned");
+            var service = Service(Catalog());
+            CreateProfile(service);
+            foreach (var mode in new[] { "campaign", "quickRace" })
+            {
+                var request = Request(mode, "harbor-hop-car-circuit");
+                request.vehicleId = "car-02";
+                var ok = SoloRaceSession.TryCreate(request, profile,
+                    Catalog(), out var session, out var error);
+                Assert.That(ok, Is.False, mode + " TryCreate must refuse");
+                Assert.That(session, Is.Null);
+                Assert.That(error, Is.EqualTo("vehicleLocked"), mode);
+
+                var started = service.Execute(Cmd("solo.start",
+                    P("mode", mode, "eventId", "harbor-hop-car-circuit",
+                      "vehicleId", "car-02")));
+                Assert.That(started.status,
+                    Is.EqualTo(CommandResult.Rejected), mode + " solo.start");
+                Assert.That(started.code, Is.EqualTo("vehicleLocked"));
+                var state = service.Snapshot();
+                Assert.That(state.soloRace, Is.Null,
+                    mode + " must publish no session");
+                Assert.That(state.savedProfile.pendingRaceContexts.Count,
+                    Is.EqualTo(0),
+                    mode + " must bind no context for a refused start");
+            }
+
+            // An owned vehicle still starts on the same profile — the
+            // check is honest, not a blanket refusal.
+            Assert.That(service.Execute(Cmd("solo.start",
+                    P("mode", "quickRace",
+                      "eventId", "harbor-hop-car-circuit",
+                      "vehicleId", "car-01"))).status,
+                Is.EqualTo(CommandResult.Applied));
+        }
+
+        [Test]
+        public void StalePendingContextFromPriorRunIsNeverAdopted()
+        {
+            var catalog = Catalog();
+            var store = new ProfileStore(directory,
+                new TestJsonSerializer());
+            // "Previous run": a progression race bound its context and
+            // the process was abandoned — the pending row is the crash
+            // residue the next process must supersede, never adopt.
+            var first = Service(catalog, store);
+            CreateProfile(first);
+            Assert.That(first.Execute(Cmd("solo.start",
+                    P("mode", "quickRace",
+                      "eventId", "harbor-hop-car-circuit",
+                      "vehicleId", "car-01"))).status,
+                Is.EqualTo(CommandResult.Applied));
+            var staleId = first.Snapshot().soloRace.raceId;
+            var loaded = store.Load(0);
+            Assert.That(loaded.Status,
+                Is.EqualTo(ProfileLoadStatus.Loaded));
+
+            // Legacy residue too: a literal "race-3" row the pre-salt
+            // build could have left behind beside the bound one.
+            var hacked = loaded.Profile;
+            hacked.pendingRaceContexts.Add(new RaceRewardContext
+            {
+                raceId = "race-3",
+                profileId = hacked.id,
+                mode = "quickRace",
+                rulesFingerprint = catalog.CompatibilityFingerprint
+            });
+            store.Save(hacked);
+
+            // A fresh process over the same store selects the profile
+            // and starts the same race: the minted identity must be
+            // distinct from BOTH leftovers so the stale rows are never
+            // silently adopted as this race's own binding.
+            var second = Service(catalog,
+                new ProfileStore(directory, new TestJsonSerializer()));
+            var selected = second.Execute(Cmd("profile.select",
+                P("slot", "0")));
+            Assert.That(selected.status,
+                Is.EqualTo(CommandResult.Applied),
+                "profile.select: " + selected.code);
+            Assert.That(second.Execute(Cmd("solo.start",
+                    P("mode", "quickRace",
+                      "eventId", "harbor-hop-car-circuit",
+                      "vehicleId", "car-01"))).status,
+                Is.EqualTo(CommandResult.Applied));
+            var snapshot = second.Snapshot();
+            var freshId = snapshot.soloRace.raceId;
+            Assert.That(freshId, Is.Not.EqualTo(staleId));
+            Assert.That(freshId, Is.Not.EqualTo("race-3"));
+            var contexts = snapshot.savedProfile.pendingRaceContexts;
+            Assert.That(contexts.Count, Is.EqualTo(3),
+                "stale rows stay pending; the new race binds its own");
+            var bound = 0;
+            foreach (var row in contexts)
+                if (row.raceId == freshId) bound++;
+            Assert.That(bound, Is.EqualTo(1),
+                "exactly one fresh context, never a reused row");
+        }
+
+        [Test]
+        public void RematchBroadcastClearsClientRaceIdentity()
+        {
+            // The session-state broadcast is authoritative in both
+            // directions: a rematch back to lobby carries an empty
+            // rcid, which must clear the client's bound identity rather
+            // than leave a stale one published.
+            var hostLink = new LanSessionTests.FakeLanLink();
+            var guestLink = new LanSessionTests.FakeLanLink();
+            var host = LanSessionTests.StandaloneHost(hostLink,
+                new LanSessionTests.FakeLanProbe());
+            var guest = LanSessionTests.StandaloneService(guestLink,
+                new LanSessionTests.FakeLanProbe(), "guest-p");
+            guest.SetRacePreparer(raceId => null);
+
+            var join = guest.Execute(Cmd("lan.join",
+                P("address", "192.168.7.7", "port", "47777")));
+            Assert.That(join.status, Is.EqualTo(CommandResult.Accepted));
+            host.OnLinkConnected(9);
+            guest.OnLinkConnected(1);
+            guestLink.DeliverTo(host, 9);
+            hostLink.DeliverTo(guest, 1);
+            Assert.That(guest.Snapshot().phase,
+                Is.EqualTo(LanSessionService.PhaseLobby),
+                "guest never reached the lobby");
+
+            Assert.That(host.Execute(Cmd("lan.configure",
+                    P("eventId", "lan-mixed", "classId", "car"))).status,
+                Is.EqualTo(CommandResult.Applied));
+            hostLink.DeliverTo(guest, 1);
+            // The guest's readiness lands on the host through the same
+            // wire message a production client sends.
+            host.OnLinkMessage(9, NetworkProtocol.Encode(
+                NetworkProtocol.MsgReadySet, "cid", "rdy-1", "rdy", "1"));
+            Assert.That(host.Execute(Cmd("lan.ready",
+                    P("ready", "true"))).status,
+                Is.EqualTo(CommandResult.Applied));
+            Assert.That(host.Execute(Cmd("lan.start", null)).status,
+                Is.EqualTo(CommandResult.Applied));
+            hostLink.DeliverTo(guest, 1);
+
+            var allocated = host.Snapshot().currentRaceId;
+            Assert.That(allocated, Is.Not.Null.And.Not.Empty);
+            Assert.That(guest.Snapshot().currentRaceId,
+                Is.EqualTo(allocated),
+                "the client must bind the host-allocated identity");
+
+            Assert.That(host.BeginRace(), Is.True);
+            hostLink.DeliverTo(guest, 1);
+            Assert.That(host.FinishRace(), Is.True);
+            hostLink.DeliverTo(guest, 1);
+            Assert.That(host.Execute(Cmd("lan.rematch", null)).status,
+                Is.EqualTo(CommandResult.Applied));
+            hostLink.DeliverTo(guest, 1);
+
+            Assert.That(guest.Snapshot().phase,
+                Is.EqualTo(LanSessionService.PhaseLobby));
+            Assert.That(guest.Snapshot().currentRaceId, Is.Null.Or.Empty,
+                "rematch must clear the client's bound race identity");
         }
     }
 }

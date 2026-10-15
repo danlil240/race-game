@@ -33,6 +33,11 @@ namespace FamilyRacing.Core.Foundation
         // the flag is per-session because the immutable result object
         // stays observable on every later snapshot.
         private bool soloResultApplied;
+        // The highest local-race ordinal this process has minted — seeded
+        // from the profile-persisted floor (ProfileSave.localRaceOrdinal)
+        // so a crashed run can never re-mint an identity a bound reward
+        // context already owns.
+        private int soloOrdinalHighWater;
 
         // The runtime injects the validated gameplay content once —
         // solo.start reports contentUnavailable until a non-legacy
@@ -142,10 +147,11 @@ namespace FamilyRacing.Core.Foundation
                 vehicleId = OptionalParam(command, "vehicleId"),
                 difficultyId = OptionalParam(command, "difficulty"),
                 participantId = savedProfile != null ? savedProfile.id : "",
-                // The run's shared race counter keeps local identities
-                // deterministic and unique across practice/solo sessions.
-                raceId = "race-" + (++raceCounter).ToString(
-                    CultureInfo.InvariantCulture),
+                // Profile-salted, monotonically minted: the durable
+                // ordinal floor keeps identities unique across process
+                // restarts, so a crashed run's pending context can never
+                // be silently adopted by a fresh "race-N".
+                raceId = MintSoloRaceId(),
                 commandId = command.CommandId
             };
             string error;
@@ -161,6 +167,44 @@ namespace FamilyRacing.Core.Foundation
             ClearInput();
             DrainSoloEvents();
             return Result(command, CommandResult.Applied, "");
+        }
+
+        // Mints a race identity that can never collide across process
+        // restarts: the profile-id prefix namespaces the id to its owner
+        // (also distinguishing it from the pre-salt "race-N" shape), the
+        // ordinal rises monotonically above the profile-persisted floor,
+        // and any ordinal already claimed by a pending context row is
+        // skipped — a leftover row is superseded, never silently
+        // adopted.
+        private string MintSoloRaceId()
+        {
+            var owner = savedProfile != null
+                && !string.IsNullOrEmpty(savedProfile.id)
+                && savedProfile.id.Length >= 8
+                ? savedProfile.id.Substring(0, 8) : "local";
+            var floor = savedProfile != null
+                ? savedProfile.localRaceOrdinal : 0;
+            if (soloOrdinalHighWater < floor)
+                soloOrdinalHighWater = floor;
+            string id;
+            do
+            {
+                id = "race-" + owner + "-" +
+                    (++soloOrdinalHighWater).ToString(
+                        CultureInfo.InvariantCulture);
+            }
+            while (HasPendingContext(id));
+            return id;
+        }
+
+        private bool HasPendingContext(string raceId)
+        {
+            if (savedProfile == null
+                || savedProfile.pendingRaceContexts == null)
+                return false;
+            foreach (var row in savedProfile.pendingRaceContexts)
+                if (row != null && row.raceId == raceId) return true;
+            return false;
         }
 
         // Binds the reward context for progression races. Returns true
@@ -193,8 +237,7 @@ namespace FamilyRacing.Core.Foundation
             var stored = soloRace.Request;
             if (stored == null)
                 return Result(command, CommandResult.Rejected, "unavailable");
-            stored.raceId = "race-" + (++raceCounter).ToString(
-                CultureInfo.InvariantCulture);
+            stored.raceId = MintSoloRaceId();
             stored.commandId = command.CommandId;
             string error;
             SoloRaceSession created;
@@ -338,6 +381,11 @@ namespace FamilyRacing.Core.Foundation
                 }
             var candidate = ProfileCopy.DeepCopy(savedProfile);
             candidate.pendingRaceContexts.Add(context);
+            // The minted-ordinal high-water lands in the same atomic save
+            // as the context row: a crashed process can never re-mint an
+            // identity a bound context already owns.
+            if (candidate.localRaceOrdinal < soloOrdinalHighWater)
+                candidate.localRaceOrdinal = soloOrdinalHighWater;
             try
             {
                 store.Save(candidate);
