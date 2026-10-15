@@ -1175,6 +1175,13 @@ namespace FamilyRacing.Networking
             // new race must not replay them.
             pendingActions.Clear();
             pendingActionOrder.Clear();
+            // The event dedup window is per-race bookkeeping: ids mint
+            // inside one race identity, and a stale-race batch is fenced
+            // by its ordinal before the dedup check, so retiring the
+            // window here can never re-admit an old race's redelivery —
+            // it only frees capacity and keeps adoption honest.
+            seenEventIds.Clear();
+            seenEventOrder.Clear();
             // Prediction/interpolation history is per-race: the new race
             // reseeds from its own snapshots.
             if (prediction != null)
@@ -1187,7 +1194,10 @@ namespace FamilyRacing.Networking
             ReleasePredictionSimulation();
         }
 
-        private void ApplyEventBatch(NetworkEventBatch batch)
+        // Internal for the adapter-level rematch/dedup tests: the batch
+        // application contract (session fencing, ordinal adoption,
+        // per-race dedup) is unit-testable without a live socket.
+        internal void ApplyEventBatch(NetworkEventBatch batch)
         {
             var snap = session.Snapshot();
             var descriptor = snap.descriptor;

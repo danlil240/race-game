@@ -372,8 +372,12 @@ namespace FamilyRacing.Tests
             Assert.AreEqual(45, victim.foamSlowTicksRemaining);
             Assert.AreEqual(45 + 60, victim.foamImmunityTicksRemaining);
             var mods = GadgetRules.ModifierFor(world3, "p1");
+            // Spec: "opponents slow to x0.70 drive acceleration/speed
+            // cap" — BOTH channels carry the authored factor.
             Assert.AreEqual(0.70f, mods.speedCapMultiplier, 1e-6f,
                 "foam slows through the cap multiplier");
+            Assert.AreEqual(0.70f, mods.accelerationMultiplier, 1e-6f,
+                "foam slows the acceleration channel too");
             var crossing = Step(world2, catalog,
                 Racer("p1", 1, 50f, 50f, segments: new[]
                     { Seg(48f, 50f, 52f, 50f) }));
@@ -397,6 +401,77 @@ namespace FamilyRacing.Tests
             Assert.AreEqual(0,
                 Row(world5, "p1").foamSlowTicksRemaining,
                 "a patch that already hit stays inert for that racer");
+        }
+
+        [Test]
+        public void FoamSlowComposesWithActiveTurbo()
+        {
+            var catalog = Catalog();
+            var world = World(catalog, null);
+            // Turbo'd victim drives over a rival's patch: the authored
+            // 0.70 scales BOTH channels of the turbo envelope — the
+            // spec's "no stacking" bars repeat foam hits (immunity),
+            // not foam+turbo co-application. Pinned: accel 1.25x0.70,
+            // cap 1.10x0.70.
+            Grant(world, "p1", "turbo-01");
+            var turbo = Step(world, catalog,
+                Racer("p1", 1, 30f, 30f, gadget: true)).state;
+            Assert.Greater(Row(turbo, "p1").turboTicksRemaining, 0);
+            Grant(turbo, "p0", "foam-01");
+            var dropped = Step(turbo, catalog,
+                Racer("p0", 0, 50f, 50f, gadget: true)).state;
+            var hit = Step(dropped, catalog,
+                Racer("p1", 1, 50f, 50f, segments: new[]
+                    { Seg(48f, 50f, 52f, 50f) })).state;
+            var row = Row(hit, "p1");
+            Assert.Greater(row.turboTicksRemaining, 0,
+                "the turbo envelope is still live under the slow");
+            Assert.AreEqual(45, row.foamSlowTicksRemaining);
+            var mods = GadgetRules.ModifierFor(hit, "p1");
+            Assert.AreEqual(1.25f * 0.70f, mods.accelerationMultiplier,
+                1e-6f, "foam scales the turbo acceleration envelope");
+            Assert.AreEqual(1.10f * 0.70f, mods.speedCapMultiplier,
+                1e-6f, "foam scales the turbo cap envelope");
+        }
+
+        [Test]
+        public void GadgetEventIdsCarryTheRaceScope()
+        {
+            var catalog = Catalog();
+            var worldA = World(catalog, new[] { Site("s1", 0f, 10f) });
+            worldA.raceId = "sess-r1";
+            var worldB = worldA.Copy();
+            worldB.raceId = "sess-r2";
+            // Identical boundary on two race-scoped worlds: same events,
+            // disjoint identities — a rematch's minted ids can never
+            // collide with the concluded race's dedup window.
+            var collect = new[]
+            {
+                Racer("p0", 0, 0f, 10f, segments: new[]
+                    { Seg(0f, 8f, 0f, 12f) })
+            };
+            var stepA = Step(worldA, catalog, collect);
+            var stepB = Step(worldB, catalog, collect);
+            Assert.AreEqual(stepA.events.Count, stepB.events.Count);
+            Assert.Greater(stepA.events.Count, 0,
+                "the shared collection boundary emits at least one event");
+            var seenA = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var ev in stepA.events) seenA.Add(ev.id);
+            foreach (var ev in stepB.events)
+            {
+                Assert.IsFalse(seenA.Contains(ev.id),
+                    "race-2 event identity must differ from race-1: "
+                    + ev.id);
+                StringAssert.Contains("sess-r2", ev.id,
+                    "the race identity prefixes the event id");
+            }
+            // Determinism preserved: the SAME world boundary replayed
+            // mints the SAME ids (snapshot replay cannot fabricate new
+            // identities).
+            var replay = Step(worldA, catalog, collect);
+            for (var i = 0; i < replay.events.Count; i++)
+                Assert.AreEqual(stepA.events[i].id, replay.events[i].id,
+                    "replayed boundaries mint identical ids");
         }
 
         [Test]
@@ -899,6 +974,61 @@ namespace FamilyRacing.Tests
             }
             Assert.IsTrue(aiUse,
                 "the AI seat eventually earns its own gadget credit");
+        }
+
+        [Test]
+        public void HeldLatchCannotDeadlockAiTakeoverGadget()
+        {
+            // Regression: a human who disconnects while still holding
+            // the gadget button leaves the rules' edge latch set. The
+            // AI seat inheriting the held item must emit a release
+            // boundary first — a pulse emitted while latched is
+            // swallowed, and a swallowed pulse that marks the grant
+            // spent would deadlock the slot forever.
+            var content = GadgetContent(GadgetCourse());
+            var race = GadgetRace(content, Catalog());
+            var world = new FlatWorld();
+            var state = race.Step(NeutralInputs(), world);
+            // The human holds the button continuously — the press edge
+            // latches on the first held boundary (empty slot, nothing
+            // spent) and stays latched through the collection.
+            var hold = new Dictionary<string, DriverInput>(
+                StringComparer.Ordinal)
+            {
+                { "local", new DriverInput(0f, false, false, true,
+                    false, false, false) }
+            };
+            for (var i = 0; i < 160
+                && state.gadgets.Racer("local").heldItemId == ""; i++)
+                state = race.Step(hold, world);
+            var row = state.gadgets.Racer("local");
+            Assert.IsFalse(string.IsNullOrEmpty(row.heldItemId),
+                "the human collects while still holding the button");
+            Assert.IsTrue(row.gadgetHeld,
+                "the held button leaves the rules' edge latch set");
+            // Disconnect mid-hold: the seat transfers to AI with the
+            // latch set and an unspent item in the slot.
+            race.SetControlSource("local", "ai");
+            var used = false;
+            for (var i = 0; i < 400 && !used; i++)
+            {
+                state = race.Step(NeutralInputs(), world);
+                foreach (var ev in state.events)
+                    if (ev.kind == "gadget.used"
+                        && ev.participantId == "local")
+                    {
+                        Assert.AreEqual("ai", ev.attribution,
+                            "the spend is the AI seat's fact, not the "
+                            + "departed human's");
+                        used = true;
+                    }
+            }
+            Assert.IsTrue(used,
+                "the AI releases the inherited latch, then spends the "
+                + "item — the slot never deadlocks");
+            Assert.IsTrue(string.IsNullOrEmpty(
+                state.gadgets.Racer("local").heldItemId),
+                "the slot clears once the inherited item is spent");
         }
 
         [Test]

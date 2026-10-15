@@ -80,9 +80,12 @@ namespace FamilyRacing.Core.Racing
     //      slot leaves the pickup untouched;
     //   5. foam patches resolve in slot order over patch order — owner
     //      and already-resolved patches skip, shield absorbs one hit.
-    // Event ids mint as "gadget-<tick>-<ordinal>" — deterministic per
-    // boundary, and disjoint from the raceId-scoped namespaces the
-    // sessions and coordinator emit.
+    // Event ids mint as "gadget-<raceId>-<tick>-<ordinal>" —
+    // deterministic per boundary AND scoped to the race identity, so a
+    // rematch's minted ids can never collide with the concluded race's
+    // wire-side dedup window; the namespace stays disjoint from the
+    // raceId-scoped "<raceId>-e<n>" ids the sessions and coordinator
+    // emit.
     public static class GadgetRules
     {
         public const string EventPickup = "gadget.pickup";
@@ -117,12 +120,16 @@ namespace FamilyRacing.Core.Racing
         // Builds the authoritative world for a race identity: pickups at
         // the authored sites (all active), one inert row per participant
         // in roster order, and the seeded bag shuffled once so the first
-        // cycle already deals every kind exactly once.
+        // cycle already deals every kind exactly once. `raceId` scopes
+        // every event id the world mints — a rematch under a fresh race
+        // identity can never collide with the concluded race's dedup
+        // window.
         public static GadgetWorldState Create(GadgetDefinitionCatalog catalog,
             IReadOnlyList<GadgetPickupSite> sites, uint seed,
-            IReadOnlyList<string> participantIds)
+            IReadOnlyList<string> participantIds, string raceId = "")
         {
             var world = new GadgetWorldState();
+            world.raceId = raceId ?? "";
             var count = catalog != null && catalog.gadgets != null
                 ? catalog.gadgets.Count : 0;
             for (var i = 0; i < count; i++)
@@ -158,9 +165,14 @@ namespace FamilyRacing.Core.Racing
         }
 
         // The per-racer modifier the simulation seam consumes next
-        // boundary: turbo supplies both authored multipliers, foam caps
-        // through the speed multiplier, and a shield is inert on motion.
-        // Absent world/row reads as neutral.
+        // boundary: turbo supplies both authored multipliers, foam
+        // scales BOTH drive channels by the authored slow factor (the
+        // spec's "x0.70 drive acceleration/speed cap"), and a shield is
+        // inert on motion. Composition is multiplicative — a turbo'd
+        // racer on foam keeps turbo's authored envelope scaled by the
+        // slow; "no stacking" refers to repeated foam hits, which the
+        // immunity window already prevents. Absent world/row reads as
+        // neutral.
         public static MotorModifiers ModifierFor(GadgetWorldState state,
             string participantId)
         {
@@ -173,7 +185,10 @@ namespace FamilyRacing.Core.Racing
                 mods.speedCapMultiplier = row.turboSpeedCapMultiplier;
             }
             if (row.foamSlowTicksRemaining > 0)
+            {
+                mods.accelerationMultiplier *= row.foamSlowMultiplier;
                 mods.speedCapMultiplier *= row.foamSlowMultiplier;
+            }
             return mods;
         }
 
@@ -571,8 +586,9 @@ namespace FamilyRacing.Core.Racing
         {
             return new DrivingEvent
             {
-                id = "gadget-" + state.tick.ToString(
-                    System.Globalization.CultureInfo.InvariantCulture)
+                id = "gadget-" + (state.raceId ?? "")
+                    + "-" + state.tick.ToString(
+                        System.Globalization.CultureInfo.InvariantCulture)
                     + "-" + (++seq).ToString(
                         System.Globalization.CultureInfo.InvariantCulture),
                 tick = state.tick,

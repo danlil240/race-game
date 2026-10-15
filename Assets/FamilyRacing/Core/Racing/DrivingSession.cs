@@ -263,7 +263,7 @@ namespace FamilyRacing.Core.Racing
                 gadgetWorld = GadgetRules.Create(gadgets,
                     course.pickupSites,
                     GadgetRules.StableSeed(raceId),
-                    new[] { this.participantId });
+                    new[] { this.participantId }, raceId);
             }
             Emit("race.started", startCommandId ?? "", evt.id);
             // A countdown-free event goes straight to running: emit the

@@ -197,7 +197,7 @@ namespace FamilyRacing.Core.Racing
                     roster.Add(spec.participantId);
                 gadgetWorld = GadgetRules.Create(gadgets,
                     course.pickupSites, GadgetRules.StableSeed(raceId),
-                    roster);
+                    roster, raceId);
             }
         }
 
@@ -647,7 +647,13 @@ namespace FamilyRacing.Core.Racing
             {
                 heldItemId = row.heldItemId,
                 heldGeneration = row.heldGeneration,
-                heldTicks = row.heldTicks
+                heldTicks = row.heldTicks,
+                // The rules' own press latch rides the context so a
+                // takeover landing on a held button emits a release
+                // before its press — the rules swallow any edge while
+                // this stays set, and a swallowed pulse must not mark
+                // the generation spent.
+                pressLatched = row.gadgetHeld
             };
             var def = gadgets != null ? gadgets.Gadget(row.heldItemId) : null;
             context.kind = def != null ? def.kind : "";

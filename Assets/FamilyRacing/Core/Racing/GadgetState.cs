@@ -139,6 +139,12 @@ namespace FamilyRacing.Core.Racing
     public sealed class GadgetWorldState
     {
         public long tick;
+        // The race identity the world was created under: gadget event
+        // ids mint scoped to it ("gadget-<raceId>-<tick>-<ordinal>") so
+        // a rematch can never mint ids that collide with a concluded
+        // race's dedup window. Empty only for worlds built without a
+        // race (direct test construction).
+        public string raceId = "";
         // Seeded shuffle bookkeeping (xorshift32 state as a signed-safe
         // long): the draw order is fixed at creation by the race seed and
         // is independent of standings or collection order.
@@ -168,6 +174,7 @@ namespace FamilyRacing.Core.Racing
             var copy = new GadgetWorldState
             {
                 tick = tick,
+                raceId = raceId,
                 rngState = rngState,
                 bagCursor = bagCursor,
                 nextPickupGeneration = nextPickupGeneration,

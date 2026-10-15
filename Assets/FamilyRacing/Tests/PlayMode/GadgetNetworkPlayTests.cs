@@ -66,7 +66,8 @@ namespace FamilyRacing.Tests
             public ulong ServerConnectionId;
 
             public Rig(string participantId, ILanNetworkAccess access,
-                string credentialStorePath = null)
+                string credentialStorePath = null,
+                DrivingContentCatalog content = null)
             {
                 Transport = new LanTransport(access);
                 Discovery = new LanDiscovery(access);
@@ -77,9 +78,10 @@ namespace FamilyRacing.Tests
                         new ReconnectCredentialStore(credentialStorePath));
                 Link.Bind(Session);
                 Session.SetLocalContext(participantId, "fox", 0, true, true);
-                Session.SetContent(Catalog());
+                var catalog = content ?? Catalog();
+                Session.SetContent(catalog);
                 Bridge = new NetworkRaceBridge(Transport, Session);
-                Bridge.SetContent(Catalog());
+                Bridge.SetContent(catalog);
                 // M5 Task 5: the authored gadget catalog seeds the host's
                 // authoritative world at race creation; the client sets
                 // it too but never creates the race — snapshots own its
@@ -263,7 +265,8 @@ namespace FamilyRacing.Tests
                 clientEvents.AddRange(client.Bridge.DrainRaceEvents());
         }
 
-        private static IEnumerator StartTwoPlayerRace(Rig host, Rig client)
+        private static IEnumerator StartTwoPlayerRace(Rig host, Rig client,
+            string eventId = "lan-mixed")
         {
             var hosted = host.Session.Execute(Cmd("lan.host", P("port", "0")));
             Assert.That(hosted.status, Is.EqualTo(CommandResult.Applied),
@@ -283,7 +286,7 @@ namespace FamilyRacing.Tests
                 "lobby", host, client);
 
             Assert.That(host.Session.Execute(Cmd("lan.configure",
-                P("eventId", "lan-mixed", "classId", "car"))).status,
+                P("eventId", eventId, "classId", "car"))).status,
                 Is.EqualTo(CommandResult.Applied));
             Assert.That(host.Session.Execute(Cmd("lan.ready",
                 P("ready", "true"))).status,
@@ -542,6 +545,288 @@ namespace FamilyRacing.Tests
                     if (Directory.Exists(dir)) Directory.Delete(dir, true);
                 }
                 catch (Exception) { }
+            }
+        }
+
+        // A small one-lap circuit: four gates ordered around a 40x40 m
+        // loop so an "aim at the next expected gate" input finishes
+        // fast — start and gate-1 share the +z direction so the finish
+        // crossing is a normal approach, not a U-turn. The pickup site
+        // overlaps slot 0's spawn so the host collects on tick one.
+        private static CourseDefinition RematchCourse()
+        {
+            var course = new CourseDefinition
+            {
+                id = "course-lan-loop",
+                checkpoints = new List<CheckpointGate>
+                {
+                    new CheckpointGate
+                    {
+                        id = "start", x = 0f, y = 0f, z = 0f,
+                        halfWidth = 10f, dirX = 0f, dirZ = 1f,
+                        recoverX = 0f, recoverZ = -3f
+                    },
+                    new CheckpointGate
+                    {
+                        id = "gate-1", x = 0f, y = 0f, z = 40f,
+                        halfWidth = 10f, dirX = 0f, dirZ = 1f,
+                        recoverX = 0f, recoverZ = 35f
+                    },
+                    new CheckpointGate
+                    {
+                        id = "gate-2", x = 40f, y = 0f, z = 40f,
+                        halfWidth = 10f, dirX = 1f, dirZ = 0f,
+                        recoverX = 35f, recoverZ = 40f
+                    },
+                    new CheckpointGate
+                    {
+                        id = "gate-3", x = 40f, y = 0f, z = 0f,
+                        halfWidth = 10f, dirX = 0f, dirZ = -1f,
+                        recoverX = 40f, recoverZ = 5f
+                    }
+                },
+                route = new List<RouteWaypoint>
+                {
+                    new RouteWaypoint { x = 0f, z = 8f, radius = 8f },
+                    new RouteWaypoint { x = 0f, z = 40f, radius = 8f },
+                    new RouteWaypoint { x = 14f, z = 54f, radius = 8f },
+                    new RouteWaypoint { x = 40f, z = 40f, radius = 8f },
+                    new RouteWaypoint { x = 40f, z = 14f, radius = 8f },
+                    new RouteWaypoint { x = 40f, z = -8f, radius = 8f },
+                    new RouteWaypoint { x = 18f, z = -16f, radius = 8f },
+                    new RouteWaypoint { x = 0f, z = -10f, radius = 8f }
+                },
+                spawnSlots = new List<MotorPose>
+                {
+                    new MotorPose { x = 0f, z = -6f },
+                    new MotorPose { x = -4f, z = -6f },
+                    new MotorPose { x = 4f, z = -6f },
+                    new MotorPose { x = 0f, z = -12f }
+                },
+                // Slot 0's exclusive early lane: p-host reaches (0,-4.5)
+                // in ~1.5 m while the nearest contested approach (ai-3's
+                // x=0 route leg) is 7.5 m out, and every rival path
+                // clears the 2 m radius by >1 m. A site deeper into the
+                // lap is hoovered by the route followers first.
+                pickupSites = new List<GadgetPickupSite>
+                {
+                    new GadgetPickupSite
+                    {
+                        id = "spawn-lane", x = 0f, y = 0f, z = -4.5f,
+                        radiusMeters = 2f, verticalRangeMeters = 2.5f
+                    }
+                }
+            };
+            return course;
+        }
+
+        private static DrivingContentCatalog RematchCatalog()
+        {
+            var evt = new EventDefinition
+            {
+                id = "lan-loop",
+                courseId = "course-lan-loop",
+                laps = 1,
+                countdownTicks = 8,
+                vehicleIds = new List<string> { "car-01" }
+            };
+            return DrivingContentCatalog.Create("lan-loop-1",
+                new[] { VehicleTuning.Car01() },
+                new[] { RematchCourse() }, new[] { evt });
+        }
+
+        private static float WrapAngle(float radians)
+        {
+            while (radians > Mathf.PI) radians -= 2f * Mathf.PI;
+            while (radians <= -Mathf.PI) radians += 2f * Mathf.PI;
+            return radians;
+        }
+
+        // The same "steer at the next expected gate's centre" policy the
+        // AI fallback uses, driven through the seat's own input slot so
+        // a scripted human finishes the circuit like a real player.
+        private static DriverInput SteerToNextGate(NetworkRaceState state,
+            string participantId, List<CheckpointGate> gates)
+        {
+            if (state != null && state.racers != null && gates != null)
+                foreach (var racer in state.racers)
+                {
+                    if (racer == null
+                        || racer.participantId != participantId
+                        || racer.finished || racer.session == null
+                        || racer.session.motor == null)
+                        continue;
+                    var cp = racer.session.nextCheckpoint;
+                    var gate = cp >= 0 && cp < gates.Count
+                        ? gates[cp] : null;
+                    if (gate == null) return Neutral;
+                    var m = racer.session.motor;
+                    var desired = Mathf.Atan2(gate.x - m.x, gate.z - m.z);
+                    var steer = Mathf.Clamp(
+                        WrapAngle(desired - m.heading) * 2.5f, -1f, 1f);
+                    return new DriverInput(steer, false, false, false,
+                        false, false, false);
+                }
+            return Neutral;
+        }
+
+        // Rematch (M5 Task 5 fix): race-1 gadget event ids must never
+        // starve race-2's event stream. Ids mint scoped to the race
+        // identity and the client's dedup window retires on adoption —
+        // a second LAN race's gadget events reach the client whole.
+        [UnityTest]
+        public IEnumerator RematchGadgetEventsReachTheClient()
+        {
+            var catalog = RematchCatalog();
+            var host = new Rig("p-host", new StubNetworkAccess(),
+                null, catalog);
+            var client = new Rig("p-guest", new StubNetworkAccess(),
+                null, catalog);
+            var gates = RematchCourse().checkpoints;
+            try
+            {
+                yield return StartTwoPlayerRace(host, client, "lan-loop");
+                var race1Id = host.Bridge.LatestState.raceId;
+                var race1Events = new List<DrivingEvent>();
+
+                // Drive the whole roster through one lap: scripted gate
+                // pursuit for both humans, authored route for AI fill.
+                // The AI followers orbit this tiny test loop instead of
+                // finishing, so the bound must clear the 60 s grace
+                // deadline that DNFs them after the first finisher
+                // (~450 ticks to finish + 1800 grace + margin).
+                var finishDeadline =
+                    DateTime.UtcNow.AddSeconds(TimeoutSeconds * 10);
+                var finishTicks = 0;
+                while (DateTime.UtcNow < finishDeadline
+                    && finishTicks < 2600)
+                {
+                    var hostState = host.Bridge.LatestState;
+                    if (hostState != null && hostState.phase == "finished")
+                        break;
+                    Tick(host, client,
+                        SteerToNextGate(hostState, "p-host", gates),
+                        SteerToNextGate(client.Bridge.LatestState,
+                            "p-guest", gates),
+                        null, race1Events);
+                    finishTicks++;
+                    if (finishTicks % 8 == 0) yield return null;
+                }
+                Assert.That(host.Bridge.LatestState.phase,
+                    Is.EqualTo("finished"),
+                    "the circuit must complete inside the finish bound "
+                    + "(ticks=" + finishTicks + ")");
+
+                // Race 1's gadget events arrived with race-1-scoped ids.
+                var race1Ids = new HashSet<string>(StringComparer.Ordinal);
+                var race1Gadget = false;
+                foreach (var ev in race1Events)
+                {
+                    race1Ids.Add(ev.id);
+                    if (ev.kind != null
+                        && ev.kind.StartsWith("gadget.")
+                        && ev.participantId == "p-host")
+                    {
+                        race1Gadget = true;
+                        StringAssert.Contains(race1Id, ev.id,
+                            "gadget event ids carry the race scope");
+                    }
+                }
+                Assert.That(race1Gadget,
+                    "race 1 must deliver at least one gadget event to "
+                    + "the client");
+
+                // Results -> rematch -> lobby -> ready -> race 2.
+                yield return PumpUntil(() =>
+                    host.Session.Snapshot().phase
+                            == LanSessionService.PhaseResults
+                        && client.Session.Snapshot().phase
+                            == LanSessionService.PhaseResults,
+                    "results", host, client);
+                var rematch = host.Session.Execute(
+                    Cmd("lan.rematch", null));
+                Assert.That(rematch.status,
+                    Is.EqualTo(CommandResult.Applied),
+                    "lan.rematch failed: " + rematch.code);
+                yield return PumpUntil(() =>
+                    host.Session.Snapshot().phase
+                            == LanSessionService.PhaseLobby
+                        && client.Session.Snapshot().phase
+                            == LanSessionService.PhaseLobby,
+                    "lobby after rematch", host, client);
+                Assert.That(host.Session.Execute(Cmd("lan.configure",
+                    P("eventId", "lan-loop", "classId", "car"))).status,
+                    Is.EqualTo(CommandResult.Applied));
+                Assert.That(host.Session.Execute(Cmd("lan.ready",
+                    P("ready", "true"))).status,
+                    Is.EqualTo(CommandResult.Applied));
+                Assert.That(client.Session.Execute(Cmd("lan.ready",
+                    P("ready", "true"))).status,
+                    Is.Not.EqualTo(CommandResult.Rejected));
+                yield return PumpUntil(() =>
+                    Find(host.Session.Snapshot(), "p-guest")?.ready
+                        == true,
+                    "ready for race 2", host, client);
+                Assert.That(host.Session.Execute(
+                    Cmd("lan.start", null)).status,
+                    Is.EqualTo(CommandResult.Applied));
+                yield return PumpUntil(() =>
+                {
+                    host.PumpFrame();
+                    client.PumpFrame();
+                    host.Bridge.StepTick(Neutral, World);
+                    client.Bridge.StepTick(Neutral, null);
+                    return host.Bridge.LatestState != null
+                        && host.Bridge.LatestState.raceId != race1Id
+                        && client.Bridge.LatestState != null
+                        && client.Bridge.LatestState.raceId
+                            == host.Bridge.LatestState.raceId;
+                }, "race 2 spawn", host, client);
+                var race2Id = host.Bridge.LatestState.raceId;
+
+                // Race 2: the host re-collects its lane site, then spends
+                // it — the fresh race's gadget events must reach the
+                // client, not die in race-1's dedup window.
+                var race2Events = new List<DrivingEvent>();
+                yield return TickUntil(() =>
+                {
+                    var row = GadgetRow(client.Bridge.LatestState,
+                        "p-host");
+                    return row != null
+                        && !string.IsNullOrEmpty(row.heldItemId);
+                }, "race-2 collection", host, client, Neutral, null,
+                    race2Events);
+                var press = new DriverInput(0f, false, false, true,
+                    false, false, false);
+                Tick(host, client, press, Neutral, null, race2Events);
+                yield return TickUntil(() =>
+                {
+                    foreach (var ev in race2Events)
+                        if (ev.kind == "gadget.used"
+                            && ev.participantId == "p-host")
+                            return true;
+                    return false;
+                }, "race-2 gadget.used", host, client, Neutral, null,
+                    race2Events);
+                var race2Gadget = false;
+                foreach (var ev in race2Events)
+                {
+                    if (ev.kind == null
+                        || !ev.kind.StartsWith("gadget.")) continue;
+                    race2Gadget = true;
+                    Assert.IsFalse(race1Ids.Contains(ev.id),
+                        "race-2 event identities never collide with "
+                        + "race-1's dedup window: " + ev.id);
+                    StringAssert.Contains(race2Id, ev.id,
+                        "race-2 gadget ids carry the new race scope");
+                }
+                Assert.That(race2Gadget,
+                    "race-2 gadget events must reach the client whole");
+            }
+            finally
+            {
+                host.Dispose();
+                client.Dispose();
             }
         }
 

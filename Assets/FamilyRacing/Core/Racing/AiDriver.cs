@@ -17,6 +17,12 @@ namespace FamilyRacing.Core.Racing
         public long heldGeneration;  // unique per grant — arms one press
         public int heldTicks;
         public string kind = "";
+        // The rules' press-edge latch for this seat (row.gadgetHeld):
+        // true while the authoritative boundary still sees the button
+        // held — e.g. a human who disconnected mid-press left it set.
+        // A fresh pulse emitted while latched is swallowed by the edge
+        // detector, so the follower must emit a release first.
+        public bool pressLatched;
         public bool rivalNearBehind;
         public bool patchAhead;
     }
@@ -73,8 +79,9 @@ namespace FamilyRacing.Core.Racing
         private bool wasRecovering;
         // M5 Task 5: the held-item generation this driver already spent
         // its press pulse on. Emitting a pulse — not a held level —
-        // means a takeover that lands on a latched press still clears
-        // the rules' edge latch before this driver's own press arrives.
+        // arms the rules' edge detector exactly once per grant, and the
+        // pressLatched context fact un-marks a generation whose pulse
+        // the rules swallowed before the edge could land.
         private long gadgetFiredGeneration = -1;
 
         public AiDriver()
@@ -317,12 +324,26 @@ namespace FamilyRacing.Core.Racing
                 var willingness = difficulty != null
                     ? Clamp01(difficulty.gadgetUseWillingness)
                     : NetworkSettings.AiGadgetDefaultWillingness;
+                if (gadgets.pressLatched)
+                {
+                    // The rules still see a held press for this seat —
+                    // a human who disconnected mid-press left the edge
+                    // latch set, or an earlier pulse landed on a
+                    // recovery boundary where the rules read the edge
+                    // but skip the use. Emit a release tick so the
+                    // latch clears before the real press, and un-mark
+                    // the generation so a swallowed pulse retries:
+                    // the seat's slot can never deadlock behind a
+                    // latch-only phantom edge.
+                    if (gadgets.heldGeneration == gadgetFiredGeneration)
+                        gadgetFiredGeneration = -1;
+                }
                 // A zero-willingness seat never spends; everyone else
                 // waits out a deterministic settle delay, then prefers
                 // the kind's real use window — and after a bounded
                 // patience window spends anyway so the held slot can
                 // never deadlock (the rules still decide the effect).
-                if (willingness > 0f
+                else if (willingness > 0f
                     && gadgets.heldGeneration != gadgetFiredGeneration)
                 {
                     var settle = (int)((1f - willingness)
