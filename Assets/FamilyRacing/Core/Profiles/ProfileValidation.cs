@@ -88,6 +88,29 @@ namespace FamilyRacing.Core.Profiles
                     if (receipt.awardedCoins < 0) return ProfileCheck.Invalid;
                     if (!IsFingerprint(receipt.fingerprint))
                         return ProfileCheck.Invalid;
+                    // Task-7 additive fields tolerate their pre-Task-7
+                    // empty shape: rules identity is "" on legacy rows
+                    // and a 64-hex fingerprint once bound; mode is "" on
+                    // legacy rows and a mode-vocabulary id afterwards.
+                    if (!string.IsNullOrEmpty(receipt.rulesFingerprint)
+                        && !IsFingerprint(receipt.rulesFingerprint))
+                        return ProfileCheck.Invalid;
+                    if (!string.IsNullOrEmpty(receipt.mode)
+                        && !IsSlugId(receipt.mode))
+                        return ProfileCheck.Invalid;
+                    if (receipt.completionCoins < 0
+                        || receipt.placementCoins < 0
+                        || receipt.challengeCoins < 0
+                        || receipt.bountyCoins < 0
+                        || receipt.rivalCoins < 0
+                        || receipt.recordBestTicks < 0
+                        || receipt.updatedVehicleCount < 0
+                        || receipt.updatedTimeTrialRecordCount < 0)
+                        return ProfileCheck.Invalid;
+                    if (receipt.completedBountyIds != null)
+                        foreach (var bountyId in receipt.completedBountyIds)
+                            if (string.IsNullOrEmpty(bountyId))
+                                return ProfileCheck.Invalid;
                     if (!seen.Add(receipt.resultId)) return ProfileCheck.Invalid;
                 }
             }

@@ -771,6 +771,10 @@ namespace FamilyRacing.Core.Foundation
             draftProfile = ProfileCopy.DeepCopy(created);
             activeSlot = slot;
             language = created.language;
+            // A retained unresolved reward belongs to the profile that
+            // produced it — the new selection must not inherit the gate.
+            unresolvedResult = null;
+            unresolvedContext = null;
             screen = ScreenSettings;
             pendingSettings = false;
             persistenceStatus = "saved";
@@ -795,6 +799,8 @@ namespace FamilyRacing.Core.Foundation
             savedProfile = ProfileCopy.DeepCopy(info.Profile);
             draftProfile = ProfileCopy.DeepCopy(info.Profile);
             activeSlot = slot;
+            unresolvedResult = null;
+            unresolvedContext = null;
             language = info.Profile.language;
             pendingSettings = false;
             persistenceStatus = info.Status == "RecoveredFromBackup" ? "recovered" : "";

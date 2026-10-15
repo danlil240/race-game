@@ -43,6 +43,46 @@ namespace FamilyRacing.Core.Foundation
         // so a crashed run can never re-mint an identity a bound reward
         // context already owns.
         private int soloOrdinalHighWater;
+        // M5 Task 7: a finalized result whose atomic progression
+        // transaction FAILED to commit stays retained here with the exact
+        // context it was bound under — the pair is what
+        // RetryUnresolvedRewards replays and what blocks starting a new
+        // progression race (or purchasing) until it resolves. Cleared on
+        // any terminal verdict and on profile switches.
+        private RaceResult unresolvedResult;
+        private RaceRewardContext unresolvedContext;
+
+        // True while a finalized result's progression transaction has a
+        // retryable commit outstanding — the gate every progression-race
+        // start and purchase must respect.
+        public bool RewardUnresolved
+        {
+            get { return unresolvedResult != null; }
+        }
+
+        // Replays the retained immutable result against its ORIGINAL
+        // bound context — the receipt dedup makes a double-commit
+        // impossible and the durable context makes the fold identical.
+        public RewardApplyResult RetryUnresolvedRewards()
+        {
+            if (unresolvedResult == null)
+                return RewardApplyResult.Ineligible("noPendingResult");
+            if (savedProfile == null)
+                return RewardApplyResult.Ineligible("noProfile");
+            var applied = RaceRewardService.Apply(unresolvedResult,
+                savedProfile.id, savedProfile, store, gameplayCatalog,
+                unresolvedContext);
+            if (applied.status == RaceRewardService.StatusFailed)
+                // Still unresolved — the identical inputs stay retained
+                // for the next retry; nothing was guessed or dropped.
+                return applied;
+            unresolvedResult = null;
+            unresolvedContext = null;
+            if (applied.status == RaceRewardService.StatusApplied
+                || applied.status == RaceRewardService.StatusAlreadyApplied)
+                RefreshProgressionCaches();
+            return applied;
+        }
 
         // The runtime injects the validated gameplay content once —
         // solo.start reports contentUnavailable until a non-legacy
@@ -152,6 +192,15 @@ namespace FamilyRacing.Core.Foundation
             if (driving != null || soloRace != null)
                 return Result(command, CommandResult.Rejected, "raceActive");
             var mode = command.Parameters["mode"];
+            // Task 7: a progression race may not start while a finalized
+            // result's transaction is still uncommitted — its fresh
+            // context would interleave with the unresolved one.
+            RaceMode requestedMode;
+            if (unresolvedResult != null
+                && RaceModeRules.TryParse(mode, out requestedMode)
+                && RaceModeRules.IsProgression(requestedMode))
+                return Result(command, CommandResult.Rejected,
+                    "rewardUnresolved");
             var request = new SoloRaceRequest
             {
                 mode = mode,
@@ -333,12 +382,12 @@ namespace FamilyRacing.Core.Foundation
             AppendDrivingEvents(soloRace.DrainStagedEvents());
         }
 
-        // A finalized local progression result feeds the same exactly-
-        // once reward seam LAN results use: authored completion coins
-        // for a finished local row, provable by receipt. Time Trial
-        // never reaches here (not progression); aborted races never
-        // produce a result at all. Task 7 retires the finished race's
-        // context inside the same atomic save that evaluates bounties.
+        // A finalized local result feeds the same exactly-once reward
+        // seam LAN results use — progression modes against their durably
+        // bound context, time trials against the record table (trials
+        // bind no context; the result's own fingerprinted course/class
+        // facts key its personal best). Aborted races never produce a
+        // result at all.
         private void TryApplyLocalResult(SoloRaceState state)
         {
             if (soloResultApplied || state == null || state.result == null)
@@ -346,11 +395,36 @@ namespace FamilyRacing.Core.Foundation
             soloResultApplied = true;
             RaceMode mode;
             if (!RaceModeRules.TryParse(state.mode, out mode)
-                || !RaceModeRules.IsProgression(mode))
+                || (mode != RaceMode.TimeTrial
+                    && !RaceModeRules.IsProgression(mode)))
                 return;
             var applied = ApplyNetworkResult(state.result);
             if (applied != null && applied.status == RaceRewardService.StatusFailed)
                 persistenceStatus = "saveFailed";
+        }
+
+        // The durable reward context bound for one race identity, or
+        // null — the row the Task-7 transaction consumes atomically.
+        private RaceRewardContext FindRewardContext(string raceId)
+        {
+            if (savedProfile == null
+                || savedProfile.pendingRaceContexts == null
+                || raceId == null)
+                return null;
+            foreach (var row in savedProfile.pendingRaceContexts)
+                if (row != null && row.raceId == raceId) return row;
+            return null;
+        }
+
+        // Slot cache + settings draft refresh after a committed reward —
+        // the draft's progression slice tracks the live profile so a
+        // pending settings save can never roll progression back.
+        private void RefreshProgressionCaches()
+        {
+            if (activeSlot >= 0)
+                slots[activeSlot].Profile = ProfileCopy.DeepCopy(savedProfile);
+            if (draftProfile != null)
+                ProfileCopy.CopyProgression(savedProfile, draftProfile);
         }
 
         // --- reward-context binding -------------------------------------
@@ -369,6 +443,9 @@ namespace FamilyRacing.Core.Foundation
             if (string.IsNullOrEmpty(raceId)) return null;
             if (savedProfile == null || activeSlot < 0) return "noProfile";
             if (!WritableSelected()) return "readOnlyProfile";
+            // Task 7: a new bound context may not interleave with a
+            // finalized result whose transaction is still uncommitted.
+            if (unresolvedResult != null) return "rewardUnresolved";
             if (string.IsNullOrEmpty(rulesFingerprint))
                 return "contentUnavailable";
             if (savedProfile.pendingRaceContexts != null)

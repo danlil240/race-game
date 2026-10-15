@@ -267,29 +267,41 @@ namespace FamilyRacing.Core.Foundation
             lanSession.SetRacePreparer(PrepareLanRewardContext);
         }
 
-        // The session service hands each finalized result here. Coins and
-        // the receipt persist together inside one atomic save; the slot
-        // caches and the settings draft are refreshed only after the
-        // write lands, and the draft's reward fields track the live
-        // profile so a pending settings save can never roll coins or
-        // receipts back.
+        // The session service hands each finalized result here. Task 7
+        // resolves the durable reward context the race was bound under
+        // and runs the full atomic transaction — coins, progression
+        // facts, record, receipt and context consumption in one save.
+        // A Failed outcome retains the immutable result with its exact
+        // bound context so RetryUnresolvedRewards replays the identical
+        // transaction; the pair also gates every new progression race.
         private RewardApplyResult ApplyNetworkResult(RaceResult result)
         {
             if (savedProfile == null)
                 return RewardApplyResult.Ineligible("noProfile");
+            var context = FindRewardContext(
+                result != null ? result.raceId : null);
             var applied = RaceRewardService.Apply(
-                result, savedProfile.id, savedProfile, store);
+                result, savedProfile.id, savedProfile, store,
+                gameplayCatalog, context);
+            if (applied.status == RaceRewardService.StatusFailed)
+            {
+                unresolvedResult = result != null ? result.Copy() : null;
+                unresolvedContext = context != null ? context.Copy() : null;
+                return applied;
+            }
+            // Terminal verdicts (applied, alreadyApplied, ineligible —
+            // including a committed bound DNF) resolve any retained
+            // retry for this result identity.
+            if (unresolvedResult != null && result != null
+                && unresolvedResult.resultId == result.resultId)
+            {
+                unresolvedResult = null;
+                unresolvedContext = null;
+            }
             if (applied.status != RaceRewardService.StatusApplied
                 && applied.status != RaceRewardService.StatusAlreadyApplied)
                 return applied;
-            if (activeSlot >= 0)
-                slots[activeSlot].Profile = ProfileCopy.DeepCopy(savedProfile);
-            if (draftProfile != null)
-                // Refresh the draft's full progression slice — coins,
-                // receipts and every schema-3 collection — so a pending
-                // settings edit never carries stale progression into a
-                // save.
-                ProfileCopy.CopyProgression(savedProfile, draftProfile);
+            RefreshProgressionCaches();
             return applied;
         }
 

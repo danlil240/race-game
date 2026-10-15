@@ -84,6 +84,13 @@ namespace FamilyRacing.Core.Racing
         // 64-hex canonical rules fingerprint the race ran under.
         public string mode = "";
         public string rulesFingerprint = "";
+        // Format-2 record-grouping facts (M5 Task 7): the course and
+        // vehicle class the result was produced under — the key a
+        // time-trial personal best is recorded against. Fingerprinted
+        // so a replay can never re-key a record onto different content.
+        // "" on legacy format-1 rows.
+        public string courseId = "";
+        public string classId = "";
         public bool finalized;
         public long finalizedHostTick;
         public long finalizedElapsedTicks;
@@ -125,9 +132,10 @@ namespace FamilyRacing.Core.Racing
         // formatVersion) keeps the exact "fr-result-fp-1" canonical form
         // so previously persisted receipts keep matching. Format 2 uses
         // a distinct "fr-result-fp-2" domain prefix and additionally
-        // binds mode + rules identity and every authoritative metric
-        // counter, so two runs differing in any recorded fact produce
-        // different fingerprints.
+        // binds mode + rules identity, the record-grouping course/class
+        // facts (Task 7), and every authoritative metric counter, so
+        // two runs differing in any recorded fact produce different
+        // fingerprints.
         public string Fingerprint()
         {
             var builder = new StringBuilder(256);
@@ -142,6 +150,8 @@ namespace FamilyRacing.Core.Racing
             {
                 Field(builder, mode);
                 Field(builder, rulesFingerprint);
+                Field(builder, courseId);
+                Field(builder, classId);
             }
             Field(builder, finalized ? "1" : "0");
             Field(builder, finalizedHostTick.ToString(

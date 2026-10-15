@@ -51,6 +51,9 @@ namespace FamilyRacing.Core.Racing
             internal string rulesFingerprint;
             internal AiDifficultyDefinition difficulty;
             internal string rivalParticipantId;
+            // M5 Task 7: the lobby-validated class the race ran under —
+            // stamped on the format-2 result as a record-grouping fact.
+            internal string classId;
         }
 
         // A candidate respawn pose closer than this to a committed peer
@@ -247,7 +250,8 @@ namespace FamilyRacing.Core.Racing
                 mode = mode ?? "",
                 rulesFingerprint = rulesFingerprint ?? "",
                 difficulty = difficulty,
-                rivalParticipantId = rivalParticipantId
+                rivalParticipantId = rivalParticipantId,
+                classId = classId ?? ""
             };
             if (!ValidateAndCreate(sessionId, raceId, content, eventId,
                     classId, racerSpecs, local, gadgets, out race,
@@ -916,10 +920,17 @@ namespace FamilyRacing.Core.Racing
             // accumulated metrics and the rivalDefeated fact — so the
             // fingerprint a consumer computes already covers them.
             if (local != null)
+            {
                 RaceResultFactory.Bind(final, local.mode,
                     local.rulesFingerprint, metrics.Snapshot(),
                     local.difficulty != null ? local.difficulty.id : "",
                     local.rivalParticipantId);
+                // Task 7 record-grouping facts ride the same format-2
+                // binding — stamped before first publication so the
+                // fingerprint covers them.
+                final.courseId = evt.courseId ?? "";
+                final.classId = local.classId ?? "";
+            }
             result = final;
             emitted.Add(CoordinatorEvent("race.finalized", result.resultId));
         }

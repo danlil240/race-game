@@ -4,6 +4,7 @@ using System.IO;
 using FamilyRacing.Core.Automation;
 using FamilyRacing.Core.Networking;
 using FamilyRacing.Core.Profiles;
+using FamilyRacing.Core.Progression;
 using FamilyRacing.Core.Racing;
 using NUnit.Framework;
 #if UNITY_5_3_OR_NEWER
@@ -612,6 +613,170 @@ namespace FamilyRacing.Tests
             Assert.That(host.Snapshot().results.Count,
                 Is.EqualTo(NetworkSettings.ResultRetentionCapacity),
                 "retained results remain visible — nothing was evicted");
+        }
+
+        // --- Task 7: context-bound progression results -------------------
+
+        [Test]
+        public void BoundLanResultCommitsProgressionTransaction()
+        {
+            var store = Store();
+            var profile = ValidProfile(0, 7);
+            store.Save(profile);
+            var loaded = store.Load(0).Profile;
+            // The Task-4 LAN bind: mode "lan" + the profile's tray
+            // captured at race start under the rules fingerprint.
+            var context = new RaceRewardContext
+            {
+                raceId = "s-1-r1", profileId = loaded.id, mode = "lan",
+                rulesFingerprint = new string('a', 64)
+            };
+            foreach (var row in loaded.activeBounties)
+            {
+                context.bountyAssignmentIds.Add(row.assignmentId);
+                context.bountyDefinitions.Add(new BountyDefinition
+                {
+                    id = row.bountyId, family = "human-finish",
+                    metric = "humanFinishes", threshold = 2,
+                    unit = "count", rewardCoins = 10,
+                    aggregation = "sum", repeatable = true
+                });
+            }
+            loaded.pendingRaceContexts.Add(context.Copy());
+            store.Save(loaded);
+
+            // Format-1 LAN wire result: no mode/metrics — the bound
+            // context supplies the rules identity for the fold.
+            var result = FinishedResult("s-1", "s-1-r1",
+                loaded.id, "finished", "other-p", "dnf");
+            var applied = RaceRewardService.Apply(result, loaded.id,
+                loaded, store, null, context);
+            Assert.That(applied.status,
+                Is.EqualTo(RaceRewardService.StatusApplied));
+            Assert.That(applied.mode, Is.EqualTo("lan"));
+            Assert.That(loaded.coins, Is.EqualTo(27));
+            // The bound human-finish assignment folded the finish fact.
+            foreach (var row in loaded.activeBounties)
+                Assert.That(row.progress, Is.EqualTo(1));
+            // The context retired inside the same save.
+            foreach (var row in loaded.pendingRaceContexts)
+                Assert.That(row.raceId, Is.Not.EqualTo("s-1-r1"));
+            var receipt = loaded.appliedResults[0];
+            Assert.That(receipt.rulesFingerprint,
+                Is.EqualTo(new string('a', 64)));
+            Assert.That(receipt.mode, Is.EqualTo("lan"));
+
+            // Redelivery after restart: receipt dedup, no repay.
+            var reloaded = Store().Load(0).Profile;
+            var replay = RaceRewardService.Apply(result, reloaded.id,
+                reloaded, Store(), null, null);
+            Assert.That(replay.status,
+                Is.EqualTo(RaceRewardService.StatusAlreadyApplied));
+            Assert.That(reloaded.coins, Is.EqualTo(27));
+        }
+
+        [Test]
+        public void ProgressionResultWithoutContextNeverGuesses()
+        {
+            var store = Store();
+            var profile = ValidProfile(0, 7);
+            store.Save(profile);
+            var loaded = store.Load(0).Profile;
+            // A format-2 progression-mode result with no bound durable
+            // context must refuse — Task 7 never guesses assignments.
+            var result = FinishedResult("s-1", "s-1-r1",
+                loaded.id, "finished", "other-p", "dnf");
+            result.formatVersion = 2;
+            result.mode = "quickRace";
+            result.rulesFingerprint = new string('a', 64);
+            var applied = RaceRewardService.Apply(result, loaded.id,
+                loaded, store, null, null);
+            Assert.That(applied.status,
+                Is.EqualTo(RaceRewardService.StatusIneligible));
+            Assert.That(applied.code, Is.EqualTo("noContext"));
+            Assert.That(loaded.coins, Is.EqualTo(7));
+            Assert.That(loaded.appliedResults.Count, Is.EqualTo(0));
+        }
+
+        [Test]
+        public void FailedSaveKeepsContextForOriginalContextRetry()
+        {
+            var store = Store();
+            var profile = ValidProfile(0, 7);
+            store.Save(profile);
+            var loaded = store.Load(0).Profile;
+            var context = new RaceRewardContext
+            {
+                raceId = "s-1-r1", profileId = loaded.id, mode = "lan",
+                rulesFingerprint = new string('a', 64)
+            };
+            context.bountyAssignmentIds.Add(loaded.activeBounties[0].assignmentId);
+            context.bountyDefinitions.Add(new BountyDefinition
+            {
+                id = loaded.activeBounties[0].bountyId, family = "drift",
+                metric = "driftSeconds", threshold = 10,
+                unit = "seconds", rewardCoins = 10,
+                aggregation = "sum", repeatable = true
+            });
+            loaded.pendingRaceContexts.Add(context.Copy());
+            store.Save(loaded);
+            var result = FinishedResult("s-1", "s-1-r1",
+                loaded.id, "finished", "other-p", "dnf");
+
+            RewardApplyResult failed;
+            using (new FileStream(Primary(0), FileMode.Open, FileAccess.Read,
+                FileShare.Read))
+            {
+                failed = RaceRewardService.Apply(result, loaded.id,
+                    loaded, store, null, context);
+            }
+            Assert.That(failed.status, Is.EqualTo(RaceRewardService.StatusFailed));
+            Assert.That(failed.code, Is.EqualTo("saveFailed"));
+            // The durable context remains — retry must evaluate the
+            // original assignment, not whatever is active later.
+            Assert.That(loaded.pendingRaceContexts.Count, Is.EqualTo(1));
+            // Divergence must not mint a duplicate tray id (validation
+            // forbids them) — a catalog-known id the tray does not hold.
+            loaded.activeBounties[0].bountyId = "drift-30s";
+
+            var retried = RaceRewardService.Apply(result, loaded.id,
+                loaded, store, null, context);
+            Assert.That(retried.status,
+                Is.EqualTo(RaceRewardService.StatusApplied));
+            Assert.That(loaded.coins, Is.EqualTo(27));
+            Assert.That(retried.divergedAssignmentIds,
+                Is.EquivalentTo(
+                    new[] { context.bountyAssignmentIds[0] }),
+                "the diverged slot is recorded, never silently fed");
+        }
+
+        [Test]
+        public void LegacyReceiptStillDeduplicatesNewOverload()
+        {
+            var store = Store();
+            var profile = ValidProfile(0, 7);
+            store.Save(profile);
+            var loaded = store.Load(0).Profile;
+            var result = FinishedResult("s-1", "s-1-r1",
+                loaded.id, "finished", "other-p", "dnf");
+
+            // The legacy 4-arg path writes a receipt without a rules
+            // fingerprint — exactly what pre-Task-7 saves hold.
+            Assert.That(RaceRewardService.Apply(result, loaded.id,
+                loaded, store).status,
+                Is.EqualTo(RaceRewardService.StatusApplied));
+            Assert.That(loaded.appliedResults[0].rulesFingerprint,
+                Is.EqualTo(""));
+
+            // The context-aware overload still dedupes it — the receipt
+            // binds the same immutable result identity.
+            var replay = RaceRewardService.Apply(result, loaded.id,
+                loaded, store, null, null);
+            Assert.That(replay.status,
+                Is.EqualTo(RaceRewardService.StatusAlreadyApplied));
+            Assert.That(replay.awardedCoins, Is.EqualTo(20));
+            Assert.That(loaded.coins, Is.EqualTo(27));
+            Assert.That(loaded.appliedResults.Count, Is.EqualTo(1));
         }
 
         // --- helpers ----------------------------------------------------------

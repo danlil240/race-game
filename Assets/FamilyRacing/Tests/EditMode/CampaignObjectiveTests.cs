@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using FamilyRacing.Core.Driving;
 using FamilyRacing.Core.Profiles;
 using FamilyRacing.Core.Progression;
 using FamilyRacing.Core.Racing;
@@ -157,6 +158,12 @@ namespace FamilyRacing.Tests
                 id = "gate-1", x = 0f, z = 16f, halfWidth = 6f,
                 dirX = 0f, dirZ = 1f, recoverX = 0f, recoverZ = 13f
             });
+            // A four-slot start grid (Task 7 service-level tests drive
+            // solo.start end-to-end through NetworkRace seat validation).
+            course.spawnSlots.Add(new MotorPose { x = -5f, z = -57f });
+            course.spawnSlots.Add(new MotorPose { x = 5f, z = -57f });
+            course.spawnSlots.Add(new MotorPose { x = -5f, z = -62f });
+            course.spawnSlots.Add(new MotorPose { x = 5f, z = -62f });
             return course;
         }
 

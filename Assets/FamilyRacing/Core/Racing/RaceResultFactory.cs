@@ -83,7 +83,7 @@ namespace FamilyRacing.Core.Racing
             string rulesFingerprint, string participantId,
             string vehicleId, long hostTick, long elapsedTicks,
             bool finished, long finishTicks, int lapsCompleted,
-            RaceMetrics metrics)
+            RaceMetrics metrics, string courseId = "", string classId = "")
         {
             var row = metrics != null ? metrics.Copy()
                 : new RaceMetrics();
@@ -103,6 +103,10 @@ namespace FamilyRacing.Core.Racing
                 contentVersion = contentVersion ?? "",
                 mode = mode ?? "",
                 rulesFingerprint = rulesFingerprint ?? "",
+                // Task 7 record-grouping facts: the trial's course and
+                // vehicle class key its personal-best row.
+                courseId = courseId ?? "",
+                classId = classId ?? "",
                 finalized = true,
                 finalizedHostTick = hostTick,
                 finalizedElapsedTicks = elapsedTicks,

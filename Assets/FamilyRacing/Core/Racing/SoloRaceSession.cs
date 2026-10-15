@@ -25,6 +25,9 @@ namespace FamilyRacing.Core.Racing
         {
             internal DrivingSession session;
             internal EventDefinition evt;
+            // The resolved record-grouping class (event's authored class
+            // or the requested one) — stamped onto the trial result.
+            internal string classId;
         }
 
         private readonly string mode;          // campaign | quickRace | timeTrial
@@ -314,7 +317,10 @@ namespace FamilyRacing.Core.Racing
                 evt, content.Version, request.commandId, null,
                 participantId, content.CompatibilityFingerprint,
                 content.SimulationBackend, gadgets);
-            var world = new TrialWorld { session = trialSession, evt = evt };
+            var world = new TrialWorld
+            {
+                session = trialSession, evt = evt, classId = classId ?? ""
+            };
             session = new SoloRaceSession(request, "timeTrial", sessionId,
                 raceId, participantId, difficultyId, rulesFingerprint,
                 content, null, world, new RaceMetricsAccumulator());
@@ -445,7 +451,8 @@ namespace FamilyRacing.Core.Racing
                         rulesFingerprint, participantId,
                         trial.session.VehicleId, hostTick,
                         snap.elapsedTicks, true, snap.finishTicks,
-                        snap.lap, rows.Count > 0 ? rows[0] : null);
+                        snap.lap, rows.Count > 0 ? rows[0] : null,
+                        trial.evt.courseId, trial.classId);
                 }
             }
             return Build(emitted);
