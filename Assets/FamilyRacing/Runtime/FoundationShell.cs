@@ -48,6 +48,7 @@ namespace FamilyRacing
         private Label finishVehicleLabel;
         private VisualElement boostFill;
         private VisualElement tutorialPanel;
+        private VisualElement garagePanel;
         private Label tutorialIconLabel;
         private Label tutorialCueLabel;
         private Label tutorialProgressLabel;
@@ -131,6 +132,7 @@ namespace FamilyRacing
             lapLabel = gateLabel = finishTimeLabel = null;
             finishVehicleLabel = null;
             tutorialPanel = null;
+            garagePanel = null;
             tutorialIconLabel = tutorialCueLabel = tutorialProgressLabel = null;
             lanTimeLabel = lanStandingsLabel = lanPhaseLabel = null;
             lanActionLabel = lanPauseLabel = null;
@@ -313,6 +315,8 @@ namespace FamilyRacing
                 SetLed("recover", state.input.recover);
             }
             UpdateDrivingIndicators(state);
+            if (garagePanel != null && state.screen == "practice")
+                RefreshGarage(state);
             if (state.screen == "lan-race")
                 UpdateLanRaceIndicators(state);
             if (pauseOverlay != null)

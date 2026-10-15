@@ -337,6 +337,137 @@ namespace FamilyRacing
         public float LeanRoll { get { return leanRoll; } }
         public string ShownKey { get { return shownKey; } }
 
+        // --- M5 Task 8: durable-fact indicators -----------------------
+        // Purchased upgrade levels and equipped cosmetics are profile
+        // facts, not tuning: every mode renders the same installed parts
+        // and cosmetics for the seat bound to the owning profile. The
+        // parts are named children under the same LeanPivot the
+        // silhouette uses — `upgrade.<category>.<level>` one per bought
+        // level, `cosmetic.<id>` one per equipped item — and carry no
+        // colliders, so they can never touch stats or collision.
+        private readonly Dictionary<string, int> upgradeLevels =
+            new Dictionary<string, int>(System.StringComparer.Ordinal);
+        private readonly List<GameObject> upgradeParts = new List<GameObject>();
+        private string upgradeKey = "";
+        private readonly List<string> cosmeticIds = new List<string>();
+        private readonly List<GameObject> cosmeticParts = new List<GameObject>();
+        private string cosmeticKey = "";
+
+        // `levels` maps authored category id -> purchased level for the
+        // vehicle this view shows. A repeated identical map is a no-op.
+        public void SetUpgradeIndicators(
+            IReadOnlyDictionary<string, int> levels)
+        {
+            EnsureBuilt();
+            var key = IndicatorKey(levels);
+            if (key == upgradeKey) return;
+            upgradeKey = key;
+            upgradeLevels.Clear();
+            if (levels != null)
+                foreach (var entry in levels)
+                    if (entry.Value > 0)
+                        upgradeLevels[entry.Key] = entry.Value;
+            foreach (var part in upgradeParts)
+                if (part != null) DestroyImmediate(part);
+            upgradeParts.Clear();
+            var slot = 0;
+            foreach (var entry in upgradeLevels)
+                for (var level = 1; level <= entry.Value; level++)
+                {
+                    var part = GameObject.CreatePrimitive(
+                        PrimitiveType.Cube);
+                    var collider = part.GetComponent<Collider>();
+                    if (collider != null) DestroyImmediate(collider);
+                    part.name = "upgrade." + entry.Key + "."
+                        + level.ToString(
+                            System.Globalization.CultureInfo
+                                .InvariantCulture);
+                    part.transform.SetParent(leanPivot, false);
+                    // One visible marker per bought level, laid out
+                    // along the body — graybox affordance, never a
+                    // stat: only presence/naming is contract.
+                    part.transform.localPosition = new Vector3(
+                        -0.6f + 0.4f * (slot % 4),
+                        1.15f,
+                        -0.9f + 0.45f * (slot / 4));
+                    part.transform.localScale = new Vector3(
+                        0.28f, 0.28f, 0.28f);
+                    var renderer = part.GetComponent<Renderer>();
+                    if (renderer != null && darkMaterial != null)
+                        renderer.sharedMaterial = darkMaterial;
+                    upgradeParts.Add(part);
+                    slot++;
+                }
+        }
+
+        // The purchased level currently displayed for one authored
+        // category — 0 when nothing is installed.
+        public int UpgradeLevelShown(string category)
+        {
+            int level;
+            return category != null
+                && upgradeLevels.TryGetValue(category, out level)
+                ? level : 0;
+        }
+
+        // Equipped cosmetic ids bind one named visual each — honest
+        // presence: only what the profile actually equips ever shows.
+        public void SetCosmetics(IReadOnlyList<string> equippedIds)
+        {
+            EnsureBuilt();
+            var key = "";
+            if (equippedIds != null)
+                foreach (var id in equippedIds)
+                    key += (id ?? "") + "|";
+            if (key == cosmeticKey) return;
+            cosmeticKey = key;
+            cosmeticIds.Clear();
+            foreach (var part in cosmeticParts)
+                if (part != null) DestroyImmediate(part);
+            cosmeticParts.Clear();
+            var slot = 0;
+            if (equippedIds != null)
+                foreach (var id in equippedIds)
+                {
+                    if (string.IsNullOrEmpty(id)) continue;
+                    cosmeticIds.Add(id);
+                    var part = GameObject.CreatePrimitive(
+                        PrimitiveType.Sphere);
+                    var collider = part.GetComponent<Collider>();
+                    if (collider != null) DestroyImmediate(collider);
+                    part.name = "cosmetic." + id;
+                    part.transform.SetParent(leanPivot, false);
+                    part.transform.localPosition = new Vector3(
+                        0.55f * (slot % 3 - 1),
+                        1.45f + 0.15f * (slot / 3),
+                        -1.15f);
+                    part.transform.localScale = new Vector3(
+                        0.22f, 0.22f, 0.22f);
+                    var renderer = part.GetComponent<Renderer>();
+                    if (renderer != null && bodyMaterial != null)
+                        renderer.sharedMaterial = bodyMaterial;
+                    cosmeticParts.Add(part);
+                    slot++;
+                }
+        }
+
+        public bool CosmeticShown(string cosmeticId)
+        {
+            return cosmeticId != null && cosmeticIds.Contains(cosmeticId);
+        }
+
+        private static string IndicatorKey(
+            IReadOnlyDictionary<string, int> levels)
+        {
+            var key = "";
+            if (levels == null) return key;
+            var ordered = new List<string>(levels.Keys);
+            ordered.Sort(System.StringComparer.Ordinal);
+            foreach (var category in ordered)
+                key += category + "=" + levels[category] + ";";
+            return key;
+        }
+
         private void EnsureBuilt()
         {
             if (leanPivot != null) return;

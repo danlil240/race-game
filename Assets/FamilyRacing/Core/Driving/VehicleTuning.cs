@@ -104,6 +104,16 @@ namespace FamilyRacing.Core.Driving
             return !float.IsNaN(value) && !float.IsInfinity(value) && value > 0f;
         }
 
+        // Deep copy (incl. the optional physics block): upgrade
+        // resolution and resolver output own their instances so a
+        // resolved tune can never alias the catalog baseline.
+        public VehicleTuning Copy()
+        {
+            var copy = (VehicleTuning)MemberwiseClone();
+            copy.physics = physics != null ? physics.Copy() : null;
+            return copy;
+        }
+
         // Content convention shared with the LAN session layer: a vehicle
         // id's class is the segment before its first '-' (car-01 -> car).
         // Ids without a separator are their own class.

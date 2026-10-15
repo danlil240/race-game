@@ -351,6 +351,10 @@ namespace FamilyRacing
                     && state.soloRace.race != null
                     && state.soloRace.race.racers != null
                     && state.soloRace.race.racers.Count > 0;
+                // M5 Task 8: the racer views bind the selected profile's
+                // durable facts (installed upgrade parts, equipped
+                // cosmetics) for the seat it owns.
+                drivingWorld.SetLocalProfile(state.savedProfile);
                 drivingWorld.ApplyFrame(state, alpha);
                 // The LAN roster renders from the host-confirmed race
                 // state; the local racer's pose is the smoothed predicted

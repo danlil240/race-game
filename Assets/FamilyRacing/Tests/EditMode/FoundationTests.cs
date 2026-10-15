@@ -60,7 +60,7 @@ namespace FamilyRacing.Tests
             Assert.That(state.featureCoverage.tutorial, Is.EqualTo("notImplemented"));
             Assert.That(state.featureCoverage.drivingSimulation, Is.EqualTo("implemented"));
             Assert.That(state.featureCoverage.campaign, Is.EqualTo("notImplemented"));
-            Assert.That(state.featureCoverage.rewardsUpgradesCosmetics, Is.EqualTo("notImplemented"));
+            Assert.That(state.featureCoverage.rewardsUpgradesCosmetics, Is.EqualTo("implemented"));
             Assert.That(state.featureCoverage.lan, Is.EqualTo("notImplemented"));
             Assert.That(state.featureCoverage.content, Is.EqualTo("graybox"));
         }
@@ -836,6 +836,8 @@ namespace FamilyRacing.Tests
                 "race.start", "race.restart", "race.exit",
                 "solo.start",
                 "tutorial.start", "tutorial.replay", "tutorial.exit",
+                // M5 Task 8: the durable progression writes.
+                "upgrade.purchase", "cosmetic.equip",
                 "lan.host", "lan.discover", "lan.discovery.stop", "lan.join",
                 "lan.configure", "lan.vehicle", "lan.ready", "lan.start",
                 "lan.pause.request", "lan.pause.set", "lan.reconnect",

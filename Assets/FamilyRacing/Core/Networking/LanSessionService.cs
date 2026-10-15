@@ -2128,9 +2128,20 @@ namespace FamilyRacing.Core.Networking
             EventDefinition evt;
             if (!content.Events.TryGetValue(descriptor.eventId, out evt))
             { code = "notConfigured"; return false; }
-            if (!evt.AllowsVehicle(vehicleId)
-                || NetworkProtocol.VehicleClass(vehicleId) != descriptor.classId)
-            { code = "invalidVehicle"; return false; }
+            // The shared mode-eligibility verdict (M5 Task 8): LAN
+            // exposes every implemented vehicle in the configured event
+            // under the configured class — normalized racing never
+            // consults profile unlocks. The lobby's historical codes
+            // stay stable on top of the verdict's reason.
+            var decision = RaceModeRules.Evaluate(RaceMode.Lan, "",
+                descriptor.eventId, descriptor.classId, vehicleId,
+                null, content, null);
+            if (!decision.allowed)
+            {
+                code = decision.code == "unknownVehicle"
+                    ? "unknownVehicle" : "invalidVehicle";
+                return false;
+            }
             return true;
         }
 

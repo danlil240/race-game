@@ -129,8 +129,8 @@ namespace FamilyRacing.Core.Racing
             requestCopy.participantId = participantId;
 
             if (mode == RaceMode.TimeTrial)
-                return CreateTrial(requestCopy, content, sessionId, raceId,
-                    participantId, difficultyId, rulesFingerprint,
+                return CreateTrial(requestCopy, catalog, content, sessionId,
+                    raceId, participantId, difficultyId, rulesFingerprint,
                     catalog.Gadgets, out session, out error);
             return CreateRace(requestCopy, mode, catalog, content, sessionId,
                 raceId, participantId, difficulty, rulesFingerprint,
@@ -142,6 +142,9 @@ namespace FamilyRacing.Core.Racing
         // the human owns slot 0; AI seats 1..3 take remaining class-legal
         // vehicles in authored order (cycling when fewer than three other
         // legal vehicles exist). A finale's authored rival owns seat 1.
+        // Entry eligibility is the shared RaceModeRules.CanEnter verdict —
+        // the same answer the garage, discovery and raw commands consult —
+        // and the human seat carries the profile-resolved purchased tune.
         private static bool CreateRace(SoloRaceRequest request, RaceMode mode,
             GameplayCatalog catalog, DrivingContentCatalog content,
             string sessionId, string raceId, string participantId,
@@ -151,40 +154,19 @@ namespace FamilyRacing.Core.Racing
         {
             session = null;
             error = null;
-            EventDefinition evt;
-            if (string.IsNullOrEmpty(request.eventId)
-                || !content.Events.TryGetValue(request.eventId, out evt)
-                || evt == null)
-            { error = "unknownEvent"; return false; }
-            if (mode == RaceMode.Campaign && !IsCampaignEvent(catalog, evt.id))
-            { error = "eventNotCampaign"; return false; }
-            VehicleTuning tuning;
-            if (string.IsNullOrEmpty(request.vehicleId)
-                || !content.Vehicles.TryGetValue(request.vehicleId, out tuning)
-                || tuning == null)
-            { error = "unknownVehicle"; return false; }
-            // The spec's "owned vehicles" rule: a progression race seats
-            // the local human only in an unlock the profile holds — a
-            // missing profile cannot prove ownership and an unowned id
-            // refuses honestly. Time Trial normalizes to the starter
-            // vehicle and LAN validates its own admission, so neither
-            // reaches this check.
-            if (profile == null)
-            { error = "requiresSelectedProfile"; return false; }
-            if (profile.unlockedVehicles == null
-                || !profile.unlockedVehicles.Contains(request.vehicleId))
-            { error = "vehicleLocked"; return false; }
-            if (!evt.AllowsVehicle(request.vehicleId))
-            { error = "vehicleNotForEvent"; return false; }
-            var classId = !string.IsNullOrEmpty(evt.vehicleClass)
-                ? evt.vehicleClass
-                : VehicleTuning.ClassIdOf(request.vehicleId);
-            if (VehicleTuning.ClassIdOf(request.vehicleId) != classId)
+            var decision = RaceModeRules.CanEnter(mode, request.courseId,
+                request.eventId, request.vehicleId, profile, catalog);
+            if (!decision.allowed)
+            { error = decision.code; return false; }
+            EventDefinition evt = content.Events[decision.eventId];
+            var classId = decision.classId;
+            // The profile's durable upgrades resolve onto the catalog
+            // baseline for this seat — a null resolve is a content or
+            // tuning failure the race must not paper over.
+            var tuning = VehicleTuningResolver.Resolve(mode,
+                request.vehicleId, profile, catalog);
+            if (tuning == null)
             { error = "invalidVehicle"; return false; }
-            CourseDefinition course;
-            if (!content.Courses.TryGetValue(evt.courseId, out course)
-                || course == null)
-            { error = "unknownCourse"; return false; }
 
             // The authored rival of a class finale owns the first AI
             // seat under a stable, honest participant identity.
@@ -215,10 +197,13 @@ namespace FamilyRacing.Core.Racing
                 slot = 0,
                 participantId = participantId,
                 vehicleId = request.vehicleId,
-                controlSource = "local"
-                // requestedTuning stays null until Task 8's resolver
-                // supplies the purchased tune; the seat then keeps the
-                // same validation the baseline passes.
+                controlSource = "local",
+                // Task 8: the profile-resolved purchased tune — the
+                // local seam honors it after the same validation the
+                // baseline passes (vehicle id, full Validate, class,
+                // backend). AI seats keep the catalog baseline:
+                // purchases are never the field's.
+                requestedTuning = tuning
             });
             var alternate = 0;
             for (var slot = 1; slot < NetworkSettings.ParticipantCapacity; slot++)
@@ -251,64 +236,28 @@ namespace FamilyRacing.Core.Racing
         // Time Trial: the authored `time` event for the course+class (or
         // an explicitly named event), the normalized starter vehicle and
         // one DrivingSession — no AI fill, no items, no rewards. A lone
-        // session needs no spawn slots.
+        // session needs no spawn slots. Event/starter resolution is the
+        // shared RaceModeRules verdict so the garage's trial answer is
+        // the same one the session seats.
         private static bool CreateTrial(SoloRaceRequest request,
-            DrivingContentCatalog content, string sessionId, string raceId,
+            GameplayCatalog gameplay, DrivingContentCatalog content,
+            string sessionId, string raceId,
             string participantId, string difficultyId,
             string rulesFingerprint, GadgetDefinitionCatalog gadgets,
             out SoloRaceSession session, out string error)
         {
             session = null;
             error = null;
-            EventDefinition evt = null;
-            if (!string.IsNullOrEmpty(request.eventId))
-            {
-                if (!content.Events.TryGetValue(request.eventId, out evt)
-                    || evt == null)
-                { error = "unknownEvent"; return false; }
-            }
-            else
-            {
-                // The authored convention: one `time` event per course/
-                // class pair. Resolve it deterministically by ordinal id
-                // so a malformed catalog surfaces as ambiguity, never a
-                // random pick.
-                var matches = new List<EventDefinition>();
-                if (content.Events != null)
-                    foreach (var candidate in content.Events.Values)
-                        if (candidate != null
-                            && candidate.eventType == GameplayEventType.Time
-                            && candidate.courseId == request.courseId
-                            && candidate.vehicleClass == request.classId)
-                            matches.Add(candidate);
-                matches.Sort((a, b) => string.CompareOrdinal(a.id, b.id));
-                if (matches.Count == 0)
-                { error = "unknownEvent"; return false; }
-                evt = matches[0];
-            }
-            CourseDefinition course;
-            if (!content.Courses.TryGetValue(evt.courseId, out course)
-                || course == null)
-            { error = "unknownCourse"; return false; }
-            // Normalized starter: the event's first class-legal vehicle.
-            // An explicitly different requested vehicle rejects honestly
-            // rather than silently substituting.
-            var starterId = "";
-            var classId = !string.IsNullOrEmpty(evt.vehicleClass)
-                ? evt.vehicleClass : request.classId;
-            if (evt.vehicleIds != null)
-                foreach (var id in evt.vehicleIds)
-                    if (string.IsNullOrEmpty(classId)
-                        || VehicleTuning.ClassIdOf(id) == classId)
-                    { starterId = id; break; }
-            VehicleTuning tuning;
-            if (starterId == ""
-                || !content.Vehicles.TryGetValue(starterId, out tuning)
-                || tuning == null)
-            { error = "unknownVehicle"; return false; }
-            if (!string.IsNullOrEmpty(request.vehicleId)
-                && request.vehicleId != starterId)
-            { error = "invalidVehicle"; return false; }
+            var decision = RaceModeRules.Evaluate(RaceMode.TimeTrial,
+                request.courseId, request.eventId, request.classId,
+                request.vehicleId, null, content, gameplay);
+            if (!decision.allowed)
+            { error = decision.code; return false; }
+            var evt = content.Events[decision.eventId];
+            var classId = decision.classId;
+            CourseDefinition course = content.Courses[evt.courseId];
+            var starterId = decision.vehicleId;
+            var tuning = content.Vehicles[starterId];
 
             // The lone trial session owns its gadget world when the
             // course authors pickup sites — same authoritative rules,
@@ -325,20 +274,6 @@ namespace FamilyRacing.Core.Racing
                 raceId, participantId, difficultyId, rulesFingerprint,
                 content, null, world, new RaceMetricsAccumulator());
             return true;
-        }
-
-        private static bool IsCampaignEvent(GameplayCatalog catalog,
-            string eventId)
-        {
-            var campaign = catalog.Campaign;
-            if (campaign == null || eventId == null) return false;
-            if (campaign.regularEventIds != null
-                && campaign.regularEventIds.Contains(eventId)) return true;
-            if (campaign.finales != null)
-                foreach (var finale in campaign.finales)
-                    if (finale != null && finale.eventId == eventId)
-                        return true;
-            return false;
         }
 
         // The roster the owning simulation initializes with: the shared

@@ -35,6 +35,15 @@ namespace FamilyRacing
                 () => StartTutorial("motorcycle-01"), "tutorial.motorcycle");
             ApplyAvailability(learnCar, "tutorial.start");
             ApplyAvailability(learnMoto, "tutorial.start");
+            // The garage (M5 Task 8): per-vehicle upgrade rows with exact
+            // authored level/cost/effect, locked-tier marks and the
+            // equipped-cosmetic strip. Values refresh in place through
+            // UpdateIndicators — a purchase or profile swap must never
+            // need a full screen rebuild to be honest.
+            garagePanel = new VisualElement();
+            garagePanel.name = "garage.panel";
+            garagePanel.style.marginTop = 8;
+            root.Add(garagePanel);
             // Same keyboard legend the race HUD carries, shown before the
             // child picks a vehicle so the keys are never a surprise.
             var keys = AddLabel(root, T("hud.keys", state), 15, Deep);
@@ -50,6 +59,161 @@ namespace FamilyRacing
             warningLabel.name = "status.fontWarning";
             statusLabel = AddLabel(root, "", 20, Deep);
             statusLabel.name = "status.persistence";
+        }
+
+        // Refills the garage rows in place: coins, per-vehicle upgrade
+        // rows (level, next authored price, per-level effect, installed
+        // marker, buy button) and the owned-cosmetic strip. Every widget
+        // carries a stable semantic name so the surface is observable
+        // exactly like the rest of the shell. Rows are rebuilt in full
+        // on each refresh — the count is small and the result is always
+        // the live profile's truth.
+        private void RefreshGarage(FoundationState state)
+        {
+            if (garagePanel == null) return;
+            garagePanel.Clear();
+            var gameplay = app != null && app.Service != null
+                ? app.Service.GameplayContent : null;
+            var profile = state != null ? state.savedProfile : null;
+            var title = AddLabel(garagePanel, T("garage.title", state),
+                30, Deep);
+            title.name = "garage.title";
+            var coins = AddLabel(garagePanel,
+                T("garage.coins", state) + " "
+                    + (profile != null ? profile.coins : 0), 24, Coral);
+            coins.name = "garage.coins";
+            if (gameplay == null || gameplay.Economy == null
+                || gameplay.Driving == null || profile == null)
+                return;
+
+            var vehicleIds = new List<string>(gameplay.Driving.Vehicles.Keys);
+            vehicleIds.Sort(System.StringComparer.Ordinal);
+            var categories = gameplay.Economy.upgradeCategories
+                ?? new List<FamilyRacing.Core.Progression
+                    .UpgradeCategoryDefinition>();
+            foreach (var vehicleId in vehicleIds)
+            {
+                var unlocked = profile.unlockedVehicles != null
+                    && profile.unlockedVehicles.Contains(vehicleId);
+                var row = UpgradeRowFor(profile, vehicleId);
+                var header = Row(garagePanel);
+                header.name = "garage." + vehicleId;
+                var name = AddLabel(header, VehicleName(vehicleId, state),
+                    22, Deep);
+                name.name = "garage." + vehicleId + ".name";
+                var locked = AddLabel(header, T("garage.locked", state),
+                    20, Coral);
+                locked.name = "garage." + vehicleId + ".locked";
+                locked.style.display = unlocked
+                    ? DisplayStyle.None : DisplayStyle.Flex;
+                foreach (var category in categories)
+                {
+                    if (category == null || category.id == null) continue;
+                    var level = row != null
+                        ? System.Math.Max(0, row.LevelFor(category.id))
+                        : 0;
+                    var catRow = Row(garagePanel);
+                    catRow.name = "garage." + vehicleId + "."
+                        + category.id;
+                    var levelLabel = AddLabel(catRow,
+                        T("garage.level", state) + " " + level, 18, Deep);
+                    levelLabel.name = "garage." + vehicleId + "."
+                        + category.id + ".level";
+                    var maxed = level >= category.maxLevel;
+                    var costLabel = AddLabel(catRow, maxed
+                            ? T("garage.max", state)
+                            : T("garage.cost", state) + " "
+                                + category.prices[level], 18, Deep);
+                    costLabel.name = "garage." + vehicleId + "."
+                        + category.id + ".cost";
+                    var effectLabel = AddLabel(catRow, "+"
+                        + ((int)System.Math.Round(
+                            category.levelMultiplierStep * 100f))
+                            .ToString() + "%", 18, Seafoam);
+                    effectLabel.name = "garage." + vehicleId + "."
+                        + category.id + ".effect";
+                    var installed = new VisualElement();
+                    installed.name = "garage." + vehicleId + "."
+                        + category.id + ".installed";
+                    installed.style.width = 10 + level * 14;
+                    installed.style.height = 14;
+                    installed.style.marginLeft = 8;
+                    installed.style.backgroundColor =
+                        level > 0 ? Seafoam : Off;
+                    catRow.Add(installed);
+                    var next = level + 1;
+                    var buy = AddButton(catRow, T("garage.buy", state),
+                        Coral,
+                        () => PurchaseUpgrade(vehicleId, category.id, next),
+                        "garage." + vehicleId + "."
+                            + category.id + ".buy");
+                    buy.SetEnabled(unlocked && !maxed);
+                    ApplyAvailability(buy, "upgrade.purchase");
+                    if (!unlocked || maxed) buy.SetEnabled(false);
+                }
+            }
+
+            // Owned cosmetics strip: one row per owned id with its
+            // equip/unequip button — the same cosmetic.equip command
+            // agents drive.
+            var owned = profile.ownedCosmetics;
+            if (owned == null || owned.Count == 0) return;
+            var cosmeticsTitle = AddLabel(garagePanel,
+                T("garage.cosmetics", state), 22, Deep);
+            cosmeticsTitle.name = "garage.cosmetics";
+            foreach (var cosmeticId in owned)
+            {
+                if (string.IsNullOrEmpty(cosmeticId)) continue;
+                var equipped = profile.equippedCosmetics != null
+                    && profile.equippedCosmetics.Contains(cosmeticId);
+                var row2 = Row(garagePanel);
+                row2.name = "garage.cosmetics." + cosmeticId;
+                var label = AddLabel(row2, cosmeticId, 18, Deep);
+                label.name = "garage.cosmetics." + cosmeticId + ".label";
+                var id = cosmeticId;
+                var toggle = AddButton(row2,
+                    T(equipped ? "garage.unequip" : "garage.equip",
+                        state),
+                    equipped ? Deep : Ocean,
+                    () => EquipCosmetic(id, !equipped),
+                    "garage.cosmetics." + cosmeticId + ".equip");
+                ApplyAvailability(toggle, "cosmetic.equip");
+            }
+        }
+
+        private void PurchaseUpgrade(string vehicleId, string category,
+            int expectedLevel)
+        {
+            var p = new Dictionary<string, string>();
+            // Deterministic purchase identity per (vehicle, category,
+            // level): a repeated press for the same level replays the
+            // stored receipt idempotently instead of double-charging.
+            p["purchaseId"] = "garage-" + vehicleId + "-" + category
+                + "-l" + expectedLevel;
+            p["vehicleId"] = vehicleId;
+            p["category"] = category;
+            p["expectedLevel"] = expectedLevel.ToString(
+                System.Globalization.CultureInfo.InvariantCulture);
+            app.Dispatch("upgrade.purchase", p);
+        }
+
+        private void EquipCosmetic(string cosmeticId, bool equipped)
+        {
+            var p = new Dictionary<string, string>();
+            p["cosmeticId"] = cosmeticId;
+            p["equipped"] = equipped ? "true" : "false";
+            app.Dispatch("cosmetic.equip", p);
+        }
+
+        private static FamilyRacing.Core.Profiles.VehicleUpgrade
+            UpgradeRowFor(FamilyRacing.Core.Profiles.ProfileSave profile,
+                string vehicleId)
+        {
+            if (profile.vehicleUpgrades != null)
+                foreach (var row in profile.vehicleUpgrades)
+                    if (row != null && row.vehicleId == vehicleId)
+                        return row;
+            return null;
         }
 
         private void StartRace(string vehicleId)

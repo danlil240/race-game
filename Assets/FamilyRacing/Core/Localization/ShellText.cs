@@ -77,6 +77,17 @@ namespace FamilyRacing.Core.Localization
             ["hud.keys"] = new[] {
                 "Keys: ◀▶ steer · S/▼ brake · Space drift · Shift boost · E gadget · R recover · C camera · Esc pause",
                 "מקשים: ◀▶ היגוי · S/▼ בלימה · Space דריפט · Shift האצה · E גאדג'ט · R חזרה · C מצלמה · Esc השהיה" },
+            // --- garage (M5 Task 8): upgrades + cosmetics --------------
+            ["garage.title"] = new[] { "Garage", "מוסך" },
+            ["garage.coins"] = new[] { "Coins", "מטבעות" },
+            ["garage.level"] = new[] { "Level", "רמה" },
+            ["garage.cost"] = new[] { "Cost", "עלות" },
+            ["garage.max"] = new[] { "Max!", "מקסימום!" },
+            ["garage.buy"] = new[] { "Buy", "קניה" },
+            ["garage.locked"] = new[] { "Locked", "נעול" },
+            ["garage.cosmetics"] = new[] { "Cosmetics", "קוסמטיקה" },
+            ["garage.equip"] = new[] { "Equip", "התקנה" },
+            ["garage.unequip"] = new[] { "Unequip", "הסרה" },
             ["action.back"] = new[] { "Back", "חזרה" },
             ["action.save"] = new[] { "Save", "שמירה" },
             ["status.saved"] = new[] { "Settings saved.", "ההגדרות נשמרו." },

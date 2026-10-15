@@ -318,7 +318,7 @@ namespace FamilyRacing.Core.Foundation
         public string drivingOnboarding = "implemented";
         public string drivingSimulation = "implemented";
         public string campaign = "notImplemented";
-        public string rewardsUpgradesCosmetics = "notImplemented";
+        public string rewardsUpgradesCosmetics = "implemented";
         public string lan = "notImplemented";
         public string content = "graybox";
     }

@@ -65,6 +65,32 @@ namespace FamilyRacing.Core.Profiles
         public int handling;
         public int boost;
 
+        // The three persisted counters are exactly the upgrade category
+        // ids the economy authors: a category id that maps to no counter
+        // reads -1 and refuses SetLevel, so purchases can never store a
+        // level the schema has no field for.
+        public int LevelFor(string categoryId)
+        {
+            switch (categoryId)
+            {
+                case "acceleration": return acceleration;
+                case "handling": return handling;
+                case "boost": return boost;
+                default: return -1;
+            }
+        }
+
+        public bool SetLevel(string categoryId, int level)
+        {
+            switch (categoryId)
+            {
+                case "acceleration": acceleration = level; return true;
+                case "handling": handling = level; return true;
+                case "boost": boost = level; return true;
+                default: return false;
+            }
+        }
+
         public VehicleUpgrade Copy()
         {
             return (VehicleUpgrade)MemberwiseClone();

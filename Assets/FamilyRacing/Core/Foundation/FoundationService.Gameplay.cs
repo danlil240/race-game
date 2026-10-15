@@ -176,6 +176,98 @@ namespace FamilyRacing.Core.Foundation
             soloSimulationFor = null;
         }
 
+        // --- garage / progression-write commands (M5 Task 8) ------------
+
+        // The shared eligibility verdict UI pickers and tests consult:
+        // the same RaceModeRules.CanEnter the raw solo.start command and
+        // the LAN lobby enforce — bound to THIS service's live profile
+        // and gameplay catalog so UI and dispatch can never disagree.
+        public EntryDecision CanEnter(RaceMode mode, string courseId,
+            string eventId, string vehicleId)
+        {
+            return RaceModeRules.CanEnter(mode, courseId, eventId,
+                vehicleId, savedProfile, gameplayCatalog);
+        }
+
+        // The atomic upgrade purchase: the whole tuple (debit, level,
+        // receipt) lands inside one profile save through UpgradeService.
+        // The unresolved-reward gate fences purchases exactly like
+        // progression race starts — a committed buy must never
+        // interleave with an uncommitted result transaction.
+        private CommandResult UpgradePurchase(GameCommand command)
+        {
+            if (gameplayCatalog == null || gameplayCatalog.IsLegacy
+                || gameplayCatalog.Driving == null
+                || gameplayCatalog.Economy == null)
+                return Result(command, CommandResult.Rejected,
+                    "contentUnavailable");
+            if (activeSlot < 0 || savedProfile == null)
+                return Result(command, CommandResult.Rejected,
+                    "requiresSelectedProfile");
+            if (!WritableSelected())
+                return Result(command, CommandResult.Rejected,
+                    "readOnlyProfile");
+            if (unresolvedResult != null)
+                return Result(command, CommandResult.Rejected,
+                    "rewardUnresolved");
+            var outcome = UpgradeService.Purchase(
+                command.Parameters["purchaseId"],
+                command.Parameters["vehicleId"],
+                command.Parameters["category"],
+                ParseInt(command.Parameters["expectedLevel"]),
+                savedProfile, store, gameplayCatalog);
+            if (outcome.status == UpgradeService.StatusFailed)
+            {
+                persistenceStatus = "saveFailed";
+                return Result(command, CommandResult.Failed, outcome.code);
+            }
+            if (outcome.status == UpgradeService.StatusRejected)
+                return Result(command, CommandResult.Rejected, outcome.code);
+            // Applied or idempotently replayed: either way the durable
+            // facts are committed. A fresh commit refreshes the slot
+            // and draft caches so they can never read stale progression.
+            if (outcome.status == UpgradeService.StatusApplied)
+            {
+                persistenceStatus = "saved";
+                RefreshProgressionCaches();
+            }
+            return Result(command, CommandResult.Applied, "");
+        }
+
+        // Cosmetic equipment: ownership-checked, same-slot replacing,
+        // committed through the same one-atomic-save contract. Not a
+        // purchase — cosmetics are earned — so no receipt or gate.
+        private CommandResult CosmeticEquip(GameCommand command)
+        {
+            if (gameplayCatalog == null || gameplayCatalog.IsLegacy
+                || gameplayCatalog.Driving == null
+                || gameplayCatalog.Economy == null)
+                return Result(command, CommandResult.Rejected,
+                    "contentUnavailable");
+            if (activeSlot < 0 || savedProfile == null)
+                return Result(command, CommandResult.Rejected,
+                    "requiresSelectedProfile");
+            if (!WritableSelected())
+                return Result(command, CommandResult.Rejected,
+                    "readOnlyProfile");
+            var outcome = UpgradeService.SetCosmeticEquipped(savedProfile,
+                command.Parameters["cosmeticId"],
+                IsTrue(command.Parameters["equipped"]), store);
+            if (outcome.status == UpgradeService.StatusFailed)
+            {
+                persistenceStatus = "saveFailed";
+                return Result(command, CommandResult.Failed, outcome.code);
+            }
+            if (outcome.status == UpgradeService.StatusRejected)
+                return Result(command, CommandResult.Rejected, outcome.code);
+            if (outcome.status == UpgradeService.StatusApplied)
+            {
+                persistenceStatus = "saved";
+                RefreshProgressionCaches();
+            }
+            return Result(command, CommandResult.Applied, "");
+        }
+
         // --- local mode commands ----------------------------------------
 
         // solo.start validates the whole selection through

@@ -173,6 +173,18 @@ namespace FamilyRacing.Core.Foundation
             Schema("tutorial.start", Param("vehicleId", "string", null)),
             Schema("tutorial.replay"),
             Schema("tutorial.exit"),
+            // M5 Task 8 durable progression writes: the atomic upgrade
+            // purchase (receipt-keyed, idempotent) and cosmetic
+            // equipment. Both refuse during a race or LAN session and
+            // honor the unresolved-reward gate.
+            Schema("upgrade.purchase",
+                Param("purchaseId", "string", null),
+                Param("vehicleId", "string", null),
+                Param("category", "string", null),
+                Param("expectedLevel", "integer", null)),
+            Schema("cosmetic.equip",
+                Param("cosmeticId", "string", null),
+                Param("equipped", "boolean", Bools)),
             // LAN session surface (Core/Networking): asynchronous commands
             // return accepted and complete through DrainNetworkOutcomes +
             // CompleteNetworkCommand on a later boundary.
@@ -657,12 +669,16 @@ namespace FamilyRacing.Core.Foundation
         {
             try
             {
-                // Entering a LAN session while a solo race runs is refused:
-                // hosting/joining/reconnecting would tear down shared state
-                // the running race still claims. Session-internal lan.* and
-                // lan.discover keep their own availability answers.
+                // Entering a LAN session or writing durable progression
+                // while a solo race runs is refused: session entry would
+                // tear down shared state the running race still claims,
+                // and a purchase/equip mutating the profile mid-race
+                // could interleave with the bound reward context.
+                // Session-internal lan.* and lan.discover keep their
+                // own availability answers.
                 if ((driving != null || soloRace != null)
-                    && LanEntryBlockedDuringRace(command.Action))
+                    && (LanEntryBlockedDuringRace(command.Action)
+                        || ProgressionWriteBlockedDuringRace(command.Action)))
                     return Result(command, CommandResult.Rejected, "raceActive");
                 // LAN commands route to the session service; pause.toggle
                 // is a shared toggle on the host and a pause request on a
@@ -695,6 +711,8 @@ namespace FamilyRacing.Core.Foundation
                     case "tutorial.start": return TutorialStart(command);
                     case "tutorial.replay": return TutorialReplay(command);
                     case "tutorial.exit": return TutorialExit(command);
+                    case "upgrade.purchase": return UpgradePurchase(command);
+                    case "cosmetic.equip": return CosmeticEquip(command);
                     default: return Result(command, CommandResult.Rejected, "unknownAction");
                 }
             }
@@ -722,6 +740,8 @@ namespace FamilyRacing.Core.Foundation
                 case "tutorial.start":
                 case "tutorial.replay":
                 case "tutorial.exit":
+                case "upgrade.purchase":
+                case "cosmetic.equip":
                     return true;
                 default:
                     return false;
@@ -739,6 +759,22 @@ namespace FamilyRacing.Core.Foundation
                 case "lan.host":
                 case "lan.join":
                 case "lan.reconnect":
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        // Durable progression writes fenced off a running solo race: a
+        // committed purchase/equip mid-race would interleave with the
+        // bound reward context's profile view. They apply again as soon
+        // as the race ends.
+        private static bool ProgressionWriteBlockedDuringRace(string action)
+        {
+            switch (action)
+            {
+                case "upgrade.purchase":
+                case "cosmetic.equip":
                     return true;
                 default:
                     return false;
@@ -1572,6 +1608,29 @@ namespace FamilyRacing.Core.Foundation
                     {
                         available = false;
                         reason = "noActiveTutorial";
+                    }
+                    break;
+                case "upgrade.purchase":
+                case "cosmetic.equip":
+                    // Content first, exactly like solo.start: a missing
+                    // or legacy catalog reports honest unavailability
+                    // before any profile check.
+                    if (gameplayCatalog == null || gameplayCatalog.IsLegacy
+                        || gameplayCatalog.Driving == null
+                        || gameplayCatalog.Economy == null)
+                    {
+                        available = false;
+                        reason = "contentUnavailable";
+                    }
+                    else if (activeSlot < 0)
+                    {
+                        available = false;
+                        reason = "requiresSelectedProfile";
+                    }
+                    else if (driving != null || soloRace != null)
+                    {
+                        available = false;
+                        reason = "raceActive";
                     }
                     break;
                 case "ui.navigate":

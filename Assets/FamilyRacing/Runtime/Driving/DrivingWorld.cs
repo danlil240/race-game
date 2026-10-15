@@ -68,6 +68,15 @@ namespace FamilyRacing
         private GameObject vehicleView;
         private VehiclePresentation presentation;
         private string shownVehicleId = "";
+        // M5 Task 8: the selected profile the presentation binds durable
+        // facts from — purchased upgrade levels and equipped cosmetics.
+        // FoundationApp re-seats it every frame; views rebind only when
+        // the facts actually change.
+        private Core.Profiles.ProfileSave localProfile;
+        private readonly Dictionary<string, int> upgradeLevelsScratch =
+            new Dictionary<string, int>(System.StringComparer.Ordinal);
+        private static readonly IReadOnlyDictionary<string, int>
+            NoUpgradeLevels = new Dictionary<string, int>(0);
 
         // One participant-keyed vehicle view for a network race: same
         // construction as the solo visual (a VehiclePresentation on a
@@ -210,6 +219,56 @@ namespace FamilyRacing
             return participantId != null
                 && racerViews.TryGetValue(participantId, out view)
                 && view != null ? view.presentation : null;
+        }
+
+        // Binds the selected profile whose durable progression facts the
+        // racer views present: upgrade part indicators and equipped
+        // cosmetics show on the seat the profile owns — every other
+        // seat reports the honest empty set (purchases are never the
+        // field's). The reference is read-only; snapshots hand a fresh
+        // deep copy each frame anyway.
+        public void SetLocalProfile(Core.Profiles.ProfileSave profile)
+        {
+            localProfile = profile;
+        }
+
+        // The profile's purchased levels for one vehicle, or the shared
+        // empty map — AI and remote seats never inherit the wallet.
+        private IReadOnlyDictionary<string, int> LevelsFor(string vehicleId)
+        {
+            upgradeLevelsScratch.Clear();
+            if (localProfile != null
+                && localProfile.vehicleUpgrades != null)
+                foreach (var row in localProfile.vehicleUpgrades)
+                    if (row != null && row.vehicleId == vehicleId)
+                    {
+                        if (row.acceleration > 0)
+                            upgradeLevelsScratch["acceleration"]
+                                = row.acceleration;
+                        if (row.handling > 0)
+                            upgradeLevelsScratch["handling"] = row.handling;
+                        if (row.boost > 0)
+                            upgradeLevelsScratch["boost"] = row.boost;
+                    }
+            return upgradeLevelsScratch.Count > 0
+                ? upgradeLevelsScratch : NoUpgradeLevels;
+        }
+
+        // The equipped cosmetic ids the local seat presents, or an
+        // honest empty set for any other seat.
+        private System.Collections.Generic.IReadOnlyList<string>
+            CosmeticsFor(string participantId)
+        {
+            return localProfile != null
+                && participantId != null
+                && participantId == localProfile.id
+                ? localProfile.equippedCosmetics : null;
+        }
+
+        private bool IsLocalSeat(string participantId)
+        {
+            return localProfile != null && participantId != null
+                && participantId == localProfile.id;
         }
 
         // FoundationApp calls this once a DrivingCamera is bound/active;
@@ -562,6 +621,14 @@ namespace FamilyRacing
                 }
                 view.cosmeticsKey = cosmeticsKey;
             }
+            // Durable-fact indicators (Task 8): the seat the selected
+            // profile owns shows its purchased levels and equipped
+            // cosmetics; every other seat binds the honest empty set.
+            var localSeat = IsLocalSeat(racer.participantId);
+            view.presentation.SetUpgradeIndicators(localSeat
+                ? LevelsFor(racer.vehicleId) : NoUpgradeLevels);
+            view.presentation.SetCosmetics(
+                CosmeticsFor(racer.participantId));
             var wasFinished = view.wasFinished;
             view.wasFinished = racer.finished;
             if (racer.finished && !wasFinished)
@@ -640,6 +707,14 @@ namespace FamilyRacing
                 }
                 soloCosmeticsKey = cosmeticsKey;
             }
+            // The solo vehicle IS the selected profile's seat: same
+            // durable-fact indicators the race views get.
+            var seatProfile = localProfile ?? profile;
+            presentation.SetUpgradeIndicators(
+                seatProfile != null ? LevelsFor(vehicleId)
+                    : NoUpgradeLevels);
+            presentation.SetCosmetics(
+                seatProfile != null ? seatProfile.equippedCosmetics : null);
             presentation.ApplyPose(motor, steering, visualAlpha);
             soloFact = new RacerPresentationState
             {
