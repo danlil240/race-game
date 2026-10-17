@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using FamilyRacing.Core.Automation;
 using FamilyRacing.Core.Foundation;
 using FamilyRacing.Core.Networking;
 using FamilyRacing.Core.Racing;
@@ -27,6 +28,17 @@ namespace FamilyRacing
         private Label lanActionLabel;
         private Label lanPauseLabel;
 
+        // Manual-join feedback (PCQA-007): shell-side validation state.
+        // The error line and the offending-field highlight update in
+        // place so the typed address/port never resets to a rebuild, and
+        // network.lastError stays reserved for real service verdicts.
+        private TextField lanAddressField;
+        private TextField lanPortField;
+        private Label lanJoinErrorLabel;
+        private string lanJoinErrorKey = "";
+        private string lanJoinErrorCode = "";
+        private string lanJoinErrorField = "";
+
         // Rebuild signature for LAN screens: the rendered roster,
         // configuration, discovery and delivery rows are part of the key
         // so a peer joining, readying, disconnecting or a result delivery
@@ -45,7 +57,8 @@ namespace FamilyRacing
             foreach (var p in net.participants)
                 key += "|" + p.slot + (p.participantId ?? "") + p.occupied
                     + p.connected + p.ready + (p.controlSource ?? "")
-                    + (p.vehicleId ?? "") + p.ownershipEpoch;
+                    + (p.vehicleId ?? "") + (p.avatar ?? "")
+                    + p.ownershipEpoch;
             foreach (var h in net.discovered)
                 key += "|" + (h.address ?? "") + h.port;
             foreach (var r in net.results)
@@ -166,8 +179,14 @@ namespace FamilyRacing
                     address.name = "lan.discovered." + index + ".address";
                     address.languageDirection = LanguageDirection.LTR;
                     var joinFound = AddButton(card, T("lan.join", state), Seafoam,
-                        () => app.Dispatch("lan.join",
-                            JoinParams(entry.address, entry.port)),
+                        () =>
+                        {
+                            // A valid discovered join clears any stale
+                            // manual-join feedback before dispatching.
+                            ClearLanJoinFeedback(state);
+                            app.Dispatch("lan.join",
+                                JoinParams(entry.address, entry.port));
+                        },
                         "lan.discovered." + index + ".join");
                     joinFound.style.minHeight = 48;
                     joinFound.style.fontSize = 20;
@@ -187,25 +206,34 @@ namespace FamilyRacing
             var manual = Row(root);
             manual.name = "lan.manual";
             AddLabel(manual, T("lan.address", state), 20, Deep);
-            var addressField = new TextField { value = "" };
-            addressField.name = "lan.join.address";
-            addressField.languageDirection = LanguageDirection.LTR;
-            addressField.style.minWidth = 220;
-            addressField.style.minHeight = 44;
-            manual.Add(addressField);
+            lanAddressField = new TextField { value = "" };
+            lanAddressField.name = "lan.join.address";
+            lanAddressField.languageDirection = LanguageDirection.LTR;
+            lanAddressField.style.minWidth = 220;
+            lanAddressField.style.minHeight = 44;
+            // Editing either field clears the inline error in place.
+            lanAddressField.RegisterValueChangedCallback(
+                _ => ClearLanJoinFeedback(state));
+            manual.Add(lanAddressField);
             AddLabel(manual, T("lan.port", state), 20, Deep);
-            var portField = new TextField { value = NetworkSettings.DefaultGameplayPort
+            lanPortField = new TextField { value = NetworkSettings.DefaultGameplayPort
                 .ToString(System.Globalization.CultureInfo.InvariantCulture) };
-            portField.name = "lan.join.port";
-            portField.languageDirection = LanguageDirection.LTR;
-            portField.style.minWidth = 110;
-            portField.style.minHeight = 44;
-            manual.Add(portField);
+            lanPortField.name = "lan.join.port";
+            lanPortField.languageDirection = LanguageDirection.LTR;
+            lanPortField.style.minWidth = 110;
+            lanPortField.style.minHeight = 44;
+            lanPortField.RegisterValueChangedCallback(
+                _ => ClearLanJoinFeedback(state));
+            manual.Add(lanPortField);
             var join = AddButton(manual, T("lan.join", state), Seafoam,
-                () => app.Dispatch("lan.join",
-                    JoinParams(addressField.value, ParsePort(portField.value))),
-                "lan.join");
+                () => TryManualJoin(state), "lan.join");
             ApplyAvailability(join, "lan.join");
+            // The inline error line: always present so a click can paint
+            // it without a rebuild; build-time state keeps it honest
+            // across unrelated signature rebuilds.
+            lanJoinErrorLabel = AddLabel(root, "", 18, Coral);
+            lanJoinErrorLabel.name = "lan.join.error";
+            PaintLanJoinError(state);
 
             var actions = Row(root);
             var leave = AddButton(actions, T("lan.leave", state), Deep,
@@ -221,13 +249,101 @@ namespace FamilyRacing
                 : (discovering ? T("lan.discovering", state) : ""));
         }
 
-        private static int ParsePort(string value)
+        // Manual-join validation (PCQA-007): input problems are answered
+        // by the shell itself — a readable line under the fields plus a
+        // highlight on the offender — without ever dispatching; a
+        // synchronous service rejection surfaces the same honest reason
+        // code the agent channel got. Neither path fakes network.lastError.
+        private void TryManualJoin(FoundationState state)
         {
+            var address = lanAddressField != null && lanAddressField.value != null
+                ? lanAddressField.value.Trim() : "";
+            var portText = lanPortField != null && lanPortField.value != null
+                ? lanPortField.value.Trim() : "";
+            if (address.Length == 0)
+            {
+                FailManualJoin(state, "lan.join.error.address", "address");
+                return;
+            }
+            if (Uri.CheckHostName(address) == UriHostNameType.Unknown)
+            {
+                FailManualJoin(state, "lan.join.error.addressBad", "address");
+                return;
+            }
             int port;
-            return int.TryParse(value,
-                System.Globalization.NumberStyles.Integer,
-                System.Globalization.CultureInfo.InvariantCulture, out port)
-                ? port : 0;
+            if (!int.TryParse(portText,
+                    System.Globalization.NumberStyles.Integer,
+                    System.Globalization.CultureInfo.InvariantCulture, out port)
+                || port < 0 || port > 65535)
+            {
+                FailManualJoin(state, "lan.join.error.port", "port");
+                return;
+            }
+            var result = app.Dispatch("lan.join", JoinParams(address, port));
+            if (result == null
+                || result.status == CommandResult.Rejected
+                || result.status == CommandResult.Failed)
+            {
+                // ReasonText keeps an unlisted code honest instead of
+                // hiding it; no field highlight — the service owns this
+                // verdict, not the input shape.
+                lanJoinErrorKey = "";
+                lanJoinErrorCode = result != null
+                    && !string.IsNullOrEmpty(result.code)
+                    ? result.code : "rejected";
+                lanJoinErrorField = "";
+                PaintLanJoinError(state);
+                return;
+            }
+            ClearLanJoinFeedback(state);
+        }
+
+        private void FailManualJoin(FoundationState state, string key,
+            string field)
+        {
+            lanJoinErrorKey = key;
+            lanJoinErrorCode = "";
+            lanJoinErrorField = field;
+            PaintLanJoinError(state);
+        }
+
+        private void ClearLanJoinFeedback(FoundationState state)
+        {
+            if (lanJoinErrorKey.Length == 0 && lanJoinErrorCode.Length == 0
+                && lanJoinErrorField.Length == 0) return;
+            lanJoinErrorKey = lanJoinErrorCode = lanJoinErrorField = "";
+            PaintLanJoinError(state);
+        }
+
+        // In-place paint: the message and highlight land on the live
+        // widgets, so typing never loses pointer capture and the fields
+        // keep their contents. BuildLanBrowser calls the same paint at
+        // build time so a rebuild for an unrelated signature change
+        // re-renders the feedback honestly.
+        private void PaintLanJoinError(FoundationState state)
+        {
+            if (lanJoinErrorLabel != null)
+                lanJoinErrorLabel.text = lanJoinErrorKey.Length > 0
+                    ? T(lanJoinErrorKey, state)
+                    : ReasonText(lanJoinErrorCode, state);
+            MarkJoinField(lanAddressField, lanJoinErrorField == "address");
+            MarkJoinField(lanPortField, lanJoinErrorField == "port");
+        }
+
+        private static void MarkJoinField(TextField field, bool invalid)
+        {
+            if (field == null) return;
+            field.EnableInClassList("lan-invalid", invalid);
+            var border = invalid ? (StyleColor)Coral
+                : new StyleColor(StyleKeyword.Null);
+            field.style.borderTopColor = field.style.borderBottomColor =
+                field.style.borderLeftColor = field.style.borderRightColor =
+                    border;
+            var width = invalid ? (StyleFloat)2f
+                : new StyleFloat(StyleKeyword.Null);
+            field.style.borderTopWidth = field.style.borderBottomWidth =
+                field.style.borderLeftWidth = field.style.borderRightWidth =
+                    width;
         }
 
         private static Dictionary<string, string> PortParam(int port)
@@ -341,11 +457,13 @@ namespace FamilyRacing
                             ? " " + T("lan.you", state) : "";
                         if (p.slot == 0 && isHost)
                             tags += " · " + T("lan.hostTag", state);
+                        // PCQA-008: the primary label is the participant's
+                        // published identity, never the raw UUID — the id
+                        // stays on the tooltip for diagnostics.
                         var name = AddLabel(card,
-                            "\u200E" + (p.participantId ?? "") + tags, 20, Deep);
+                            ParticipantName(p, state) + tags, 20, Deep);
                         name.name = "lan.slot." + p.slot + ".name";
-                        // Participant ids stay LTR inside RTL layouts.
-                        name.languageDirection = LanguageDirection.LTR;
+                        name.tooltip = p.participantId ?? "";
                         var statusText = p.controlSource == "ai"
                             ? T("lan.ai", state)
                             : (!p.connected
@@ -408,6 +526,26 @@ namespace FamilyRacing
             var result = new Dictionary<string, string>();
             result["ready"] = ready ? "true" : "false";
             return result;
+        }
+
+        // Readable participant identity (PCQA-008): the wire already
+        // carries each participant's profile animal, so the roster names
+        // people through the same profile.animal.* keys the profile
+        // cards use. An empty or unknown avatar falls back to a
+        // localized slot-based Player N instead of leaking the UUID.
+        private string ParticipantName(ParticipantState p,
+            FoundationState state)
+        {
+            if (p != null && !string.IsNullOrEmpty(p.avatar))
+            {
+                try { return T("profile.animal." + p.avatar, state); }
+                catch (KeyNotFoundException) { }
+                catch (ArgumentException) { }
+            }
+            var slot = p != null ? p.slot : -1;
+            return T("lan.player", state) + " "
+                + (slot + 1).ToString(
+                    System.Globalization.CultureInfo.InvariantCulture);
         }
 
         private string EventName(string eventId, FoundationState state)

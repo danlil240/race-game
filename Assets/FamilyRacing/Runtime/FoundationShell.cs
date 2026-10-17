@@ -161,6 +161,13 @@ namespace FamilyRacing
             tutorialIconLabel = tutorialCueLabel = tutorialProgressLabel = null;
             lanTimeLabel = lanStandingsLabel = lanPhaseLabel = null;
             lanActionLabel = lanPauseLabel = null;
+            lanAddressField = lanPortField = null;
+            lanJoinErrorLabel = null;
+            // Manual-join feedback belongs to the browser: leaving the
+            // screen retires it so a later visit never resurrects a
+            // stale error line.
+            if (state.screen != "lan-browser")
+                lanJoinErrorKey = lanJoinErrorCode = lanJoinErrorField = "";
             saveButton = null;
             musicSlider = effectsSlider = voiceSlider = null;
             chaseButton = overheadButton = shakeButton = langEnButton = langHeButton = null;

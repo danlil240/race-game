@@ -324,6 +324,17 @@ namespace FamilyRacing.Tests
                 countdownTicks = 8,
                 vehicleIds = new List<string> { "car-01" }
             };
+            // A shipped-catalog id: exercises the lan.event.* localization
+            // path (PCQA-008) next to the fixture-only ids that still
+            // fall back to their raw id honestly.
+            var shipped = new EventDefinition
+            {
+                id = "lan-car-01",
+                courseId = "course-lan",
+                laps = 1,
+                countdownTicks = 8,
+                vehicleIds = new List<string> { "car-01" }
+            };
             // A solo-only event: race.start needs real solo content so the
             // raceActive LAN-entry gate is exercised by a live race, not
             // by a start that could never apply.
@@ -337,7 +348,7 @@ namespace FamilyRacing.Tests
             };
             return DrivingContentCatalog.Create("lan-content-1",
                 new[] { VehicleTuning.Car01(), VehicleTuning.Motorcycle01() },
-                new[] { course }, new[] { mixed, extra, solo });
+                new[] { course }, new[] { mixed, extra, shipped, solo });
         }
 
         // Async join/reconnect completions land on the next boundary the
@@ -538,6 +549,139 @@ namespace FamilyRacing.Tests
             Assert.That(state.screen, Is.EqualTo("lan-race"));
         }
 
+        // --- PCQA-007/008 regression tests ----------------------------------
+
+        [UnityTest]
+        public IEnumerator ManualJoinValidationShowsInlineErrorWithoutDialing()
+        {
+            CreateProfileAndNavigate("lan-browser");
+            Refresh();
+            yield return WaitForWidget<Button>("lan.join");
+            var address = Widget<TextField>("lan.join.address");
+            var port = Widget<TextField>("lan.join.port");
+            var error = Widget<Label>("lan.join.error");
+            Assert.That(error, Is.Not.Null,
+                "the manual join must own an inline error line");
+
+            // Empty address: no dispatch, no dial, the field is flagged.
+            address.value = "";
+            Press(Widget<Button>("lan.join"));
+            Assert.That(link.StartClientCalls, Is.EqualTo(0),
+                "an empty address must never reach lan.join");
+            Assert.That(error.text,
+                Is.EqualTo("Type the host address first."));
+            Assert.That(address.ClassListContains("lan-invalid"), Is.True,
+                "the offending field is highlighted");
+            Assert.That(port.ClassListContains("lan-invalid"), Is.False);
+
+            // Malformed address: same refusal with its own message.
+            address.value = "not a host";
+            Press(Widget<Button>("lan.join"));
+            Assert.That(link.StartClientCalls, Is.EqualTo(0));
+            Assert.That(error.text,
+                Is.EqualTo("That address does not look right."));
+
+            // Non-numeric, then out-of-range port: the highlight moves.
+            address.value = "10.9.8.7";
+            port.value = "abc";
+            Press(Widget<Button>("lan.join"));
+            Assert.That(link.StartClientCalls, Is.EqualTo(0));
+            Assert.That(error.text, Is.EqualTo(
+                "The port must be a number between 0 and 65535."));
+            Assert.That(port.ClassListContains("lan-invalid"), Is.True);
+            Assert.That(address.ClassListContains("lan-invalid"), Is.False);
+            port.value = "70000";
+            Press(Widget<Button>("lan.join"));
+            Assert.That(link.StartClientCalls, Is.EqualTo(0));
+            Assert.That(error.text, Is.EqualTo(
+                "The port must be a number between 0 and 65535."));
+
+            // Editing clears the feedback; a valid pair dials honestly.
+            port.value = "48888";
+            Assert.That(error.text, Is.EqualTo(""),
+                "editing a field must clear the inline error");
+            Press(Widget<Button>("lan.join"));
+            Assert.That(link.StartClientCalls, Is.EqualTo(1));
+            Assert.That(link.LastClientAddress, Is.EqualTo("10.9.8.7"));
+            Assert.That(Snapshot().network.phase, Is.EqualTo("connecting"));
+        }
+
+        [UnityTest]
+        public IEnumerator ManualJoinValidationErrorIsLocalized()
+        {
+            CreateProfileAndNavigate("lan-browser");
+            var draft = Snapshot().draftProfile;
+            var updated = app.Dispatch("settings.update", Params(
+                ("language", "he"), ("camera", draft.camera),
+                ("reducedCameraShake", draft.reducedCameraShake ? "true" : "false"),
+                ("musicVolume", "0.8"), ("effectsVolume", "0.8"),
+                ("voiceVolume", "0.8")));
+            Assert.That(updated.status, Is.EqualTo("applied"));
+            app.Dispatch("settings.save", Params());
+            Refresh();
+            yield return WaitForWidget<Button>("lan.join");
+            var error = Widget<Label>("lan.join.error");
+            Press(Widget<Button>("lan.join"));
+            Assert.That(link.StartClientCalls, Is.EqualTo(0));
+            Assert.That(error.text,
+                Is.EqualTo("כותבים קודם את כתובת המארח."));
+        }
+
+        [UnityTest]
+        public IEnumerator LobbyRendersAnimalNamesAndLocalizedCourses()
+        {
+            yield return HostLobby();
+            var state = Snapshot();
+            var name = Widget<Label>("lan.slot.0.name");
+            Assert.That(name, Is.Not.Null);
+            Assert.That(name.text, Does.Contain("Fox"),
+                "the roster names participants by their published animal");
+            Assert.That(name.text, Does.Not.Contain(
+                state.network.localParticipantId),
+                "the raw participant id is never the primary label");
+            Assert.That(name.tooltip,
+                Is.EqualTo(state.network.localParticipantId),
+                "the id stays reachable for diagnostics");
+            // A shipped LAN event resolves its lan.event.* name; a
+            // fixture-only id still falls back to the raw id honestly.
+            var shipped = Widget<Button>("lan.course.lan-car-01");
+            Assert.That(shipped, Is.Not.Null);
+            Assert.That(shipped.text, Is.EqualTo("Car course"));
+            var unknown = Widget<Button>("lan.course.lan-mixed");
+            Assert.That(unknown.text, Is.EqualTo("lan-mixed"));
+        }
+
+        [UnityTest]
+        public IEnumerator ClientLobbyNamesRemoteParticipantsByAnimal()
+        {
+            yield return JoinAsClient();
+            // A roster broadcast naming a panda host on slot 0: the card
+            // renders the animal, never the host's wire id.
+            lan.OnLinkMessage(3, NetworkProtocol.Encode(
+                NetworkProtocol.MsgSessionState,
+                "sid", "s-test", "ph", "lobby", "ev", "lan-mixed",
+                "cl", "car", "pd", "0", "pr", "", "occ", "2", "jn", "0",
+                "p0", string.Join(",", new[]
+                {
+                    "host-pid", "0", "panda", "1", "car-01", "1", "0",
+                    "remote", "1"
+                }),
+                "p1", string.Join(",", new[]
+                {
+                    Snapshot().savedProfile.id, "1", "fox", "0", "car-01",
+                    "1", "0", "remote", "1"
+                }),
+                "p2", "", "p3", ""));
+            DrainOutcomes();
+            Refresh();
+            yield return WaitForWidget<Button>("lan.ready");
+            var hostCard = Widget<Label>("lan.slot.0.name");
+            Assert.That(hostCard.text, Does.Contain("Panda"));
+            Assert.That(hostCard.tooltip, Is.EqualTo("host-pid"));
+            var selfCard = Widget<Label>("lan.slot.1.name");
+            Assert.That(selfCard.text, Does.Contain("Fox"));
+        }
+
         [UnityTest]
         public IEnumerator LobbyLeaveReturnsToBrowser()
         {
@@ -658,6 +802,12 @@ namespace FamilyRacing.Tests
             var configure = Widget<Button>("lan.course.lan-mixed");
             Assert.That(configure, Is.Not.Null);
             Assert.That(configure.enabledSelf, Is.False);
+            // PCQA-008: the join-accept seat (slot 1) names the local
+            // animal rather than the raw participant id.
+            Assert.That(Widget<Label>("lan.slot.1.name").text,
+                Does.Contain("Fox"));
+            Assert.That(Widget<Label>("lan.slot.1.name").tooltip,
+                Is.EqualTo(state.network.localParticipantId));
             // Ready remains a real client control.
             var ready = Widget<Button>("lan.ready");
             Assert.That(ready.enabledSelf, Is.True);
@@ -916,10 +1066,13 @@ namespace FamilyRacing.Tests
             yield return WaitForWidget<Button>("lan.ready");
             Assert.That(Widget<Button>("lan.ready").text, Is.EqualTo("מוכנים!"));
             Assert.That(Widget<Button>("lan.leave").text, Is.EqualTo("עזיבה"));
-            // Participant identity stays LTR inside the RTL roster.
+            // PCQA-008: the roster names the participant by their
+            // published animal — localized Hebrew, following the shell's
+            // RTL direction — while the wire id stays on the tooltip.
             var name = Widget<Label>("lan.slot.0.name");
-            Assert.That(name.languageDirection,
-                Is.EqualTo(LanguageDirection.LTR));
+            Assert.That(name.text, Does.Contain("שועל"));
+            Assert.That(name.tooltip,
+                Is.EqualTo(Snapshot().network.localParticipantId));
         }
 
         // --- solo-flow preservation -----------------------------------------

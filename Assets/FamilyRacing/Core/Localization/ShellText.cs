@@ -149,6 +149,18 @@ namespace FamilyRacing.Core.Localization
             ["lan.saving"] = new[] { "Saving…", "שומרים…" },
             ["lan.saveFailed"] = new[] { "Save failed", "השמירה נכשלה" },
             ["lan.err.title"] = new[] { "Network problem", "תקלת רשת" },
+            // PCQA-007: manual-join input feedback — shell-side validation
+            // texts; they never reach network.lastError.
+            ["lan.join.error.address"] = new[] { "Type the host address first.", "כותבים קודם את כתובת המארח." },
+            ["lan.join.error.addressBad"] = new[] { "That address does not look right.", "הכתובת הזאת לא נראית נכונה." },
+            ["lan.join.error.port"] = new[] { "The port must be a number between 0 and 65535.", "הפורט חייב להיות מספר בין 0 ל-65535." },
+            // PCQA-008: readable lobby identity — the slot-based fallback
+            // when a participant publishes no known animal, plus the LAN
+            // course names the shipped lan-* events resolve through
+            // EventName (unknown event ids still fall back to the raw id).
+            ["lan.player"] = new[] { "Player", "שחקן" },
+            ["lan.event.lan-car-01"] = new[] { "Car course", "מסלול מכוניות" },
+            ["lan.event.lan-motorcycle-01"] = new[] { "Motorcycle course", "מסלול אופנועים" },
             // Disabled-reason / error-code texts for the LAN surface; the
             // raw code stays the fallback for anything unlisted.
             ["lan.reason.inSession"] = new[] { "You are already in a race session.", "אתם כבר בתוך מירוץ." },
