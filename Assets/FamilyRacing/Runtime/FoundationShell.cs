@@ -88,6 +88,7 @@ namespace FamilyRacing
             var settings = document != null && document.panelSettings != null
                 ? document.panelSettings.textSettings : null;
             if (settings == null || settings.defaultFontAsset == null) return;
+            FoundationFonts.Warmup(document.panelSettings);
             element.style.unityTextGenerator = TextGeneratorType.Advanced;
             element.style.unityFontDefinition =
                 FontDefinition.FromSDFFont(settings.defaultFontAsset);

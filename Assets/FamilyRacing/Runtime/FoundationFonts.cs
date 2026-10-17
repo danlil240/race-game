@@ -19,6 +19,48 @@ namespace FamilyRacing
 
         private static readonly string RequiredCharacters = BuildRequiredCharacters();
 
+        // PCQA-005: dynamic glyph additions are queued, not applied — the
+        // atlas texture upload only lands when the font pipeline flushes
+        // its update queue, which can trail the first rendered frames by
+        // seconds on a cold player launch. Elements whose text generates
+        // against the not-yet-uploaded atlas bake UVs for glyph rects that
+        // never arrive and stay permanently blank — no amount of dirtying
+        // or rebuilding regenerates them once cached. Adding the full
+        // repertoire and flushing the queue synchronously at bind keeps
+        // the first screen's UV generation aligned with the real atlas.
+        internal static void Warmup(PanelSettings panelSettings)
+        {
+            var settings = panelSettings != null ? panelSettings.textSettings : null;
+            var font = settings != null ? settings.defaultFontAsset : null;
+            if (font == null) return;
+            var visited = new HashSet<FontAsset>();
+            WarmupChain(font, visited);
+            try
+            {
+                typeof(FontAsset).GetMethod("UpdateFontAssetsInUpdateQueue",
+                        System.Reflection.BindingFlags.NonPublic |
+                        System.Reflection.BindingFlags.Static)
+                    ?.Invoke(null, null);
+            }
+            catch (Exception)
+            {
+                // Queue flushing is best-effort: the character adds above
+                // still seed the atlas; a missing internal API just means
+                // the pipeline flushes itself on the first pass.
+            }
+        }
+
+        private static void WarmupChain(FontAsset font, HashSet<FontAsset> visited)
+        {
+            if (font == null || !visited.Add(font)) return;
+            if (font.atlasPopulationMode == AtlasPopulationMode.Dynamic)
+                font.TryAddCharacters(RequiredCharacters);
+            var fallbacks = font.fallbackFontAssetTable;
+            if (fallbacks != null)
+                foreach (var fallback in fallbacks)
+                    WarmupChain(fallback, visited);
+        }
+
         internal static bool IsReady(UIDocument document)
         {
             if (document == null)
