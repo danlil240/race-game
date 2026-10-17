@@ -37,6 +37,11 @@ namespace FamilyRacing.EditorTools
             NetworkPrototypeSetup.Create();
             VehiclePhysicsSetup.Create();
             ApplyPlayerSettings();
+            // The release identity owns the version progression once
+            // Release/release.json exists: applied after generic setup so
+            // a repeatable pass always restores the declared release
+            // version instead of the development default.
+            FamilyReleaseSettings.ApplyIfConfigured();
             EnableInputSystem();
             AssetDatabase.SaveAssets();
         }
@@ -203,7 +208,11 @@ namespace FamilyRacing.EditorTools
             PlayerSettings.productName = "Family Racing";
             PlayerSettings.companyName = "Family Racing";
             PlayerSettings.defaultInterfaceOrientation = UIOrientation.LandscapeLeft;
-            PlayerSettings.bundleVersion = "0.1.0";
+            // Generic setup must never reset an already-applied release
+            // version: only the development default for projects that have
+            // no release config yet.
+            if (!FamilyReleaseSettings.IsConfigured())
+                PlayerSettings.bundleVersion = "0.1.0";
 
             var standalone = UnityEditor.Build.NamedBuildTarget.Standalone;
             PlayerSettings.SetScriptingBackend(standalone, ScriptingImplementation.Mono2x);

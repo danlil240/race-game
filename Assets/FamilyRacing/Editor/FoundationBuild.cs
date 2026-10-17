@@ -226,47 +226,88 @@ namespace FamilyRacing.EditorTools
             ExportAndroid("Android-VisualBenchmark-Ordinary", development: false, visualBenchmark: true);
         }
 
-        private static void ExportAndroid(string flavor, bool development,
-            bool visualBenchmark, string contentStage = null)
+        // --- M7 Task 1: family release flavors --------------------------
+        // Ordinary-only full-content entry points that stamp the durable
+        // release identity (Release/release.json) onto the validated
+        // player. The production content gate, generic setup and release
+        // apply all run before packaging; a failed build can never leave
+        // the temporary Android export flags flipped.
+        public static void WindowsFamilyRelease()
         {
-            // Full-content flavors run their content gate before any
-            // plumbing so a catalog defect can never reach packaging.
-            if (contentStage == "complete")
-                FamilyRacing.EditorTools.FullContentSetup.Create();
-            else if (contentStage == "partial")
-                FamilyRacing.EditorTools.FullContentSetup.CreatePreview();
-            else if (contentStage != null)
-                throw new ArgumentException("Unknown content stage: "
-                    + contentStage);
+            FamilyRacing.EditorTools.FullContentSetup.Create();
+            FoundationProjectSetup.Create();
+            FamilyReleaseSettings.Apply(
+                FamilyReleaseSettings.ResolveConfigPath());
+            NetworkPrototypeSetup.VerifyBuildConfiguration(BuildTarget.StandaloneWindows64);
+            var report = Build("Builds/Windows-FamilyRelease/FamilyRacing.exe",
+                BuildTarget.StandaloneWindows64, BuildOptions.None);
+            Report(report, "Windows Mono family release build (no validation)");
+            FamilyRacing.EditorTools.FullContentSetup.WriteManifest(
+                "Builds/Windows-FamilyRelease", "Ordinary", "complete");
+        }
 
-            var args = Environment.GetCommandLineArgs();
-            string exportPath = null;
-            for (var i = 0; i < args.Length; i++)
-            {
-                if (args[i] != "--android-export-dir") continue;
-                if (exportPath != null || i + 1 == args.Length)
-                    throw new ArgumentException("Expected one --android-export-dir value.");
-                exportPath = args[++i];
-            }
-            if (string.IsNullOrEmpty(exportPath))
-                throw new ArgumentException("Use Tools/Verify.ps1 -Mode Android to export and build offline.");
-            exportPath = Path.GetFullPath(exportPath);
-            var root = Path.GetFullPath(Path.Combine(Application.dataPath,
-                "../Builds/" + flavor + "/offline")) + Path.DirectorySeparatorChar;
-            if (!exportPath.StartsWith(root, StringComparison.OrdinalIgnoreCase))
-                throw new ArgumentException("Android export must stay under Builds/" + flavor + "/offline.");
-            if (Directory.Exists(exportPath) || File.Exists(exportPath))
-                throw new IOException("Android export directory must be new: " + exportPath);
-            if (!BuildPipeline.IsBuildTargetSupported(BuildTargetGroup.Android, BuildTarget.Android))
-                throw new InvalidOperationException("Android Build Support is not installed.");
+        public static void ExportAndroidFamilyRelease()
+        {
+            ExportAndroid("Android-FamilyRelease", development: false,
+                visualBenchmark: false, contentStage: "complete",
+                releaseConfigPath: FamilyReleaseSettings.ResolveConfigPath());
+        }
 
+        private static void ExportAndroid(string flavor, bool development,
+            bool visualBenchmark, string contentStage = null,
+            string releaseConfigPath = null)
+        {
+            // The export flags are editor state, not per-build state:
+            // capture them first, flip inside try, and restore in finally
+            // so ANY failure — content gate, argument validation, missing
+            // Android support, or the build itself — leaves the editor
+            // exactly as it found it.
             var oldExport = EditorUserBuildSettings.exportAsGoogleAndroidProject;
             var oldBundle = EditorUserBuildSettings.buildAppBundle;
             try
             {
                 EditorUserBuildSettings.exportAsGoogleAndroidProject = true;
                 EditorUserBuildSettings.buildAppBundle = false;
+
+                // Full-content flavors run their content gate before any
+                // other packaging step so a catalog defect can never
+                // reach packaging.
+                if (contentStage == "complete")
+                    FamilyRacing.EditorTools.FullContentSetup.Create();
+                else if (contentStage == "partial")
+                    FamilyRacing.EditorTools.FullContentSetup.CreatePreview();
+                else if (contentStage != null)
+                    throw new ArgumentException("Unknown content stage: "
+                        + contentStage);
+
+                var args = Environment.GetCommandLineArgs();
+                string exportPath = null;
+                for (var i = 0; i < args.Length; i++)
+                {
+                    if (args[i] != "--android-export-dir") continue;
+                    if (exportPath != null || i + 1 == args.Length)
+                        throw new ArgumentException("Expected one --android-export-dir value.");
+                    exportPath = args[++i];
+                }
+                if (string.IsNullOrEmpty(exportPath))
+                    throw new ArgumentException("Use Tools/Verify.ps1 -Mode Android to export and build offline.");
+                exportPath = Path.GetFullPath(exportPath);
+                var root = Path.GetFullPath(Path.Combine(Application.dataPath,
+                    "../Builds/" + flavor + "/offline")) + Path.DirectorySeparatorChar;
+                if (!exportPath.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+                    throw new ArgumentException("Android export must stay under Builds/" + flavor + "/offline.");
+                if (Directory.Exists(exportPath) || File.Exists(exportPath))
+                    throw new IOException("Android export directory must be new: " + exportPath);
+                if (!BuildPipeline.IsBuildTargetSupported(BuildTargetGroup.Android, BuildTarget.Android))
+                    throw new InvalidOperationException("Android Build Support is not installed.");
+
                 FoundationProjectSetup.Create();
+                // Release flavors re-apply the resolved config after
+                // normal setup: the ordering guarantees the built player
+                // carries the declared release identity even when the
+                // config path is overridden by tooling.
+                if (releaseConfigPath != null)
+                    FamilyReleaseSettings.Apply(releaseConfigPath);
                 if (visualBenchmark)
                     FamilyRacing.EditorTools.VisualBenchmarkSetup.Create();
                 NetworkPrototypeSetup.VerifyBuildConfiguration(BuildTarget.Android);
