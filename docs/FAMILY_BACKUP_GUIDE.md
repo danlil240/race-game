@@ -143,6 +143,55 @@ honestly rather than pretending; that failure is an open qualification
 row, not a supported workaround. Do **not** copy files via a random
 phone file-manager app — that path is untested and unsafe to document.
 
+## Updating the game (keep your progress)
+
+An update means installing the new version **over** the old one — never
+uninstalling first.
+
+- **Tablet:** install the new `FamilyRacing-<version>-Android.apk` on top
+  of the existing app. Because every release APK is signed with the same
+  family key and carries a higher internal version number, Android keeps
+  all four profiles in place. If Android refuses the install, stop — see
+  the debug-build note below; do not uninstall.
+- **PC:** extract the new `FamilyRacing-<version>-Windows-x64.zip` and
+  replace the program folder (the folder containing `FamilyRacing.exe`).
+  Profiles are stored separately under
+  `C:\Users\<you>\AppData\LocalLow\Family Racing\Family Racing\Profiles`
+  and are untouched by replacing the program files.
+- **Optional belt-and-braces:** take a backup (above) before updating.
+  It is not required for the update itself — it is insurance against a
+  failed device or a mistake.
+
+## If a tablet has a development (debug) build installed
+
+If the tablet ever ran a development build of the game (installed by a
+PC during development rather than from a release APK), its signature is
+**different** from the family release key. Android will refuse to update
+it in place — that is normal and expected; the release key cannot and
+must not pretend to be the debug key.
+
+The migration is a separate procedure — **do not uninstall the debug
+build until the saves are safely backed up**:
+
+1. With the debug build still installed, run `Backup-FamilyProfiles.ps1`
+   for that tablet (`-Platform Android -DeviceSerial <serial>`), passing
+   the **release** package's `release-manifest.json` as
+   `-ExpectedManifest` so the backup is labeled for the release
+   installation it will join. Move the backup off the tablet.
+2. Verify the backup's `backup-manifest.json` lists every expected slot
+   file with hashes.
+3. Only then remove the debug app and install the release APK.
+4. Restore with `Restore-FamilyProfiles.ps1 -Apply` onto the **same
+   tablet** — the tools check the device serial and application identity,
+   so the same device is accepted and a different tablet is refused.
+5. Launch the game once and check the profiles before deleting the
+   backup.
+
+**This path is documented but not yet qualified on real hardware** — no
+tablet was attached when this guide was written. If a debug install turns
+out to exist on a family device, run through these steps once with a
+throwaway profile before trusting them with real progress.
+
 ## Important rules
 
 - **Uninstalling or "clear data" is NOT an update step.** Updating means

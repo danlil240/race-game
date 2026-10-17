@@ -240,6 +240,96 @@ unqualified** — `adb devices` reports zero attached devices on this
 machine (verified this task), so real pull/push on a tablet stays an
 open row below.
 
+## Update qualification + the evidence gate (M7 Task 5)
+
+`Release/acceptance-matrix.json` is the independent required-row
+inventory for the release: 47 rows covering candidate baseline, package
+identity/content/licenses on both platforms, signing certificate and key
+custody, every inherited M1–M6 acceptance requirement, all Task 6
+physical-matrix row families (fresh install, host permutations, join
+failures, session recovery, impaired Wi-Fi, sustained play, performance,
+updates/recovery, input/presentation, validation-endpoint absence, clean
+account), family/human sessions, the parent-guide walkthrough, the
+debug-predecessor migration doc — plus eight `tooling.*` rows that qualify
+pipeline/update *behavior* and are the only rows fixture evidence may
+satisfy.
+
+`Tools/ReleaseQualification.py` is the gate:
+
+```powershell
+python Tools\ReleaseQualification.py `
+    --manifest <release-manifest.json> `
+    --matrix Release\acceptance-matrix.json `
+    --evidence <new-output-directory> `
+    --records <record.json> [<more records or directories>...]
+```
+
+It writes `<evidence>\result.json` and exits 0 only when every required
+row passed; any failure or gap exits nonzero with verdict `failed` or
+`partial`. Semantics pinned by `Tools/TestReleaseQualification.py`:
+
+- **Integrity is hard-fail.** A measured artifact hash that contradicts
+  the manifest, a missing or tampered evidence file, a malformed record,
+  an unknown row id, or a second record for the same row → `failed`.
+  The manifest itself is sanity-checked (schema, file hashes against the
+  files on disk, and `androidVersionCode` strictly above
+  `previousAndroidVersionCode`).
+- **Inadmissible evidence is a gap, not a pass and not a fabrication.**
+  Fixture/rehearsal records on a `production` row, development-build
+  records on an `ordinary`-package row, records whose source commit or
+  content identity is not the candidate's, a human-review row without a
+  named `humanReviewer`, and a physical row without device identification
+  all leave the row `notVerified` → verdict `partial`.
+- **Nothing is filled in.** The gate never edits the candidate, the
+  matrix, or a record, and has no success override.
+
+Evidence record (schema 1): `rowId`, `outcome`
+(`passed|failed|skipped|notVerified`), `evidenceClass`
+(`production|fixture`), `buildKind` (`ordinary|development|fixture`),
+`source` `{commit, contentVersion}`, `method`, `observedUtc`, and as
+required `artifact` `{path, sha256}`, `device` `{label, os,
+configuration}`, `humanReviewer`, `evidenceFiles` `[{path, sha256}]`
+(paths resolve relative to the record file; every hash is re-verified).
+
+### Fixture update rehearsal (what is proven now)
+
+Under `Logs\release-qualification\rehearsal-2026-10-17\` (gitignored;
+regenerate with `rehearse.py` next to it):
+
+- **Same-key APK pair, codes 1→2** — two minimal APKs for
+  `com.daniel.familyracing` built with the bundled `aapt` and signed
+  through the real `Sign-AndroidRelease.ps1` pipeline under a disposable
+  test keystore. `apksigner --print-certs` reports one identical
+  certificate SHA-256 on both; `aapt` badging confirms codes 1 and 2.
+  This is signer-continuity/update mechanics only — a labeled fixture
+  pair, not an upgrade from a shipped version; `release.json`
+  `previousAndroidVersionCode` stays 0.
+- **Windows binary replacement** — the rehearsal player was extracted, a
+  disposable `LocalLow\Family Racing\Family Racing\Profiles` tree of four
+  synthetic schema-3 slots (+`.bak`) was written, then the entire binary
+  set was swapped for a distinct v2 set. All eight profile files hashed
+  byte-identically after the swap.
+- **Rejections at pipeline level** — `Sign-AndroidRelease.ps1` refused a
+  fixture-B-signed APK when fixture-A's certificate was expected (no
+  output published); the gate refused a manifest whose
+  `androidVersionCode` was not strictly above its predecessor (the same
+  rule is pinned by EditMode test
+  `FamilyReleaseSettingsTests.ReleaseRejectsNonIncreasingVersionCode`).
+
+Gate result on this rehearsal evidence set: **verdict `partial` —
+8 tooling rows passed, 39 production rows `notVerified`, 0 failed, 0
+integrity failures.** The open rows are exactly the hardware/ordinary-
+package/human rows; none may be closed by fixture evidence.
+
+### Debug-signed predecessors
+
+Any tablet that ever ran a Gradle-debug/dev APK cannot be updated in
+place to the release signature — Android refuses cross-signer updates by
+design. That migration is a separate, documented procedure in
+`docs/FAMILY_BACKUP_GUIDE.md` (preserve the saves with the backup tools,
+verify, then remove): the release pipeline never silently uninstalls a
+debug build and never claims release-key continuity over one.
+
 ## Open rows (explicitly not closed by this task)
 
 - **Real release candidate build** — gated on the bound production
@@ -271,12 +361,32 @@ open row below.
   task; the row belongs to Task 6 qualification.
 - **Qualification + acceptance** — the manifest is frozen at
   `acceptanceStatus:"unqualified"`; the Task 5 evidence gate owns the
-  change. Physical install/update/backup/family rows stay in Task 6.
+  change. On the rehearsal evidence set the gate reports `partial`
+  (8 tooling rows pass; all 39 production rows `notVerified`). Physical
+  install/update/backup/family rows stay in Task 6.
+- **Physical update + install-rejection rows** — OPEN. The fixture
+  rehearsals proved signer continuity, binary replacement, and pipeline
+  rejections at tooling level; on-device install-over with earned
+  progress, mismatched-signer install rejection, and Windows binary
+  replacement on the shipped package still require hardware + ordinary
+  packages (Task 6).
+- **Debug-predecessor migration** — documented path only (see the backup
+  guide); no device has been observed carrying a debug install, and no
+  cross-signer update is claimed.
 
 ## Tooling tests
 
+`python -m unittest discover -s Tools -p "TestReleaseQualification.py"`
+(12 tests) covers
+the evidence-gate contract: absent required rows are `partial`; fixture
+records can never satisfy production rows (a fully fixture matrix passes
+only as a tooling self-test); artifact-hash and evidence-file tampering
+fail; development-build records cannot satisfy ordinary-package rows;
+unknown/duplicate row ids fail; human rows need a named reviewer; and
+failed/skipped outcomes map to `failed`/`notVerified`.
+
 `powershell -NoProfile -File Tools/Test-FamilyProfileBackup.ps1`
-(55 checks) covers the backup/restore contract: manifest hash/size/slot/
+(64 checks) covers the backup/restore contract: manifest hash/size/slot/
 id/schema enforcement, traversal and unexpected-file rejection, foreign
 slot/id/installation/serial, newer-schema rejection plus preservation of
 unreadable/newer on-disk files, running-game refusal (real process check
