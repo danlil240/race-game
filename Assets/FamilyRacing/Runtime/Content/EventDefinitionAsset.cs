@@ -42,6 +42,18 @@ namespace FamilyRacing
         public int parTicks;
         public bool isFinale;
 
+        // One ANDed conjunct inside a leg — a leaf on purpose: Core
+        // validation rejects nested alsoRequires, so the serialized
+        // row stops at one level and Unity never walks a
+        // self-referencing field to its serialization depth limit.
+        [Serializable]
+        public sealed class ObjectiveConditionLeaf
+        {
+            public string metric = "";
+            public string comparator = "atLeast"; // "atLeast" | "atMost"
+            public long threshold = 1;
+        }
+
         [Serializable]
         public sealed class ObjectiveConditionRow
         {
@@ -50,7 +62,7 @@ namespace FamilyRacing
             public long threshold = 1;
             // ANDed conditions inside this leg (e.g. "60 s streak AND
             // zero recoveries"); OR lives across `alternatives`.
-            public ObjectiveConditionRow[] alsoRequires = new ObjectiveConditionRow[0];
+            public ObjectiveConditionLeaf[] alsoRequires = new ObjectiveConditionLeaf[0];
         }
 
         [Serializable]
@@ -91,6 +103,26 @@ namespace FamilyRacing
             }
             error = null;
             return condition;
+        }
+
+        // Leaf conjuncts need no Validate of their own — the leg's
+        // Validate above walks `alsoRequires` and names the failing
+        // field (e.g. "alsoRequires.metric").
+        private ObjectiveCondition ToCondition(ObjectiveConditionLeaf leaf,
+            out string error)
+        {
+            if (leaf == null)
+            {
+                error = name + ": null objective condition";
+                return null;
+            }
+            error = null;
+            return new ObjectiveCondition
+            {
+                metric = leaf.metric,
+                comparator = leaf.comparator,
+                threshold = leaf.threshold
+            };
         }
 
         public EventDefinition ToEvent(out string error)

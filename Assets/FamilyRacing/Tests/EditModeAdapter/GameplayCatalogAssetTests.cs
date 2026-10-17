@@ -161,6 +161,138 @@ namespace FamilyRacing.Tests
         }
 
         [Test]
+        public void EventAssetConvertsLeafConjunctsInLeg()
+        {
+            var track = TrackAsset("harbor-hop");
+            var objectives = new[]
+            {
+                Objective("cd-intro", "introductory",
+                    ObjectiveMetric.CleanStreakSeconds, 30),
+                new EventDefinitionAsset.ObjectiveRow
+                {
+                    objectiveId = "cd-mastery",
+                    kind = "mastery",
+                    alternatives = new[]
+                    {
+                        new EventDefinitionAsset.ObjectiveConditionRow
+                        {
+                            metric = ObjectiveMetric.CleanStreakSeconds,
+                            threshold = 60,
+                            // 60 s streak AND zero recoveries — the
+                            // canonical one-level conjunct the leaf row
+                            // exists to express.
+                            alsoRequires = new[]
+                            {
+                                new EventDefinitionAsset.ObjectiveConditionLeaf
+                                {
+                                    metric = ObjectiveMetric.Recoveries,
+                                    comparator = "atMost",
+                                    threshold = 0
+                                }
+                            }
+                        }
+                    }
+                }
+            };
+            var asset = EventAsset(GameplayEventType.CleanDriving, "car",
+                0, objectives);
+            asset.track = track;
+            try
+            {
+                string error;
+                var evt = asset.ToEvent(out error);
+                Assert.That(evt, Is.Not.Null, error);
+                var leg = evt.objectives[1].alternatives[0];
+                Assert.That(leg.metric,
+                    Is.EqualTo(ObjectiveMetric.CleanStreakSeconds));
+                Assert.That(leg.alsoRequires, Has.Count.EqualTo(1),
+                    "leaf conjuncts must survive conversion");
+                var conjunct = leg.alsoRequires[0];
+                Assert.That(conjunct.metric,
+                    Is.EqualTo(ObjectiveMetric.Recoveries));
+                Assert.That(conjunct.comparator, Is.EqualTo("atMost"));
+                Assert.That(conjunct.threshold, Is.EqualTo(0));
+                Assert.That(conjunct.alsoRequires, Is.Empty,
+                    "a leaf row can never carry a nested conjunct");
+            }
+            finally
+            {
+                Destroy(asset, track);
+            }
+        }
+
+        [Test]
+        public void EventAssetRejectsInvalidLeafConjunct()
+        {
+            var track = TrackAsset("harbor-hop");
+            var objectives = new[]
+            {
+                Objective("cd-intro", "introductory",
+                    ObjectiveMetric.CleanStreakSeconds, 30),
+                new EventDefinitionAsset.ObjectiveRow
+                {
+                    objectiveId = "cd-mastery",
+                    kind = "mastery",
+                    alternatives = new[]
+                    {
+                        new EventDefinitionAsset.ObjectiveConditionRow
+                        {
+                            metric = ObjectiveMetric.CleanStreakSeconds,
+                            threshold = 60,
+                            alsoRequires = new[]
+                            {
+                                new EventDefinitionAsset.ObjectiveConditionLeaf
+                                {
+                                    metric = "not-a-metric",
+                                    threshold = 1
+                                }
+                            }
+                        }
+                    }
+                }
+            };
+            var asset = EventAsset(GameplayEventType.CleanDriving, "car",
+                0, objectives);
+            asset.track = track;
+            try
+            {
+                string error;
+                Assert.That(asset.ToEvent(out error), Is.Null,
+                    "a bad leaf row fails the whole conversion");
+                Assert.That(error, Does.Contain("alsoRequires.metric"),
+                    "the failing leaf field must be named in the error");
+            }
+            finally
+            {
+                Destroy(asset, track);
+            }
+        }
+
+        [Test]
+        public void NestedConjunctsStayRejectedByDomainValidation()
+        {
+            var nested = new ObjectiveCondition
+            {
+                metric = ObjectiveMetric.Recoveries,
+                comparator = ObjectiveComparator.AtMost,
+                threshold = 0
+            };
+            nested.alsoRequires.Add(new ObjectiveCondition
+            {
+                metric = ObjectiveMetric.CleanStreakSeconds, threshold = 60
+            });
+            var leg = new ObjectiveCondition
+            {
+                metric = ObjectiveMetric.CleanStreakSeconds, threshold = 60
+            };
+            leg.alsoRequires.Add(nested);
+            string error;
+            Assert.That(leg.Validate(out error), Is.False);
+            Assert.That(error, Is.EqualTo("alsoRequires.nested"),
+                "the domain still forbids conjuncts inside conjuncts");
+        }
+
+        [Test]
         public void LegacyEventAssetStillConvertsWithoutGameplayFields()
         {
             var track = TrackAsset("graybox-01");
