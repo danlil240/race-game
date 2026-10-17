@@ -69,7 +69,7 @@ function Run-Case([string]$Name, [string]$Behavior = 'success', [string]$Missing
 try {
     $fixtureExe = Join-Path $fixtureRoot 'AndroidToolFixture.exe'
     $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
-    & $compiler /nologo /target:exe "/out:$fixtureExe" (Join-Path $PSScriptRoot 'Tests\AndroidToolFixture.cs')
+    & $compiler /nologo /target:exe /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll "/out:$fixtureExe" (Join-Path $PSScriptRoot 'Tests\AndroidToolFixture.cs')
     if ($LASTEXITCODE -ne 0) { throw 'Could not compile external-process fixture.' }
 
     $ok = Run-Case 'success'
@@ -80,6 +80,9 @@ try {
         @(Get-Content -LiteralPath (Join-Path $ok.Result.exportPath 'java-arguments.txt'))
     } else { @() }
     Check 'Gradle receives offline and bounded local-tool arguments' ($javaArguments -contains '--offline' -and $javaArguments -contains '--no-daemon' -and $javaArguments -contains '-Dorg.gradle.java.installations.auto-download=false' -and $javaArguments -contains '-Pandroid.builder.sdkDownload=false')
+    # Development and Ordinary must keep building the debug task; the
+    # signed release path is a separate -Configuration Release flavor.
+    Check 'development build keeps the debug Gradle task' ($javaArguments -contains ':launcher:assembleDebug' -and $javaArguments -notcontains ':launcher:assembleRelease') ($javaArguments -join ' ')
     $expectedJar = Join-Path $ok.Android 'Tools\gradle\lib\gradle-launcher-9.3.1.jar'
     Check 'Gradle uses bundled launcher JAR as one intact argument' ($javaArguments -contains $expectedJar)
     Check 'export and Gradle logs are distinct and preserved' ($null -ne $ok.Result -and $ok.Result.exportLog -ne $ok.Result.gradleLog -and (Test-Path -LiteralPath $ok.Result.exportLog) -and (Test-Path -LiteralPath $ok.Result.gradleLog))

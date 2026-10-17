@@ -46,6 +46,14 @@
 #   -Mode AndroidFullContent / -Mode AndroidFullContentOrdinary
 #                          Offline wrapper with -Presentation FullContent;
 #                          output under Builds\Android-FullContent[-Ordinary].
+#   -Mode AndroidFamilyRelease
+#                          Offline wrapper with -Presentation FullContent
+#                          -Configuration Release: unsigned release Gradle
+#                          output, zipalign + release-key signing via
+#                          Tools/Sign-AndroidRelease.ps1, certificate and
+#                          metadata verification, published under
+#                          Builds\Android-FamilyRelease. Signing secrets
+#                          come from the FAMILY_RACING_* process env only.
 #
 # All Unity modes use the pinned editor only; each writes its own log under
 # Logs\ and propagates failures. Android keeps distinct export/build logs
@@ -57,7 +65,8 @@ param(
         "AndroidVisualBenchmark", "AndroidVisualBenchmarkOrdinary",
         "FullContentSetup", "WindowsFullContent", "WindowsFullContentOrdinary",
         "WindowsFullContentPreview",
-        "AndroidFullContent", "AndroidFullContentOrdinary", "AndroidFullContentPreview")]
+        "AndroidFullContent", "AndroidFullContentOrdinary", "AndroidFullContentPreview",
+        "AndroidFamilyRelease")]
     [string]$Mode,
 
     [string]$EditorRoot = "C:\Program Files\Unity\Hub\Editor",
@@ -93,6 +102,15 @@ switch ($Mode) {
         $configuration = if ($Mode -eq "AndroidFullContentOrdinary") { "Ordinary" } else { "Development" }
         & (Join-Path $repo "Tools\Build-AndroidOffline.ps1") -ProjectPath $repo -EditorRoot $EditorRoot `
             -Presentation FullContent -Configuration $configuration
+        exit $LASTEXITCODE
+    }
+
+    # The signed family release flavor: Release is allowed only with
+    # FullContent (the wrapper enforces the gate). Signing credentials
+    # arrive through the FAMILY_RACING_* process environment.
+    "AndroidFamilyRelease" {
+        & (Join-Path $repo "Tools\Build-AndroidOffline.ps1") -ProjectPath $repo -EditorRoot $EditorRoot `
+            -Presentation FullContent -Configuration Release
         exit $LASTEXITCODE
     }
 

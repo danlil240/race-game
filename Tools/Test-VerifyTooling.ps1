@@ -67,7 +67,7 @@ Check "suite not run on invalid NUnit path" ($output -notmatch "RESULT:") "suite
 $fixtureSrc = Join-Path (Split-Path -Parent $VerifyScript) 'Tests\AndroidToolFixture.cs'
 $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 $fixtureExe = Join-Path $temp 'ToolFixture.exe'
-& $compiler /nologo /target:exe "/out:$fixtureExe" $fixtureSrc
+& $compiler /nologo /target:exe /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll "/out:$fixtureExe" $fixtureSrc
 Check "external-process fixture compiles" ($LASTEXITCODE -eq 0) "csc exit=$LASTEXITCODE"
 if ($LASTEXITCODE -eq 0) {
     Copy-Item -LiteralPath $fixtureExe -Destination (Join-Path $editorDir 'Editor\Unity.exe') -Force
@@ -103,7 +103,8 @@ if ($LASTEXITCODE -eq 0) {
     #    (proving dispatch happened); full offline behavior is covered
     #    by Test-AndroidOffline.ps1.
     foreach ($mode in @('AndroidVisualBenchmark', 'AndroidVisualBenchmarkOrdinary',
-        'AndroidFullContent', 'AndroidFullContentOrdinary', 'AndroidFullContentPreview')) {
+        'AndroidFullContent', 'AndroidFullContentOrdinary', 'AndroidFullContentPreview',
+        'AndroidFamilyRelease')) {
         $output = & $pwsh -NoProfile -File $VerifyScript -Mode $mode -EditorRoot (Join-Path $temp 'no-editor') 2>&1 | Out-String
         Check "$mode dispatches to the offline Android wrapper" `
             ($LASTEXITCODE -ne 0 -and $output -notmatch 'Cannot validate argument' -and $output -match 'Pinned Unity editor') `
