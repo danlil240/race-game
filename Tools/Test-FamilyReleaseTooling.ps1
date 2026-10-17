@@ -317,7 +317,7 @@ function New-FixtureWindowsPlayer([string]$Dir, [hashtable]$Opt = @{}) {
 # MissingRuntimeDll, MissingMono, NoManifest, ManifestStage,
 # ManifestDriving, ManifestContent, ManifestCandidate, StaleManifest,
 # PlantProfile, PlantKeystore, PlantToken, PlantDoNotShip, NoNotices,
-# NoGuide, NoGit, DirtyFile, ExistingOutput, OmitEnv.
+# NoGuide, NoGit, DirtyFile, ExistingOutput, OmitEnv, AltConfig.
 function Run-PackageCase([string]$Name, [hashtable]$Opt = @{}) {
     $project = Join-Path $fixtureRoot ('pkg-' + $Name)
     $tools = Join-Path $project 'Tools'
@@ -337,7 +337,21 @@ function Run-PackageCase([string]$Name, [hashtable]$Opt = @{}) {
         signingKeyAlias = 'fixture-alias'
         expectedCertificateSha256 = $script:FixtureCert
     }
-    ($config | ConvertTo-Json) | Set-Content -LiteralPath (Join-Path $releaseDir 'release.json') -Encoding UTF8
+    $configPath = Join-Path $releaseDir 'release.json'
+    ($config | ConvertTo-Json) | Set-Content -LiteralPath $configPath -Encoding UTF8
+    if ($Opt.ContainsKey('AltConfig')) {
+        # The -Config file lives at a NON-default location. The tracked
+        # Release\release.json deliberately carries a WRONG certificate,
+        # so any child that resolves the default instead of honoring the
+        # propagated FAMILY_RACING_RELEASE_CONFIG fails the certificate
+        # check — the divergence this regression pins cannot pass.
+        $altDir = Join-Path $project 'config-overrides'
+        New-Item -ItemType Directory -Path $altDir -Force | Out-Null
+        $configPath = Join-Path $altDir 'release-alt.json'
+        ($config | ConvertTo-Json) | Set-Content -LiteralPath $configPath -Encoding UTF8
+        $config['expectedCertificateSha256'] = 'f' * 64
+        ($config | ConvertTo-Json) | Set-Content -LiteralPath (Join-Path $releaseDir 'release.json') -Encoding UTF8
+    }
     if (-not $Opt.ContainsKey('NoNotices')) {
         Set-Content -LiteralPath (Join-Path $releaseDir 'THIRD-PARTY-NOTICES.txt') -Value 'fixture third-party notices' -NoNewline
     }
@@ -410,7 +424,7 @@ function Run-PackageCase([string]$Name, [hashtable]$Opt = @{}) {
         Set-Content -LiteralPath (Join-Path $output 'leftover.txt') -Value 'previous run' -NoNewline
     }
     $argList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $tools 'Build-FamilyRelease.ps1'),
-        '-Config', (Join-Path $releaseDir 'release.json'), '-Output', $output, '-ProjectPath', $project)
+        '-Config', $configPath, '-Output', $output, '-ProjectPath', $project)
     if (-not $Opt.ContainsKey('Rehearsal')) {
         $argList += @('-EditorRoot', (Join-Path $project 'Installed Editors'))
     } else {
@@ -747,6 +761,32 @@ try {
     Check 'pkg: stale player manifest rejected on the real path' `
         ($pkg.ExitCode -ne 0 -and $pkg.Output -match 'stale|older|this run' -and
          -not (Test-Path -LiteralPath $pkg.WinZip)) $pkg.Output
+
+    # A non-default -Config must drive the WHOLE pipeline: Build-
+    # FamilyRelease exports FAMILY_RACING_RELEASE_CONFIG so the child
+    # Verify/Unity/sign steps stamp and verify the same identity the
+    # manifest records. Here the tracked Release\release.json carries a
+    # wrong certificate on purpose — any child still resolving the
+    # default fails the certificate check, so this run can only succeed
+    # when the override flows through end-to-end.
+    $pkg = Run-PackageCase 'real-alt-config' @{ AltConfig = $true }
+    Check 'pkg: non-default -Config flows through to the signing child' `
+        ($pkg.ExitCode -eq 0) $pkg.Output
+    $altResults = @(Get-ChildItem -LiteralPath (Join-Path $pkg.Project 'Logs') -Filter result.json -Recurse -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -match 'android-offline' })
+    $altResult = if ($altResults.Count -eq 1) { Get-Content -LiteralPath $altResults[0].FullName -Raw | ConvertFrom-Json } else { $null }
+    Check 'pkg: offline build resolved the override config path' `
+        ($null -ne $altResult -and
+         [string]$altResult.releaseConfigPath -match 'release-alt\.json$') `
+        ($altResult | ConvertTo-Json -Compress)
+    if (Test-Path -LiteralPath $pkg.ManifestPath) {
+        $m = Get-Content -LiteralPath $pkg.ManifestPath -Raw | ConvertFrom-Json
+        Check 'pkg: manifest records the override identity + certificate' `
+            ($m.packageKind -eq 'release' -and
+             $m.packages.android.signed -eq $true -and
+             $m.packages.android.certificateSha256 -eq $script:FixtureCert) `
+            ($m | ConvertTo-Json -Compress -Depth 5)
+    } else { Check 'pkg: manifest records the override identity + certificate' $false 'no manifest' }
 }
 finally {
     Clear-SignEnv

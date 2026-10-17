@@ -145,6 +145,52 @@ namespace FamilyRacing.Tests
                 Is.EqualTo(expectedTargetSdk));
         }
 
+        // The env override is the config the whole pipeline must use:
+        // IsConfigured() and ApplyIfConfigured() resolve through
+        // FAMILY_RACING_RELEASE_CONFIG, never hard-code the tracked
+        // default. A release build driven by a non-default config must
+        // not silently apply Release\release.json instead.
+        [Test]
+        public void EnvironmentConfigOverrideDrivesResolution()
+        {
+            var priorEnv = Environment.GetEnvironmentVariable(
+                FamilyReleaseSettings.ConfigEnvironmentVariable);
+            var config = LoadConfig();
+            config["versionName"] = "9.9.9";
+            var path = WriteTempConfig(config);
+            try
+            {
+                Environment.SetEnvironmentVariable(
+                    FamilyReleaseSettings.ConfigEnvironmentVariable, path);
+
+                Assert.That(FamilyReleaseSettings.ResolveConfigPath(),
+                    Is.EqualTo(Path.GetFullPath(path)),
+                    "The override path must be the resolved config path.");
+                Assert.That(FamilyReleaseSettings.IsConfigured(), Is.True,
+                    "An existing override config must count as configured.");
+
+                PlayerSettings.bundleVersion = "0.0.1-dirtied";
+                FamilyReleaseSettings.ApplyIfConfigured();
+                Assert.That(PlayerSettings.bundleVersion,
+                    Is.EqualTo("9.9.9"),
+                    "ApplyIfConfigured must apply the override config, "
+                    + "not the tracked default.");
+
+                // An override that names a missing file is genuinely
+                // unconfigured — never fall back to the tracked default.
+                File.Delete(path);
+                Assert.That(FamilyReleaseSettings.IsConfigured(), Is.False,
+                    "A missing override config must report unconfigured "
+                    + "rather than silently using the tracked default.");
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable(
+                    FamilyReleaseSettings.ConfigEnvironmentVariable,
+                    priorEnv);
+            }
+        }
+
         // The family identity is fixed so updates preserve saves: a config
         // that changes it must be rejected wholesale — no field may be
         // partially applied first.

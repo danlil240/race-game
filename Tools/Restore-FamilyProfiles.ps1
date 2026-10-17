@@ -264,16 +264,26 @@ function Target-JournalMkdir([string]$DirName) {
     if ($r.Code -ne 0) { throw "adb mkdir failed for $jdir : $($r.Text.Trim())" }
 }
 
+# Snapshot the live bytes into the journal's pre/ dir ATOMICALLY: a kill
+# mid-copy can only leave a stray .snap-tmp-* name, never a torn
+# pre/<name> that would pass an existence check and later be trusted as
+# authoritative pre-restore bytes.
 function Target-JournalSnapshot([string]$DirName, [string]$Name) {
+    $tag = [guid]::NewGuid().ToString('N').Substring(0, 8)
     if ($Platform -eq 'Windows') {
-        Copy-Item -LiteralPath (Join-Path $script:ProfilesResolved $Name) `
-            -Destination (Join-Path (Join-Path (Join-Path $script:ProfilesResolved $DirName) 'pre') $Name)
+        $preDir = Join-Path (Join-Path $script:ProfilesResolved $DirName) 'pre'
+        $tmp = Join-Path $preDir ($Name + '.snap-tmp-' + $tag)
+        Copy-Item -LiteralPath (Join-Path $script:ProfilesResolved $Name) -Destination $tmp
+        Write-AtomicLocalFile $tmp (Join-Path $preDir $Name)
         return
     }
+    $remotePre = $script:ProfilesResolved + '/' + $DirName + '/pre/' + $Name
+    $remoteTmp = $remotePre + '.snap-tmp-' + $tag
     $r = Invoke-Adb @('-s', $DeviceSerial, 'shell', 'cp',
-        ($script:ProfilesResolved + '/' + $Name),
-        ($script:ProfilesResolved + '/' + $DirName + '/pre/' + $Name))
+        ($script:ProfilesResolved + '/' + $Name), $remoteTmp)
     if ($r.Code -ne 0) { throw "adb snapshot cp failed for $Name : $($r.Text.Trim())" }
+    $m = Invoke-Adb @('-s', $DeviceSerial, 'shell', 'mv', '-f', $remoteTmp, $remotePre)
+    if ($m.Code -ne 0) { throw "adb snapshot mv failed for $Name : $($m.Text.Trim())" }
 }
 
 function Target-PreFileExists([string]$DirName, [string]$Name) {
@@ -283,6 +293,34 @@ function Target-PreFileExists([string]$DirName, [string]$Name) {
     $r = Invoke-Adb @('-s', $DeviceSerial, 'shell', 'test', '-f',
         ($script:ProfilesResolved + '/' + $DirName + '/pre/' + $Name))
     return ($r.Code -eq 0)
+}
+
+# SHA-256 of the bytes stored under the journal's pre/ dir; $null when
+# absent. A snapshot is evidence only when it hashes as recorded.
+function Target-PreFileSha256([string]$DirName, [string]$Name) {
+    if ($Platform -eq 'Windows') {
+        $pre = Join-Path $script:ProfilesResolved ($DirName + '\pre\' + $Name)
+        if (-not (Test-Path -LiteralPath $pre -PathType Leaf)) { return $null }
+        return (Get-FileHash -LiteralPath $pre -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
+    if (-not (Target-PreFileExists $DirName $Name)) { return $null }
+    $tmp = Join-Path ([IO.Path]::GetTempPath()) ('family-pre-' + [guid]::NewGuid().ToString('N').Substring(0, 8) + '.bin')
+    try {
+        Target-FetchToLocal ($DirName + '/pre/' + $Name) $tmp
+        return (Get-FileHash -LiteralPath $tmp -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
+    finally { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
+}
+
+# SHA-256 of the live target file; $null when absent.
+function Target-LiveFileSha256([string]$Name) {
+    if (-not (Target-FileExists $Name)) { return $null }
+    $tmp = Join-Path ([IO.Path]::GetTempPath()) ('family-live-' + [guid]::NewGuid().ToString('N').Substring(0, 8) + '.bin')
+    try {
+        Target-FetchToLocal $Name $tmp
+        return (Get-FileHash -LiteralPath $tmp -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
+    finally { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
 }
 
 function Target-JournalWriteJson([string]$DirName, $Journal) {
@@ -324,16 +362,56 @@ function Target-RestorePreBytes([string]$DirName, [string]$Name) {
         Write-AtomicLocalFile $tmp (Join-Path $script:ProfilesResolved $Name)
         return
     }
-    $r = Invoke-Adb @('-s', $DeviceSerial, 'shell', 'mv', '-f',
-        ($script:ProfilesResolved + '/' + $DirName + '/pre/' + $Name),
+    # Copy the snapshot to a temp name and rename it over the live file:
+    # an mv FROM pre/ would consume the snapshot, so a rollback killed
+    # mid-loop would leave entries still 'done' with their snapshots
+    # gone and every retry permanently wedged. Keeping pre/ intact until
+    # the journal completes gives Android the same idempotent-retry
+    # semantics the Windows path already has, while the temp+rename keeps
+    # the live write atomic.
+    $remoteTmp = $script:ProfilesResolved + '/' + $Name + '.restore-tmp-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    $cp = Invoke-Adb @('-s', $DeviceSerial, 'shell', 'cp',
+        ($script:ProfilesResolved + '/' + $DirName + '/pre/' + $Name), $remoteTmp)
+    if ($cp.Code -ne 0) { throw "adb rollback cp failed for $Name : $($cp.Text.Trim())" }
+    $mv = Invoke-Adb @('-s', $DeviceSerial, 'shell', 'mv', '-f', $remoteTmp,
         ($script:ProfilesResolved + '/' + $Name))
-    if ($r.Code -ne 0) { throw "adb rollback mv failed for $Name : $($r.Text.Trim())" }
+    if ($mv.Code -ne 0) { throw "adb rollback mv failed for $Name : $($mv.Text.Trim())" }
+}
+
+function Target-ListPreEntryNames([string]$DirName) {
+    if ($Platform -eq 'Windows') {
+        $preDir = Join-Path $script:ProfilesResolved ($DirName + '\pre')
+        return @(Get-ChildItem -LiteralPath $preDir -ErrorAction SilentlyContinue | ForEach-Object { $_.Name })
+    }
+    $ls = Invoke-Adb @('-s', $DeviceSerial, 'shell', 'ls', '-a', '-1',
+        ($script:ProfilesResolved + '/' + $DirName + '/pre'))
+    if ($ls.Code -ne 0) { return @() }
+    return @($ls.Text -split "`r?`n" | Where-Object { $_.Trim().Length -gt 0 } | ForEach-Object { $_.Trim() })
+}
+
+function Target-RemovePreFile([string]$DirName, [string]$Name) {
+    if ($Platform -eq 'Windows') {
+        Remove-Item -LiteralPath (Join-Path $script:ProfilesResolved ($DirName + '\pre\' + $Name)) -Force -ErrorAction SilentlyContinue
+        return
+    }
+    Invoke-Adb @('-s', $DeviceSerial, 'shell', 'rm', '-f',
+        ($script:ProfilesResolved + '/' + $DirName + '/pre/' + $Name)) | Out-Null
 }
 
 function Target-RemoveStrayTemps() {
     foreach ($name in (Target-ListEntryNames)) {
         if ($name -match '\.restore-tmp-' -or ($name -match '^\.profile-\d\.json(\.bak)?\.[0-9a-f]{8}\.tmp$')) {
             try { Target-Remove $name } catch { }
+        }
+        # Stray .snap-tmp-* names inside a journal's pre/ dir are the
+        # remains of a mid-copy kill; they are never authoritative and
+        # are safe to clear before resume/rollback.
+        if ($name.StartsWith($JournalPrefix) -and (Target-DirExists $name)) {
+            foreach ($preName in (Target-ListPreEntryNames $name)) {
+                if ($preName -match '\.snap-tmp-') {
+                    try { Target-RemovePreFile $name $preName } catch { }
+                }
+            }
         }
     }
 }
@@ -517,10 +595,11 @@ try {
         if ($Resume) {
             # Repair pass: an apply killed inside the snapshot loop (up to
             # ~16 adb round-trips on Android) leaves an 'applying' journal
-            # whose preExisted entries may have no pre/ bytes. Any entry
-            # that was never written — pending restores and every
-            # non-restore action — still holds its untouched pre-restore
-            # bytes on disk, so capture them now BEFORE the first write;
+            # whose preExisted entries may have missing or torn pre/
+            # bytes. Any entry that was never written — pending restores
+            # and every non-restore action — still holds its untouched
+            # pre-restore bytes on disk, so a missing or unverifiable
+            # snapshot is recaptured now BEFORE the first write;
             # otherwise those bytes are lost and a later rollback wedges
             # on the missing pre/ file.
             $repaired = $false
@@ -528,18 +607,37 @@ try {
                 if (-not $entry.preExisted) { continue }
                 if ($entry.action -eq 'restore' -and $entry.state -eq 'done') { continue }
                 $name = [string]$entry.name
-                if (Target-PreFileExists $jdir $name) { continue }
-                if (Target-FileExists $name) {
-                    Target-JournalSnapshot $jdir $name
-                    $preTmp = Join-Path ([IO.Path]::GetTempPath()) ('family-pre-' + [guid]::NewGuid().ToString('N').Substring(0, 8) + '.bin')
-                    try {
-                        if ($Platform -eq 'Windows') {
-                            Copy-Item -LiteralPath (Join-Path $script:ProfilesResolved ($jdir + '\pre\' + $name)) -Destination $preTmp
+                # An existing pre/ file is trusted ONLY when it hashes as
+                # the journal recorded: existence alone is not evidence
+                # (a mid-copy kill can leave torn bytes), and a snapshot
+                # without a recorded hash is treated as absent.
+                $needsCapture = $true
+                if (Target-PreFileExists $jdir $name) {
+                    $recordedPre = [string]$entry.preSha256
+                    if (-not [string]::IsNullOrEmpty($recordedPre)) {
+                        if ((Target-PreFileSha256 $jdir $name) -eq $recordedPre) {
+                            $needsCapture = $false
                         } else {
-                            Target-FetchToLocal ($jdir + '/pre/' + $name) $preTmp
+                            Write-Host "Restore(resume): pre-restore snapshot for $name fails its journaled hash; recapturing from the still-untouched live file."
                         }
-                        $entry.preSha256 = (Get-FileHash -LiteralPath $preTmp -Algorithm SHA256).Hash.ToLowerInvariant()
-                    } finally { Remove-Item -LiteralPath $preTmp -Force -ErrorAction SilentlyContinue }
+                    }
+                }
+                if (-not $needsCapture) { continue }
+                if (Target-FileExists $name) {
+                    # Capture, then verify the stored bytes equal the live
+                    # file — a torn snapshot is retried once and never
+                    # recorded as authoritative.
+                    Target-JournalSnapshot $jdir $name
+                    $liveHash = Target-LiveFileSha256 $name
+                    $preHash = Target-PreFileSha256 $jdir $name
+                    if ($preHash -ne $liveHash) {
+                        Target-JournalSnapshot $jdir $name
+                        $preHash = Target-PreFileSha256 $jdir $name
+                        if ($preHash -ne $liveHash) {
+                            throw "Pre-restore snapshot for $name could not be verified after retry (live $liveHash, stored $preHash); the live file was left unmodified."
+                        }
+                    }
+                    $entry.preSha256 = $liveHash
                     Write-Host "Restore(resume): captured missed pre-restore bytes for $name"
                 } else {
                     $entry.preExisted = $false
@@ -575,8 +673,22 @@ try {
             } else {
                 if ($entry.action -ne 'restore' -or $entry.state -ne 'done') { continue }
                 if ($entry.preExisted) {
-                    if (-not (Target-PreFileExists $jdir ([string]$entry.name))) {
-                        throw "Rollback cannot proceed: pre-restore bytes for '$($entry.name)' are missing under $jdir (the file was already written but its snapshot was never captured). Recover manually from $jdir."
+                    $name = [string]$entry.name
+                    # The snapshot is authoritative only when it hashes
+                    # exactly as the journal recorded: a missing recorded
+                    # hash is treated as absent, a missing file stays a
+                    # named refusal, and a hash mismatch means torn or
+                    # tampered bytes that must never reach the live file.
+                    $recordedPre = [string]$entry.preSha256
+                    if ([string]::IsNullOrEmpty($recordedPre)) {
+                        throw "Rollback cannot proceed: the journal records no pre-restore hash for '$name' under $jdir; the snapshot cannot be verified and is treated as absent. Recover manually from $jdir."
+                    }
+                    if (-not (Target-PreFileExists $jdir $name)) {
+                        throw "Rollback cannot proceed: pre-restore bytes for '$name' are missing under $jdir (the file was already written but its snapshot was never captured). Recover manually from $jdir."
+                    }
+                    $preHash = Target-PreFileSha256 $jdir $name
+                    if ($preHash -ne $recordedPre) {
+                        throw "Rollback cannot proceed: pre-restore bytes for '$name' under $jdir fail the journaled hash check (recorded $recordedPre, stored $preHash) -- the snapshot is torn or tampered and was NOT restored. Recover manually from $jdir."
                     }
                     Target-RestorePreBytes $jdir $entry.name
                     Write-Host "Restore(rollback): returned pre-restore bytes for $($entry.name)"
@@ -735,6 +847,19 @@ try {
             Target-FetchToLocal $name $observed
         }
         $entry.preSha256 = (Get-FileHash -LiteralPath $observed -Algorithm SHA256).Hash.ToLowerInvariant()
+        # The stored snapshot must carry exactly those bytes — a torn
+        # copy would otherwise be recorded as authoritative and silently
+        # restored on rollback.
+        $storedHash = Target-PreFileSha256 $jdir $name
+        if ($storedHash -ne $entry.preSha256) {
+            throw "Pre-restore snapshot for $name failed verification right after capture (live $($entry.preSha256), stored $storedHash); leaving the journal for -Resume/-Rollback."
+        }
+        # Persist the verified hash per entry: a kill here leaves an
+        # 'applying' journal whose recorded hashes let resume distinguish
+        # a merely-missing snapshot from a torn one (named mismatch
+        # instead of blind recapture).
+        $journal.updatedUtc = [DateTime]::UtcNow.ToString('o')
+        Target-JournalWriteJson $jdir $journal
         $snapshotted++
         if ($InterruptDuringSnapshot -ge 0 -and $snapshotted -ge $InterruptDuringSnapshot) {
             Write-Host "Restore: INTERRUPTED by test hook inside the snapshot loop after $snapshotted file(s); journal left in 'applying' state with a partial pre/ snapshot."

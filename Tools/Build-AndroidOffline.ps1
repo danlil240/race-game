@@ -81,6 +81,7 @@ $result = [ordered]@{
     configuration = $Configuration
     buildFlavor = $buildFlavor
     exportMethod = $exportMethod
+    releaseConfigPath = $null
     editorVersion = $editorVersion
     editorPath = $editor
     exportPath = $export
@@ -211,8 +212,19 @@ try {
         $result.builtApk = $unsignedApk
 
         $result.stage = 'sign'
-        $releaseConfigPath = Join-Path $project 'Release\release.json'
+        # Resolve the release config through the same mechanism the Unity
+        # export used (FamilyReleaseSettings.ResolveConfigPath): an
+        # explicit FAMILY_RACING_RELEASE_CONFIG override wins, otherwise
+        # the tracked Release\release.json. Signing expectations must
+        # come from the SAME config the artifacts were stamped with.
+        $releaseConfigPath = [Environment]::GetEnvironmentVariable('FAMILY_RACING_RELEASE_CONFIG')
+        if ([string]::IsNullOrEmpty($releaseConfigPath)) {
+            $releaseConfigPath = Join-Path $project 'Release\release.json'
+        } else {
+            $releaseConfigPath = [IO.Path]::GetFullPath($releaseConfigPath)
+        }
         Require-File $releaseConfigPath 'Release identity config'
+        $result.releaseConfigPath = $releaseConfigPath
         $releaseConfig = Get-Content -LiteralPath $releaseConfigPath -Raw | ConvertFrom-Json
         foreach ($field in @('applicationId', 'versionName', 'androidVersionCode',
                 'androidMinSdkVersion', 'androidTargetSdkVersion', 'expectedCertificateSha256')) {

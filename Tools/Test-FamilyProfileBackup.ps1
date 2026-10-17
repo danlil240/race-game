@@ -711,6 +711,92 @@ try {
         ($run.ExitCode -eq 0 -and (Compare-FileMap $preMap (Get-FileMap $case.Profiles))) `
         ($run.Output + ' exit=' + $run.ExitCode)
 
+    # A torn/corrupt pre/ snapshot must be a NAMED refusal on rollback —
+    # the journaled preSha256 is verified before any byte moves, so a
+    # mid-copy-kill artifact can never be silently restored.
+    $case = New-BackedUpCase 'i-pre-corrupt'
+    $j0 = Get-Content -LiteralPath (Join-Path $case.Backup 'profile-0.json') -Raw | ConvertFrom-Json
+    Set-Content -LiteralPath (Join-Path $case.Profiles 'profile-0.json') `
+        -Value (New-ProfileJson -Slot 0 -Id ([string]$j0.id) -Coins 99) -NoNewline -Encoding UTF8
+    Remove-Item -LiteralPath (Join-Path $case.Profiles 'profile-1.json') -Force
+    $run = Run-RestoreCase @{
+        Backup = $case.Backup; ExpectedManifest = $case.Manifest
+        ProfilesPath = $case.Profiles; Apply = $true; InterruptAfterFiles = 1 }
+    $journalDir = @(Get-ChildItem -LiteralPath $case.Profiles -Directory -Filter '.family-restore-*' -ErrorAction SilentlyContinue)
+    $corruptSeeded = ($run.ExitCode -eq 3 -and $journalDir.Count -eq 1 -and
+        (Test-Path -LiteralPath (Join-Path $journalDir[0].FullName 'pre\profile-0.json')))
+    if ($corruptSeeded) {
+        Set-Content -LiteralPath (Join-Path $journalDir[0].FullName 'pre\profile-0.json') `
+            -Value 'torn snapshot bytes' -NoNewline
+    }
+    $liveBefore = Get-FileMap $case.Profiles
+    $run = Run-RestoreCase @{ ProfilesPath = $case.Profiles; Rollback = $true }
+    Check 'restore: corrupt pre/ snapshot is a named refusal, wrong bytes never restored' `
+        ($corruptSeeded -and $run.ExitCode -ne 0 -and
+         $run.Output -match 'hash|sha256|torn|tamper' -and
+         $run.Output -match 'profile-0\.json' -and
+         (Compare-FileMap $liveBefore (Get-FileMap $case.Profiles))) `
+        ("exit=$($run.ExitCode) " + $run.Output)
+
+    # A journal entry whose recorded hash is missing makes the snapshot
+    # unverifiable: treated as absent -> named refusal, same as a
+    # missing pre/ file.
+    $case = New-BackedUpCase 'i-pre-nohash'
+    $j0 = Get-Content -LiteralPath (Join-Path $case.Backup 'profile-0.json') -Raw | ConvertFrom-Json
+    Set-Content -LiteralPath (Join-Path $case.Profiles 'profile-0.json') `
+        -Value (New-ProfileJson -Slot 0 -Id ([string]$j0.id) -Coins 99) -NoNewline -Encoding UTF8
+    $run = Run-RestoreCase @{
+        Backup = $case.Backup; ExpectedManifest = $case.Manifest
+        ProfilesPath = $case.Profiles; Apply = $true; InterruptAfterFiles = 1 }
+    $journalDir = @(Get-ChildItem -LiteralPath $case.Profiles -Directory -Filter '.family-restore-*' -ErrorAction SilentlyContinue)
+    if ($journalDir.Count -eq 1) {
+        $jpath = Join-Path $journalDir[0].FullName 'journal.json'
+        $j = Get-Content -LiteralPath $jpath -Raw | ConvertFrom-Json
+        foreach ($e in $j.entries) { if ($e.name -eq 'profile-0.json') { $e.preSha256 = $null } }
+        ($j | ConvertTo-Json -Depth 8) | Set-Content -LiteralPath $jpath -Encoding UTF8
+    }
+    $liveBefore = Get-FileMap $case.Profiles
+    $run = Run-RestoreCase @{ ProfilesPath = $case.Profiles; Rollback = $true }
+    Check 'restore: snapshot without recorded hash refused on rollback' `
+        ($journalDir.Count -eq 1 -and $run.ExitCode -ne 0 -and
+         $run.Output -match 'hash|sha256|verif|absent|missing' -and
+         $run.Output -match 'profile-0\.json' -and
+         (Compare-FileMap $liveBefore (Get-FileMap $case.Profiles))) `
+        ("exit=$($run.ExitCode) " + $run.Output)
+
+    # The same corrupt snapshot is REPAIRED on resume: the repair pass
+    # verifies each existing pre/ file against its journaled hash and
+    # recaptures mismatches from the still-untouched live file, so resume
+    # completes and rollback still restores the exact pre bytes.
+    $case = New-BackedUpCase 'i-pre-retorn'
+    $j0 = Get-Content -LiteralPath (Join-Path $case.Backup 'profile-0.json') -Raw | ConvertFrom-Json
+    Set-Content -LiteralPath (Join-Path $case.Profiles 'profile-0.json') `
+        -Value (New-ProfileJson -Slot 0 -Id ([string]$j0.id) -Coins 99) -NoNewline -Encoding UTF8
+    $preMap = Get-FileMap $case.Profiles
+    $run = Run-RestoreCase @{
+        Backup = $case.Backup; ExpectedManifest = $case.Manifest
+        ProfilesPath = $case.Profiles; Apply = $true; InterruptDuringSnapshot = 1 }
+    $journalDir = @(Get-ChildItem -LiteralPath $case.Profiles -Directory -Filter '.family-restore-*' -ErrorAction SilentlyContinue)
+    $corruptSeeded = ($run.ExitCode -eq 3 -and $journalDir.Count -eq 1 -and
+        (Test-Path -LiteralPath (Join-Path $journalDir[0].FullName 'pre\profile-0.json')))
+    if ($corruptSeeded) {
+        Set-Content -LiteralPath (Join-Path $journalDir[0].FullName 'pre\profile-0.json') `
+            -Value 'torn snapshot bytes' -NoNewline
+    }
+    # The repair runs BEFORE the first resumed write; interrupting the
+    # resume mid-apply then proves rollback still restores exact bytes.
+    $run = Run-RestoreCase @{
+        ProfilesPath = $case.Profiles; Resume = $true; InterruptAfterFiles = 1 }
+    Check 'restore: -Resume recaptures a torn pre/ snapshot before writing' `
+        ($corruptSeeded -and $run.ExitCode -eq 3 -and
+         $run.Output -match 'profile-0\.json' -and
+         $run.Output -match 'recaptur|journaled hash') `
+        ("exit=$($run.ExitCode) " + $run.Output)
+    $run = Run-RestoreCase @{ ProfilesPath = $case.Profiles; Rollback = $true }
+    Check 'restore: -Rollback after torn-snapshot repair restores exact pre bytes' `
+        ($run.ExitCode -eq 0 -and (Compare-FileMap $preMap (Get-FileMap $case.Profiles))) `
+        ($run.Output + ' exit=' + $run.ExitCode)
+
     # ============================ ANDROID ================================
     $ac = New-AdbCase 'a-backup-ok'
     $dest = Join-Path $ac.Dir 'backup'
@@ -825,6 +911,73 @@ try {
         ProfilesPath = $ac.DevProfiles; DeviceSerial = 'SM-T220-TEST1'
         AdbPath = $ac.Adb; Apply = $true }
     Check 'android restore: running game on device fails' ($run.ExitCode -ne 0) $run.Output
+
+    # A torn pre/ snapshot on the device is a NAMED refusal on rollback,
+    # never a silent wrong-bytes restore.
+    $ac = New-AdbCase 'a-pre-corrupt' @{}
+    Write-FixtureReleaseManifest (Join-Path $ac.Dir 'release-manifest.json')
+    $dest = Join-Path $ac.Dir 'backup'
+    $run = Run-BackupCase 'a-pre-corrupt' @{
+        Platform = 'Android'; Destination = $dest
+        ExpectedManifest = (Join-Path $ac.Dir 'release-manifest.json')
+        ProfilesPath = $ac.DevProfiles; DeviceSerial = $ac.Serial; AdbPath = $ac.Adb }
+    $j0 = Get-Content -LiteralPath (Join-Path $dest 'profile-0.json') -Raw | ConvertFrom-Json
+    Set-Content -LiteralPath (Join-Path $ac.HostProfiles 'profile-0.json') `
+        -Value (New-ProfileJson -Slot 0 -Id ([string]$j0.id) -Coins 99) -NoNewline -Encoding UTF8
+    $run = Run-RestoreCase @{
+        Platform = 'Android'; Backup = $dest
+        ExpectedManifest = (Join-Path $ac.Dir 'release-manifest.json')
+        ProfilesPath = $ac.DevProfiles; DeviceSerial = $ac.Serial
+        AdbPath = $ac.Adb; Apply = $true; InterruptAfterFiles = 1 }
+    $journalDirs = @(Get-ChildItem -LiteralPath $ac.HostProfiles -Directory -Filter '.family-restore-*' -ErrorAction SilentlyContinue)
+    $corruptSeeded = ($run.ExitCode -eq 3 -and $journalDirs.Count -eq 1 -and
+        (Test-Path -LiteralPath (Join-Path $journalDirs[0].FullName 'pre\profile-0.json')))
+    if ($corruptSeeded) {
+        Set-Content -LiteralPath (Join-Path $journalDirs[0].FullName 'pre\profile-0.json') `
+            -Value 'torn snapshot bytes' -NoNewline
+    }
+    $liveBefore = Get-FileMap $ac.HostProfiles
+    $run = Run-RestoreCase @{
+        Platform = 'Android'; ProfilesPath = $ac.DevProfiles
+        DeviceSerial = $ac.Serial; AdbPath = $ac.Adb; Rollback = $true }
+    Check 'android restore: corrupt pre/ snapshot is a named refusal, wrong bytes never restored' `
+        ($corruptSeeded -and $run.ExitCode -ne 0 -and
+         $run.Output -match 'hash|sha256|torn|tamper' -and
+         $run.Output -match 'profile-0\.json' -and
+         (Compare-FileMap $liveBefore (Get-FileMap $ac.HostProfiles))) `
+        ("exit=$($run.ExitCode) " + $run.Output)
+
+    # Rollback must be idempotent on Android: pre/ snapshots are copied,
+    # never consumed by mv, so a retried rollback after a mid-loop kill
+    # still finds every snapshot.
+    $ac = New-AdbCase 'a-rollback-intact' @{}
+    Write-FixtureReleaseManifest (Join-Path $ac.Dir 'release-manifest.json')
+    $dest = Join-Path $ac.Dir 'backup'
+    $run = Run-BackupCase 'a-rollback-intact' @{
+        Platform = 'Android'; Destination = $dest
+        ExpectedManifest = (Join-Path $ac.Dir 'release-manifest.json')
+        ProfilesPath = $ac.DevProfiles; DeviceSerial = $ac.Serial; AdbPath = $ac.Adb }
+    $j0 = Get-Content -LiteralPath (Join-Path $dest 'profile-0.json') -Raw | ConvertFrom-Json
+    Set-Content -LiteralPath (Join-Path $ac.HostProfiles 'profile-0.json') `
+        -Value (New-ProfileJson -Slot 0 -Id ([string]$j0.id) -Coins 99) -NoNewline -Encoding UTF8
+    $preMap = Get-FileMap $ac.HostProfiles
+    $driftHash = (Get-FileHash -LiteralPath (Join-Path $ac.HostProfiles 'profile-0.json') -Algorithm SHA256).Hash
+    $run = Run-RestoreCase @{
+        Platform = 'Android'; Backup = $dest
+        ExpectedManifest = (Join-Path $ac.Dir 'release-manifest.json')
+        ProfilesPath = $ac.DevProfiles; DeviceSerial = $ac.Serial
+        AdbPath = $ac.Adb; Apply = $true; InterruptAfterFiles = 1 }
+    $journalDirs = @(Get-ChildItem -LiteralPath $ac.HostProfiles -Directory -Filter '.family-restore-*' -ErrorAction SilentlyContinue)
+    $run = Run-RestoreCase @{
+        Platform = 'Android'; ProfilesPath = $ac.DevProfiles
+        DeviceSerial = $ac.Serial; AdbPath = $ac.Adb; Rollback = $true }
+    $preIntact = ($journalDirs.Count -eq 1 -and
+        (Test-Path -LiteralPath (Join-Path $journalDirs[0].FullName 'pre\profile-0.json')) -and
+        ((Get-FileHash -LiteralPath (Join-Path $journalDirs[0].FullName 'pre\profile-0.json') -Algorithm SHA256).Hash -eq $driftHash))
+    Check 'android restore: rollback restores exact pre bytes AND keeps pre/ intact for retry' `
+        ($run.ExitCode -eq 0 -and
+         (Compare-FileMap $preMap (Get-FileMap $ac.HostProfiles)) -and $preIntact) `
+        ("exit=$($run.ExitCode) " + $run.Output)
 }
 finally {
     Remove-Item -LiteralPath $fixtureRoot -Recurse -Force -ErrorAction SilentlyContinue

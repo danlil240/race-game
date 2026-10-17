@@ -29,7 +29,9 @@ required            optional rows report but never block (default true)
 evidenceClass       ``production`` — only production-class records count;
                     ``fixture`` — tooling-level row, fixture records allowed
 buildKind           ``ordinary`` | ``development`` | ``any`` — the artifact
-                    kind the row must be observed on
+                    kind the row must be observed on; on a production row
+                    ``any`` admits only ``ordinary``/``development``
+                    records — ``fixture`` is never production evidence
 artifact            ``android`` | ``windows`` | ``none`` — the manifest
                     package the record must bind by path + SHA-256
 requiresHumanReview record must name ``humanReviewer``
@@ -50,9 +52,11 @@ Admission rules (in order; the first decisive problem settles the row):
    missing/tampered evidence file FAILS the row — integrity violations are
    never softened into gaps.
 2. A record that is inadmissible for the row (fixture class on a
-   production row, wrong build kind, source commit or content identity
-   that is not this candidate's, missing required reviewer or device)
-   leaves the row ``notVerified`` — evidence exists but does not qualify.
+   production row, a fixture build kind on a production row — even one
+   whose buildKind is ``any`` — a wrong build kind, source commit or
+   content identity that is not this candidate's, missing required
+   reviewer or device) leaves the row ``notVerified`` — evidence exists
+   but does not qualify.
 3. Otherwise the record's own outcome applies: ``passed`` passes,
    ``failed`` fails, ``skipped``/``notVerified`` stay open.
 
@@ -435,7 +439,17 @@ def evaluate_row(row, record, manifest):
         reasons.append("record evidenceClass %r cannot satisfy a production "
                        "row; fixture/rehearsal evidence never qualifies a "
                        "release row" % data.get("evidenceClass"))
-    if row["buildKind"] != "any" and data.get("buildKind") != row["buildKind"]:
+    if row["buildKind"] == "any":
+        # "any" is not a wildcard for fixture observations on production
+        # rows: it admits only real build kinds (ordinary/development).
+        # A fixture-build record on a production row is inadmissible no
+        # matter what evidenceClass it claims.
+        if row["evidenceClass"] == "production" \
+                and data.get("buildKind") == "fixture":
+            reasons.append("record buildKind 'fixture' cannot satisfy a "
+                           "production row; 'any' admits only ordinary or "
+                           "development builds")
+    elif data.get("buildKind") != row["buildKind"]:
         reasons.append("record buildKind %r cannot satisfy a row requiring "
                        "%r packages" % (data.get("buildKind"),
                                         row["buildKind"]))

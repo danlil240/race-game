@@ -60,19 +60,25 @@ namespace FamilyRacing.EditorTools
                 : Path.GetFullPath(env);
         }
 
+        // "Configured" means the RESOLVED config path — an explicit
+        // FAMILY_RACING_RELEASE_CONFIG override is the config this run
+        // uses, so checking only the tracked default would both stamp the
+        // development version over an override-only setup and apply the
+        // wrong config when both exist.
         public static bool IsConfigured()
         {
-            return File.Exists(DefaultConfigPath);
+            return File.Exists(ResolveConfigPath());
         }
 
-        // Repeatable-setup hook: applies the tracked release identity only
-        // when the config exists. An invalid config surfaces as an
+        // Repeatable-setup hook: applies the resolved release identity
+        // only when the config exists. An invalid config surfaces as an
         // InvalidDataException — setup fails honestly rather than shipping
         // a silently wrong identity.
         public static void ApplyIfConfigured()
         {
-            if (IsConfigured())
-                Apply(DefaultConfigPath);
+            var path = ResolveConfigPath();
+            if (File.Exists(path))
+                Apply(path);
         }
 
         // Every invalid identity/version field, as named reasons. An

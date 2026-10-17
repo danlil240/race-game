@@ -281,6 +281,58 @@ class DevelopmentCannotSatisfyOrdinaryRow(unittest.TestCase):
             self.assertTrue(any("development" in r for r in reasons), reasons)
 
 
+class ProductionAnyBuildKindExcludesFixture(unittest.TestCase):
+    """A production row whose buildKind is ``any`` admits ordinary and
+    development evidence only — seven real matrix rows use this shape
+    (``candidate.baseline-recorded``, ``signing.key-custody``,
+    ``m5.first-world-content``, ``m6.complete-content``,
+    ``m6.audio-bilingual``, ``ordinary.instrumentation-overhead``,
+    ``release.debug-predecessor-migration``). A record claiming
+    production evidenceClass but observed on a fixture build is
+    inadmissible there regardless."""
+
+    def test_fixture_build_record_leaves_production_any_row_open(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manifest = write_manifest(root)
+            matrix = write_matrix(root, [make_row(
+                "candidate.baseline-recorded", build_kind="any")])
+            notes = root / "notes.txt"
+            notes.write_text("fixture observation", encoding="utf-8")
+            record = make_record(
+                root, "candidate.baseline-recorded", "rec.json",
+                evidence_class="production", build_kind="fixture",
+                evidence_files=[{"path": "notes.txt",
+                                 "sha256": sha256_file(notes)}])
+            code, result, proc = run_gate(manifest, matrix, [record],
+                                          root / "evidence")
+            self.assertEqual(code, 1, proc.stderr)
+            self.assertEqual(result["verdict"], "partial")
+            status, reasons = row_status(
+                result, "candidate.baseline-recorded")
+            self.assertEqual(status, "notVerified")
+            self.assertTrue(any("fixture" in r for r in reasons), reasons)
+
+    def test_real_build_kinds_satisfy_production_any_row(self):
+        for kind in ("ordinary", "development"):
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                manifest = write_manifest(root)
+                matrix = write_matrix(root, [make_row(
+                    "candidate.baseline-recorded", build_kind="any")])
+                notes = root / "notes.txt"
+                notes.write_text("observation " + kind, encoding="utf-8")
+                record = make_record(
+                    root, "candidate.baseline-recorded", "rec.json",
+                    build_kind=kind,
+                    evidence_files=[{"path": "notes.txt",
+                                     "sha256": sha256_file(notes)}])
+                code, result, proc = run_gate(manifest, matrix, [record],
+                                              root / "evidence")
+                self.assertEqual(code, 0, proc.stderr + json.dumps(result))
+                self.assertEqual(result["verdict"], "passed", kind)
+
+
 class TamperedEvidenceFails(unittest.TestCase):
     """Evidence files are hash-pinned inside the record; mutating a file
     after the fact is an integrity failure, not a soft mismatch."""

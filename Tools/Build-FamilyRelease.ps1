@@ -31,6 +31,10 @@
 #   called a release candidate; a missing android artifact is recorded
 #   as a named blocker rather than fabricated.
 #
+# The resolved -Config path is exported as FAMILY_RACING_RELEASE_CONFIG
+# for every child Verify/Unity/sign invocation, so the whole pipeline
+# stamps the same release identity the manifest records.
+#
 # Every failure is named and publishes nothing: reused output dirs,
 # stale/mixed/partial source-content manifests, missing player data or
 # runtime DLLs, planted saves/keys/validation tokens, and missing
@@ -124,6 +128,14 @@ function Invoke-ChildTool([string]$Script, [string[]]$Arguments, [string]$LogNam
 try {
     # --- stage: config -----------------------------------------------------
     Require-File $Config 'Release config'
+    $Config = (Resolve-Path -LiteralPath $Config).Path
+    # Every child pipeline (Verify modes, the Unity exports, the offline
+    # Android build and its signer) resolves the release config through
+    # FAMILY_RACING_RELEASE_CONFIG. Propagating the resolved -Config here
+    # guarantees the identity/version/certificate the manifest records is
+    # exactly the identity stamped into the artifacts — a non-default
+    # -Config can never diverge from what the builds actually used.
+    $env:FAMILY_RACING_RELEASE_CONFIG = $Config
     $releaseConfig = Get-Content -LiteralPath $Config -Raw | ConvertFrom-Json
     foreach ($field in @('versionName', 'androidVersionCode', 'applicationId',
             'companyName', 'productName', 'androidMinSdkVersion',

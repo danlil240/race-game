@@ -100,6 +100,7 @@ updating the game folder never touches it; uninstalling Windows does.
 | Tablet says "app not installed" on update | The APK is signed with a different key than the installed one — keep the old app installed and ask for the correctly signed package |
 | Profile looks damaged after a crash | The game keeps an automatic `.bak` copy of each profile and restores it on next start |
 
-For backup/restore of profiles between machines, see
+For backup/restore of profiles on the same installation (the same PC
+user or the same tablet — the tools refuse cross-device restores), see
 `FAMILY_BACKUP_GUIDE.md` (when delivered). For the technical release
 pipeline, see `FAMILY_RELEASE_RUNBOOK.md`.
