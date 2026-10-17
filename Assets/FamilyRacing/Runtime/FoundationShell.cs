@@ -20,6 +20,10 @@ namespace FamilyRacing
         private static readonly Color Ocean = new Color(0.24f, 0.49f, 0.63f);
         private static readonly Color Deep = new Color(0.16f, 0.24f, 0.30f);
         private static readonly Color Cream = new Color(0.99f, 0.97f, 0.92f);
+        // Semi-opaque cream wash: the one backdrop every floating panel or
+        // HUD strip over the live course shares (tutorial cue panel,
+        // pause/finish overlays, the HUD readout strips — PCQA-011).
+        private static readonly Color PanelWash = new Color(0.99f, 0.97f, 0.92f, 0.85f);
         private static readonly Color Off = new Color(0.75f, 0.72f, 0.66f);
         private static readonly Color[] CardColors = { Coral, Seafoam, Ocean, new Color(0.80f, 0.66f, 0.45f) };
         private static readonly string[] AnimalKeys =

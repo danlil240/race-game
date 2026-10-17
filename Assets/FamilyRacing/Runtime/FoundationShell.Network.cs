@@ -617,6 +617,10 @@ namespace FamilyRacing
         private void BuildLanRace(FoundationState state)
         {
             var top = Row(root);
+            // Same over-world exposure as the solo HUD (PCQA-011): the
+            // shared wash keeps the readouts readable on dark geometry.
+            top.name = "lan.hud.readouts";
+            HudStrip(top);
             lanTimeLabel = AddLabel(top, "", 28, Deep);
             lanTimeLabel.name = "lan.hud.time";
             lanStandingsLabel = AddLabel(top, "", 22, Deep);
@@ -658,6 +662,7 @@ namespace FamilyRacing
             var keys = AddLabel(root, T("hud.keys", state), 15, Deep);
             keys.name = "lan.hud.keys";
             keys.style.opacity = 0.75f;
+            HudStrip(keys);
 
             var actions = Row(root);
             var recover = AddButton(actions, T("input.recovery", state), Deep,

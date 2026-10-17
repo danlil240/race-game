@@ -314,6 +314,11 @@ namespace FamilyRacing
         private void BuildDriving(FoundationState state)
         {
             var top = Row(root);
+            // PCQA-011: the readouts draw dark text straight over live
+            // track geometry — the shared wash keeps them readable on
+            // dark ground while the world stays visible around the strip.
+            top.name = "hud.readouts";
+            HudStrip(top);
             elapsedLabel = AddLabel(top, "", 28, Deep);
             elapsedLabel.name = "hud.elapsed";
             lapLabel = AddLabel(top, "", 28, Deep);
@@ -337,6 +342,10 @@ namespace FamilyRacing
             gadgetLabel.name = "hud.gadget";
 
             var boostRow = Row(root);
+            // Same exposure as the readout strip: the caption is dark
+            // text over the course, so the row gets the shared wash.
+            boostRow.name = "hud.boostRow";
+            HudStrip(boostRow);
             var boostCaption = AddLabel(boostRow, T("input.boost", state), 20, Deep);
             boostCaption.name = "hud.boostLabel";
             var boostTrack = new VisualElement();
@@ -366,7 +375,7 @@ namespace FamilyRacing
             tutorialPanel.style.flexDirection = FlexDirection.Row;
             tutorialPanel.style.justifyContent = Justify.Center;
             tutorialPanel.style.alignItems = Align.Center;
-            tutorialPanel.style.backgroundColor = new Color(0.99f, 0.97f, 0.92f, 0.85f);
+            tutorialPanel.style.backgroundColor = PanelWash;
             tutorialPanel.style.borderTopLeftRadius = tutorialPanel.style.borderTopRightRadius =
                 tutorialPanel.style.borderBottomLeftRadius = tutorialPanel.style.borderBottomRightRadius = 14;
             tutorialPanel.style.marginTop = 6;
@@ -412,6 +421,7 @@ namespace FamilyRacing
             var keys = AddLabel(root, T("hud.keys", state), 15, Deep);
             keys.name = "hud.keys";
             keys.style.opacity = 0.75f;
+            HudStrip(keys);
 
             var actions = Row(root);
             var recover = AddButton(actions, T("input.recovery", state), Deep,
@@ -476,6 +486,19 @@ namespace FamilyRacing
             statusLabel.name = "status.persistence";
         }
 
+        // One shared backdrop for HUD strips that float text over the live
+        // course (PCQA-011): the same semi-opaque cream + 14-radius the
+        // tutorial cue panel and the overlays already paint, so dark
+        // readouts keep their contrast over dark track geometry.
+        private void HudStrip(VisualElement element)
+        {
+            element.style.backgroundColor = PanelWash;
+            element.style.borderTopLeftRadius = element.style.borderTopRightRadius =
+                element.style.borderBottomLeftRadius = element.style.borderBottomRightRadius = 14;
+            element.style.paddingTop = element.style.paddingBottom = 2;
+            element.style.paddingLeft = element.style.paddingRight = 10;
+        }
+
         // Full-screen semi-opaque overlay, hidden until shown by the
         // indicator update; children (labels/buttons) still receive input.
         private VisualElement Overlay(string name)
@@ -485,7 +508,7 @@ namespace FamilyRacing
             overlay.style.position = Position.Absolute;
             overlay.style.left = overlay.style.right = 0;
             overlay.style.top = overlay.style.bottom = 0;
-            overlay.style.backgroundColor = new Color(0.99f, 0.97f, 0.92f, 0.85f);
+            overlay.style.backgroundColor = PanelWash;
             overlay.style.alignItems = Align.Center;
             overlay.style.justifyContent = Justify.Center;
             overlay.style.display = DisplayStyle.None;
@@ -502,9 +525,23 @@ namespace FamilyRacing
                 elapsedLabel.text = T("hud.time", state) + " " +
                     FormatRaceTime(session.elapsedTicks);
             if (lapLabel != null)
-                lapLabel.text = T("hud.lap", state) + " " +
-                    Mathf.Min(session.lap + 1, session.lapsRequired) + "/" +
-                    session.lapsRequired;
+            {
+                // PCQA-010: the tutorial free-drive event authors 99 laps
+                // so lessons are never lap-limited — rendering "Lap 1/99"
+                // reads to a child like a 99-lap requirement. Hide the
+                // counter while lessons run (the tutorial strip already
+                // shows "lesson x/7") and restore the real readout for
+                // the trial phase and every non-tutorial race.
+                var lessonPhase = session.tutorial != null
+                    && session.tutorial.phase
+                        == FamilyRacing.Core.Tutorial.DrivingTutorial.PhaseLessons;
+                lapLabel.style.display = lessonPhase
+                    ? DisplayStyle.None : DisplayStyle.Flex;
+                if (!lessonPhase)
+                    lapLabel.text = T("hud.lap", state) + " " +
+                        Mathf.Min(session.lap + 1, session.lapsRequired) + "/" +
+                        session.lapsRequired;
+            }
             if (gateLabel != null)
             {
                 // nextCheckpoint is the expected gate index; gate 0 is the

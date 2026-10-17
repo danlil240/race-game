@@ -7,6 +7,7 @@ using FamilyRacing.Core.Driving;
 using FamilyRacing.Core.Foundation;
 using FamilyRacing.Core.Profiles;
 using FamilyRacing.Core.Racing;
+using FamilyRacing.Core.Tutorial;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
@@ -620,6 +621,87 @@ namespace FamilyRacing.Tests
             Assert.That(document.rootVisualElement.style.backgroundColor.value.a,
                 Is.EqualTo(0f).Within(0.001f),
                 "the driving HUD must not paint an opaque root over the course");
+        }
+
+        // PCQA-010: the tutorial free-drive stage rides the authored
+        // 99-lap event, so an unfiltered counter reads "Lap 1/99" — a
+        // child could take it for a 99-lap requirement. The lessons
+        // phase hides the readout (the tutorial strip already carries
+        // "lesson x/7"); the trial and non-tutorial races show it.
+        [UnityTest]
+        public IEnumerator TutorialLessonsHideLapCounterUntilTrial()
+        {
+            yield return ToRunning();
+            var lap = Widget<Label>("hud.lap");
+            Assert.That(lap, Is.Not.Null);
+            Assert.That(lap.style.display.value, Is.EqualTo(DisplayStyle.Flex),
+                "a normal race shows the real lap counter");
+            Assert.That(lap.text, Does.Contain("1/2"));
+
+            // Lessons run on the free-drive event — lapsRequired is the
+            // authored free-drive bound, not a goal.
+            var lessons = Snapshot();
+            lessons.driving.lapsRequired = 99;
+            lessons.driving.tutorial = new TutorialState
+            {
+                tutorialId = "tutorial-play",
+                phase = "lessons",
+                lessonId = "steering",
+                lessonIndex = 0,
+                lessonTotal = 7,
+                cueId = "steering",
+                objective = "tutorial.cue.steering"
+            };
+            shell.Refresh(lessons);
+            Assert.That(lap.style.display.value, Is.EqualTo(DisplayStyle.None),
+                "lesson phases must hide the free-drive lap counter");
+
+            // The graduation trial seats the real one-lap event: the
+            // counter returns with a meaningful count.
+            var trial = Snapshot();
+            trial.driving.tutorial = new TutorialState
+            {
+                tutorialId = "tutorial-play",
+                phase = "trial",
+                cueId = "trial",
+                objective = "tutorial.cue.trial"
+            };
+            shell.Refresh(trial);
+            Assert.That(lap.style.display.value, Is.EqualTo(DisplayStyle.Flex),
+                "the trial phase restores the lap counter");
+            Assert.That(lap.text, Does.Contain("1/2"));
+
+            // Back to a plain non-tutorial frame: the readout stays on.
+            shell.Refresh(Snapshot());
+            Assert.That(lap.style.display.value, Is.EqualTo(DisplayStyle.Flex));
+        }
+
+        // PCQA-011: the top readout strip and the other floating HUD
+        // text draw over live track geometry — they carry the shared
+        // semi-opaque wash so dark labels keep their contrast, while the
+        // HUD root itself stays transparent to the course.
+        [UnityTest]
+        public IEnumerator HudStripsCarrySemiOpaqueBackdrop()
+        {
+            StartRace();
+            RefreshDriving();
+            yield return WaitForWidget<VisualElement>("hud.readouts");
+
+            var strip = Widget<VisualElement>("hud.readouts");
+            Assert.That(strip.resolvedStyle.backgroundColor.a,
+                Is.GreaterThan(0.5f),
+                "the top readout strip must paint a real backdrop over the world");
+            Assert.That(Widget<VisualElement>("hud.boostRow")
+                    .resolvedStyle.backgroundColor.a,
+                Is.GreaterThan(0.5f),
+                "the boost row is equally exposed and carries the same wash");
+            Assert.That(Widget<Label>("hud.keys")
+                    .resolvedStyle.backgroundColor.a,
+                Is.GreaterThan(0.5f),
+                "the keyboard legend keeps the same backdrop");
+            Assert.That(document.rootVisualElement.style.backgroundColor.value.a,
+                Is.EqualTo(0f).Within(0.001f),
+                "only the strips get a backdrop — the HUD root stays transparent");
         }
 
         [UnityTest]
