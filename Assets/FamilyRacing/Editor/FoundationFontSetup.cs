@@ -40,6 +40,40 @@ namespace FamilyRacing.EditorTools
             if (text.defaultFontAsset != latin)
                 EnsureFallbacks(text.defaultFontAsset, latin, hebrew, symbols);
             EnableAdvancedText();
+            PopulateAtlas(latin, hebrew, symbols, text.defaultFontAsset);
+        }
+
+        // Seeds the serialized atlas with the shipped UI repertoire so player
+        // cold starts render text against an already-uploaded texture instead
+        // of pending glyph additions (PCQA-001/PCQA-005). Runs at setup so
+        // regenerated assets re-populate; runtime FoundationFonts.Warmup
+        // remains as the belt-and-suspenders net.
+        private static void PopulateAtlas(params FontAsset[] fonts)
+        {
+            foreach (var font in fonts)
+                if (font != null &&
+                    font.atlasPopulationMode == AtlasPopulationMode.Dynamic)
+                    font.TryAddCharacters(FoundationFonts.RequiredCharacters);
+            FlushFontQueue();
+            foreach (var font in fonts)
+            {
+                if (font == null)
+                    continue;
+                PersistSubAssets(font);
+                var textures = font.atlasTextures;
+                if (textures != null)
+                    foreach (var texture in textures)
+                        if (texture != null)
+                            EditorUtility.SetDirty(texture);
+            }
+        }
+
+        private static void FlushFontQueue()
+        {
+            var method = typeof(FontAsset).GetMethod(
+                "UpdateFontAssetsInUpdateQueue",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            method?.Invoke(null, null);
         }
 
         private static FontAsset EnsureGeneratedFont(string assetPath, string sourcePath)

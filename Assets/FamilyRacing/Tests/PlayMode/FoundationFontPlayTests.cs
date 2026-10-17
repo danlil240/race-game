@@ -116,6 +116,10 @@ namespace FamilyRacing.Tests
         // a live atlas texture with nothing left pending; otherwise the
         // first elements bake UVs for a not-yet-uploaded atlas and paint
         // blank until a rebuild (the player-only cold-launch symptom).
+        // Caveat: in-editor PlayMode runs generation on the main thread
+        // where GenerateText self-flushes, so the empty-queue half is an
+        // invariant, not a fix/no-fix discriminator — the WarmupCalls
+        // signal is what proves the warm-up path actually ran at Bind.
         [UnityTest]
         public IEnumerator FirstScreenGlyphsAreInTheAtlasWithNoPendingUpdate()
         {
@@ -125,10 +129,16 @@ namespace FamilyRacing.Tests
             Assert.That(font.atlasTextures, Is.Not.Null.And.Not.Empty,
                 "The warm-up must leave a real atlas texture, not a queued upload.");
             Assert.That(font.atlasTextures[0], Is.Not.Null);
-            var labels = document.rootVisualElement.Query<Label>().ToList();
-            var text = string.Concat(labels
-                .Where(l => !string.IsNullOrEmpty(l.text))
-                .Select(l => l.text));
+            Assert.That(WarmupInvocationCount(), Is.GreaterThan(0),
+                "FoundationFonts.Warmup must have run during Bind on the " +
+                "first screen — this is the fix's observable signal.");
+            // UIElements TextElement covers labels, button text, and every
+            // other text-bearing element the first RebuildTree produced.
+            var elements = document.rootVisualElement
+                .Query<UnityEngine.UIElements.TextElement>().ToList();
+            var text = string.Concat(elements
+                .Where(e => !string.IsNullOrEmpty(e.text))
+                .Select(e => e.text));
             Assert.That(text, Is.Not.Empty,
                 "The first screen must actually contain rendered strings.");
             Assert.That(font.HasCharacters(text, out _,
@@ -141,16 +151,19 @@ namespace FamilyRacing.Tests
                 Assert.That(fallback.atlasTextures, Is.Not.Null.And.Not.Empty,
                     "Fallback '" + fallback.name + "' must also carry a live atlas.");
             }
-            var pending = typeof(FontAsset).GetField("m_AtlasUpdateQueue",
+            var pending = typeof(FontAsset).GetField(
+                "k_FontAssets_AtlasTexturesUpdateQueue",
                 BindingFlags.Static | BindingFlags.NonPublic);
-            if (pending != null)
-            {
-                var queue = (System.Collections.ICollection)pending.GetValue(null);
-                Assert.That(queue.Count, Is.EqualTo(0),
-                    "No atlas update may still be pending on the first " +
-                    "rendered screen — pending uploads are exactly what " +
-                    "leaves cold-launch text permanently blank.");
-            }
+            Assert.That(pending, Is.Not.Null,
+                "FontAsset's atlas-update queue field was renamed in this " +
+                "Unity version — update the probe rather than silently skip.");
+            var queue = pending.GetValue(null) as System.Collections.ICollection;
+            Assert.That(queue, Is.Not.Null,
+                "The atlas-update queue must be an initialized collection.");
+            Assert.That(queue.Count, Is.EqualTo(0),
+                "No atlas update may still be pending on the first " +
+                "rendered screen — pending uploads are exactly what " +
+                "leaves cold-launch text permanently blank.");
         }
 
         [UnityTest]
@@ -259,6 +272,16 @@ namespace FamilyRacing.Tests
                         live.style.unityFontDefinition = FontDefinition.FromSDFFont(font);
                 }
             }
+        }
+
+        private static int WarmupInvocationCount()
+        {
+            var field = typeof(FoundationApp).Assembly
+                .GetType("FamilyRacing.FoundationFonts")
+                .GetField("WarmupCalls", BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.That(field, Is.Not.Null,
+                "FoundationFonts.WarmupCalls must exist for this probe.");
+            return (int)field.GetValue(null);
         }
 
         private static bool FontsReady(UIDocument doc)

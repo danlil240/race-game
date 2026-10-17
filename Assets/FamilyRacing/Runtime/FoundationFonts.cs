@@ -17,7 +17,17 @@ namespace FamilyRacing
         internal const string Warning =
             "Bilingual font or Advanced Text Generator configuration unavailable.";
 
-        private static readonly string RequiredCharacters = BuildRequiredCharacters();
+        internal static readonly string RequiredCharacters = BuildRequiredCharacters();
+
+        // Test-observable signal that the bind-time warm-up path ran; lets
+        // PlayMode coverage assert the fix executed rather than only its
+        // (frame-timing-dependent) queue side-effects.
+        internal static int WarmupCalls;
+
+        private static readonly System.Reflection.MethodInfo FlushMethod =
+            typeof(FontAsset).GetMethod("UpdateFontAssetsInUpdateQueue",
+                System.Reflection.BindingFlags.NonPublic |
+                System.Reflection.BindingFlags.Static);
 
         // PCQA-005: dynamic glyph additions are queued, not applied — the
         // atlas texture upload only lands when the font pipeline flushes
@@ -28,25 +38,28 @@ namespace FamilyRacing
         // or rebuilding regenerates them once cached. Adding the full
         // repertoire and flushing the queue synchronously at bind keeps
         // the first screen's UV generation aligned with the real atlas.
+        // Never throws: a corrupted authored font or engine-side failure
+        // degrades to the pre-fix behavior (the pipeline flushes itself on
+        // its own schedule) rather than aborting Awake through the
+        // ApplyTextConfiguration → Bind path.
         internal static void Warmup(PanelSettings panelSettings)
         {
-            var settings = panelSettings != null ? panelSettings.textSettings : null;
-            var font = settings != null ? settings.defaultFontAsset : null;
-            if (font == null) return;
-            var visited = new HashSet<FontAsset>();
-            WarmupChain(font, visited);
             try
             {
-                typeof(FontAsset).GetMethod("UpdateFontAssetsInUpdateQueue",
-                        System.Reflection.BindingFlags.NonPublic |
-                        System.Reflection.BindingFlags.Static)
-                    ?.Invoke(null, null);
+                var settings = panelSettings != null ? panelSettings.textSettings : null;
+                var font = settings != null ? settings.defaultFontAsset : null;
+                if (font == null)
+                    return;
+                WarmupCalls++;
+                var visited = new HashSet<FontAsset>();
+                WarmupChain(font, visited);
+                FlushMethod?.Invoke(null, null);
             }
             catch (Exception)
             {
-                // Queue flushing is best-effort: the character adds above
-                // still seed the atlas; a missing internal API just means
-                // the pipeline flushes itself on the first pass.
+                // Best-effort only: the character adds still seed the atlas,
+                // and a missing internal flush API or broken font just means
+                // the pipeline flushes on the first pass.
             }
         }
 
