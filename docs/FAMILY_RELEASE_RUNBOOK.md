@@ -168,6 +168,78 @@ Run logs go to `Logs\family-release\<runid>\` — never into packages or
 the output directory. Fixture artifacts (test keystore, simulated
 toolchain) are never release evidence.
 
+## Profile backup & recovery (M7 Task 4)
+
+Two tools provide qualified same-installation backup and restore of the
+profile store (`persistentDataPath/Profiles`; the game writes
+`profile-{0..3}.json` + `.json.bak` siblings, schema 3, atomic saves —
+unchanged by this task):
+
+```powershell
+# Backup — Destination must be a NEW directory:
+powershell -NoProfile -File Tools\Backup-FamilyProfiles.ps1 `
+    -Destination <new-dir> -ExpectedManifest <release-manifest.json> `
+    [-Platform Windows|Android] [-ProfilesPath <dir>] `
+    [-DeviceSerial <serial>] [-InstallationLabel <label>] `
+    [-AdbPath <adb.exe>] [-GameProcessNames <extra-names>]
+
+# Restore — preview (validates + plans, writes nothing) then -Apply:
+powershell -NoProfile -File Tools\Restore-FamilyProfiles.ps1 `
+    -Backup <dir> -ExpectedManifest <release-manifest.json> `
+    [-Platform Windows|Android] [-ProfilesPath <dir>] `
+    [-DeviceSerial <serial>] [-Apply]
+
+# After an interrupted apply (journal left in Profiles):
+powershell -NoProfile -File Tools\Restore-FamilyProfiles.ps1 -Resume
+powershell -NoProfile -File Tools\Restore-FamilyProfiles.ps1 -Rollback
+```
+
+Contract highlights (the tooling test pins each one):
+
+- **Scope** — only `profile-{0..3}.json` and `.json.bak` siblings are
+  ever copied or written; non-profile entries are ignored and recorded,
+  never touched; no recursion outside the validated Profiles directory;
+  the backup directory is read-only during restore.
+- **Backup manifest** (`backup-manifest.json`, schema 1) — installation
+  key + label (`windows|<PC>|<user>` or `android|<serial>`),
+  application identity copied from the installed release manifest with
+  its SHA-256, per-file slot/kind/profileId/schemaVersion/SHA-256/size,
+  original missing-file states, and the supported profile schema. The
+  manifest is written only after every staged byte hashes correctly, so
+  a partial copy is never marked usable.
+- **Restore identity gate** — backup platform, installation key,
+  applicationId/company/product, and profile schema must all match the
+  target + `-ExpectedManifest`; foreign slot/identity inside a file or a
+  mismatched manifest is rejected.
+- **Preservation** — on-disk files that are unreadable, newer-schema, or
+  provably a different profile id/slot are never overwritten; parseable
+  foreign-id/slot files abort the whole restore before any write.
+  Restoring never merges progress.
+- **Recovery journal** — `-Apply` first snapshots every existing byte of
+  the eight names into `Profiles\.family-restore-<id>\pre` plus a
+  `journal.json` state file; each write is staged then renamed. An
+  interruption leaves state `applying`: `-Resume` completes it (backup
+  hash re-verified), `-Rollback` returns the exact pre-restore bytes; a
+  new apply refuses while a journal is pending.
+- **Running-game refusal** — Windows checks the process list
+  (`FamilyRacing`, `Family Racing`, plus `-GameProcessNames`); Android
+  runs `adb shell pidof com.daniel.familyracing`.
+- **Android wiring** — requires `-DeviceSerial`; `get-state` must be
+  `device`, `pm path com.daniel.familyracing` must resolve, and
+  `-ProfilesPath` must stay under
+  `Android/data/com.daniel.familyracing/` (default
+  `/sdcard/Android/data/com.daniel.familyracing/files/Profiles`). Pull/
+  push via the pinned SDK adb with push-to-temp + `mv` atomic placement.
+
+Qualification status: **Windows is qualified** — a real backup +
+preview + delete/restore round-trip ran byte-identically against the
+actual `LocalLow\Family Racing\Family Racing\Profiles` path on the
+build machine (rehearsal profiles), and the tooling suite proves every
+failure class on disposable dirs. **Android is implemented but
+unqualified** — `adb devices` reports zero attached devices on this
+machine (verified this task), so real pull/push on a tablet stays an
+open row below.
+
 ## Open rows (explicitly not closed by this task)
 
 - **Real release candidate build** — gated on the bound production
@@ -179,6 +251,16 @@ toolchain) are never release evidence.
   re-verify the certificate fingerprint.
 - **Device installation / update-preserves-saves** — needs the physical
   matrix (Task 6): SM-T220 plus second tablet/PC/fourth device.
+- **Android backup/restore on-device qualification** — OPEN. The tools
+  implement scoped `adb pull/push` with serial checks, `pidof`
+  running-game detection and the same journal contract, exercised
+  against a simulated device fs in the tooling suite — but no physical
+  tablet was attached (`adb devices`: zero devices, re-verified this
+  task), so discovery of the installed player's real data path and the
+  pull/push round-trip are **unqualified on each supported tablet**
+  (ordinary APK, no root/`run-as`). Shell access to `Android/data/` may
+  be refused on newer Android; that outcome must be recorded honestly,
+  not worked around.
 - **Family acceptance** — human sessions on the ordinary packages
   (Task 6).
 - **Clean-account offline launch** — OPEN. The Task 3 rehearsal
@@ -192,6 +274,15 @@ toolchain) are never release evidence.
   change. Physical install/update/backup/family rows stay in Task 6.
 
 ## Tooling tests
+
+`powershell -NoProfile -File Tools/Test-FamilyProfileBackup.ps1`
+(55 checks) covers the backup/restore contract: manifest hash/size/slot/
+id/schema enforcement, traversal and unexpected-file rejection, foreign
+slot/id/installation/serial, newer-schema rejection plus preservation of
+unreadable/newer on-disk files, running-game refusal (real process check
++ `pidof`), disconnected/offline device, partial copy, preview-vs-apply,
+interrupted apply with `-Resume`/`-Rollback`, byte-identical Windows and
+(simulated) Android round-trips, and read-only source/backup dirs.
 
 `powershell -NoProfile -File Tools/Test-FamilyReleaseTooling.ps1`
 (79 checks) covers: the signing-pipeline cases above plus package
