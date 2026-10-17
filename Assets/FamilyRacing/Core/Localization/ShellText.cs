@@ -14,6 +14,11 @@ namespace FamilyRacing.Core.Localization
         {
             ["shell.title"] = new[] { "Family Racing", "מירוץ משפחתי" },
             ["shell.disclaimer"] = new[] { "Family preview: campaign races, quick race, time trial, garage and home-network racing are all playable.", "גרסת תצוגה משפחתית: מירוצי המסע, מירוץ מהיר, מירוץ נגד זמן, המוסך ומירוץ הרשת הביתית — הכל פתוח למשחק." },
+            // PCQA-003: the honest variant for builds whose gated loop
+            // entries report contentUnavailable — names what IS playable.
+            ["shell.disclaimer.unavailable"] = new[] {
+                "Family preview: driving practice, the driving lesson and home-network racing are playable — campaign races, quick race, time trial and the garage are not in this build yet.",
+                "גרסת תצוגה משפחתית: אימון הנהיגה, שיעור הנהיגה ומירוץ הרשת הביתית פתוחים למשחק — מירוצי המסע, מירוץ מהיר, מירוץ נגד זמן והמוסך עדיין לא בגרסה הזאת." },
             ["profile.select"] = new[] { "Choose your driver", "בחרו נהג" },
             ["profile.animal.fox"] = new[] { "Fox", "שועל" },
             ["profile.animal.rabbit"] = new[] { "Rabbit", "ארנב" },
@@ -90,6 +95,7 @@ namespace FamilyRacing.Core.Localization
             ["garage.unequip"] = new[] { "Unequip", "הסרה" },
             ["action.back"] = new[] { "Back", "חזרה" },
             ["action.save"] = new[] { "Save", "שמירה" },
+            ["action.settings"] = new[] { "Settings", "הגדרות" },
             ["status.saved"] = new[] { "Settings saved.", "ההגדרות נשמרו." },
             ["status.blocked"] = new[] { "This profile's data cannot be read, so it was left unchanged.", "לא ניתן לקרוא את נתוני הפרופיל, לכן לא בוצע שום שינוי." },
             ["status.recovered"] = new[] { "This profile was loaded from a backup; the original files were left unchanged. Saving stays off until it is checked.", "הפרופיל נטען מגיבוי; הקבצים המקוריים לא השתנו. השמירה כבויה עד שהוא ייבדק." },

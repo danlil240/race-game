@@ -6,6 +6,7 @@ using System.Reflection;
 using FamilyRacing.Core.Automation;
 using FamilyRacing.Core.Driving;
 using FamilyRacing.Core.Foundation;
+using FamilyRacing.Core.Localization;
 using FamilyRacing.Core.Networking;
 using FamilyRacing.Core.Profiles;
 using FamilyRacing.Core.Progression;
@@ -1713,6 +1714,36 @@ namespace FamilyRacing.Tests
             Refresh();
             yield return WaitForWidget<Label>(
                 "campaign.world.sunny-island.selected");
+        }
+
+        [UnityTest]
+        public IEnumerator ProfilesDisclaimerTracksCatalogAvailability()
+        {
+            // SetUp binds a full gameplay catalog: with the gated
+            // *.open entries published playable, the welcome copy
+            // keeps the all-playable claim.
+            Refresh();
+            yield return WaitForWidget<Label>("shell.disclaimer");
+            Assert.That(Widget<Label>("shell.disclaimer").text,
+                Is.EqualTo(ShellText.Get("shell.disclaimer", "en")));
+
+            // Unbinding flips every *.open descriptor to
+            // contentUnavailable; the profiles signature picks the
+            // verdict up and repaints honestly.
+            service.SetGameplayCatalog(null);
+            Refresh();
+            yield return WaitForWidget<Label>("shell.disclaimer");
+            Assert.That(Widget<Label>("shell.disclaimer").text,
+                Is.EqualTo(ShellText.Get("shell.disclaimer.unavailable", "en")),
+                "Without a catalog the welcome must name the playable modes.");
+
+            // Rebinding restores the claim — the verdict is a live
+            // published fact, never a latched build-time string.
+            service.SetGameplayCatalog(Gameplay(world.Catalog));
+            Refresh();
+            yield return WaitForWidget<Label>("shell.disclaimer");
+            Assert.That(Widget<Label>("shell.disclaimer").text,
+                Is.EqualTo(ShellText.Get("shell.disclaimer", "en")));
         }
 
         // Fails profile saves on demand — the PlayMode counterpart of

@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using FamilyRacing.Core.Foundation;
+using FamilyRacing.Core.Localization;
 using FamilyRacing.Core.Profiles;
 using NUnit.Framework;
 using UnityEngine;
@@ -336,6 +337,91 @@ namespace FamilyRacing.Tests
             yield return WaitForWidget<Button>("action.back");
             Press(Widget<Button>("action.back"));
             Assert.That(Snapshot().screen, Is.EqualTo("profiles"));
+        }
+
+        [UnityTest]
+        public IEnumerator SandboxSettingsButtonNavigatesAndBackReturnsToSandbox()
+        {
+            yield return GoToSandbox();
+            yield return WaitForWidget<Button>("action.settings");
+
+            Press(Widget<Button>("action.settings"));
+            Assert.That(Snapshot().screen, Is.EqualTo("settings"),
+                "The sandbox settings button must dispatch ui.navigate to settings.");
+
+            // Edit + save through the existing-profile route: the same
+            // draft/pending contract the create flow exercises.
+            Refresh();
+            yield return WaitForWidget<Button>("settings.camera.overhead");
+            Press(Widget<Button>("settings.camera.overhead"));
+            Refresh();
+            Assert.That(Snapshot().pendingSettings, Is.True);
+            Assert.That(Snapshot().draftProfile.camera, Is.EqualTo("overhead"));
+            yield return WaitForWidget<Button>("settings.save");
+            Press(Widget<Button>("settings.save"));
+            Refresh();
+            Assert.That(Snapshot().persistenceStatus, Is.EqualTo("saved"));
+            Assert.That(Snapshot().savedProfile.camera, Is.EqualTo("overhead"));
+
+            yield return WaitForWidget<Button>("action.back");
+            Press(Widget<Button>("action.back"));
+            Assert.That(Snapshot().screen, Is.EqualTo("sandbox"),
+                "Back must return to the sandbox the user arrived from, "
+                + "not profiles.");
+        }
+
+        [UnityTest]
+        public IEnumerator SandboxSettingsBackThenCreateFlowBackStillReturnsToProfiles()
+        {
+            // Enter settings through the sandbox, come back, then walk
+            // the creation route — each Back must follow its own origin.
+            yield return GoToSandbox();
+            yield return WaitForWidget<Button>("action.settings");
+            Press(Widget<Button>("action.settings"));
+            Assert.That(Snapshot().screen, Is.EqualTo("settings"));
+
+            Refresh();
+            yield return WaitForWidget<Button>("action.back");
+            Press(Widget<Button>("action.back"));
+            Assert.That(Snapshot().screen, Is.EqualTo("sandbox"));
+
+            // Sandbox back → profiles, then create a second profile:
+            // its Back must still land on profiles, not the sandbox.
+            Refresh();
+            yield return WaitForWidget<Button>("action.back");
+            Press(Widget<Button>("action.back"));
+            Assert.That(Snapshot().screen, Is.EqualTo("profiles"));
+
+            Refresh();
+            yield return WaitForWidget<Button>("profile.1.select");
+            Press(Widget<Button>("profile.1.select"));
+            Assert.That(Snapshot().screen, Is.EqualTo("settings"));
+
+            Refresh();
+            yield return WaitForWidget<Button>("action.back");
+            Press(Widget<Button>("action.back"));
+            Assert.That(Snapshot().screen, Is.EqualTo("profiles"),
+                "The create→settings→Back route must keep returning to profiles.");
+        }
+
+        [UnityTest]
+        public IEnumerator ProfilesDisclaimerWithoutGameplayContentStaysHonest()
+        {
+            // This fixture never binds a gameplay catalog: every gated
+            // *.open reports contentUnavailable, so the welcome copy
+            // must name the playable modes instead of promising them.
+            Refresh();
+            yield return WaitForWidget<Label>("shell.disclaimer");
+            Assert.That(Widget<Label>("shell.disclaimer").text,
+                Is.EqualTo(ShellText.Get("shell.disclaimer.unavailable", "en")));
+
+            yield return WaitForWidget<Button>("settings.language.he");
+            Press(Widget<Button>("settings.language.he"));
+            Refresh();
+            yield return WaitForWidget<Label>("shell.disclaimer");
+            Assert.That(Widget<Label>("shell.disclaimer").text,
+                Is.EqualTo(ShellText.Get("shell.disclaimer.unavailable", "he")),
+                "The Hebrew welcome must carry the same honest claim.");
         }
 
         [UnityTest]

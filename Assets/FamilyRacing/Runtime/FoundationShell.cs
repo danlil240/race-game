@@ -121,6 +121,12 @@ namespace FamilyRacing
             // captures) exactly like the LAN signature does.
             if (IsLoopScreen(state.screen))
                 key += "|" + LoopSignature(state);
+            // The profiles disclaimer flips on the published catalog
+            // verdict, which the base key does not cover — the same
+            // cheap-signature rule the LAN screens follow.
+            if (state.screen == "profiles")
+                key += "|" + (LoopContentAvailable()
+                    ? "loop:yes" : "loop:no");
             if (key != rebuildKey)
             {
                 rebuildKey = key;
@@ -166,6 +172,11 @@ namespace FamilyRacing
                     ? new Color(0, 0, 0, 0) : Sand;
             root.style.paddingTop = root.style.paddingBottom = 16;
             root.style.paddingLeft = root.style.paddingRight = 16;
+            // The screen the tree last rendered owns Settings' return
+            // (PCQA-004): profile creation builds settings over
+            // profiles; the sandbox action builds it over the sandbox.
+            if (IsSettingsOriginScreen(state.screen))
+                settingsReturnScreen = state.screen;
             switch (state.screen)
             {
                 case "settings": BuildSettings(state); break;
