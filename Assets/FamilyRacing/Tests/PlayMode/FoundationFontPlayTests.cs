@@ -132,6 +132,15 @@ namespace FamilyRacing.Tests
             Assert.That(WarmupInvocationCount(), Is.GreaterThan(0),
                 "FoundationFonts.Warmup must have run during Bind on the " +
                 "first screen — this is the fix's observable signal.");
+            var flush = typeof(FoundationApp).Assembly
+                .GetType("FamilyRacing.FoundationFonts")
+                .GetField("FlushMethod", BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.That(flush, Is.Not.Null,
+                "FoundationFonts.FlushMethod field must exist.");
+            Assert.That(flush.GetValue(null), Is.Not.Null,
+                "FontAsset.UpdateFontAssetsInUpdateQueue was renamed in " +
+                "this Unity version — Warmup's flush silently no-ops; " +
+                "update FoundationFonts instead of losing the fix.");
             // UIElements TextElement covers labels, button text, and every
             // other text-bearing element the first RebuildTree produced.
             var elements = document.rootVisualElement

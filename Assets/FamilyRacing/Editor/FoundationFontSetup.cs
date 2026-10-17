@@ -40,7 +40,32 @@ namespace FamilyRacing.EditorTools
             if (text.defaultFontAsset != latin)
                 EnsureFallbacks(text.defaultFontAsset, latin, hebrew, symbols);
             EnableAdvancedText();
+            // Keep populated glyph tables/atlas data through the player
+            // build — otherwise the engine clears dynamic font data at
+            // build time and the seeded atlas never reaches the player.
+            KeepDynamicDataOnBuild(latin, hebrew, symbols,
+                text.defaultFontAsset);
+            ClearKeepFlag(text);
             PopulateAtlas(latin, hebrew, symbols, text.defaultFontAsset);
+        }
+
+        private static void KeepDynamicDataOnBuild(params FontAsset[] fonts)
+        {
+            foreach (var font in fonts)
+                if (font != null)
+                    ClearKeepFlag(font);
+        }
+
+        private static void ClearKeepFlag(UnityEngine.Object target)
+        {
+            var serialized = new SerializedObject(target);
+            var property = serialized.FindProperty("m_ClearDynamicDataOnBuild");
+            if (property != null && property.boolValue)
+            {
+                property.boolValue = false;
+                serialized.ApplyModifiedPropertiesWithoutUndo();
+                EditorUtility.SetDirty(target);
+            }
         }
 
         // Seeds the serialized atlas with the shipped UI repertoire so player
