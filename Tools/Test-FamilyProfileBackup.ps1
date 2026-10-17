@@ -187,6 +187,7 @@ function Run-RestoreCase([hashtable]$Opt) {
     if ($Opt.Resume) { $args += '-Resume' }
     if ($Opt.Rollback) { $args += '-Rollback' }
     if ($Opt.ContainsKey('InterruptAfterFiles')) { $args += @('-InterruptAfterFiles', [string]$Opt.InterruptAfterFiles) }
+    if ($Opt.ContainsKey('InterruptDuringSnapshot')) { $args += @('-InterruptDuringSnapshot', [string]$Opt.InterruptDuringSnapshot) }
     if ($Opt.ContainsKey('ExtraArgs')) { $args += $Opt.ExtraArgs }
     return Invoke-Tool $tool $args
 }
@@ -667,6 +668,48 @@ try {
     Check 'restore: rollback refuses a journal recorded for another profiles path' `
         ($run.ExitCode -ne 0 -and $run.Output -match 'path|installation|foreign' -and
          (Compare-FileMap $otherMap (Get-FileMap $other))) $run.Output
+
+    # Kill INSIDE the snapshot loop (realistic on Android): journal is
+    # 'applying' but later entries have no pre/ bytes. -Resume must
+    # capture the missed bytes BEFORE writing, and a second interruption
+    # followed by -Rollback must still restore the exact pre bytes.
+    $case = New-BackedUpCase 'i-snapshot-interrupt'
+    # Drift slot 0 (same id, different bytes) so its entry is 'restore'
+    # with preExisted=true — the entry most at risk in a snapshot kill.
+    $j0 = Get-Content -LiteralPath (Join-Path $case.Backup 'profile-0.json') -Raw | ConvertFrom-Json
+    Set-Content -LiteralPath (Join-Path $case.Profiles 'profile-0.json') `
+        -Value (New-ProfileJson -Slot 0 -Id ([string]$j0.id) -Coins 99) -NoNewline -Encoding UTF8
+    $driftHash = (Get-FileHash -LiteralPath (Join-Path $case.Profiles 'profile-0.json') -Algorithm SHA256).Hash
+    $preMap = Get-FileMap $case.Profiles
+    $run = Run-RestoreCase @{
+        Backup = $case.Backup; ExpectedManifest = $case.Manifest
+        ProfilesPath = $case.Profiles; Apply = $true; InterruptDuringSnapshot = 1 }
+    $journalDir = @(Get-ChildItem -LiteralPath $case.Profiles -Directory -Filter '.family-restore-*' -ErrorAction SilentlyContinue)
+    $partialPre = $false
+    if ($journalDir.Count -eq 1) {
+        $partialPre = (Test-Path -LiteralPath (Join-Path $journalDir[0].FullName 'pre\profile-0.json')) -and
+            (-not (Test-Path -LiteralPath (Join-Path $journalDir[0].FullName 'pre\profile-0.json.bak')))
+    }
+    Check 'restore: kill inside snapshot loop leaves applying journal with partial pre/' `
+        ($run.ExitCode -eq 3 -and $journalDir.Count -eq 1 -and $partialPre) `
+        ("exit=$($run.ExitCode) " + $run.Output)
+    # Resume repairs the missing pre/ bytes, then is itself killed mid-apply.
+    $run = Run-RestoreCase @{
+        ProfilesPath = $case.Profiles; Resume = $true; InterruptAfterFiles = 1 }
+    $captured = $false
+    if ($journalDir.Count -eq 1) {
+        $preFile = Join-Path $journalDir[0].FullName 'pre\profile-0.json'
+        $preBak = Join-Path $journalDir[0].FullName 'pre\profile-0.json.bak'
+        $captured = (Test-Path -LiteralPath $preFile) -and (Test-Path -LiteralPath $preBak) -and
+            ((Get-FileHash -LiteralPath $preFile -Algorithm SHA256).Hash -eq $driftHash)
+    }
+    Check 'restore: -Resume captures pre/ bytes missed by the snapshot-kill before writing' `
+        ($run.ExitCode -eq 3 -and $captured) `
+        ("exit=$($run.ExitCode) " + $run.Output)
+    $run = Run-RestoreCase @{ ProfilesPath = $case.Profiles; Rollback = $true }
+    Check 'restore: -Rollback after snapshot-kill + resume-kill restores exact pre bytes' `
+        ($run.ExitCode -eq 0 -and (Compare-FileMap $preMap (Get-FileMap $case.Profiles))) `
+        ($run.Output + ' exit=' + $run.ExitCode)
 
     # ============================ ANDROID ================================
     $ac = New-AdbCase 'a-backup-ok'

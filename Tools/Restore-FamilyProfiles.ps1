@@ -44,7 +44,10 @@ param(
     [switch]$Resume,
     [switch]$Rollback,
     # Test hook only: simulate a kill after N applied file writes.
-    [int]$InterruptAfterFiles = -1
+    [int]$InterruptAfterFiles = -1,
+    # Test hook only: simulate a kill after N snapshot copies inside the
+    # pre-restore snapshot loop (leaves a journal with partial pre/ bytes).
+    [int]$InterruptDuringSnapshot = -1
 )
 
 $ErrorActionPreference = 'Stop'
@@ -271,6 +274,15 @@ function Target-JournalSnapshot([string]$DirName, [string]$Name) {
         ($script:ProfilesResolved + '/' + $Name),
         ($script:ProfilesResolved + '/' + $DirName + '/pre/' + $Name))
     if ($r.Code -ne 0) { throw "adb snapshot cp failed for $Name : $($r.Text.Trim())" }
+}
+
+function Target-PreFileExists([string]$DirName, [string]$Name) {
+    if ($Platform -eq 'Windows') {
+        return (Test-Path -LiteralPath (Join-Path $script:ProfilesResolved ($DirName + '\pre\' + $Name)) -PathType Leaf)
+    }
+    $r = Invoke-Adb @('-s', $DeviceSerial, 'shell', 'test', '-f',
+        ($script:ProfilesResolved + '/' + $DirName + '/pre/' + $Name))
+    return ($r.Code -eq 0)
 }
 
 function Target-JournalWriteJson([string]$DirName, $Journal) {
@@ -502,6 +514,45 @@ try {
             }
         }
         Target-RemoveStrayTemps
+        if ($Resume) {
+            # Repair pass: an apply killed inside the snapshot loop (up to
+            # ~16 adb round-trips on Android) leaves an 'applying' journal
+            # whose preExisted entries may have no pre/ bytes. Any entry
+            # that was never written — pending restores and every
+            # non-restore action — still holds its untouched pre-restore
+            # bytes on disk, so capture them now BEFORE the first write;
+            # otherwise those bytes are lost and a later rollback wedges
+            # on the missing pre/ file.
+            $repaired = $false
+            foreach ($entry in @($journal.entries)) {
+                if (-not $entry.preExisted) { continue }
+                if ($entry.action -eq 'restore' -and $entry.state -eq 'done') { continue }
+                $name = [string]$entry.name
+                if (Target-PreFileExists $jdir $name) { continue }
+                if (Target-FileExists $name) {
+                    Target-JournalSnapshot $jdir $name
+                    $preTmp = Join-Path ([IO.Path]::GetTempPath()) ('family-pre-' + [guid]::NewGuid().ToString('N').Substring(0, 8) + '.bin')
+                    try {
+                        if ($Platform -eq 'Windows') {
+                            Copy-Item -LiteralPath (Join-Path $script:ProfilesResolved ($jdir + '\pre\' + $name)) -Destination $preTmp
+                        } else {
+                            Target-FetchToLocal ($jdir + '/pre/' + $name) $preTmp
+                        }
+                        $entry.preSha256 = (Get-FileHash -LiteralPath $preTmp -Algorithm SHA256).Hash.ToLowerInvariant()
+                    } finally { Remove-Item -LiteralPath $preTmp -Force -ErrorAction SilentlyContinue }
+                    Write-Host "Restore(resume): captured missed pre-restore bytes for $name"
+                } else {
+                    $entry.preExisted = $false
+                    Write-Host "Restore(resume): $name vanished before its snapshot could be captured; nothing to preserve."
+                }
+                $repaired = $true
+            }
+            if ($repaired) {
+                $journal.updatedUtc = [DateTime]::UtcNow.ToString('o')
+                Target-JournalWriteJson $jdir $journal
+            }
+        }
+        $resumedWrites = 0
         foreach ($entry in @($journal.entries)) {
             if ($Resume) {
                 if ($entry.action -ne 'restore' -or $entry.state -eq 'done') { continue }
@@ -516,9 +567,17 @@ try {
                 $journal.updatedUtc = [DateTime]::UtcNow.ToString('o')
                 Target-JournalWriteJson $jdir $journal
                 Write-Host "Restore(resume): wrote $($entry.name)"
+                $resumedWrites++
+                if ($InterruptAfterFiles -ge 0 -and $resumedWrites -ge $InterruptAfterFiles) {
+                    Write-Host "Restore(resume): INTERRUPTED by test hook after $resumedWrites file(s); journal left in 'applying' state."
+                    exit 3
+                }
             } else {
                 if ($entry.action -ne 'restore' -or $entry.state -ne 'done') { continue }
                 if ($entry.preExisted) {
+                    if (-not (Target-PreFileExists $jdir ([string]$entry.name))) {
+                        throw "Rollback cannot proceed: pre-restore bytes for '$($entry.name)' are missing under $jdir (the file was already written but its snapshot was never captured). Recover manually from $jdir."
+                    }
                     Target-RestorePreBytes $jdir $entry.name
                     Write-Host "Restore(rollback): returned pre-restore bytes for $($entry.name)"
                 } else {
@@ -666,6 +725,7 @@ try {
     # still leaves a resumable/rollbackable record instead of an orphaned
     # journal dir that wedges every future restore.
     Target-JournalWriteJson $jdir $journal
+    $snapshotted = 0
     foreach ($entry in $journal.entries) {
         if (-not $entry.preExisted) { continue }
         $name = [string]$entry.name
@@ -675,6 +735,11 @@ try {
             Target-FetchToLocal $name $observed
         }
         $entry.preSha256 = (Get-FileHash -LiteralPath $observed -Algorithm SHA256).Hash.ToLowerInvariant()
+        $snapshotted++
+        if ($InterruptDuringSnapshot -ge 0 -and $snapshotted -ge $InterruptDuringSnapshot) {
+            Write-Host "Restore: INTERRUPTED by test hook inside the snapshot loop after $snapshotted file(s); journal left in 'applying' state with a partial pre/ snapshot."
+            exit 3
+        }
     }
     Target-JournalWriteJson $jdir $journal
 
