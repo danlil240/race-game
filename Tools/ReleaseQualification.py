@@ -445,11 +445,19 @@ def evaluate_row(row, record, manifest):
             reasons.append("record source commit %r is not this candidate's "
                            "commit %r" % (source.get("commit"),
                                           manifest["commit"]))
+        # The contract requires every record to name its source/content
+        # identity: when the candidate declares a contentVersion, a
+        # production record must declare it too and it must match.
         content = source.get("contentVersion")
-        if content is not None and manifest["contentVersion"] is not None \
-                and content != manifest["contentVersion"]:
-            reasons.append("record contentVersion %r is not this candidate's "
-                           "%r" % (content, manifest["contentVersion"]))
+        if manifest["contentVersion"] is not None:
+            if not isinstance(content, str) or not content:
+                reasons.append("record declares no source.contentVersion; "
+                               "the candidate's content identity %r must be "
+                               "named" % manifest["contentVersion"])
+            elif content != manifest["contentVersion"]:
+                reasons.append("record contentVersion %r is not this "
+                               "candidate's %r"
+                               % (content, manifest["contentVersion"]))
     if row["requiresHumanReview"]:
         reviewer = data.get("humanReviewer")
         if not isinstance(reviewer, str) or not reviewer.strip():
@@ -457,10 +465,13 @@ def evaluate_row(row, record, manifest):
                            "carries none")
     if row["physical"]:
         device = data.get("device") or {}
-        if not isinstance(device.get("label"), str) \
-                or not device["label"].strip():
-            reasons.append("physical row requires device identification "
-                           "(device.label); record carries none")
+        missing = [field for field in ("label", "os", "configuration")
+                   if not isinstance(device.get(field), str)
+                   or not device[field].strip()]
+        if missing:
+            reasons.append("physical row requires device/OS/configuration "
+                           "identification; record device lacks %s"
+                           % ", ".join("device." + f for f in missing))
     if data.get("outcome") == "passed" and not data.get("evidenceFiles"):
         reasons.append("a passed claim must name at least one evidence "
                        "file (evidenceFiles); a bare pass is not evidence")

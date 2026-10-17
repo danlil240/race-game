@@ -115,15 +115,19 @@ def write_matrix(directory, rows):
 
 def make_record(directory, row_id, name, outcome="passed",
                 evidence_class="production", build_kind="ordinary",
-                artifact=None, commit=COMMIT, reviewer=None,
+                artifact=None, commit=COMMIT,
+                content_version="full-content-1", reviewer=None,
                 device=None, evidence_files=None):
+    source = {"commit": commit}
+    if content_version is not None:
+        source["contentVersion"] = content_version
     record = {
         "schemaVersion": 1,
         "rowId": row_id,
         "outcome": outcome,
         "evidenceClass": evidence_class,
         "buildKind": build_kind,
-        "source": {"commit": commit, "contentVersion": "full-content-1"},
+        "source": source,
         "method": "synthetic test observation",
         "observedUtc": "2026-10-17T00:00:00Z",
         "notes": ""}
@@ -369,6 +373,66 @@ class HumanRowNeedsNamedReview(unittest.TestCase):
                 reviewer="Daniel",
                 evidence_files=[{"path": "session-notes.txt",
                                  "sha256": sha256_file(session)}])
+            code, result, proc = run_gate(manifest, matrix, [record],
+                                          root / "evidence")
+            self.assertEqual(code, 0, proc.stderr + json.dumps(result))
+            self.assertEqual(result["verdict"], "passed")
+
+
+class RecordFieldCompleteness(unittest.TestCase):
+    """The contract requires every record to name its source/content
+    identity and, for physical rows, device/OS/configuration. An
+    honest-but-incomplete record is inadmissible, never a pass."""
+
+    def test_missing_content_version_is_inadmissible(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manifest = write_manifest(root)
+            matrix = write_matrix(root, [make_row("m6.complete-content")])
+            record = make_record(root, "m6.complete-content", "rec.json",
+                                 content_version=None)
+            code, result, proc = run_gate(manifest, matrix, [record],
+                                          root / "evidence")
+            self.assertEqual(code, 1, proc.stderr)
+            self.assertEqual(result["verdict"], "partial")
+            status, reasons = row_status(result, "m6.complete-content")
+            self.assertEqual(status, "notVerified")
+            self.assertTrue(any("contentVersion" in r for r in reasons),
+                            reasons)
+
+    def test_physical_row_needs_os_and_configuration(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manifest = write_manifest(root)
+            matrix = write_matrix(root, [make_row("physical.probe",
+                                                  physical=True)])
+            record = make_record(
+                root, "physical.probe", "rec.json",
+                device={"label": "tab-1"})  # no os, no configuration
+            code, result, proc = run_gate(manifest, matrix, [record],
+                                          root / "evidence")
+            self.assertEqual(code, 1, proc.stderr)
+            self.assertEqual(result["verdict"], "partial")
+            status, reasons = row_status(result, "physical.probe")
+            self.assertEqual(status, "notVerified")
+            joined = " ".join(reasons)
+            self.assertIn("device.os", joined, reasons)
+            self.assertIn("device.configuration", joined, reasons)
+
+    def test_complete_physical_record_passes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manifest = write_manifest(root)
+            matrix = write_matrix(root, [make_row("physical.probe",
+                                                  physical=True)])
+            notes = root / "notes.txt"
+            notes.write_text("observation", encoding="utf-8")
+            record = make_record(
+                root, "physical.probe", "rec.json",
+                device={"label": "tab-1", "os": "Android 14",
+                        "configuration": "SM-T220 3GB, offline Wi-Fi"},
+                evidence_files=[{"path": "notes.txt",
+                                 "sha256": sha256_file(notes)}])
             code, result, proc = run_gate(manifest, matrix, [record],
                                           root / "evidence")
             self.assertEqual(code, 0, proc.stderr + json.dumps(result))
