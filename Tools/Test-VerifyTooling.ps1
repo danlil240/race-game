@@ -82,7 +82,8 @@ if ($LASTEXITCODE -eq 0) {
             @{ Mode = 'FullContentSetup';               Method = 'FamilyRacing.EditorTools.FoundationBuild.FullContentSetup' },
             @{ Mode = 'WindowsFullContent';             Method = 'FamilyRacing.EditorTools.FoundationBuild.WindowsFullContent' },
             @{ Mode = 'WindowsFullContentOrdinary';     Method = 'FamilyRacing.EditorTools.FoundationBuild.WindowsFullContentOrdinary' },
-            @{ Mode = 'WindowsFullContentPreview';      Method = 'FamilyRacing.EditorTools.FoundationBuild.WindowsFullContentPreview' })) {
+            @{ Mode = 'WindowsFullContentPreview';      Method = 'FamilyRacing.EditorTools.FoundationBuild.WindowsFullContentPreview' },
+            @{ Mode = 'WindowsFamilyRelease';           Method = 'FamilyRacing.EditorTools.FoundationBuild.WindowsFamilyRelease' })) {
             Remove-Item -LiteralPath $argumentsFile -Force -ErrorAction SilentlyContinue
             $output = & $pwsh -NoProfile -File $VerifyScript -Mode $case.Mode -EditorRoot $editorRoot 2>&1 | Out-String
             $code = $LASTEXITCODE
