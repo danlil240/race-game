@@ -55,6 +55,7 @@ Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 if (-not $ProjectPath) { $ProjectPath = Join-Path $PSScriptRoot '..' }
+$script:staging = $null
 $project = (Resolve-Path -LiteralPath $ProjectPath).Path
 $editorVersion = '6000.3.26f1'
 $runId = [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss') + '-' + [guid]::NewGuid().ToString('N').Substring(0, 8)
@@ -297,9 +298,12 @@ try {
     Require-File $guideSrc 'Family install guide (docs\FAMILY_INSTALL_GUIDE.md)'
 
     # --- stage: assemble ---------------------------------------------------------
-    New-Item -ItemType Directory -Path $outputFull | Out-Null
-    $staging = Join-Path $outputFull '.staging'
-    $stageRoot = Join-Path $staging 'FamilyRacing'
+    # Everything builds under a TEMP staging dir OUTSIDE -Output: any
+    # post-assembly failure (archive self-check, missing artifact,
+    # forbidden entry) publishes nothing — the output directory is
+    # created only after every artifact passed every check.
+    $script:staging = Join-Path ([IO.Path]::GetTempPath()) ('family-release-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+    $stageRoot = Join-Path $script:staging 'FamilyRacing'
     New-Item -ItemType Directory -Path $stageRoot | Out-Null
     foreach ($file in $allFiles) {
         $rel = $file.FullName.Substring($winSrcFull.Length).TrimStart('\', '/')
@@ -318,7 +322,7 @@ try {
     Copy-Item -LiteralPath $guideSrc -Destination (Join-Path $stageRoot 'INSTALL-GUIDE.txt')
 
     $zipName = "FamilyRacing-$version-Windows-x64.zip"
-    $zipPath = Join-Path $outputFull $zipName
+    $zipPath = Join-Path $script:staging $zipName
     # Entries are written manually with forward-slash names so the
     # archive uses canonical zip paths (CreateFromDirectory emits
     # backslash names on .NET Framework).
@@ -371,7 +375,7 @@ try {
 
     # --- stage: android artifact ---------------------------------------------------
     $apkName = "FamilyRacing-$version-Android.apk"
-    $apkDest = Join-Path $outputFull $apkName
+    $apkDest = Join-Path $script:staging $apkName
     $apkPackaged = $false
     if ($AndroidSource -and (Test-Path -LiteralPath $AndroidSource -PathType Leaf)) {
         # Bytes are copied unchanged -- the artifact was already verified
@@ -384,14 +388,15 @@ try {
         $blockers += "android release artifact absent: requires the production export plus the release signing key (test-key rehearsal signing not performed -- no unsigned release APK exists)"
     }
 
-    # --- stage: package docs at output root -----------------------------------------
-    Copy-Item -LiteralPath $noticesSrc -Destination (Join-Path $outputFull 'THIRD-PARTY-NOTICES.txt')
-    Copy-Item -LiteralPath $guideSrc -Destination (Join-Path $outputFull 'INSTALL-GUIDE.txt')
-    Remove-Item -LiteralPath $staging -Recurse -Force
+    # --- stage: package docs --------------------------------------------------------
+    Copy-Item -LiteralPath $noticesSrc -Destination (Join-Path $script:staging 'THIRD-PARTY-NOTICES.txt')
+    Copy-Item -LiteralPath $guideSrc -Destination (Join-Path $script:staging 'INSTALL-GUIDE.txt')
+    # The zip source tree is done contributing; drop it before hashing.
+    Remove-Item -LiteralPath $stageRoot -Recurse -Force
 
     # --- stage: manifest (after final assembly; stays OUTSIDE the zip) -------------
     $files = @()
-    foreach ($file in @(Get-ChildItem -LiteralPath $outputFull -File | Where-Object { $_.Name -ne 'release-manifest.json' })) {
+    foreach ($file in @(Get-ChildItem -LiteralPath $script:staging -File | Where-Object { $_.Name -ne 'release-manifest.json' })) {
         $files += [ordered]@{
             path = $file.Name
             sha256 = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -471,13 +476,26 @@ try {
         files = $files
         blockers = $blockers
     }
-    $manifestPath = Join-Path $outputFull 'release-manifest.json'
+    $manifestPath = Join-Path $script:staging 'release-manifest.json'
     $manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $manifestPath -Encoding UTF8
+
+    # --- stage: publish --------------------------------------------------------------
+    # Every check has passed and every artifact (zip, apk, docs,
+    # manifest) is complete and hashed -- only now does the caller's
+    # output directory come into existence, so a failed run can never
+    # leave a half-package behind.
+    New-Item -ItemType Directory -Path $outputFull | Out-Null
+    Move-Item -Path (Join-Path $script:staging '*') -Destination $outputFull -Force
     Write-Host "FamilyRelease: assembled $outputFull (kind=$($manifest.packageKind), stage=$contentStage, acceptance=unqualified)"
-    Write-Host "FamilyRelease: manifest $manifestPath"
+    Write-Host "FamilyRelease: manifest $(Join-Path $outputFull 'release-manifest.json')"
     exit 0
 }
 catch {
     Write-Host "FamilyRelease failed: $($_.Exception.Message)"
     exit 1
+}
+finally {
+    if ($script:staging -and (Test-Path -LiteralPath $script:staging)) {
+        Remove-Item -LiteralPath $script:staging -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }

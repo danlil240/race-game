@@ -140,7 +140,10 @@ Pipeline stages (every failure is named and publishes nothing):
    folder plus `THIRD-PARTY-NOTICES.txt` + `INSTALL-GUIDE.txt`, zipped
    with canonical forward-slash entries; the signed APK is copied byte
    for byte. A self-check re-opens the archive and asserts required
-   entries, no forbidden entries, and no embedded manifest.
+   entries, no forbidden entries, and no embedded manifest. All
+   assembly happens under a temp staging dir OUTSIDE `-Output`; the
+   output directory is created and populated only after every check
+   passes, so any failure — including post-zip — publishes nothing.
 9. **Manifest** — `release-manifest.json` schema 1 is written to the
    output root AFTER final assembly and stays OUTSIDE the zip: source
    commit + cleanSource + dirty areas, tool versions, release identity,
@@ -178,6 +181,12 @@ toolchain) are never release evidence.
   matrix (Task 6): SM-T220 plus second tablet/PC/fourth device.
 - **Family acceptance** — human sessions on the ordinary packages
   (Task 6).
+- **Clean-account offline launch** — OPEN. The Task 3 rehearsal
+  extracted the Windows ZIP to a clean directory and launched it
+  offline under the build/owner account; that is accepted rehearsal
+  evidence only. A qualification-grade row still requires launch under
+  a separate clean Windows account — no new account is created in this
+  task; the row belongs to Task 6 qualification.
 - **Qualification + acceptance** — the manifest is frozen at
   `acceptanceStatus:"unqualified"`; the Task 5 evidence gate owns the
   change. Physical install/update/backup/family rows stay in Task 6.
@@ -185,12 +194,14 @@ toolchain) are never release evidence.
 ## Tooling tests
 
 `powershell -NoProfile -File Tools/Test-FamilyReleaseTooling.ps1`
-(77 checks) covers: the signing-pipeline cases above plus package
+(79 checks) covers: the signing-pipeline cases above plus package
 assembly — rehearsal + full-path assembly, entire-player archiving,
 partial/mixed/non-candidate/stale content manifests, missing player
 data/runtime DLLs/Mono, planted saves/keystores/validation tokens,
 missing notices/guide, reused output dirs, failed-run publishes
-nothing, manifest outside the zip with post-assembly hashes, honest
-dirty-source recording, and absent-android named blockers.
+nothing (pre-assembly AND post-zip self-check failures leave no output
+directory at all — assembly is staged in temp and published
+atomically), manifest outside the zip with post-assembly hashes,
+honest dirty-source recording, and absent-android named blockers.
 Fixtures use temporary test keystores and a simulated toolchain only —
 fixture artifacts are never release evidence.

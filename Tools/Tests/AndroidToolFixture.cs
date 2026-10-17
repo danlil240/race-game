@@ -130,10 +130,16 @@ internal static class AndroidToolFixture
             if (behavior == "export-failure") return 29;
             if (behavior == "incomplete-export") return 0;
             var export = Value(args, "--android-export-dir");
-            // No export dir means a non-export invocation (player build,
-            // test run, setup): record it and succeed — the release
-            // orchestrator also drives Windows/editor entry points.
-            if (export == null) return 0;
+            if (export == null)
+            {
+                // A non-export invocation (Windows player build, setup,
+                // test run) legitimately carries no export dir; an
+                // export entry point missing --android-export-dir is a
+                // malformed invocation and must still fail loudly.
+                var method = Value(args, "-executeMethod");
+                if (method != null && !method.Contains("ExportAndroid")) return 0;
+                return 92;
+            }
             Directory.CreateDirectory(Path.Combine(export, "launcher"));
             Directory.CreateDirectory(Path.Combine(export, "unityLibrary"));
             File.WriteAllText(Path.Combine(export, "settings.gradle"), "include ':launcher', ':unityLibrary'");

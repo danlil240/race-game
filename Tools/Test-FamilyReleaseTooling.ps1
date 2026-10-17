@@ -296,6 +296,11 @@ function New-FixtureWindowsPlayer([string]$Dir, [hashtable]$Opt = @{}) {
     if ($Opt.ContainsKey('PlantToken')) {
         Set-Content -LiteralPath (Join-Path $data 'validation-token.txt') -Value 'fixture validation token' -NoNewline
     }
+    if ($Opt.ContainsKey('PlantManifest')) {
+        # Not in the source forbidden list — it only fails when the
+        # assembled archive is self-checked (post-zip failure path).
+        Set-Content -LiteralPath (Join-Path $Dir 'release-manifest.json') -Value '{"planted":true}' -NoNewline
+    }
     if ($Opt.ContainsKey('PlantDoNotShip')) {
         New-Item -ItemType Directory -Path (Join-Path $Dir 'Family Racing_BurstDebugInformation_DoNotShip') -Force | Out-Null
         Set-Content -LiteralPath (Join-Path $Dir 'Family Racing_BurstDebugInformation_DoNotShip\burst-symbols.pdb') -Value 'fixture symbols' -NoNewline
@@ -694,6 +699,15 @@ try {
     Check 'pkg: failed run publishes no packages' `
         ($pkg.ExitCode -ne 0 -and -not (Test-Path -LiteralPath $pkg.WinZip) -and
          -not (Test-Path -LiteralPath $pkg.Apk)) ''
+    Check 'pkg: pre-assembly failure leaves no output dir at all' `
+        (-not (Test-Path -LiteralPath $pkg.OutDir))
+    # A file that slips past the source scan but is caught by the
+    # archive self-check: the failure lands post-zip, so the output dir
+    # must still be entirely absent (no half-package, no staging junk).
+    $pkg = Run-PackageCase 'postzip-failure' @{ Rehearsal = $true; PlantManifest = $true }
+    Check 'pkg: post-zip self-check failure names the entry and leaves no output dir' `
+        ($pkg.ExitCode -ne 0 -and $pkg.Output -match 'release-manifest' -and
+         -not (Test-Path -LiteralPath $pkg.OutDir)) ("exit=$($pkg.ExitCode) out=$($pkg.Output)")
     $pkg = Run-PackageCase 'no-android' @{ Rehearsal = $true; NoAndroid = $true }
     Check 'pkg: rehearsal without android artifact still assembles + names blocker' `
         ($pkg.ExitCode -eq 0 -and -not (Test-Path -LiteralPath $pkg.Apk)) $pkg.Output
