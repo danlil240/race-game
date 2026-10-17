@@ -227,6 +227,210 @@ function Run-ReleaseCase([string]$Name, [string]$Behavior = 'success', [hashtabl
               Published = $published; Android = $android; JdkBin = $jdkBin; BuildTools = $buildTools }
 }
 
+# Builds a fake ordinary Windows player tree under $Dir. Opt flags
+# remove/plant pieces so the assembly gate's failure classes can fire:
+# MissingExe, MissingData, MissingRuntimeDll, MissingMono, NoManifest,
+# ManifestStage, ManifestDriving, ManifestContent, StaleManifest,
+# PlantProfile, PlantKeystore, PlantToken, PlantDoNotShip.
+function New-FixtureWindowsPlayer([string]$Dir, [hashtable]$Opt = @{}) {
+    $data = Join-Path $Dir 'FamilyRacing_Data'
+    $managed = Join-Path $data 'Managed'
+    foreach ($d in @($managed, (Join-Path $data 'Resources'),
+        (Join-Path $Dir 'MonoBleedingEdge\etc\mono\4.5'),
+        (Join-Path $Dir 'MonoBleedingEdge\EmbedRuntime'))) {
+        New-Item -ItemType Directory -Path $d -Force | Out-Null
+    }
+    if (-not $Opt.ContainsKey('MissingExe')) {
+        Set-Content -LiteralPath (Join-Path $Dir 'FamilyRacing.exe') -Value 'fixture player exe' -NoNewline
+    }
+    Set-Content -LiteralPath (Join-Path $Dir 'UnityPlayer.dll') -Value 'fixture unityplayer' -NoNewline
+    Set-Content -LiteralPath (Join-Path $Dir 'UnityCrashHandler64.exe') -Value 'fixture crash handler' -NoNewline
+    foreach ($f in @('level0', 'sharedassets0.assets', 'sharedassets0.assets.resS',
+        'resources.assets', 'globalgamemanagers', 'globalgamemanagers.assets',
+        'boot.config', 'app.info')) {
+        Set-Content -LiteralPath (Join-Path $data $f) -Value ('fixture ' + $f) -NoNewline
+    }
+    foreach ($f in @('FamilyRacing.Core.dll', 'UnityEngine.CoreModule.dll',
+        'mscorlib.dll', 'netstandard.dll', 'Newtonsoft.Json.dll')) {
+        Set-Content -LiteralPath (Join-Path $managed $f) -Value ('fixture ' + $f) -NoNewline
+    }
+    if (-not $Opt.ContainsKey('MissingRuntimeDll')) {
+        Set-Content -LiteralPath (Join-Path $managed 'FamilyRacing.Runtime.dll') -Value 'fixture runtime dll' -NoNewline
+    }
+    if (-not $Opt.ContainsKey('MissingMono')) {
+        Set-Content -LiteralPath (Join-Path $Dir 'MonoBleedingEdge\etc\mono\4.5\machine.config') -Value 'fixture mono config' -NoNewline
+        Set-Content -LiteralPath (Join-Path $Dir 'MonoBleedingEdge\EmbedRuntime\mono-posix.dll') -Value 'fixture mono runtime' -NoNewline
+    }
+    if ($Opt.ContainsKey('MissingData')) {
+        Remove-Item -LiteralPath $data -Recurse -Force
+    }
+    # An ordinary player carries no production content manifest — only
+    # full-content flavors write one. Rehearsal fixtures therefore get a
+    # manifest only when a Manifest* option asks for it; the real path
+    # always seeds the release flavor's own complete manifest.
+    $hasManifestOpt = $Opt.ContainsKey('ManifestStage') -or $Opt.ContainsKey('ManifestDriving') -or
+        $Opt.ContainsKey('ManifestContent') -or $Opt.ContainsKey('ManifestCandidate')
+    $writeManifest = (-not $Opt.ContainsKey('NoManifest')) -and
+        ((-not $Opt.ContainsKey('Rehearsal')) -or $hasManifestOpt)
+    if ($writeManifest) {
+        $stage = if ($Opt.ContainsKey('ManifestStage')) { $Opt.ManifestStage } else { 'complete' }
+        $driving = if ($Opt.ContainsKey('ManifestDriving')) { $Opt.ManifestDriving } else { 'full-content-1' }
+        $content = if ($Opt.ContainsKey('ManifestContent')) { $Opt.ManifestContent } else { 'full-content-1' }
+        $candidate = if ($Opt.ContainsKey('ManifestCandidate')) { $Opt.ManifestCandidate } else { ($stage -eq 'complete') }
+        $candJson = if ($candidate) { 'true' } else { 'false' }
+        $m = "{`"schemaVersion`":1,`"presentation`":`"FullContent`",`"configuration`":`"Ordinary`"," +
+            "`"contentStage`":`"$stage`",`"contentVersion`":`"$content`",`"drivingVersion`":`"$driving`",`"candidate`":$candJson}"
+        $mPath = Join-Path $Dir 'manifest.json'
+        Set-Content -LiteralPath $mPath -Value $m -Encoding UTF8
+        if ($Opt.ContainsKey('StaleManifest')) {
+            (Get-Item -LiteralPath $mPath).LastWriteTimeUtc = [DateTime]::UtcNow.AddDays(-2)
+        }
+    }
+    if ($Opt.ContainsKey('PlantProfile')) {
+        New-Item -ItemType Directory -Path (Join-Path $data 'Profiles') -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $data 'Profiles\profile-0.json') -Value '{"schemaVersion":3}' -NoNewline
+    }
+    if ($Opt.ContainsKey('PlantKeystore')) {
+        Set-Content -LiteralPath (Join-Path $Dir 'release.keystore') -Value 'fake key bytes' -NoNewline
+    }
+    if ($Opt.ContainsKey('PlantToken')) {
+        Set-Content -LiteralPath (Join-Path $data 'validation-token.txt') -Value 'fixture validation token' -NoNewline
+    }
+    if ($Opt.ContainsKey('PlantDoNotShip')) {
+        New-Item -ItemType Directory -Path (Join-Path $Dir 'Family Racing_BurstDebugInformation_DoNotShip') -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $Dir 'Family Racing_BurstDebugInformation_DoNotShip\burst-symbols.pdb') -Value 'fixture symbols' -NoNewline
+        Set-Content -LiteralPath (Join-Path $managed 'FamilyRacing.Runtime.pdb') -Value 'fixture symbols' -NoNewline
+        Set-Content -LiteralPath (Join-Path $Dir 'unity-build.log') -Value 'fixture build log' -NoNewline
+    }
+}
+
+# Full Build-FamilyRelease.ps1 fixture: fake project with Tools scripts,
+# Release/release.json, tracked notices + install guide, a real git repo
+# (source identity is recorded honestly), a fixture editor tree plus
+# signing env for the real build path, and a fake ordinary Windows player.
+# Options: Rehearsal, NoWindows, NoAndroid, MissingExe, MissingData,
+# MissingRuntimeDll, MissingMono, NoManifest, ManifestStage,
+# ManifestDriving, ManifestContent, ManifestCandidate, StaleManifest,
+# PlantProfile, PlantKeystore, PlantToken, PlantDoNotShip, NoNotices,
+# NoGuide, NoGit, DirtyFile, ExistingOutput, OmitEnv.
+function Run-PackageCase([string]$Name, [hashtable]$Opt = @{}) {
+    $project = Join-Path $fixtureRoot ('pkg-' + $Name)
+    $tools = Join-Path $project 'Tools'
+    New-Item -ItemType Directory -Path $tools -Force | Out-Null
+    foreach ($toolScript in @('Verify.ps1', 'Build-AndroidOffline.ps1', 'Build-Windows.ps1',
+            'Sign-AndroidRelease.ps1', 'Build-FamilyRelease.ps1')) {
+        $source = Join-Path $ToolsDir $toolScript
+        if (Test-Path -LiteralPath $source) { Copy-Item -LiteralPath $source -Destination $tools }
+    }
+    $releaseDir = Join-Path $project 'Release'
+    New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null
+    $config = [ordered]@{
+        schemaVersion = 1; versionName = '1.0.0'; androidVersionCode = 1
+        previousAndroidVersionCode = 0; applicationId = 'com.daniel.familyracing'
+        companyName = 'Family Racing'; productName = 'Family Racing'
+        androidMinSdkVersion = 25; androidTargetSdkVersion = 36
+        signingKeyAlias = 'fixture-alias'
+        expectedCertificateSha256 = $script:FixtureCert
+    }
+    ($config | ConvertTo-Json) | Set-Content -LiteralPath (Join-Path $releaseDir 'release.json') -Encoding UTF8
+    if (-not $Opt.ContainsKey('NoNotices')) {
+        Set-Content -LiteralPath (Join-Path $releaseDir 'THIRD-PARTY-NOTICES.txt') -Value 'fixture third-party notices' -NoNewline
+    }
+    if (-not $Opt.ContainsKey('NoGuide')) {
+        New-Item -ItemType Directory -Path (Join-Path $project 'docs') -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $project 'docs\FAMILY_INSTALL_GUIDE.md') -Value 'fixture install guide' -NoNewline
+    }
+
+    if (-not $Opt.ContainsKey('Rehearsal')) {
+        # Editor tree + signing env for the real orchestrated path: the
+        # Android export/sign chain runs end-to-end on fixture tools.
+        $editorRoot = Join-Path $project 'Installed Editors'
+        $editor = Join-Path $editorRoot '6000.3.26f1\Editor'
+        $android = Join-Path $editor 'Data\PlaybackEngines\AndroidPlayer'
+        $jdkBin = Join-Path $android 'OpenJDK\bin'
+        $buildTools = Join-Path $android 'SDK\build-tools\36.0.0'
+        $standalone = Join-Path $editor 'Data\PlaybackEngines\WindowsStandaloneSupport'
+        foreach ($directory in @($editor, $jdkBin, $standalone,
+                (Join-Path $android 'Tools\gradle\lib'),
+                (Join-Path $android 'SDK\platform-tools'), (Join-Path $android 'NDK'),
+                (Join-Path $buildTools 'lib'))) {
+            New-Item -ItemType Directory -Path $directory -Force | Out-Null
+        }
+        Copy-Item -LiteralPath $fixtureExe -Destination (Join-Path $editor 'Unity.exe')
+        Copy-Item -LiteralPath $fixtureExe -Destination (Join-Path $jdkBin 'java.exe')
+        Copy-Item -LiteralPath $fixtureExe -Destination (Join-Path $buildTools 'zipalign.exe')
+        Copy-Item -LiteralPath $fixtureExe -Destination (Join-Path $buildTools 'aapt.exe')
+        Set-Content -LiteralPath (Join-Path $android 'Tools\gradle\lib\gradle-launcher-9.3.1.jar') -Value 'fixture'
+        Set-Content -LiteralPath (Join-Path $android 'SDK\platform-tools\adb.exe') -Value 'fixture'
+        Set-Content -LiteralPath (Join-Path $android 'NDK\ndk-build.cmd') -Value 'fixture'
+        Set-Content -LiteralPath (Join-Path $buildTools 'lib\apksigner.jar') -Value 'fixture jar'
+        Set-Content -LiteralPath (Join-Path $editor 'behavior.txt') -Value 'success'
+        Set-Content -LiteralPath (Join-Path $jdkBin 'behavior.txt') -Value 'success'
+        Set-Content -LiteralPath (Join-Path $jdkBin 'cert-sha256.txt') -Value $script:FixtureCert
+        Set-Content -LiteralPath (Join-Path $buildTools 'badging.txt') -Value $script:FixtureBadging
+        $keystore = Join-Path $project 'test.keystore'
+        Set-Content -LiteralPath $keystore -Value 'temporary fixture test keystore - not a real key'
+        $omit = if ($Opt.ContainsKey('OmitEnv')) { [string[]]$Opt.OmitEnv } else { @() }
+        Set-SignEnv -KeystorePath $keystore -Omit $omit
+    }
+
+    $winSrcName = if ($Opt.ContainsKey('Rehearsal')) { 'Windows-Ordinary' } else { 'Windows-FamilyRelease' }
+    $winSrc = Join-Path $project "Builds\$winSrcName"
+    if (-not $Opt.ContainsKey('NoWindows')) {
+        New-FixtureWindowsPlayer $winSrc -Opt $Opt
+    }
+    if ($Opt.ContainsKey('Rehearsal') -and -not $Opt.ContainsKey('NoAndroid')) {
+        $apkDir = Join-Path $project 'Builds\Android-FamilyRelease'
+        New-Item -ItemType Directory -Path $apkDir -Force | Out-Null
+        New-FixtureApk (Join-Path $apkDir 'FamilyRacing.apk') -PreSigned:$true
+    }
+
+    # Source identity: a real git repo so the manifest records an actual
+    # commit and an honest clean/dirty verdict.
+    if (-not $Opt.ContainsKey('NoGit')) {
+        $oldPreference = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        & git -C $project init -q 2>&1 | Out-Null
+        & git -C $project add -A 2>&1 | Out-Null
+        & git -C $project -c user.email=fixture@test -c user.name=fixture commit -qm 'fixture baseline' 2>&1 | Out-Null
+        $ErrorActionPreference = $oldPreference
+        if ($Opt.ContainsKey('DirtyFile')) {
+            Set-Content -LiteralPath (Join-Path $releaseDir 'dirty-marker.txt') -Value 'uncommitted' -NoNewline
+        }
+    }
+
+    $output = Join-Path $project 'out\package'
+    if ($Opt.ContainsKey('ExistingOutput')) {
+        New-Item -ItemType Directory -Path $output -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $output 'leftover.txt') -Value 'previous run' -NoNewline
+    }
+    $argList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $tools 'Build-FamilyRelease.ps1'),
+        '-Config', (Join-Path $releaseDir 'release.json'), '-Output', $output, '-ProjectPath', $project)
+    if (-not $Opt.ContainsKey('Rehearsal')) {
+        $argList += @('-EditorRoot', (Join-Path $project 'Installed Editors'))
+    } else {
+        $argList += @('-Rehearsal', '-WindowsSource', $winSrc)
+        if (-not $Opt.ContainsKey('NoAndroid')) { $argList += @('-AndroidSource', (Join-Path $project 'Builds\Android-FamilyRelease\FamilyRacing.apk')) }
+    }
+    $oldPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $pkgOutput = & powershell.exe $argList 2>&1 | Out-String
+    $pkgCode = $LASTEXITCODE
+    $ErrorActionPreference = $oldPreference
+    if (-not $Opt.ContainsKey('Rehearsal')) { Clear-SignEnv }
+    return @{ Project = $project; ExitCode = $pkgCode; Output = $pkgOutput; OutDir = $output;
+              WinZip = (Join-Path $output 'FamilyRacing-1.0.0-Windows-x64.zip');
+              Apk = (Join-Path $output 'FamilyRacing-1.0.0-Android.apk');
+              ManifestPath = (Join-Path $output 'release-manifest.json');
+              WinSrc = $winSrc }
+}
+
+function Get-ZipEntries([string]$Path) {
+    $zip = [IO.Compression.ZipFile]::OpenRead($Path)
+    try { return @($zip.Entries | ForEach-Object { $_.FullName }) }
+    finally { $zip.Dispose() }
+}
+
 try {
     $fixtureExe = Join-Path $fixtureRoot 'AndroidToolFixture.exe'
     $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
@@ -348,6 +552,187 @@ try {
             ($rejectCode -ne 0 -and $rejectOutput -match 'Release.*FullContent|FullContent.*Release') `
             ("exit=$rejectCode output=$rejectOutput")
     }
+
+    # --- Build-FamilyRelease.ps1 package assembly -------------------------
+    # Rehearsal path: packages an existing ordinary player output into a
+    # clearly-labeled, traceable package — never a release candidate.
+    $pkg = Run-PackageCase 'rehearsal-ok' @{ Rehearsal = $true }
+    Check 'pkg: rehearsal package assembles end-to-end' ($pkg.ExitCode -eq 0) $pkg.Output
+    Check 'pkg: windows zip produced' (Test-Path -LiteralPath $pkg.WinZip)
+    Check 'pkg: android artifact copied' (Test-Path -LiteralPath $pkg.Apk)
+    Check 'pkg: manifest written OUTSIDE the zip' (Test-Path -LiteralPath $pkg.ManifestPath)
+    $manifest = $null
+    if (Test-Path -LiteralPath $pkg.ManifestPath) {
+        $manifest = Get-Content -LiteralPath $pkg.ManifestPath -Raw | ConvertFrom-Json
+    }
+    Check 'pkg: manifest is schema 1, unqualified, marked rehearsal' `
+        ($null -ne $manifest -and $manifest.schemaVersion -eq 1 -and
+         $manifest.acceptanceStatus -eq 'unqualified' -and
+         $manifest.packageKind -eq 'rehearsal') ($pkg.ManifestPath)
+    Check 'pkg: manifest records honest non-complete content stage' `
+        ($null -ne $manifest -and $manifest.contentStage -ne 'complete') 'contentStage overclaimed'
+    if (Test-Path -LiteralPath $pkg.WinZip) {
+        $entries = Get-ZipEntries $pkg.WinZip
+        Check 'pkg: archive contains the ENTIRE player, not just the exe' `
+            (@($entries | Where-Object { $_ -eq 'FamilyRacing/FamilyRacing.exe' }).Count -eq 1 -and
+             @($entries | Where-Object { $_ -eq 'FamilyRacing/FamilyRacing_Data/Managed/FamilyRacing.Runtime.dll' }).Count -eq 1 -and
+             @($entries | Where-Object { $_ -eq 'FamilyRacing/FamilyRacing_Data/level0' }).Count -eq 1 -and
+             @($entries | Where-Object { $_ -eq 'FamilyRacing/FamilyRacing_Data/globalgamemanagers' }).Count -eq 1 -and
+             @($entries | Where-Object { $_ -eq 'FamilyRacing/UnityPlayer.dll' }).Count -eq 1 -and
+             @($entries | Where-Object { $_ -like 'FamilyRacing/MonoBleedingEdge/etc/mono/*' }).Count -ge 1) ($entries -join ' ')
+        Check 'pkg: third-party notices inside the archive' `
+            (@($entries | Where-Object { $_ -eq 'FamilyRacing/THIRD-PARTY-NOTICES.txt' }).Count -eq 1)
+        Check 'pkg: install guide inside the archive' `
+            (@($entries | Where-Object { $_ -eq 'FamilyRacing/INSTALL-GUIDE.txt' }).Count -eq 1)
+        Check 'pkg: release manifest NOT inside the archive' `
+            (@($entries | Where-Object { $_ -match 'release-manifest' }).Count -eq 0)
+    } else {
+        Check 'pkg: archive contains the ENTIRE player, not just the exe' $false 'no zip'
+        Check 'pkg: third-party notices inside the archive' $false 'no zip'
+        Check 'pkg: install guide inside the archive' $false 'no zip'
+        Check 'pkg: release manifest NOT inside the archive' $false 'no zip'
+    }
+    if ($null -ne $manifest -and (Test-Path -LiteralPath $pkg.WinZip)) {
+        $winEntry = @($manifest.files | Where-Object { $_.path -eq 'FamilyRacing-1.0.0-Windows-x64.zip' })
+        $actualHash = (Get-FileHash -LiteralPath $pkg.WinZip -Algorithm SHA256).Hash.ToLowerInvariant()
+        $actualSize = (Get-Item -LiteralPath $pkg.WinZip).Length
+        Check 'pkg: manifest records post-assembly zip sha256+size' `
+            ($winEntry.Count -eq 1 -and $winEntry[0].sha256 -eq $actualHash -and
+             $winEntry[0].sizeBytes -eq $actualSize) ($manifest.files | ConvertTo-Json -Compress -Depth 4)
+    } else { Check 'pkg: manifest records post-assembly zip sha256+size' $false 'no manifest/zip' }
+    if ($null -ne $manifest -and (Test-Path -LiteralPath $pkg.Apk)) {
+        $apkEntry = @($manifest.files | Where-Object { $_.path -eq 'FamilyRacing-1.0.0-Android.apk' })
+        $srcHash = (Get-FileHash -LiteralPath (Join-Path $pkg.Project 'Builds\Android-FamilyRelease\FamilyRacing.apk') -Algorithm SHA256).Hash.ToLowerInvariant()
+        Check 'pkg: android artifact bytes copied unchanged' `
+            ($apkEntry.Count -eq 1 -and $apkEntry[0].sha256 -eq $srcHash)
+    } else { Check 'pkg: android artifact bytes copied unchanged' $false 'no manifest/apk' }
+    Check 'pkg: manifest records identity + fingerprints' `
+        ($null -ne $manifest -and $manifest.identity.versionName -eq '1.0.0' -and
+         $manifest.identity.androidVersionCode -eq 1 -and
+         $manifest.identity.applicationId -eq 'com.daniel.familyracing' -and
+         $manifest.gameplay.gameplayVersion -eq 'gameplay-4' -and
+         $manifest.gameplay.contentVersion -eq 'full-content-1' -and
+         $manifest.gameplay.lanProtocol -eq 3 -and
+         $manifest.gameplay.observationSchema -eq 7 -and
+         $manifest.gameplay.profileSchema -eq 3 -and
+         $manifest.gameplay.backend -eq 'arcade' -and
+         $manifest.windows.arch -eq 'x64' -and $manifest.windows.backend -eq 'Mono' -and
+         $manifest.windows.authenticodeSigned -eq $false) 'manifest fields wrong'
+
+    $pkg = Run-PackageCase 'git-clean' @{ Rehearsal = $true }
+    $m = if (Test-Path -LiteralPath $pkg.ManifestPath) { Get-Content -LiteralPath $pkg.ManifestPath -Raw | ConvertFrom-Json } else { $null }
+    $head = (& git -C $pkg.Project rev-parse HEAD 2>$null)
+    Check 'pkg: clean source recorded with real commit' `
+        ($null -ne $m -and $m.source.commit -eq $head -and $m.source.cleanSource -eq $true) `
+        ("commit=$($m.source.commit) head=$head")
+    $pkg = Run-PackageCase 'git-dirty' @{ Rehearsal = $true; DirtyFile = $true }
+    $m = if (Test-Path -LiteralPath $pkg.ManifestPath) { Get-Content -LiteralPath $pkg.ManifestPath -Raw | ConvertFrom-Json } else { $null }
+    Check 'pkg: dirty source recorded honestly with named areas' `
+        ($null -ne $m -and $m.source.cleanSource -eq $false -and
+         @($m.source.dirtyAreas).Count -ge 1) ($m.source | ConvertTo-Json -Compress)
+
+    # --- stale / mixed / partial content manifests -----------------------
+    $pkg = Run-PackageCase 'partial-manifest' @{ Rehearsal = $true; ManifestStage = 'partial' }
+    Check 'pkg: partial content manifest rejected as release package' `
+        ($pkg.ExitCode -ne 0 -and $pkg.Output -match 'partial' -and
+         -not (Test-Path -LiteralPath $pkg.WinZip)) $pkg.Output
+    $pkg = Run-PackageCase 'mixed-manifest' @{ Rehearsal = $true; ManifestDriving = 'legacy-9' }
+    Check 'pkg: mixed source-content manifest rejected' `
+        ($pkg.ExitCode -ne 0 -and $pkg.Output -match 'drivingVersion|content' -and
+         -not (Test-Path -LiteralPath $pkg.WinZip)) $pkg.Output
+    $pkg = Run-PackageCase 'noncandidate' @{ Rehearsal = $true; ManifestCandidate = $false }
+    Check 'pkg: non-candidate manifest rejected' `
+        ($pkg.ExitCode -ne 0 -and $pkg.Output -match 'candidate' -and
+         -not (Test-Path -LiteralPath $pkg.WinZip)) $pkg.Output
+
+    # --- incomplete player trees ------------------------------------------
+    $pkg = Run-PackageCase 'missing-data' @{ Rehearsal = $true; MissingData = $true }
+    Check 'pkg: missing player data dir rejected' `
+        ($pkg.ExitCode -ne 0 -and $pkg.Output -match 'FamilyRacing_Data') $pkg.Output
+    $pkg = Run-PackageCase 'missing-runtime-dll' @{ Rehearsal = $true; MissingRuntimeDll = $true }
+    Check 'pkg: missing runtime DLL rejected' `
+        ($pkg.ExitCode -ne 0 -and $pkg.Output -match 'FamilyRacing\.Runtime\.dll') $pkg.Output
+    $pkg = Run-PackageCase 'missing-mono' @{ Rehearsal = $true; MissingMono = $true }
+    Check 'pkg: missing Mono runtime rejected' `
+        ($pkg.ExitCode -ne 0 -and $pkg.Output -match 'MonoBleedingEdge') $pkg.Output
+    $pkg = Run-PackageCase 'missing-exe' @{ Rehearsal = $true; MissingExe = $true }
+    Check 'pkg: missing player exe rejected' `
+        ($pkg.ExitCode -ne 0 -and $pkg.Output -match 'FamilyRacing\.exe') $pkg.Output
+
+    # --- contaminants that must never ship ---------------------------------
+    $pkg = Run-PackageCase 'plant-profile' @{ Rehearsal = $true; PlantProfile = $true }
+    Check 'pkg: planted profile save rejected' `
+        ($pkg.ExitCode -ne 0 -and $pkg.Output -match 'profile-0\.json') $pkg.Output
+    $pkg = Run-PackageCase 'plant-keystore' @{ Rehearsal = $true; PlantKeystore = $true }
+    Check 'pkg: planted keystore rejected' `
+        ($pkg.ExitCode -ne 0 -and $pkg.Output -match 'keystore') $pkg.Output
+    $pkg = Run-PackageCase 'plant-token' @{ Rehearsal = $true; PlantToken = $true }
+    Check 'pkg: validation token rejected' `
+        ($pkg.ExitCode -ne 0 -and $pkg.Output -match 'validation') $pkg.Output
+    $pkg = Run-PackageCase 'donotship' @{ Rehearsal = $true; PlantDoNotShip = $true }
+    Check 'pkg: burst/symbol/log byproducts excluded, package still assembles' `
+        ($pkg.ExitCode -eq 0) $pkg.Output
+    if ($pkg.ExitCode -eq 0 -and (Test-Path -LiteralPath $pkg.WinZip)) {
+        $entries = Get-ZipEntries $pkg.WinZip
+        Check 'pkg: no DoNotShip/pdb/log entries in archive' `
+            (@($entries | Where-Object { $_ -match 'DoNotShip|\.pdb$|\.log$' }).Count -eq 0) ($entries -join ' ')
+    } else { Check 'pkg: no DoNotShip/pdb/log entries in archive' $false 'no zip' }
+
+    # --- required package documents ----------------------------------------
+    $pkg = Run-PackageCase 'no-notices' @{ Rehearsal = $true; NoNotices = $true }
+    Check 'pkg: missing third-party notices rejected' `
+        ($pkg.ExitCode -ne 0 -and $pkg.Output -match 'NOTICES|notices') $pkg.Output
+    $pkg = Run-PackageCase 'no-guide' @{ Rehearsal = $true; NoGuide = $true }
+    Check 'pkg: missing install guide rejected' `
+        ($pkg.ExitCode -ne 0 -and $pkg.Output -match 'install guide|INSTALL') $pkg.Output
+
+    # --- output hygiene ------------------------------------------------------
+    $pkg = Run-PackageCase 'reused-output' @{ Rehearsal = $true; ExistingOutput = $true }
+    Check 'pkg: reused output directory rejected' `
+        ($pkg.ExitCode -ne 0 -and $pkg.Output -match 'exists|reused|empty') $pkg.Output
+    $pkg = Run-PackageCase 'failed-no-artifacts' @{ Rehearsal = $true; ManifestStage = 'partial' }
+    Check 'pkg: failed run publishes no packages' `
+        ($pkg.ExitCode -ne 0 -and -not (Test-Path -LiteralPath $pkg.WinZip) -and
+         -not (Test-Path -LiteralPath $pkg.Apk)) ''
+    $pkg = Run-PackageCase 'no-android' @{ Rehearsal = $true; NoAndroid = $true }
+    Check 'pkg: rehearsal without android artifact still assembles + names blocker' `
+        ($pkg.ExitCode -eq 0 -and -not (Test-Path -LiteralPath $pkg.Apk)) $pkg.Output
+    if ($pkg.ExitCode -eq 0 -and (Test-Path -LiteralPath $pkg.ManifestPath)) {
+        $m = Get-Content -LiteralPath $pkg.ManifestPath -Raw | ConvertFrom-Json
+        Check 'pkg: absent android artifact recorded as named blocker' `
+            ($null -eq $m.packages.android.package -and
+             @($m.blockers | Where-Object { $_ -match 'android' }).Count -ge 1) `
+            ($m | ConvertTo-Json -Compress -Depth 5)
+    } else { Check 'pkg: absent android artifact recorded as named blocker' $false 'no manifest' }
+
+    # --- real orchestrated path (validation -> builds -> signing -> assembly)
+    $pkg = Run-PackageCase 'real-path' @{}
+    Check 'pkg: full pipeline assembles end-to-end' ($pkg.ExitCode -eq 0) $pkg.Output
+    $unityArgs = ''
+    $argsPath = Join-Path $pkg.Project 'unity-arguments.txt'
+    if (Test-Path -LiteralPath $argsPath) { $unityArgs = (Get-Content -LiteralPath $argsPath) -join "`n" }
+    Check 'pkg: pipeline invoked the release Windows + Android exports' `
+        ($unityArgs -match 'FoundationBuild\.WindowsFamilyRelease' -and
+         $unityArgs -match 'FoundationBuild\.ExportAndroidFamilyRelease') $unityArgs
+    Check 'pkg: pipeline produced both packages + manifest' `
+        ((Test-Path -LiteralPath $pkg.WinZip) -and (Test-Path -LiteralPath $pkg.Apk) -and
+         (Test-Path -LiteralPath $pkg.ManifestPath))
+    if (Test-Path -LiteralPath $pkg.ManifestPath) {
+        $m = Get-Content -LiteralPath $pkg.ManifestPath -Raw | ConvertFrom-Json
+        Check 'pkg: release path is NOT labeled rehearsal and apk cert recorded' `
+            ($m.packageKind -eq 'release' -and
+             $m.packages.android.certificateSha256 -eq $script:FixtureCert -and
+             $m.acceptanceStatus -eq 'unqualified') ($m | ConvertTo-Json -Compress -Depth 5)
+    } else { Check 'pkg: release path is NOT labeled rehearsal and apk cert recorded' $false 'no manifest' }
+
+    $pkg = Run-PackageCase 'real-missing-env' @{ OmitEnv = @('FAMILY_RACING_KEYSTORE') }
+    Check 'pkg: missing signing credential fails NAMED with no package' `
+        ($pkg.ExitCode -ne 0 -and $pkg.Output -match 'FAMILY_RACING_KEYSTORE' -and
+         -not (Test-Path -LiteralPath $pkg.WinZip) -and -not (Test-Path -LiteralPath $pkg.Apk)) $pkg.Output
+    $pkg = Run-PackageCase 'real-stale-player' @{ StaleManifest = $true }
+    Check 'pkg: stale player manifest rejected on the real path' `
+        ($pkg.ExitCode -ne 0 -and $pkg.Output -match 'stale|older|this run' -and
+         -not (Test-Path -LiteralPath $pkg.WinZip)) $pkg.Output
 }
 finally {
     Clear-SignEnv

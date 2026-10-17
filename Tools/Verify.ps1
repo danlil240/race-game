@@ -54,6 +54,13 @@
 #                          metadata verification, published under
 #                          Builds\Android-FamilyRelease. Signing secrets
 #                          come from the FAMILY_RACING_* process env only.
+#   -Mode WindowsFamilyRelease
+#                          Windows Mono ordinary player stamped with the
+#                          release identity (FoundationBuild.
+#                          WindowsFamilyRelease): the FullContent
+#                          production gate runs first and validation
+#                          endpoints are compiled out; output under
+#                          Builds\Windows-FamilyRelease.
 #
 # All Unity modes use the pinned editor only; each writes its own log under
 # Logs\ and propagates failures. Android keeps distinct export/build logs
@@ -66,7 +73,7 @@ param(
         "FullContentSetup", "WindowsFullContent", "WindowsFullContentOrdinary",
         "WindowsFullContentPreview",
         "AndroidFullContent", "AndroidFullContentOrdinary", "AndroidFullContentPreview",
-        "AndroidFamilyRelease")]
+        "AndroidFamilyRelease", "WindowsFamilyRelease")]
     [string]$Mode,
 
     [string]$EditorRoot = "C:\Program Files\Unity\Hub\Editor",
@@ -111,6 +118,15 @@ switch ($Mode) {
     "AndroidFamilyRelease" {
         & (Join-Path $repo "Tools\Build-AndroidOffline.ps1") -ProjectPath $repo -EditorRoot $EditorRoot `
             -Presentation FullContent -Configuration Release
+        exit $LASTEXITCODE
+    }
+
+    # Windows release flavor: ordinary Mono player stamped with the
+    # release identity; the FullContent production gate runs inside the
+    # editor entry point, so an incomplete inventory fails here honestly.
+    "WindowsFamilyRelease" {
+        & (Join-Path $repo "Tools\Build-Windows.ps1") -ProjectPath $repo -EditorRoot $EditorRoot `
+            -Configuration FamilyRelease
         exit $LASTEXITCODE
     }
 

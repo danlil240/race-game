@@ -1,4 +1,4 @@
-# Family Release Runbook (M7 Task 2 — Android signing pipeline)
+# Family Release Runbook (M7 — signing pipeline + package assembly)
 
 Packaging and verification contract for the privately distributed family
 release. This document covers the signed Android pipeline that exists
@@ -92,6 +92,79 @@ the variable names listed.
    package. Evidence: `Logs\android-offline\<runId>\result.json` plus
    `export.log`/`gradle.log`/`sign.log`.
 
+## Package assembly (M7 Task 3)
+
+`Tools/Build-FamilyRelease.ps1 -Config <release.json> -Output <new-dir>`
+orchestrates the whole chain and assembles the traceable package set:
+
+```powershell
+# Full release path (today this fails honestly at the FullContent
+# production gate inside the Windows entry point):
+powershell -NoProfile -File Tools/Build-FamilyRelease.ps1 `
+    -Config Release\release.json -Output <new-directory>
+
+# Rehearsal path: package EXISTING build outputs to prove the assembly
+# machinery end-to-end on real build output. Never a release candidate.
+powershell -NoProfile -File Tools/Build-FamilyRelease.ps1 `
+    -Config Release\release.json -Output <new-directory> -Rehearsal `
+    -WindowsSource Builds\Windows-Ordinary [-AndroidSource <apk>]
+```
+
+Pipeline stages (every failure is named and publishes nothing):
+
+1. **Config** — required `release.json` fields enforced.
+2. **Output dir** — must be new; any existing/reused directory is refused.
+3. **Source identity** — `git rev-parse HEAD` + `status --porcelain`;
+   dirty trees record `cleanSource:false` with named areas, never a
+   fabricated clean claim.
+4. **Builds** (full path only) — `Verify -Mode WindowsFamilyRelease`
+   (FoundationBuild.WindowsFamilyRelease: production content gate +
+   ordinary Mono x64 player) then `Verify -Mode AndroidFamilyRelease`
+   (the signed pipeline above). Signing env vars are preflight-checked
+   before any Unity run and named on failure.
+5. **Player completeness** — requires the ENTIRE ordinary player:
+   `FamilyRacing.exe`, `FamilyRacing_Data` (level0, globalgamemanagers,
+   resources.assets, boot.config, app.info, `Managed` with
+   `FamilyRacing.Core/Runtime.dll` + `UnityEngine*.dll`),
+   `UnityPlayer.dll`, `MonoBleedingEdge` runtime config.
+6. **Content manifest** — the build's `manifest.json` must declare
+   `contentStage=complete`, `candidate=true` and the expected
+   `drivingVersion`/`contentVersion` (`full-content-1`); partial,
+   non-candidate, mixed and (on the real path) stale manifests are
+   rejected.
+7. **Contamination scan** — keystores/keys, `Profiles\`,
+   `profile-*.json`, validation tokens and credential files anywhere in
+   the player tree fail the run. `*_DoNotShip`, `*.pdb`, `*.log` are
+   excluded from the archive silently (build byproducts, not content).
+8. **Assemble** — player staged under a top-level `FamilyRacing\`
+   folder plus `THIRD-PARTY-NOTICES.txt` + `INSTALL-GUIDE.txt`, zipped
+   with canonical forward-slash entries; the signed APK is copied byte
+   for byte. A self-check re-opens the archive and asserts required
+   entries, no forbidden entries, and no embedded manifest.
+9. **Manifest** — `release-manifest.json` schema 1 is written to the
+   output root AFTER final assembly and stays OUTSIDE the zip: source
+   commit + cleanSource + dirty areas, tool versions, release identity,
+   Android SDK/ABI/certificate, Windows x64/Mono + honest
+   `authenticodeSigned:false`, arcade backend, gameplay/content
+   fingerprints, `contentStage`, per-file sha256+size, named
+   `blockers`, and `acceptanceStatus:"unqualified"` — the Task 5 gate
+   owns any status change.
+
+Package layout on success:
+
+```
+<Output>\
+  FamilyRacing-<version>-Windows-x64.zip
+  FamilyRacing-<version>-Android.apk     (full path; absent in rehearsal)
+  THIRD-PARTY-NOTICES.txt
+  INSTALL-GUIDE.txt
+  release-manifest.json
+```
+
+Run logs go to `Logs\family-release\<runid>\` — never into packages or
+the output directory. Fixture artifacts (test keystore, simulated
+toolchain) are never release evidence.
+
 ## Open rows (explicitly not closed by this task)
 
 - **Real release candidate build** — gated on the bound production
@@ -105,14 +178,19 @@ the variable names listed.
   matrix (Task 6): SM-T220 plus second tablet/PC/fourth device.
 - **Family acceptance** — human sessions on the ordinary packages
   (Task 6).
-- **Windows packaging, manifest, qualification** — Tasks 3–5.
+- **Qualification + acceptance** — the manifest is frozen at
+  `acceptanceStatus:"unqualified"`; the Task 5 evidence gate owns the
+  change. Physical install/update/backup/family rows stay in Task 6.
 
 ## Tooling tests
 
 `powershell -NoProfile -File Tools/Test-FamilyReleaseTooling.ps1`
-(38 checks) covers missing signing variables, wrong certificate,
-empty/pre-signed/debuggable input, zipalign/sign/verify/Gradle
-failures, missing ARM64, metadata mismatch, stale-package preservation
-on failure, secret leakage, and the Preview/other+Release refusals.
+(77 checks) covers: the signing-pipeline cases above plus package
+assembly — rehearsal + full-path assembly, entire-player archiving,
+partial/mixed/non-candidate/stale content manifests, missing player
+data/runtime DLLs/Mono, planted saves/keystores/validation tokens,
+missing notices/guide, reused output dirs, failed-run publishes
+nothing, manifest outside the zip with post-assembly hashes, honest
+dirty-source recording, and absent-android named blockers.
 Fixtures use temporary test keystores and a simulated toolchain only —
 fixture artifacts are never release evidence.

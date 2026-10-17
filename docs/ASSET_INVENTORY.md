@@ -18,6 +18,7 @@ asset GUID).
 | 2026-10-14 | US$0 of US$100 | Race presentation effects and audio (Task 5) are original — procedural sprites/prefabs authored in-editor, PCM WAVs synthesized offline by Tools/Generate-RaceAudio.py. No purchases made or needed. |
 | 2026-10-14 | US$0 of US$100 | Task 7 closeout: no new assets, no purchases. PC profiling found no actionable hotspot, so no replacement/optimized content was added. Inventory remains complete (`AllReferencedAssetsHaveInventoryEntries` green). |
 | 2026-10-15 | US$0 of US$100 | M5 gameplay loop (tasks 1–12): four gadget one-shot cues synthesized offline by Tools/Generate-RaceAudio.py and the generated gadget catalog bound in `Foundation.unity`; all original work. No purchases made or needed. Task 9's authored Sunny Island courses/campaign content was never produced (M4 device gate) — nothing further to inventory. |
+| 2026-10-17 | US$0 of US$100 | M7 Task 3 shipped-package reconciliation: the release packages contain only project-owned content plus the bundled third-party components listed in "Shipped-package reconciliation" (Noto fonts under SIL OFL 1.1, Unity engine redistributables, Newtonsoft.Json MIT). Windows Authenticode is intentionally not purchased — the install guide documents the unsigned status. No purchases made or needed. |
 
 ## Referenced assets (machine-readable)
 
@@ -122,6 +123,10 @@ Columns: `guid` | `path` | `source` | `license` | `cost` | `role`.
 | 7f5a2fc948a395f4d837123385a95582 | Assets/FamilyRacing/Audio/VisualBenchmark/cue-gadget-shield.wav | Original — synthesized offline by Tools/Generate-RaceAudio.py (22050 Hz mono PCM) | Project-owned original work — no third-party license, no attribution required | US$0 | bubble-shield blocked-hit one-shot cue |
 | 87bc926397843194f87ee699adf17ced | Assets/FamilyRacing/Audio/VisualBenchmark/cue-gadget-use.wav | Original — synthesized offline by Tools/Generate-RaceAudio.py (22050 Hz mono PCM) | Project-owned original work — no third-party license, no attribution required | US$0 | gadget used one-shot cue |
 | 47f0a23a8f5bbe846a2cf9b24005b3ce | Assets/FamilyRacing/Generated/Driving/gadget-catalog-01.asset | Original — authored gadget catalog (turbo/bubble-shield/foam-trap definitions; bound as `gadgetCatalog` in Foundation.unity) | Project-owned original work — no third-party license, no attribution required | US$0 | gadget definition catalog (M5 Task 5) |
+| 85701e625ffcf9a489fd4019bc2fa4e3 | Assets/FamilyRacing/Fonts/NotoSans-Regular.ttf | Noto Fonts, notofonts/noto-fonts@ffebf8c (sha256:b85c38ecea8a7cfb, unmodified; provenance in Assets/FamilyRacing/Fonts/README.md) | SIL Open Font License 1.1 (OFL.txt in directory) | US$0 | Latin UI text font source → FoundationLatinFont.asset |
+| 246d33a8145f16f46949d4190ae391c7 | Assets/FamilyRacing/Fonts/NotoSansHebrew-Regular.ttf | Noto Fonts, same pinned revision (sha256:a7fa16fffb27bedb, unmodified) | SIL Open Font License 1.1 (OFL.txt in directory) | US$0 | Hebrew catalog/UI font source → FoundationHebrewFont.asset |
+| 36b08115a5b7b4047a4702a9414f0fe6 | Assets/FamilyRacing/Fonts/NotoSansSymbols2-Regular.ttf | Noto Fonts, same pinned revision (sha256:630846d528dbe4c4, unmodified) | SIL Open Font License 1.1 (OFL.txt in directory) | US$0 | directional arrow glyphs U+25C0/U+25B6 → FoundationSymbolsFont.asset |
+| 7f1a7395b6f20d94e909f8e68e9b532c | Assets/FamilyRacing/Fonts/OFL.txt | Verbatim upstream LICENSE from the pinned noto-fonts revision | SIL Open Font License 1.1 text itself | US$0 | font license evidence bundled with the font sources |
 <!-- INVENTORY-TABLE-END -->
 
 ## Authored-in-editor originals
@@ -141,6 +146,41 @@ None selected. The US$0 treatment meets the benchmark brief; if a later
 task proposes a purchase, the needed asset, candidate sources, license
 and cost must be recorded here **before** purchase — the budget is a
 cap, not authorization.
+
+## Shipped-package reconciliation (M7 Task 3)
+
+What actually ships inside the assembled family packages
+(`Tools/Build-FamilyRelease.ps1` output), reconciled against this
+inventory — the authoritative bundled notice text lives in
+`Release/THIRD-PARTY-NOTICES.txt` and is required by the packaging tool.
+
+| Shipped component | Source / license | Cost | Where it lands |
+|---|---|---|---|
+| All game content (code, art, audio, EN/HE text tables) | Project-owned original work — the GUID table above | US$0 | `FamilyRacing_Data` inside the Windows zip; inside the APK |
+| Noto Sans / Noto Sans Hebrew / Noto Sans Symbols 2 fonts | noto-fonts@ffebf8c, unmodified — SIL OFL 1.1, license at `Assets/FamilyRacing/Fonts/OFL.txt`, provenance + sha256 in `README.md` | US$0 | compiled into the generated FontAssets → packaged player |
+| Unity engine runtime (`UnityPlayer.dll`, Mono runtime, `Unity.*` managed assemblies: URP 17.3.0, Netcode 2.7.0, Transport 2.6.0, Input System 1.20.0, uGUI 2.0.0, TextMeshPro, Burst, Collections, Mathematics) | Unity Editor/Package licenses — bundled by the pinned 6000.3.26f1 editor | US$0 | player root + `FamilyRacing_Data/Managed` + `MonoBleedingEdge` |
+| Newtonsoft.Json.dll | Json.NET via com.unity.nuget.newtonsoft-json 3.2.2 — MIT | US$0 | `FamilyRacing_Data/Managed` |
+| Vendor redistributables (`D3D12Core.dll`, `AMDUnityPlugin.dll`, `NVUnityPlugin.dll`, `nvngx_dlss.dll`, `UnityCrashHandler64.exe`) | Microsoft/AMD/NVIDIA binaries bundled by the Unity build | US$0 | player root + `D3D12/` |
+
+Reconciliation notes:
+
+- **Fonts and EN/HE text are physically packaged**: the three Noto
+  TTFs compile into the generated FontAssets (`FoundationLatinFont`,
+  `FoundationHebrewFont`, `FoundationSymbolsFont`) inside the player;
+  bilingual strings live in `Core/Localization` compiled into
+  `FamilyRacing.Core.dll`.
+- **Bilingual voice prompts are NOT final**: tutorial cues (18 files,
+  EN+HE) and the 14 production prompts await the credential-gated
+  Azure voice pass (`AZURE_SPEECH_KEY`); the packages ship today's
+  synthesized cues honestly — recorded as a blocker in
+  `release-manifest.json`.
+- **Windows Authenticode**: no code-signing certificate is purchased
+  (budget is a cap, not authorization). The player is genuinely
+  unsigned-by-Authenticode — documented in `FAMILY_INSTALL_GUIDE.md`
+  and `release-manifest.json` (`windows.authenticodeSigned: false`).
+- The zip excludes build byproducts (`*_DoNotShip`, `*.pdb`, `*.log`)
+  and rejects any planted save/keystore/validation token; Android
+  bytes are copied unchanged after the signing pipeline's own checks.
 
 ## Open needs
 

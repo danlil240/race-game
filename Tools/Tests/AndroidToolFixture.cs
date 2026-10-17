@@ -124,13 +124,16 @@ internal static class AndroidToolFixture
         {
             var project = Value(args, "-projectPath");
             if (project == null || !Directory.Exists(project)) return 91;
-            File.WriteAllLines(Path.Combine(project, "unity-arguments.txt"), args);
+            File.AppendAllLines(Path.Combine(project, "unity-arguments.txt"), args);
             var log = Value(args, "-logFile");
             if (log != null) File.WriteAllText(log, "Fixture export: " + behavior);
             if (behavior == "export-failure") return 29;
             if (behavior == "incomplete-export") return 0;
             var export = Value(args, "--android-export-dir");
-            if (export == null) return 92;
+            // No export dir means a non-export invocation (player build,
+            // test run, setup): record it and succeed — the release
+            // orchestrator also drives Windows/editor entry points.
+            if (export == null) return 0;
             Directory.CreateDirectory(Path.Combine(export, "launcher"));
             Directory.CreateDirectory(Path.Combine(export, "unityLibrary"));
             File.WriteAllText(Path.Combine(export, "settings.gradle"), "include ':launcher', ':unityLibrary'");
