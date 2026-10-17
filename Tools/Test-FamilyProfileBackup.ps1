@@ -589,6 +589,85 @@ try {
         ($run4.ExitCode -eq 0 -and (Compare-FileMap $preMap (Get-FileMap $case.Profiles))) `
         ($run4.Output + ' exit=' + $run4.ExitCode)
 
+    # A profile file created AFTER the backup (absent in the manifest) must
+    # not crash the apply or wedge future restores.
+    $case = New-BackedUpCase 'i-new-file' @{ ProfilesOpt = @{ SlotCount = 2; WithBaks = $true } }
+    Set-Content -LiteralPath (Join-Path $case.Profiles 'profile-2.json') `
+        -Value (New-ProfileJson -Slot 2 -Id ([guid]::NewGuid().ToString())) -NoNewline -Encoding UTF8
+    $newHash = (Get-FileHash -LiteralPath (Join-Path $case.Profiles 'profile-2.json') -Algorithm SHA256).Hash
+    $run = Run-RestoreCase @{
+        Backup = $case.Backup; ExpectedManifest = $case.Manifest
+        ProfilesPath = $case.Profiles; Apply = $true }
+    Check 'restore: on-disk file absent in backup does not crash -Apply' `
+        ($run.ExitCode -eq 0 -and
+         (Get-FileHash -LiteralPath (Join-Path $case.Profiles 'profile-2.json') -Algorithm SHA256).Hash -eq $newHash) $run.Output
+    $journalDir = @(Get-ChildItem -LiteralPath $case.Profiles -Directory -Filter '.family-restore-*' -ErrorAction SilentlyContinue)
+    $snapshotOk = $false
+    if ($journalDir.Count -eq 1) {
+        $snap = Join-Path $journalDir[0].FullName 'pre\profile-2.json'
+        $snapshotOk = (Test-Path -LiteralPath $snap) -and
+            ((Get-FileHash -LiteralPath $snap -Algorithm SHA256).Hash -eq $newHash) -and
+            (Test-Path -LiteralPath (Join-Path $journalDir[0].FullName 'journal.json'))
+    }
+    Check 'restore: post-backup file bytes land in the pre-restore snapshot' `
+        $snapshotOk 'snapshot missing or hash mismatch'
+
+    # A tampered journal name must never write/delete outside Profiles.
+    $case = New-BackedUpCase 'i-tampered-journal'
+    Remove-Item -LiteralPath (Join-Path $case.Profiles 'profile-0.json'),
+        (Join-Path $case.Profiles 'profile-1.json') -Force
+    $outside = Join-Path $case.Dir 'evil.txt'
+    Set-Content -LiteralPath $outside -Value 'precious' -NoNewline
+    $run = Run-RestoreCase @{
+        Backup = $case.Backup; ExpectedManifest = $case.Manifest
+        ProfilesPath = $case.Profiles; Apply = $true; InterruptAfterFiles = 1 }
+    $journalDir = @(Get-ChildItem -LiteralPath $case.Profiles -Directory -Filter '.family-restore-*' -ErrorAction SilentlyContinue)
+    if ($journalDir.Count -eq 1) {
+        $jpath = Join-Path $journalDir[0].FullName 'journal.json'
+        $j = Get-Content -LiteralPath $jpath -Raw | ConvertFrom-Json
+        foreach ($e in $j.entries) { if ($e.state -eq 'pending') { $e.name = '..\evil.txt' } }
+        ($j | ConvertTo-Json -Depth 8) | Set-Content -LiteralPath $jpath -Encoding UTF8
+    }
+    $preMap = Get-FileMap $case.Dir
+    $run = Run-RestoreCase @{ ProfilesPath = $case.Profiles; Resume = $true }
+    Check 'restore: tampered journal entry name is refused on resume' `
+        ($run.ExitCode -ne 0 -and $run.Output -match 'journal|name|non-profile' -and
+         (Compare-FileMap $preMap (Get-FileMap $case.Dir))) $run.Output
+    # Same gate on the rollback path (a tampered DONE entry name).
+    if ($journalDir.Count -eq 1) {
+        $jpath = Join-Path $journalDir[0].FullName 'journal.json'
+        $j = Get-Content -LiteralPath $jpath -Raw | ConvertFrom-Json
+        foreach ($e in $j.entries) { if ($e.state -eq 'done' -and $e.action -eq 'restore') { $e.name = '..\evil.txt' } }
+        ($j | ConvertTo-Json -Depth 8) | Set-Content -LiteralPath $jpath -Encoding UTF8
+    }
+    $run = Run-RestoreCase @{ ProfilesPath = $case.Profiles; Rollback = $true }
+    Check 'restore: tampered journal entry name is refused on rollback' `
+        ($run.ExitCode -ne 0 -and $run.Output -match 'journal|name|non-profile' -and
+         (Compare-FileMap $preMap (Get-FileMap $case.Dir))) $run.Output
+
+    # A journal copied into a different Profiles dir must not resume there.
+    $case = New-BackedUpCase 'i-journal-moved'
+    Remove-Item -LiteralPath (Join-Path $case.Profiles 'profile-0.json'),
+        (Join-Path $case.Profiles 'profile-1.json') -Force
+    $run = Run-RestoreCase @{
+        Backup = $case.Backup; ExpectedManifest = $case.Manifest
+        ProfilesPath = $case.Profiles; Apply = $true; InterruptAfterFiles = 1 }
+    $other = Join-Path $case.Dir 'Profiles-Other'
+    New-ProfilesDir $other @{ WithBaks = $true }
+    $otherMap = Get-FileMap $other
+    $journalDir = @(Get-ChildItem -LiteralPath $case.Profiles -Directory -Filter '.family-restore-*' -ErrorAction SilentlyContinue)
+    if ($journalDir.Count -eq 1) {
+        Copy-Item -LiteralPath $journalDir[0].FullName -Recurse -Destination (Join-Path $other $journalDir[0].Name)
+    }
+    $run = Run-RestoreCase @{ ProfilesPath = $other; Resume = $true }
+    Check 'restore: resume refuses a journal recorded for another profiles path' `
+        ($run.ExitCode -ne 0 -and $run.Output -match 'path|installation|foreign' -and
+         (Compare-FileMap $otherMap (Get-FileMap $other))) $run.Output
+    $run = Run-RestoreCase @{ ProfilesPath = $other; Rollback = $true }
+    Check 'restore: rollback refuses a journal recorded for another profiles path' `
+        ($run.ExitCode -ne 0 -and $run.Output -match 'path|installation|foreign' -and
+         (Compare-FileMap $otherMap (Get-FileMap $other))) $run.Output
+
     # ============================ ANDROID ================================
     $ac = New-AdbCase 'a-backup-ok'
     $dest = Join-Path $ac.Dir 'backup'

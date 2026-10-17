@@ -469,8 +469,27 @@ try {
         if ([string]$journal.platform -ne $Platform) {
             throw "Journal platform '$($journal.platform)' does not match -Platform '$Platform'."
         }
+        # A journal may only complete/roll back the installation it was
+        # recorded for — a copied .family-restore-* dir must not push its
+        # recorded bytes into a different installation.
+        $recordedPath = [string]$journal.profilesPath
+        if ([string]::IsNullOrEmpty($recordedPath) -or
+                $recordedPath.TrimEnd('\', '/') -ine $script:ProfilesResolved.TrimEnd('\', '/')) {
+            throw "Journal profiles path '$recordedPath' does not match the resolved target '$($script:ProfilesResolved)'; refusing a foreign-installation resume/rollback."
+        }
+        if ($journal.installationKey -and [string]$journal.installationKey -ne $installationKey) {
+            throw "Journal installation key '$($journal.installationKey)' does not match this installation '$installationKey'."
+        }
         if ($journal.deviceSerial -and $journal.deviceSerial -ne $DeviceSerial) {
             throw "Journal device serial '$($journal.deviceSerial)' does not match -DeviceSerial '$DeviceSerial'."
+        }
+        # Journaled entry names flow into Join-Path / adb paths — re-apply
+        # the allowed-name gate so a tampered journal can never write or
+        # delete outside the Profiles directory.
+        foreach ($entry in @($journal.entries)) {
+            if ([string]$entry.name -notmatch '^profile-[0-3]\.json(\.bak)?$') {
+                throw "Journal $jdir contains a non-profile entry name '$($entry.name)'; refusing to resume or roll back."
+            }
         }
         # Re-verify the recorded backup before resuming an apply.
         $journalBackup = [string]$journal.backupDir
@@ -615,23 +634,19 @@ try {
         updatedUtc = [DateTime]::UtcNow.ToString('o')
         platform = $Platform
         profilesPath = $script:ProfilesResolved
+        installationKey = $installationKey
         deviceSerial = $(if ($Platform -eq 'Android') { $DeviceSerial } else { $null })
         backupDir = $backupFull
         backupManifestSha256 = (Get-FileHash -LiteralPath (Join-Path $backupFull 'backup-manifest.json') -Algorithm SHA256).Hash.ToLowerInvariant()
         expectedManifestSha256 = $expected.Sha256
         entries = @()
     }
-    # Snapshot EVERY existing byte of the allowed names before any write.
+    # Snapshot coverage is the ON-DISK set of allowed names, independent of
+    # what the backup recorded — a file created after the backup still gets
+    # its bytes preserved.
     $pre = @{}
     foreach ($name in $AllowedNames) {
-        if (Target-FileExists $name) {
-            Target-JournalSnapshot $jdir $name
-            $observed = Join-Path $observeDir $name
-            $pre[$name] = @{ preExisted = $true
-                preSha256 = (Get-FileHash -LiteralPath $observed -Algorithm SHA256).Hash.ToLowerInvariant() }
-        } else {
-            $pre[$name] = @{ preExisted = $false; preSha256 = $null }
-        }
+        $pre[$name] = @{ preExisted = (Target-FileExists $name); preSha256 = $null }
     }
     $jEntries = @()
     foreach ($entry in $plan) {
@@ -641,12 +656,26 @@ try {
         }
         $jEntries += [ordered]@{
             name = $entry.name; action = $entry.action; note = $entry.note
-            preExisted = $pre[$entry.name].preExisted; preSha256 = $pre[$entry.name].preSha256
+            preExisted = $pre[$entry.name].preExisted; preSha256 = $null
             postSha256 = $post
             state = $(if ($entry.action -eq 'restore') { 'pending' } else { 'done' })
         }
     }
     $journal.entries = $jEntries
+    # Write the journal BEFORE snapshotting bytes: an interruption here
+    # still leaves a resumable/rollbackable record instead of an orphaned
+    # journal dir that wedges every future restore.
+    Target-JournalWriteJson $jdir $journal
+    foreach ($entry in $journal.entries) {
+        if (-not $entry.preExisted) { continue }
+        $name = [string]$entry.name
+        Target-JournalSnapshot $jdir $name
+        $observed = Join-Path $observeDir $name
+        if (-not (Test-Path -LiteralPath $observed -PathType Leaf)) {
+            Target-FetchToLocal $name $observed
+        }
+        $entry.preSha256 = (Get-FileHash -LiteralPath $observed -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
     Target-JournalWriteJson $jdir $journal
 
     $applied = 0
