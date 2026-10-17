@@ -741,11 +741,22 @@ namespace FamilyRacing
                 var paused = net != null && net.paused;
                 var requests = net != null ? net.pauseRequests.Count : 0;
                 var text = paused ? T("lan.sharedPaused", state) : "";
+                var ids = "";
                 if (requests > 0 && net != null)
+                {
+                    var names = "";
+                    foreach (var id in net.pauseRequests)
+                    {
+                        if (names.Length > 0) names += ", ";
+                        names += ParticipantNameForId(net, id, state);
+                        if (ids.Length > 0) ids += ", ";
+                        ids += id ?? "";
+                    }
                     text += (text.Length > 0 ? " · " : "")
-                        + string.Join(", ", net.pauseRequests) + " "
-                        + T("lan.pausedBy", state);
+                        + names + " " + T("lan.pausedBy", state);
+                }
                 lanPauseLabel.text = text;
+                lanPauseLabel.tooltip = ids;
             }
             // One-shot action acknowledgment: the newest action.* event
             // for the local participant proves the press reached the host

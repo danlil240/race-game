@@ -858,6 +858,28 @@ namespace FamilyRacing.Tests
         }
 
         [UnityTest]
+        public IEnumerator LanRacePauseLabelNamesRequesterNotRawId()
+        {
+            yield return HostRacing();
+            // A pause request on the host lists the requester's
+            // participant id in network.pauseRequests — the shared-pause
+            // label must name the roster animal (PCQA-008) and keep the
+            // raw id on the tooltip for diagnostics only.
+            var requested = app.Dispatch("lan.pause.request", Params());
+            Assert.That(requested.status, Is.EqualTo("applied"));
+            var state = Snapshot();
+            Assert.That(state.network.pauseRequests,
+                Does.Contain(state.network.localParticipantId));
+            Refresh();
+            var label = Widget<Label>("lan.hud.paused");
+            Assert.That(label.text, Does.Contain("Fox"));
+            Assert.That(label.text,
+                Does.Not.Contain(state.network.localParticipantId));
+            Assert.That(label.tooltip,
+                Is.EqualTo(state.network.localParticipantId));
+        }
+
+        [UnityTest]
         public IEnumerator LanRaceRecoverPressesStayBounded()
         {
             yield return HostRacing();
