@@ -574,8 +574,16 @@ namespace FamilyRacing.Tests
                 "the offending field is highlighted");
             Assert.That(port.ClassListContains("lan-invalid"), Is.False);
 
-            // Malformed address: same refusal with its own message.
+            // Malformed address: same refusal with its own message. A
+            // hostname is an input error too — the transport only dials
+            // IPv4 literals (LanTransport.StartClient), so "localhost"
+            // could never connect.
             address.value = "not a host";
+            Press(Widget<Button>("lan.join"));
+            Assert.That(link.StartClientCalls, Is.EqualTo(0));
+            Assert.That(error.text,
+                Is.EqualTo("That address does not look right."));
+            address.value = "localhost";
             Press(Widget<Button>("lan.join"));
             Assert.That(link.StartClientCalls, Is.EqualTo(0));
             Assert.That(error.text,
@@ -591,6 +599,11 @@ namespace FamilyRacing.Tests
             Assert.That(port.ClassListContains("lan-invalid"), Is.True);
             Assert.That(address.ClassListContains("lan-invalid"), Is.False);
             port.value = "70000";
+            Press(Widget<Button>("lan.join"));
+            Assert.That(link.StartClientCalls, Is.EqualTo(0));
+            Assert.That(error.text, Is.EqualTo(
+                "The port must be a number between 0 and 65535."));
+            port.value = "-1";
             Press(Widget<Button>("lan.join"));
             Assert.That(link.StartClientCalls, Is.EqualTo(0));
             Assert.That(error.text, Is.EqualTo(
@@ -628,6 +641,80 @@ namespace FamilyRacing.Tests
         }
 
         [UnityTest]
+        public IEnumerator DiscoveredJoinRejectionPaintsInlineError()
+        {
+            CreateProfileAndNavigate("lan-browser");
+            Refresh();
+            yield return WaitForWidget<Button>("lan.join");
+            // A stale manual-join error must be replaced by the verdict,
+            // not silently wiped by the discovered-join click.
+            Press(Widget<Button>("lan.join"));
+            Assert.That(Widget<Label>("lan.join.error").text,
+                Is.EqualTo("Type the host address first."));
+
+            // An incompatible advertisement: the session's discovery
+            // fence rejects synchronously before a single datagram, so
+            // the click must paint the honest reason, not stay silent.
+            var advertised = Catalog();
+            probe.Hosts.Add(new LanDiscoveredHost
+            {
+                address = "192.168.9.9", port = 47777, hostName = "peer",
+                compat = "gameplay-test|wrong-version|wrong-fingerprint"
+            });
+            Refresh();
+            yield return WaitForWidget<Button>("lan.discovered.0.join");
+            var join = Widget<Button>("lan.discovered.0.join");
+            Assert.That(join.enabledSelf, Is.True,
+                "availability is per-action; the fence verdict is the rejection itself");
+            Press(join);
+            Assert.That(link.StartClientCalls, Is.EqualTo(0),
+                "the incompatible fence rejects before dialing");
+            Assert.That(Widget<Label>("lan.join.error").text,
+                Is.EqualTo("Different game version."),
+                "a synchronous rejection must paint its localized reason");
+            Assert.That(Snapshot().network.lastError, Is.EqualTo(""),
+                "shell-side feedback never fakes a service error");
+        }
+
+        [UnityTest]
+        public IEnumerator JoinErrorSurvivesRebuildAndClearsOffScreen()
+        {
+            CreateProfileAndNavigate("lan-browser");
+            Refresh();
+            yield return WaitForWidget<Button>("lan.join");
+            Press(Widget<Button>("lan.join"));
+            Assert.That(Widget<Label>("lan.join.error").text,
+                Is.EqualTo("Type the host address first."));
+
+            // An unrelated signature change (a host appears) rebuilds the
+            // whole tree: the shell-side message re-renders from stored
+            // state instead of vanishing with the widgets.
+            var advertised = Catalog();
+            probe.Hosts.Add(new LanDiscoveredHost
+            {
+                address = "192.168.1.9", port = 47777, hostName = "peer",
+                compat = "gameplay-test|" + advertised.CompatibilityVersion
+                    + "|" + advertised.CompatibilityFingerprint
+            });
+            Refresh();
+            yield return WaitForWidget<Button>("lan.discovered.0.join");
+            Assert.That(Widget<Label>("lan.join.error").text,
+                Is.EqualTo("Type the host address first."),
+                "an unrelated rebuild must not drop the inline error");
+
+            // Leaving the browser retires the feedback entirely: the
+            // sandbox rebuild clears the shell-side state, so the next
+            // browser build paints an empty line.
+            app.Dispatch("ui.navigate", Params(("screen", "sandbox")));
+            Refresh();
+            app.Dispatch("ui.navigate", Params(("screen", "lan-browser")));
+            Refresh();
+            yield return WaitForWidget<Button>("lan.join");
+            Assert.That(Widget<Label>("lan.join.error").text, Is.EqualTo(""),
+                "leaving the screen clears shell-side join feedback");
+        }
+
+        [UnityTest]
         public IEnumerator LobbyRendersAnimalNamesAndLocalizedCourses()
         {
             yield return HostLobby();
@@ -660,7 +747,7 @@ namespace FamilyRacing.Tests
             lan.OnLinkMessage(3, NetworkProtocol.Encode(
                 NetworkProtocol.MsgSessionState,
                 "sid", "s-test", "ph", "lobby", "ev", "lan-mixed",
-                "cl", "car", "pd", "0", "pr", "", "occ", "2", "jn", "0",
+                "cl", "car", "pd", "0", "pr", "", "occ", "3", "jn", "0",
                 "p0", string.Join(",", new[]
                 {
                     "host-pid", "0", "panda", "1", "car-01", "1", "0",
@@ -671,7 +758,14 @@ namespace FamilyRacing.Tests
                     Snapshot().savedProfile.id, "1", "fox", "0", "car-01",
                     "1", "0", "remote", "1"
                 }),
-                "p2", "", "p3", ""));
+                // A participant publishing no avatar falls back to the
+                // localized slot-based Player N rather than the UUID.
+                "p2", string.Join(",", new[]
+                {
+                    "guest-pid", "2", "", "0", "car-01", "1", "0",
+                    "remote", "1"
+                }),
+                "p3", ""));
             DrainOutcomes();
             Refresh();
             yield return WaitForWidget<Button>("lan.ready");
@@ -680,6 +774,10 @@ namespace FamilyRacing.Tests
             Assert.That(hostCard.tooltip, Is.EqualTo("host-pid"));
             var selfCard = Widget<Label>("lan.slot.1.name");
             Assert.That(selfCard.text, Does.Contain("Fox"));
+            var guestCard = Widget<Label>("lan.slot.2.name");
+            Assert.That(guestCard.text, Is.EqualTo("Player 3"),
+                "an empty avatar falls back to the slot-based name");
+            Assert.That(guestCard.tooltip, Is.EqualTo("guest-pid"));
         }
 
         [UnityTest]
@@ -971,6 +1069,22 @@ namespace FamilyRacing.Tests
             Assert.That(lan.PublishResult(
                 MakeResult("res-1", "race-1", hostId, "finished", 20)),
                 Is.True);
+            // The standings rows render from the race slice the bridge
+            // normally forwards — publish it through the same seam.
+            service.SetNetworkRaceState(new NetworkRaceState
+            {
+                sessionId = "s-test", raceId = "race-1", phase = "finished",
+                standings = new List<int> { 0 },
+                racers = new List<NetworkRacerState>
+                {
+                    new NetworkRacerState
+                    {
+                        participantId = hostId, slot = 0,
+                        vehicleId = "car-01", attribution = "human",
+                        position = 1, finished = true, finishTicks = 900
+                    }
+                }
+            });
             DrainOutcomes();
             var state = Snapshot();
             Assert.That(state.network.phase, Is.EqualTo("results"));
@@ -978,6 +1092,14 @@ namespace FamilyRacing.Tests
             Assert.That(state.network.results.Count, Is.GreaterThan(0));
             Refresh();
             yield return WaitForWidget<Button>("lan.results.request");
+            // PCQA-008: result rows name the racer by roster avatar —
+            // the id stays on the tooltip for diagnostics.
+            var resultLine = Widget<Label>("lan.result.0.line");
+            Assert.That(resultLine, Is.Not.Null,
+                "the finalized standings row must render");
+            Assert.That(resultLine.text, Does.Contain("Fox"));
+            Assert.That(resultLine.text, Does.Not.Contain(hostId));
+            Assert.That(resultLine.tooltip, Is.EqualTo(hostId));
 
             // Result request on the host is the local retrieval path —
             // applied, and the ledger stays put.
@@ -1018,6 +1140,12 @@ namespace FamilyRacing.Tests
             var retry = Widget<Button>("lan.results.retrySave");
             Assert.That(retry.enabledSelf, Is.True,
                 "a failed delivery must offer retry");
+            // PCQA-008: the delivery ledger names the participant by
+            // roster avatar; the wire id stays on the tooltip.
+            var deliveryLine = Widget<Label>("lan.delivery.0.line");
+            Assert.That(deliveryLine, Is.Not.Null);
+            Assert.That(deliveryLine.text, Does.Contain("Fox"));
+            Assert.That(deliveryLine.tooltip, Is.EqualTo(clientId));
 
             // Result request is an async client op: pending until the
             // host's answer; the wire carries the immutable raceId.
