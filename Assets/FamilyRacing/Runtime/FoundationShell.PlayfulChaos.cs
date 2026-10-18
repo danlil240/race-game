@@ -41,6 +41,20 @@ namespace FamilyRacing
             track.style.width = 200;
             track.style.height = 15;
             top.pickingMode = boostRow.pickingMode = PickingMode.Ignore;
+            tutorialPanel.style.position = Position.Absolute;
+            tutorialPanel.style.top = 128;
+            tutorialPanel.style.left = tutorialPanel.style.right = 12;
+            tutorialPanel.style.flexWrap = Wrap.Wrap;
+            tutorialCueLabel.style.fontSize = 22;
+            tutorialCueLabel.style.whiteSpace = WhiteSpace.Normal;
+            tutorialCueLabel.style.flexShrink = 1;
+            tutorialCueLabel.style.flexGrow = 1;
+            tutorialIconLabel.style.fontSize = 32;
+            foreach (var button in tutorialPanel.Query<Button>().ToList())
+            {
+                button.style.minHeight = 48;
+                button.style.fontSize = 20;
+            }
 
             var touch = UseTouchControls;
             controls.style.display = touch ? DisplayStyle.Flex : DisplayStyle.None;
@@ -87,8 +101,12 @@ namespace FamilyRacing
                 element.style.minWidth = element.style.width = 100;
                 element.style.minHeight = element.style.height = 80;
                 element.style.fontSize = 19;
-                element.style.display = touch && element.name == "driving.gadget"
+                element.style.whiteSpace = WhiteSpace.Normal;
+                element.style.display = touch && (element.name == "driving.gadget"
+                    || element.name == "driving.recover")
                     ? DisplayStyle.Flex : DisplayStyle.None;
+                if (element.name == "driving.recover")
+                    element.style.minWidth = element.style.width = 120;
             }
             }
             pause.RemoveFromHierarchy();

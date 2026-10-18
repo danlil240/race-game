@@ -32,3 +32,17 @@ For the first family session, observe whether the player can start unaided, exit
 ## Next checkpoint
 
 The next implementation package is Harbor Havoc course authoring, followed by collision/stunt feedback, a fountain hazard and rival route choices. The approved plan places a human handling checkpoint after this first package. Confirm driving/readability with the preview before extending those interactions.
+
+## Verification and review
+
+The Windows preview built successfully after the review fixes; its [build record](playful-chaos-preview/build.json) identifies the build environment. Captured layouts: [English touch race](playful-chaos-preview/touch-race-en.png), [Hebrew touch race](playful-chaos-preview/touch-race-he.png), [English tutorial](playful-chaos-preview/tutorial-en.png), [Hebrew tutorial](playful-chaos-preview/tutorial-he.png), [home](playful-chaos-preview/home-en.png), and [completed race](playful-chaos-preview/results-en.png). The final targeted layout rerun passed 2/2 tests.
+
+The first package passed 849 core tests, 977 EditMode tests (one inherited ignored), 333 Python tooling tests and 27 verification-tooling checks. The runtime smoke run completed a two-lap race through ordinary driving inputs, displayed results, and started a fresh rematch without granting progression rewards. The player finished in 56.2 seconds; all three AI finished by 62.1 seconds. This existing course is shorter than the planned Harbor Havoc target.
+
+Independent code review found two important layout issues: manual recovery was hidden on touch, and the tutorial overlapped the compact HUD. Both received reproducing tests before fixes. Recovery now remains visible and dispatches ordinary recovery input; the tutorial sits below the readouts in both supported languages.
+
+The final PlayMode rerun passed 341/342 tests, including both new regressions. `PhysicsPredictionPlayTests.ImpairedLanPhysicalCorrections` exceeded its 3 m correction limit (3.872 m); an isolated rerun passed at 1.620 m. The earlier full 340-test run passed. This live-timing network test varies between runs; its intermittent failure remains unresolved and LAN qualification is open. No networking code was changed to suppress it.
+
+Review boundaries remain open: human handling preference, voluntary replay, physical tablet reach and multitouch, subjective audio quality, LAN HUD parity and device qualification. Desktop touch simulation and captured images are layout evidence only. Tasks 3–7 remain pending at the approved human checkpoint. There were no deferred minor review findings.
+
+Implementation rulings: keep the preview in an isolated worktree and profile namespace; use the existing dressed course for this package; preserve baseline and responsive tuning candidates; mark tuning as normalized because rewards/upgrades are disabled; add the missing scene AudioListener; use supported steering glyphs in hints; and use a compiler response file to support long Windows worktree paths. The Windows build wrapper must run in the current PowerShell environment: a nested legacy PowerShell run failed during post-build hashing, while the direct invocation succeeded.
