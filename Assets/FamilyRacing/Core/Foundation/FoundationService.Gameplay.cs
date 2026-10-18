@@ -426,6 +426,7 @@ namespace FamilyRacing.Core.Foundation
         private bool BindRewardContextFor(SoloRaceRequest request,
             SoloRaceSession session, GameCommand command)
         {
+            if (gameplayCatalog != null && gameplayCatalog.QuickRaceOnly) return true;
             RaceMode mode;
             if (!RaceModeRules.TryParse(request.mode, out mode)
                 || !RaceModeRules.IsProgression(mode))
@@ -561,6 +562,7 @@ namespace FamilyRacing.Core.Foundation
             if (soloResultApplied || state == null || state.result == null)
                 return;
             soloResultApplied = true;
+            if (gameplayCatalog != null && gameplayCatalog.QuickRaceOnly) return;
             RaceMode mode;
             if (!RaceModeRules.TryParse(state.mode, out mode)
                 || (mode != RaceMode.TimeTrial
@@ -713,6 +715,7 @@ namespace FamilyRacing.Core.Foundation
         // a fingerprint.
         private string PrepareLanRewardContext(string allocatedRaceId)
         {
+            if (gameplayCatalog != null && gameplayCatalog.QuickRaceOnly) return null;
             var fingerprint = gameplayCatalog != null
                 ? gameplayCatalog.CompatibilityFingerprint
                 : drivingContent != null

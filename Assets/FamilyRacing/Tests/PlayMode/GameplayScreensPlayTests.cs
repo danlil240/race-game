@@ -989,6 +989,28 @@ namespace FamilyRacing.Tests
         // --- tests ---------------------------------------------------------
 
         [UnityTest]
+        public IEnumerator QuickRaceHomeStartsImmediatelyAndKeepsRoadViewClear()
+        {
+            yield return SeedProfile("en");
+            var full = service.GameplayContent;
+            Assert.That(GameplayCatalog.TryCreateQuickRace(full.Driving, full.Gadgets,
+                full.Difficulties, out var quick, out var error), Is.True, error);
+            service.SetGameplayCatalog(quick);
+            Refresh();
+            yield return WaitForWidget<Button>("home.raceNow");
+            yield return PressWidget("home.raceNow");
+            Assert.That(Snapshot().screen, Is.EqualTo("driving"));
+            Assert.That(Snapshot().soloRace.race.racers.Count, Is.EqualTo(4));
+            Refresh();
+            yield return WaitForWidget<VisualElement>("hud.readouts");
+            Assert.That(Widget<VisualElement>("hud.controls").resolvedStyle.display,
+                Is.EqualTo(DisplayStyle.None), "desktop touch grid must leave the road visible");
+            Assert.That(Widget<Label>("hud.gate").resolvedStyle.display,
+                Is.EqualTo(DisplayStyle.None), "checkpoint diagnostics are not a family HUD field");
+            Assert.That(Widget<Button>("driving.pause").enabledSelf, Is.True);
+        }
+
+        [UnityTest]
         public IEnumerator SandboxLoopButtonsLandOnGatedScreens()
         {
             yield return SeedProfile("en");

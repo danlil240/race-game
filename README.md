@@ -10,6 +10,19 @@ Production CI, signed release setup and startup GitHub update notifications:
 
 ## What exists today
 
+**Playful Chaos preview (19 October 2026).** The dedicated
+`WindowsPlayfulChaos` build adds a direct Race now → four-racer Quick Race
+→ Race again loop, a compact keyboard/touch HUD, a separate responsive-car
+tuning candidate, speed/boost camera feedback with reduced-motion support,
+and the existing Sunny Island visual/audio treatment. It uses isolated
+`PlayfulChaos/Profiles` saves and a validated Quick Race-only catalog with
+no persistent progression rewards. Build it with
+`Tools\Verify.ps1 -Mode WindowsPlayfulChaos` and run
+`Builds\Windows-PlayfulChaos\FamilyRacing.exe`.
+See [preview notes](docs/playtests/2026-10-19-playful-chaos-preview.md).
+This is the first package of the playful-chaos plan; the new harbor course,
+hazard, rival behaviors and human/device acceptance are subsequent work.
+
 **Graybox driving prototype (M2, under review).** On top of the
 foundation below, the repo now ships a command-driven driving trial:
 profile select → practice screen → `race.start` on `intro-01` (or the

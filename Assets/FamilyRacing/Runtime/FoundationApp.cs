@@ -32,6 +32,7 @@ namespace FamilyRacing
         private static readonly ProfilerMarker WorldMarker = new ProfilerMarker("FamilyRacing.WorldPresentation");
         private static readonly ProfilerMarker HudMarker = new ProfilerMarker("FamilyRacing.Hud");
         private static readonly ProfilerMarker FontsMarker = new ProfilerMarker("FamilyRacing.FontReadiness");
+        [SerializeField] private string profileStorageNamespace = "";
 
         private FoundationService service;
         private Networking.LanSessionLink lanLink;
@@ -80,8 +81,11 @@ namespace FamilyRacing
         private void Awake()
         {
             var validationDir = ValidationDirectory();
+            var profileRoot = string.IsNullOrEmpty(profileStorageNamespace)
+                ? Application.persistentDataPath
+                : Path.Combine(Application.persistentDataPath, profileStorageNamespace);
             var profilesDir = SelectProfilesDirectory(validationDir,
-                Application.persistentDataPath, Environment.GetCommandLineArgs());
+                profileRoot, Environment.GetCommandLineArgs());
             // In validation mode the bridge owns the capture directory (it
             // requires a new/empty dir); ProfileStore.Save creates the
             // selected profile directory on first write, including a shared

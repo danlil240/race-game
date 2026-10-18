@@ -31,6 +31,7 @@ namespace FamilyRacing
         public CampaignDefinitionAsset[] campaigns =
             new CampaignDefinitionAsset[0];
         public CampaignDefinitionAsset campaign;
+        public bool quickRaceOnly;
         public BountyCatalogAsset bounties;
         public EconomyDefinitionAsset economy;
         public GadgetCatalogAsset gadgets;
@@ -46,6 +47,7 @@ namespace FamilyRacing
         public GameplayCatalog ToCatalog(DrivingContentCatalog driving,
             out string error)
         {
+            if (quickRaceOnly) return ToQuickRaceCatalog(driving, out error);
             if (driving == null)
             {
                 error = name + ": missing driving catalog";
@@ -146,6 +148,32 @@ namespace FamilyRacing
             }
             error = null;
             return catalog;
+        }
+
+        private GameplayCatalog ToQuickRaceCatalog(DrivingContentCatalog driving, out string error)
+        {
+            if (campaign != null || (campaigns != null && campaigns.Length > 0)
+                || economy != null || bounties != null || gadgets == null)
+            {
+                error = "quickRaceOnly: unexpected progression sections or missing gadgets";
+                return null;
+            }
+            var gadgetDefs = gadgets.ToCatalog(out error);
+            if (gadgetDefs == null) return null;
+            var presets = new List<AiDifficultyDefinition>();
+            foreach (var row in difficulties ?? new DifficultyRow[0])
+            {
+                if (row == null) { error = "difficulties.null"; return null; }
+                presets.Add(new AiDifficultyDefinition
+                {
+                    id = row.difficultyId, brakeMarginScale = row.brakeMarginScale,
+                    boostUseMinCharge = row.boostUseMinCharge,
+                    gadgetUseWillingness = row.gadgetUseWillingness,
+                    shortcutWillingness = row.shortcutWillingness
+                });
+            }
+            return GameplayCatalog.TryCreateQuickRace(driving, gadgetDefs, presets,
+                out var catalog, out error) ? catalog : null;
         }
     }
 }

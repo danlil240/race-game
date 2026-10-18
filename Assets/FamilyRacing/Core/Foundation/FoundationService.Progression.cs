@@ -38,6 +38,9 @@ namespace FamilyRacing.Core.Foundation
         private CommandResult OpenLoopScreen(GameCommand command,
             string target)
         {
+            if (gameplayCatalog != null && gameplayCatalog.QuickRaceOnly
+                && target != ScreenQuickRace)
+                return Result(command, CommandResult.Rejected, "contentUnavailable");
             if (gameplayCatalog == null || gameplayCatalog.IsLegacy
                 || gameplayCatalog.Driving == null)
                 return Result(command, CommandResult.Rejected,
@@ -74,6 +77,8 @@ namespace FamilyRacing.Core.Foundation
         // surface reflects, so pausing never fences it.
         private CommandResult CampaignSelectWorld(GameCommand command)
         {
+            if (gameplayCatalog != null && gameplayCatalog.QuickRaceOnly)
+                return Result(command, CommandResult.Rejected, "contentUnavailable");
             if (gameplayCatalog == null || gameplayCatalog.IsLegacy
                 || gameplayCatalog.Driving == null)
                 return Result(command, CommandResult.Rejected,
@@ -269,7 +274,7 @@ namespace FamilyRacing.Core.Foundation
             if (gameplayCatalog == null || gameplayCatalog.IsLegacy
                 || gameplayCatalog.Driving == null)
                 return state;
-            state.available = true;
+            state.available = !gameplayCatalog.QuickRaceOnly;
             state.contentIdentity =
                 gameplayCatalog.CompatibilityVersion ?? "none";
             // Schema-7 (M6 Task 3): every authored world publishes a row

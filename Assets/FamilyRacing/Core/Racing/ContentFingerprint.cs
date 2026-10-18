@@ -69,7 +69,7 @@ namespace FamilyRacing.Core.Racing
             {
                 using (var writer = new BinaryWriter(stream, Encoding.UTF8, true))
                 {
-                    writer.Write(5); // canonical schema epoch: explicit route topology
+                    writer.Write(catalog.QuickRaceOnly ? 6 : 5); // explicit routes plus isolated preview capability
                     if (catalog.Driving == null)
                     {
                         writer.Write(false);

@@ -50,6 +50,18 @@ namespace FamilyRacing.EditorTools
             Report(report, "Windows Mono ordinary build (no validation)");
         }
 
+        public static void WindowsPlayfulChaos()
+        {
+            PlayfulChaosSetup.Create();
+            NetworkPrototypeSetup.VerifyBuildConfiguration(BuildTarget.StandaloneWindows64);
+            var report = Build("Builds/Windows-PlayfulChaos/FamilyRacing.exe",
+                BuildTarget.StandaloneWindows64, BuildOptions.Development,
+                new[] { PlayfulChaosSetup.ScenePath });
+            Report(report, "Playful Chaos development preview (partial content)");
+            File.WriteAllText("Builds/Windows-PlayfulChaos/content-stage.txt",
+                "partial\nplayful-chaos-1\nProfiles: PlayfulChaos/Profiles\n");
+        }
+
         // Opt-in physical-backend development player: regenerates the
         // physics content (tunings, vehicles, course, lab + race scenes)
         // and builds the self-bootstrapping PhysicsRace scene — the same

@@ -289,6 +289,8 @@ namespace FamilyRacing.Core.Foundation
         // way — the honest forensic record of what was bound.
         private RewardApplyResult ApplyNetworkResult(RaceResult result)
         {
+            if (gameplayCatalog != null && gameplayCatalog.QuickRaceOnly)
+                return RewardApplyResult.Ineligible("contentUnavailable");
             if (savedProfile == null)
                 return RewardApplyResult.Ineligible("noProfile");
             var context = FindRewardContext(

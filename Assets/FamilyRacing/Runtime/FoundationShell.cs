@@ -125,6 +125,15 @@ namespace FamilyRacing
             // A late network response must never rebuild racing controls or drop touch capture.
             if (state.screen == "profiles" || state.screen == "sandbox")
                 key += "|update:" + UpdateNoticeKey;
+            key += "|fun:" + IsPlayfulChaos;
+            if (IsPlayfulChaos)
+            {
+                var touchLayout = UseTouchControls;
+                key += "|touch:" + touchLayout;
+                if (lastTouchLayout.HasValue && lastTouchLayout.Value != touchLayout)
+                    app.Input?.RequireRearm();
+                lastTouchLayout = touchLayout;
+            }
             foreach (var slot in state.slots) key += "|" + slot.status;
             // LAN screens rebuild on roster/discovery/config/delivery
             // changes as well — the signature is cheap and covers only the

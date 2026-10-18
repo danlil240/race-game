@@ -121,6 +121,8 @@ namespace FamilyRacing.Core.Racing
             string vehicleId, ProfileSave profile,
             DrivingContentCatalog content, GameplayCatalog gameplay)
         {
+            if (gameplay != null && !gameplay.SupportsMode(mode))
+                return Deny("contentUnavailable");
             if (content == null) return Deny("contentUnavailable");
             switch (mode)
             {
@@ -191,10 +193,13 @@ namespace FamilyRacing.Core.Racing
             // a locked world (or claimed by none) refuses honestly —
             // course pick and explicit event id alike (M6 Task 2). A
             // driving-only catalog answers without the world rule.
-            if (mode == RaceMode.QuickRace && gameplay != null
+            if (mode == RaceMode.QuickRace && gameplay != null && !gameplay.QuickRaceOnly
                 && !AdventureRules.CanAccessCourse(gameplay, profile,
                     evt.courseId))
                 return Deny("worldLocked");
+            if (gameplay != null && gameplay.QuickRaceOnly
+                && (evt.eventType != GameplayEventType.Circuit || evt.isFinale))
+                return Deny("eventNotForMode");
             if (string.IsNullOrEmpty(vehicleId)
                 || !content.Vehicles.ContainsKey(vehicleId))
                 return Deny("unknownVehicle");

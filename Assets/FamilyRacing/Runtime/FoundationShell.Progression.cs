@@ -552,7 +552,7 @@ namespace FamilyRacing
                             () => { quickCourseId = id; quickClassId = "";
                                 quickVehicleId = ""; },
                             "quick.course." + id);
-                        if (!AdventureRules.CanAccessCourse(gameplay,
+                        if (!gameplay.QuickRaceOnly && !AdventureRules.CanAccessCourse(gameplay,
                                 state.savedProfile, id))
                         {
                             button.SetEnabled(false);
@@ -578,7 +578,7 @@ namespace FamilyRacing
                         () => { quickCourseId = id; quickClassId = "";
                             quickVehicleId = ""; },
                         "quick.course." + id);
-                    if (!AdventureRules.CanAccessCourse(gameplay,
+                    if (!gameplay.QuickRaceOnly && !AdventureRules.CanAccessCourse(gameplay,
                             state.savedProfile, id))
                     {
                         button.SetEnabled(false);
@@ -1011,7 +1011,7 @@ namespace FamilyRacing
                 "results.retrySave");
             var actions = Row(resultsOverlay);
             resultsRetryButton = AddButton(actions,
-                T("results.again", state), Seafoam,
+                T(IsPlayfulChaos ? "fun.raceAgain" : "results.again", state), Seafoam,
                 () => app.Dispatch("results.retry", emptyParams),
                 "results.retry");
             resultsContinueButton = AddButton(actions,

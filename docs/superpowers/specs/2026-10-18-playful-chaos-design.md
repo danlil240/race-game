@@ -1,6 +1,6 @@
 # Family Racing: playful chaos design
 
-Date: 18 October 2026. Status: proposed direction for review; planning only.
+Date: 18 October 2026. Status: approved for implementation by the owner's "implement" instruction; first playable package underway on 19 October.
 
 ## Intent
 

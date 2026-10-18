@@ -33,6 +33,21 @@ namespace FamilyRacing.Tests
             "Assets/FamilyRacing/Generated/FoundationPanelSettings.asset";
         private const string RunId = "driving-presentation-test";
 
+        [UnityTest]
+        public IEnumerator SpeedFeedbackWidensViewAndReducedMotionKeepsItFixed()
+        {
+            Inject(drivingCamera, "speedFeedbackEnabled", true);
+            var baselineFov = renderCamera.fieldOfView;
+            var motor = new MotorState { y = 1f, speed = 26f, boostActive = true, grounded = true };
+            drivingCamera.ApplyMotor(motor, false, false, 0.5f);
+            Assert.That(renderCamera.fieldOfView, Is.GreaterThan(baselineFov + 1f));
+            drivingCamera.ApplyMotor(motor, false, true, 0.5f);
+            Assert.That(renderCamera.fieldOfView, Is.EqualTo(baselineFov).Within(0.01f));
+            drivingCamera.ApplyMotor(null, false, false, 0.1f);
+            Assert.That(renderCamera.fieldOfView, Is.EqualTo(baselineFov).Within(0.01f));
+            yield return null;
+        }
+
         private string profilesDirectory;
         private ProfileStore store;
         private FoundationService service;

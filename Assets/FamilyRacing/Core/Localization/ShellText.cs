@@ -26,6 +26,13 @@ namespace FamilyRacing.Core.Localization
             ["player.profile.play"] = new[] { "Select racer", "בחרו נהג" },
             ["player.switchDriver"] = new[] { "Switch driver", "החלפת נהג" },
             ["hud.kmh"] = new[] { "km/h", "קמ״ש" },
+            ["fun.title"] = new[] { "Ready, set, race!", "מוכנים? למירוץ!" },
+            ["fun.tagline"] = new[] { "Sunny Island · Four racers · One more round", "אי השמש · ארבעה מתחרים · עוד סיבוב" },
+            ["fun.raceNow"] = new[] { "Race now", "למירוץ!" },
+            ["fun.raceHint"] = new[] { "Drift into a boost. Take the jump. Beat your rivals.", "דריפט, האצה וקפיצה — בדרך לניצחון!" },
+            ["fun.welcome"] = new[] { "Choose a driver for a quick race, driving practice or a race together.", "בחרו נהג למירוץ מהיר, אימון נהיגה או מירוץ ביחד." },
+            ["fun.raceAgain"] = new[] { "Race again", "עוד מירוץ" },
+            ["fun.keys"] = new[] { "◀ ▶ Steer · Space Drift · Shift Boost · E Gadget · R Recover · Esc Pause", "◀ ▶ היגוי · רווח דריפט · Shift האצה · E גאדג׳ט · R חזרה למסלול · Esc השהיה" },
             ["shell.disclaimer"] = new[] { "Family preview: campaign races, quick race, time trial, garage and home-network racing are all playable.", "גרסת תצוגה משפחתית: מירוצי המסע, מירוץ מהיר, מירוץ נגד זמן, המוסך ומירוץ הרשת הביתית — הכל פתוח למשחק." },
             // PCQA-003: the honest variant for builds whose gated loop
             // entries report contentUnavailable — names what IS playable.

@@ -1599,6 +1599,18 @@ namespace FamilyRacing.Core.Foundation
         {
             available = true;
             reason = "";
+            if (gameplayCatalog != null && gameplayCatalog.QuickRaceOnly
+                && (action.StartsWith("campaign.", StringComparison.Ordinal)
+                    || action.StartsWith("timeTrial.", StringComparison.Ordinal)
+                    || action.StartsWith("garage.", StringComparison.Ordinal)
+                    || action.StartsWith("bounties.", StringComparison.Ordinal)
+                    || action.StartsWith("upgrade.", StringComparison.Ordinal)
+                    || action.StartsWith("cosmetic.", StringComparison.Ordinal)))
+            {
+                available = false;
+                reason = "contentUnavailable";
+                return;
+            }
             if (action.StartsWith("lan.", StringComparison.Ordinal))
             {
                 if (lanSession == null)

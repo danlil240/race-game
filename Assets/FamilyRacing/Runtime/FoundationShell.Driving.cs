@@ -498,6 +498,7 @@ namespace FamilyRacing
 
             statusLabel = AddLabel(root, "", 18, Deep);
             statusLabel.name = "status.persistence";
+            if (IsPlayfulChaos) ApplyCompactRaceHud(state, top, boostRow);
         }
 
         // One shared backdrop for HUD strips that float text over the live
@@ -547,7 +548,7 @@ namespace FamilyRacing
                         if (racer != null && racer.participantId == state.soloRace.participantId)
                         { place = racer.position; break; }
                 }
-                var showPosition = playerPresentation && place > 0 && totalRacers > 0;
+                var showPosition = (playerPresentation || IsPlayfulChaos) && place > 0 && totalRacers > 0;
                 positionLabel.style.display = showPosition ? DisplayStyle.Flex : DisplayStyle.None;
                 positionLabel.text = showPosition
                     ? T("results.place", state) + " " + Ltr(place + "/" + totalRacers)

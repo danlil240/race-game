@@ -55,7 +55,7 @@ namespace FamilyRacing
         private void BuildProfiles(FoundationState state)
         {
             AddLabel(root, T("shell.title", state), 44, Deep);
-            var disclaimer = AddLabel(root, T(LoopContentAvailable()
+            var disclaimer = AddLabel(root, T(IsPlayfulChaos ? "fun.welcome" : LoopContentAvailable()
                 ? "shell.disclaimer" : "shell.disclaimer.unavailable",
                 state), 18, Deep);
             disclaimer.name = "shell.disclaimer";
@@ -226,6 +226,7 @@ namespace FamilyRacing
 
         private void BuildSandbox(FoundationState state)
         {
+            if (IsPlayfulChaos) { BuildPlayfulHome(state); return; }
             AddLabel(root, T("sandbox.title", state), 40, Deep);
             var indicators = Row(root);
             steeringLabel = AddLabel(indicators, T("input.steering", state) + ": 0", 22, Deep);

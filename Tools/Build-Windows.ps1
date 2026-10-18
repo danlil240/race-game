@@ -23,7 +23,7 @@
 # -logFile (unity.log), the child process stdout/stderr (unity-process.log),
 # and result.json with the outcome and exe SHA-256.
 param(
-    [ValidateSet('Development', 'Ordinary', 'Physics', 'FamilyRelease')]
+    [ValidateSet('Development', 'Ordinary', 'Physics', 'FamilyRelease', 'PlayfulChaos')]
     [string]$Configuration = 'Development',
     [string]$ProjectPath = (Join-Path $PSScriptRoot '..'),
     [string]$EditorRoot = 'C:\Program Files\Unity\Hub\Editor'
@@ -34,6 +34,10 @@ $project = (Resolve-Path -LiteralPath $ProjectPath).Path
 $editorVersion = '6000.3.26f1'
 $editor = Join-Path $EditorRoot "$editorVersion\Editor\Unity.exe"
 $flavors = @{
+    playfulchaos = @{
+        Method = 'FamilyRacing.EditorTools.FoundationBuild.WindowsPlayfulChaos'
+        Exe = 'Builds\Windows-PlayfulChaos\FamilyRacing.exe'
+    }
     development = @{
         Method = 'FamilyRacing.EditorTools.FoundationBuild.Windows'
         Exe = 'Builds\Windows\FamilyRacing.exe'

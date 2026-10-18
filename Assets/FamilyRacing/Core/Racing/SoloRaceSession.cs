@@ -36,6 +36,7 @@ namespace FamilyRacing.Core.Racing
         private readonly string participantId;
         private readonly string difficultyId;
         private readonly string rulesFingerprint;
+        private readonly bool normalizedQuickRace;
         private readonly SoloRaceRequest request;
         private readonly DrivingContentCatalog content;
 
@@ -52,8 +53,9 @@ namespace FamilyRacing.Core.Racing
             string sessionId, string raceId, string participantId,
             string difficultyId, string rulesFingerprint,
             DrivingContentCatalog content, NetworkRace race,
-            TrialWorld trial, RaceMetricsAccumulator trialMetrics)
+            TrialWorld trial, RaceMetricsAccumulator trialMetrics, bool normalizedQuickRace = false)
         {
+            this.normalizedQuickRace = normalizedQuickRace;
             this.request = request;
             this.mode = mode;
             this.sessionId = sessionId;
@@ -94,6 +96,8 @@ namespace FamilyRacing.Core.Racing
                 || mode == RaceMode.Lan || mode == RaceMode.Practice)
             { error = "invalidMode"; return false; }
             if (catalog == null || catalog.IsLegacy || catalog.Driving == null)
+            { error = "contentUnavailable"; return false; }
+            if (!catalog.SupportsMode(mode))
             { error = "contentUnavailable"; return false; }
             var content = catalog.Driving;
             var participantId = !string.IsNullOrEmpty(request.participantId)
@@ -238,7 +242,7 @@ namespace FamilyRacing.Core.Racing
 
             session = new SoloRaceSession(request,
                 RaceModeRules.ModeId(mode), sessionId, raceId, participantId,
-                difficulty.id, rulesFingerprint, content, race, null, null);
+                difficulty.id, rulesFingerprint, content, race, null, null, catalog.QuickRaceOnly);
             return true;
         }
 
@@ -513,7 +517,7 @@ namespace FamilyRacing.Core.Racing
                 // The human seat's tuning provenance: progression modes
                 // run the profile-resolved purchased tune; the trial
                 // runs the authored normalized starter.
-                tuningSource = mode == "timeTrial"
+                tuningSource = mode == "timeTrial" || normalizedQuickRace
                     ? "normalized"
                     : mode == "campaign" || mode == "quickRace"
                         ? "purchased" : "",

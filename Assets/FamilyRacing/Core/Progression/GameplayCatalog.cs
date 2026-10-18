@@ -14,7 +14,7 @@ namespace FamilyRacing.Core.Progression
     // gameplay-affecting value (see ContentFingerprint); the authored
     // identity string is the full-content version, independent of the
     // driving content version, profile schema and LAN protocol.
-    public sealed class GameplayCatalog
+    public sealed partial class GameplayCatalog
     {
         // Full-content identity (M6 Task 1): the ordered multiworld
         // campaign contract replaces the M5 first-world epoch. Bumped

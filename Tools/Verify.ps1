@@ -67,7 +67,7 @@
 # and a result.json under Logs\android-offline\<run-id>.
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet("CoreOffline", "Core", "CheckEnvironment", "Setup", "EditMode", "PlayMode", "Windows", "WindowsOrdinary", "Android",
+    [ValidateSet("CoreOffline", "Core", "CheckEnvironment", "Setup", "EditMode", "PlayMode", "Windows", "WindowsOrdinary", "WindowsPlayfulChaos", "Android",
         "VisualBenchmarkSetup", "WindowsVisualBenchmark", "WindowsVisualBenchmarkOrdinary",
         "AndroidVisualBenchmark", "AndroidVisualBenchmarkOrdinary",
         "FullContentSetup", "WindowsFullContent", "WindowsFullContentOrdinary",
@@ -93,6 +93,11 @@ function Find-Dotnet {
 }
 
 switch ($Mode) {
+    "WindowsPlayfulChaos" {
+        & (Join-Path $repo "Tools\Build-Windows.ps1") -ProjectPath $repo -EditorRoot $EditorRoot `
+            -Configuration PlayfulChaos
+        exit $LASTEXITCODE
+    }
     "Android" {
         & (Join-Path $repo "Tools\Build-AndroidOffline.ps1") -ProjectPath $repo -EditorRoot $EditorRoot
         exit $LASTEXITCODE
