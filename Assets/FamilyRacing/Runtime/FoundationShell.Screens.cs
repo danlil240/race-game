@@ -59,6 +59,12 @@ namespace FamilyRacing
                 ? "shell.disclaimer" : "shell.disclaimer.unavailable",
                 state), 18, Deep);
             disclaimer.name = "shell.disclaimer";
+            // PCQA2-001: the welcome copy runs past the client width —
+            // under the Advanced generator an unset whiteSpace resolves
+            // to NoWrap, so the single centered line clipped at both
+            // viewport edges. Same wrapping-label opt-in the world-name
+            // cards use (FoundationShell.Progression.cs).
+            disclaimer.style.whiteSpace = WhiteSpace.Normal;
             AddLabel(root, T("profile.select", state), 28, Deep);
             var cards = Row(root);
             for (var i = 0; i < state.slots.Count; i++)

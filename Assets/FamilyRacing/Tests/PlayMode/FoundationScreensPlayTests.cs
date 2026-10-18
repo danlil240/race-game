@@ -425,6 +425,123 @@ namespace FamilyRacing.Tests
         }
 
         [UnityTest]
+        public IEnumerator ProfilesDisclaimerWrapsInsideTheViewport()
+        {
+            // PCQA2-001: the long welcome line rendered as one centered
+            // row wider than the client area and clipped mid-word at
+            // both viewport edges. The label must wrap inside the root
+            // content width in both locales — on the cold launch and on
+            // the return visit after a profile is selected.
+            Refresh();
+            yield return WaitForWidget<Label>("shell.disclaimer");
+            yield return AssertDisclaimerInsideViewport("en");
+            yield return AssertDisclaimerMultiline("en");
+
+            yield return WaitForWidget<Button>("settings.language.he");
+            Press(Widget<Button>("settings.language.he"));
+            Assert.That(Snapshot().language, Is.EqualTo("he"),
+                "the Hebrew toggle must dispatch ui.language");
+            Refresh();
+            yield return WaitForWidget<Label>("shell.disclaimer");
+            yield return AssertDisclaimerInsideViewport("he");
+
+            // The return visit: a created profile lands on settings, so
+            // navigating back rebuilds profiles over a loaded slot.
+            var created = app.Dispatch("profile.create",
+                Params(("slot", "0"), ("language", "en")));
+            Assert.That(created.status, Is.EqualTo("applied"));
+            var back = app.Dispatch("ui.navigate",
+                Params(("screen", "profiles")));
+            Assert.That(back.status, Is.EqualTo("applied"));
+            Refresh();
+            yield return WaitForWidget<Label>("shell.disclaimer");
+            Assert.That(Snapshot().activeSlot, Is.EqualTo(0),
+                "the return visit is the with-profile profiles screen");
+            yield return AssertDisclaimerInsideViewport("en");
+            yield return AssertDisclaimerMultiline("en");
+
+            // Once a profile is selected ui.language is profile-scoped
+            // (the profiles toggle reports useSettingsUpdate), so a
+            // Hebrew locale on the return visit rides a Hebrew profile.
+            created = app.Dispatch("profile.create",
+                Params(("slot", "1"), ("language", "he")));
+            Assert.That(created.status, Is.EqualTo("applied"));
+            back = app.Dispatch("ui.navigate",
+                Params(("screen", "profiles")));
+            Assert.That(back.status, Is.EqualTo("applied"));
+            Refresh();
+            yield return WaitForWidget<Label>("shell.disclaimer");
+            Assert.That(Snapshot().language, Is.EqualTo("he"),
+                "the Hebrew profile carries its locale to profiles");
+            yield return AssertDisclaimerInsideViewport("he");
+        }
+
+        // The welcome line must opt into wrapping (whiteSpace Normal —
+        // the codebase's wrapping-label convention, Progression.cs) and
+        // its layout box must stay inside the root content width, so
+        // neither viewport edge clips it. The discriminating check is
+        // resolvedStyle: an unset whiteSpace reports Normal but resolves
+        // to NoWrap under the Advanced text generator.
+        private void AssertDisclaimerContains(string locale)
+        {
+            var disclaimer = Widget<Label>("shell.disclaimer");
+            Assert.That(disclaimer, Is.Not.Null,
+                "shell.disclaimer must render (" + locale + ")");
+            Assert.That(disclaimer.text,
+                Is.EqualTo(ShellText.Get("shell.disclaimer.unavailable",
+                    locale)),
+                "this fixture has no gameplay catalog: the honest "
+                    + "welcome copy renders (" + locale + ")");
+            Assert.That(disclaimer.style.whiteSpace.value,
+                Is.EqualTo(WhiteSpace.Normal),
+                "the welcome label must opt into wrapping (" + locale + ")");
+            Assert.That(disclaimer.resolvedStyle.whiteSpace,
+                Is.EqualTo(WhiteSpace.Normal),
+                "the Advanced text generator must wrap the welcome line "
+                    + "(" + locale + ")");
+            var content = document.rootVisualElement.LocalToWorld(
+                document.rootVisualElement.contentRect);
+            Assert.That(disclaimer.worldBound.xMin,
+                Is.GreaterThanOrEqualTo(content.xMin - 1f),
+                "the welcome line must not clip at the left edge ("
+                    + locale + ")");
+            Assert.That(disclaimer.worldBound.xMax,
+                Is.LessThanOrEqualTo(content.xMax + 1f),
+                "the welcome line must not clip at the right edge ("
+                    + locale + ")");
+        }
+
+        private IEnumerator AssertDisclaimerInsideViewport(string locale)
+        {
+            // Advanced text settles over a layout pass or two — poll for
+            // containment instead of reading a mid-settle bound.
+            var content = document.rootVisualElement.LocalToWorld(
+                document.rootVisualElement.contentRect);
+            yield return WaitFor(() =>
+            {
+                var disclaimer = Widget<Label>("shell.disclaimer");
+                return disclaimer != null
+                    && disclaimer.worldBound.xMin >= content.xMin - 1f
+                    && disclaimer.worldBound.xMax <= content.xMax + 1f;
+            }, "welcome line contained inside the client area ("
+                + locale + ")");
+            AssertDisclaimerContains(locale);
+        }
+
+        private IEnumerator AssertDisclaimerMultiline(string locale)
+        {
+            // One 18px line measures ~34px under the generated font;
+            // once the long English copy reflows to two lines the label
+            // is ~55px — 44px sits clearly between them.
+            yield return WaitFor(() =>
+            {
+                var disclaimer = Widget<Label>("shell.disclaimer");
+                return disclaimer != null
+                    && disclaimer.worldBound.height > 44f;
+            }, "welcome line reflowing past one line (" + locale + ")");
+        }
+
+        [UnityTest]
         public IEnumerator SandboxHoldButtonDownHoldsAndUpReleases()
         {
             yield return GoToSandbox();
