@@ -11,6 +11,33 @@ from LongRaceScenario import ROOT, TourDriver
 from DrivingScenario import screenshot
 
 
+def validate_results(host_race, guest_race, event_id, course):
+    a, b = host_race["result"], guest_race["result"]
+    assert host_race["phase"] == guest_race["phase"] == "finished"
+    assert a["resultId"] == b["resultId"], "Endpoints received different result identities"
+    assert a["eventId"] == b["eventId"] == event_id
+    # LAN uses the original format-1 result contract, which does not populate
+    # the local format-2 courseId field. The authoritative sessions identify
+    # the actual driven course on both endpoints.
+    for race in (host_race, guest_race):
+        assert race["racers"] and all(r["session"]["courseId"] == course for r in race["racers"])
+    humans = [r for r in a["racers"] if r["attribution"] == "human"]
+    assert len(humans) == 2 and all(r["outcome"] == "finished" for r in humans), humans
+    assert [(r["slot"], r["finishTicks"], r["outcome"]) for r in a["racers"]] == [
+        (r["slot"], r["finishTicks"], r["outcome"]) for r in b["racers"]]
+    return a, humans
+
+
+def saved_rewards(root, result_id):
+    rewards = []
+    for name, slot in (("host", 0), ("guest", 1)):
+        profile = json.loads((root / (name + "-profiles") / ("profile-%d.json" % slot)).read_text(encoding="utf-8"))
+        receipts = [r for r in profile["appliedResults"] if r["resultId"] == result_id]
+        assert len(receipts) == 1 and receipts[0]["awardedCoins"] > 0
+        rewards.append({"endpoint": name, "coins": profile["coins"], "receipt": receipts[0]})
+    return rewards
+
+
 def run(args):
     root=args.evidence.resolve();root.mkdir(parents=True,exist_ok=False)
     entries=[];drivers=[];report={"status":"failed","transport":"Unity Transport loopback","checks":[]}
@@ -55,12 +82,12 @@ def run(args):
         for name,_,client,run_dir in entries:
             network.wait_state(client,lambda s:s["network"]["phase"]=="results" and (s.get("networkRace") or {}).get("result") is not None,850,name+" journey result")
             screenshot(client,name+"-journey-result",str(run_dir))
-        a=host.state["networkRace"]["result"];b=guest.state["networkRace"]["result"]
-        assert a["resultId"]==b["resultId"] and a["courseId"]==course
-        humans=[r for r in a["racers"] if r["attribution"]=="human"]
-        assert len(humans)==2 and all(r["outcome"]=="finished" for r in humans),humans
+        a,humans=validate_results(host.state["networkRace"],guest.state["networkRace"],event_id,course)
+        report["checks"].append("Both endpoints received the same finished race and human results on the selected course")
+        rewards=saved_rewards(root,a["resultId"])
+        report["checks"].append("Both profiles saved one reward receipt for this result")
         report.update(status="passed",result=a,humanSeconds=[r["finishTicks"]/30 for r in humans],
-                      maxSpeedKmh=[d.max_speed for d in drivers],recoveries=[d.recoveries for d in drivers],wallSeconds=time.monotonic()-started)
+                      rewards=rewards,maxSpeedKmh=[d.max_speed for d in drivers],recoveries=[d.recoveries for d in drivers],wallSeconds=time.monotonic()-started)
     except Exception as error:
         report["error"]=repr(error);raise
     finally:

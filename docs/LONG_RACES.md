@@ -41,11 +41,12 @@ and builds development and ordinary Windows players.
 
 ```
 dotnet test Tools/CoreTests/FamilyRacing.CoreTests.csproj --no-restore
-python -m unittest discover -s Tools -p TestLongRaceScenario.py
+python -m unittest discover -s Tools -p 'TestLongRace*.py'
 python Tools/LongRaceScenario.py --course coastal-grand-tour-v1 --evidence Logs/new-coast-run
 python Tools/LongRaceScenario.py --course pine-lake-journey-v1 --vehicle motorcycle-01 --language he --mode timeTrial --evidence Logs/new-forest-run
 python Tools/LongRaceScenario.py --course canyon-expedition-v1 --evidence Logs/new-canyon-run
 python Tools/LongRaceLanScenario.py --evidence Logs/new-lan-run
+python Tools/LongRaceLanEvidence.py --evidence Logs/grand-tour-lan-qualified
 ```
 
 Unity PlayMode filters: `FamilyRacing.Tests.LongRaceWorldPlayTests` and
@@ -67,6 +68,12 @@ resume, camera switching and restart without another full traversal.
   the reliable send queue at an odd final tick. Final snapshots now retry until
   every connected peer accepts them, so a temporary full queue cannot leave a
   guest on the race screen after the host finishes.
+- All 6 Python pursuit/result-contract tests pass. The full two-endpoint forest
+  race finishes both humans at 5:25, with identical delivered results and saved
+  reward receipts (25/23 coins). Shared pause/resume also passes. The original
+  live harness stopped on an incorrect format-1 result-field assertion; an audit
+  of both complete recordings verifies the actual course, final states, standings
+  and profiles. Its correction and evidence are preserved in `lan-evidence.json`.
 - Complete deterministic simulation over actual Unity road collision: all six
   course × vehicle combinations finish with zero recoveries. Recorded times:
   coastal car 6:14 / motorcycle 5:48; forest 6:11 / 5:45; canyon 6:37 / 6:10.

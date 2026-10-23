@@ -53,7 +53,7 @@ Interfaces: HUD consumes Task 1 route progress; course selection consumes versio
 Files: Tools/LongRaceScenario.py, docs/LONG_RACES.md, docs/qa/long-races-2026-10-24/*.
 - [x] Build standalone development and ordinary Windows players in separate LongRaces folders.
 - [x] Drive full races on all three courses with real input. Save elapsed time, speed, gate progression, finish/reward and gameplay captures; tune route length/speed from measurements.
-- [ ] Exercise two LAN endpoints on an open course, relevant existing Core/Unity checks and sustained PC frame samples. Record physical-tablet qualification as unverified.
+- [x] Exercise two LAN endpoints on an open course, relevant existing Core/Unity checks and sustained PC frame samples. Record physical-tablet qualification as unverified.
 - [x] Obtain one fresh code review; address material findings and verify fixes. Document runnable build paths and observed limits.
 
 ## Execution ledger
