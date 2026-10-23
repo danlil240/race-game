@@ -13,6 +13,15 @@ namespace FamilyRacing.Core.Localization
         private static readonly Dictionary<string, string[]> Catalog = new Dictionary<string, string[]>
         {
             ["shell.title"] = new[] { "Family Racing", "מירוץ משפחתי" },
+            ["home.title"] = new[] { "Race Planet", "כוכב המרוצים" },
+            ["home.subtitle"] = new[] { "Choose a mode and hit the track", "בחרו מצב משחק וצאו למסלול" },
+            ["home.primaryHint"] = new[] { "Choose your route and hit the road", "בחרו מסלול וצאו לדרך" },
+            ["player.profile.new"] = new[] { "New racer", "נהג חדש" },
+            ["player.profile.ready"] = new[] { "Ready to race", "מוכן למירוץ" },
+            ["player.profile.start"] = new[] { "Start racing", "התחילו להתחרות" },
+            ["player.profile.play"] = new[] { "Select racer", "בחרו נהג" },
+            ["player.switchDriver"] = new[] { "Switch driver", "החלפת נהג" },
+            ["hud.kmh"] = new[] { "km/h", "קמ״ש" },
             ["shell.disclaimer"] = new[] { "Family preview: campaign races, quick race, time trial, garage and home-network racing are all playable.", "גרסת תצוגה משפחתית: מירוצי המסע, מירוץ מהיר, מירוץ נגד זמן, המוסך ומירוץ הרשת הביתית — הכל פתוח למשחק." },
             // PCQA-003: the honest variant for builds whose gated loop
             // entries report contentUnavailable — names what IS playable.
@@ -64,6 +73,10 @@ namespace FamilyRacing.Core.Localization
             ["hud.time"] = new[] { "Time", "זמן" },
             ["hud.speed"] = new[] { "Speed", "מהירות" },
             ["hud.lap"] = new[] { "Lap", "הקפה" },
+            ["hud.routeProgress"] = new[] { "Journey", "מסע" },
+            ["route.journey"] = new[] { "Start to finish", "מהזינוק לסיום" },
+            ["route.circuit"] = new[] { "2 laps", "2 הקפות" },
+            ["route.duration"] = new[] { "5–8 min", "5–8 דקות" },
             ["hud.gate"] = new[] { "Gate", "שער" },
             ["hud.paused"] = new[] { "Paused", "מושהה" },
             ["hud.resume"] = new[] { "Resume", "המשך" },
@@ -74,6 +87,11 @@ namespace FamilyRacing.Core.Localization
             // gadget kind so the HUD never shows a raw catalog id.
             ["hud.gadget"] = new[] { "Gadget", "גאדג'ט" },
             ["hud.gadget.empty"] = new[] { "empty", "ריק" },
+            ["hud.gadget.find"] = new[] { "Collect a glowing box", "אספו קופסה זוהרת" },
+            ["hud.gadget.use"] = new[] { "E / click to use", "E / לחצו להפעלה" },
+            ["hud.gadget.turbo"] = new[] { "A burst of extra speed", "פרץ מהירות נוסף" },
+            ["hud.gadget.bubble-shield"] = new[] { "Blocks one foam hit", "חוסם פגיעת קצף אחת" },
+            ["hud.gadget.foam-trap"] = new[] { "Drops a trap behind you", "מפיל מלכודת מאחוריכם" },
             ["gadget.turbo"] = new[] { "Turbo", "טורבו" },
             ["gadget.bubble-shield"] = new[] { "Bubble shield", "מגן בועות" },
             ["gadget.foam-trap"] = new[] { "Foam trap", "מלכודת קצף" },

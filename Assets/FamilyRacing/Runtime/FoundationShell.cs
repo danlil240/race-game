@@ -32,6 +32,8 @@ namespace FamilyRacing
         private FoundationApp app;
         private UIDocument document;
         private VisualElement root;
+        private AssetTrialHud playerHud;
+        private bool playerPresentation;
         private string rebuildKey = "";
         private bool suppressSliderEvents;
         private Label statusLabel;
@@ -47,6 +49,7 @@ namespace FamilyRacing
         private Button pauseRetryButton;
         private Button finishRetryButton;
         private Label elapsedLabel;
+        private Label positionLabel;
         private Label phaseLabel;
         private Label speedLabel;
         private Label driftLabel;
@@ -72,6 +75,8 @@ namespace FamilyRacing
             app = owner;
             document = GetComponent<UIDocument>();
             root = document.rootVisualElement;
+            playerHud = GetComponent<AssetTrialHud>();
+            playerPresentation = playerHud != null;
             ApplyTextConfiguration(root);
             rebuildKey = "";
         }
@@ -111,6 +116,7 @@ namespace FamilyRacing
                 rebuildKey = "";
             }
             if (state == null) return;
+            if (playerPresentation) EnsurePlayerSetupDefaults(state);
             root.languageDirection = state.language == "he"
                 ? LanguageDirection.RTL : LanguageDirection.LTR;
             var key = state.screen + "|" + state.language + "|" + state.activeSlot;
@@ -148,7 +154,7 @@ namespace FamilyRacing
             statusLabel = warningLabel = steeringLabel = null;
             pauseOverlay = finishOverlay = boostFill = null;
             pauseRetryButton = finishRetryButton = null;
-            elapsedLabel = phaseLabel = speedLabel = null;
+            elapsedLabel = positionLabel = phaseLabel = speedLabel = null;
             driftLabel = null;
             gadgetLabel = null;
             lapLabel = gateLabel = finishTimeLabel = null;
@@ -191,7 +197,10 @@ namespace FamilyRacing
             switch (state.screen)
             {
                 case "settings": BuildSettings(state); break;
-                case "sandbox": BuildSandbox(state); break;
+                case "sandbox":
+                    if (playerPresentation) BuildPlayerHome(state);
+                    else BuildSandbox(state);
+                    break;
                 case "practice": BuildPractice(state); break;
                 case "driving": BuildDriving(state); break;
                 case "lan-browser":
@@ -207,8 +216,12 @@ namespace FamilyRacing
                 case FoundationService.ScreenTimeTrial: BuildTimeTrial(state); break;
                 case FoundationService.ScreenGarage: BuildGarageScreen(state); break;
                 case FoundationService.ScreenBounties: BuildBounties(state); break;
-                default: BuildProfiles(state); break;
+                default:
+                    if (playerPresentation) BuildPlayerProfiles(state);
+                    else BuildProfiles(state);
+                    break;
             }
+            if (playerPresentation) StylePlayerScreen(state);
         }
 
         private Label AddLabel(VisualElement parent, string text, int size, Color color)
@@ -235,6 +248,7 @@ namespace FamilyRacing
             button.style.marginTop = button.style.marginBottom = 6;
             button.style.marginLeft = button.style.marginRight = 6;
             parent.Add(button);
+            if (playerPresentation) StylePlayerButton(button, bg);
             return button;
         }
 
@@ -304,6 +318,8 @@ namespace FamilyRacing
             {
                 if (descriptor.action != action) continue;
                 element.SetEnabled(descriptor.available);
+                if (playerPresentation)
+                    element.style.opacity = descriptor.available ? 1f : 0.45f;
                 if (!string.IsNullOrEmpty(descriptor.reason))
                     element.tooltip = descriptor.reason;
                 return;
@@ -338,7 +354,12 @@ namespace FamilyRacing
         private void UpdateIndicators(FoundationState state)
         {
             if (warningLabel != null && state.presentation != null)
+            {
                 warningLabel.text = state.presentation.fontWarning;
+                if (playerPresentation)
+                    warningLabel.style.display = !string.IsNullOrEmpty(warningLabel.text)
+                        ? DisplayStyle.Flex : DisplayStyle.None;
+            }
             if (statusLabel != null)
             {
                 var slot = state.activeSlot >= 0 && state.activeSlot < state.slots.Count
@@ -348,9 +369,13 @@ namespace FamilyRacing
                     statusLabel.text = T("status.recovered", state);
                 else if (state.persistenceStatus == "saveFailed")
                     statusLabel.text = T("status.saveFailed", state);
-                else if (state.persistenceStatus == "saved")
+                else if (state.persistenceStatus == "saved"
+                    && (!playerPresentation || state.screen == "settings"))
                     statusLabel.text = T("status.saved", state);
                 else if (statusLabel.text.Length > 0) statusLabel.text = "";
+                if (playerPresentation)
+                    statusLabel.style.display = statusLabel.text.Length > 0
+                        ? DisplayStyle.Flex : DisplayStyle.None;
             }
             if (state.screen == "sandbox" && state.input != null)
             {
@@ -384,7 +409,12 @@ namespace FamilyRacing
                 if (effectsSlider != null) effectsSlider.value = state.draftProfile.effectsVolume;
                 if (voiceSlider != null) voiceSlider.value = state.draftProfile.voiceVolume;
                 suppressSliderEvents = false;
-                if (saveButton != null) saveButton.SetEnabled(state.pendingSettings);
+                if (saveButton != null)
+                {
+                    saveButton.SetEnabled(state.pendingSettings);
+                    if (playerPresentation)
+                        saveButton.style.opacity = state.pendingSettings ? 1f : 0.45f;
+                }
             }
         }
 
@@ -395,10 +425,15 @@ namespace FamilyRacing
                 led.style.backgroundColor = on ? Coral : Off;
         }
 
-        private static void Highlight(Button button, bool active)
+        private void Highlight(Button button, bool active)
         {
-            if (button != null)
-                button.style.backgroundColor = active ? Coral : Ocean;
+            if (button == null) return;
+            if (playerPresentation)
+            {
+                HighlightPlayerToggle(button, active);
+                return;
+            }
+            button.style.backgroundColor = active ? Coral : Ocean;
         }
     }
 }

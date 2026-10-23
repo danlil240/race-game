@@ -141,6 +141,17 @@ namespace FamilyRacing
             catch (KeyNotFoundException) { return eventType; }
         }
 
+        private string CourseName(string id, FoundationState state)
+        {
+            var content = LoopContent();
+            if (content != null && content.Driving.Courses.TryGetValue(id, out var course))
+            {
+                var display = state.language == "he" ? course.nameHe : course.nameEn;
+                if (!string.IsNullOrEmpty(display)) return display;
+            }
+            return id;
+        }
+
         private string BountyFamilyName(string family, FoundationState state)
         {
             if (string.IsNullOrEmpty(family)) return "";
@@ -224,9 +235,9 @@ namespace FamilyRacing
                     var eventId = row.eventId;
                     var rowEl = Row(scroll);
                     rowEl.name = "campaign.row." + eventId;
-                    var label = (row.finale ? "★ " : "🏁 ")
-                        + EventKindName(row.eventType, state)
-                        + " " + row.courseId;
+                    var label = (row.finale ? "★ " : "")
+                        + ClassName(row.classId, state) + " · " + EventKindName(row.eventType, state)
+                        + " · " + CourseName(row.courseId, state);
                     var pick = AddButton(rowEl, label,
                         row.finale ? Coral : Ocean,
                         () => { campaignEventId = eventId; },
@@ -536,7 +547,7 @@ namespace FamilyRacing
                     foreach (var courseId in owned)
                     {
                         var id = courseId;
-                        var button = AddButton(courseRow, id,
+                        var button = AddButton(courseRow, CourseName(id, state),
                             id == quickCourseId ? Coral : Ocean,
                             () => { quickCourseId = id; quickClassId = "";
                                 quickVehicleId = ""; },
@@ -562,7 +573,7 @@ namespace FamilyRacing
                 foreach (var courseId in rest)
                 {
                     var id = courseId;
-                    var button = AddButton(courseRow, id,
+                    var button = AddButton(courseRow, CourseName(id, state),
                         id == quickCourseId ? Coral : Ocean,
                         () => { quickCourseId = id; quickClassId = "";
                             quickVehicleId = ""; },
@@ -750,7 +761,7 @@ namespace FamilyRacing
                     foreach (var courseId in owned)
                     {
                         var id = courseId;
-                        AddButton(courseRow, id,
+                        AddButton(courseRow, CourseName(id, state),
                             id == trialCourseId ? Coral : Ocean,
                             () => { trialCourseId = id; trialClassId = ""; },
                             "trial.course." + id);
@@ -766,7 +777,7 @@ namespace FamilyRacing
                 foreach (var courseId in rest)
                 {
                     var id = courseId;
-                    AddButton(courseRow, id,
+                    AddButton(courseRow, CourseName(id, state),
                         id == trialCourseId ? Coral : Ocean,
                         () => { trialCourseId = id; trialClassId = ""; },
                         "trial.course." + id);

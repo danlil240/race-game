@@ -195,6 +195,7 @@ namespace FamilyRacing
                     "garage.cosmetics." + cosmeticId + ".equip");
                 ApplyAvailability(toggle, "cosmetic.equip");
             }
+            if (playerPresentation) StylePlayerGarage(state);
         }
 
         // Every fact RefreshGarage renders: profile presence and coins,
@@ -319,6 +320,9 @@ namespace FamilyRacing
             // dark ground while the world stays visible around the strip.
             top.name = "hud.readouts";
             HudStrip(top);
+            positionLabel = AddLabel(top, "", 28, Deep);
+            positionLabel.name = "hud.position";
+            positionLabel.style.display = DisplayStyle.None;
             elapsedLabel = AddLabel(top, "", 28, Deep);
             elapsedLabel.name = "hud.elapsed";
             lapLabel = AddLabel(top, "", 28, Deep);
@@ -521,6 +525,24 @@ namespace FamilyRacing
             if (state.screen != "driving") return;
             var session = PresentedSession(state);
             if (session == null) return;
+            if (positionLabel != null)
+            {
+                var place = 0;
+                var totalRacers = 0;
+                if (state.soloRace != null && state.soloRace.race != null
+                    && state.soloRace.race.racers != null)
+                {
+                    totalRacers = state.soloRace.race.racers.Count;
+                    foreach (var racer in state.soloRace.race.racers)
+                        if (racer != null && racer.participantId == state.soloRace.participantId)
+                        { place = racer.position; break; }
+                }
+                var showPosition = playerPresentation && place > 0 && totalRacers > 0;
+                positionLabel.style.display = showPosition ? DisplayStyle.Flex : DisplayStyle.None;
+                positionLabel.text = showPosition
+                    ? T("results.place", state) + " " + Ltr(place + "/" + totalRacers)
+                    : "";
+            }
             if (elapsedLabel != null)
                 elapsedLabel.text = T("hud.time", state) + " " +
                     FormatRaceTime(session.elapsedTicks);
@@ -537,24 +559,35 @@ namespace FamilyRacing
                         == FamilyRacing.Core.Tutorial.DrivingTutorial.PhaseLessons;
                 lapLabel.style.display = lessonPhase
                     ? DisplayStyle.None : DisplayStyle.Flex;
-                if (!lessonPhase)
+                if (!lessonPhase && session.isOpenRoute)
+                    lapLabel.text = T("hud.routeProgress", state) + " " +
+                        Ltr(Mathf.RoundToInt(session.routeProgress * 100f) + "%");
+                else if (!lessonPhase)
                     lapLabel.text = T("hud.lap", state) + " " +
                         Mathf.Min(session.lap + 1, session.lapsRequired) + "/" +
                         session.lapsRequired;
             }
             if (gateLabel != null)
             {
-                // nextCheckpoint is the expected gate index; gate 0 is the
-                // start/finish line, so the readable gate number for the
-                // child counts only the non-start gates ahead.
-                var total = session.checkpoints.Count;
-                var nonStart = Mathf.Max(total - 1, 1);
-                var next = session.nextCheckpoint == 0
-                    ? nonStart
-                    : Mathf.Min(session.nextCheckpoint, nonStart);
-                gateLabel.text = session.finished || total == 0
-                    ? ""
-                    : T("hud.gate", state) + " " + next + "/" + nonStart;
+                if (playerPresentation)
+                {
+                    gateLabel.style.display = DisplayStyle.None;
+                    gateLabel.text = "";
+                }
+                else
+                {
+                    // nextCheckpoint is the expected gate index; gate 0 is the
+                    // start/finish line, so the readable gate number for the
+                    // child counts only the non-start gates ahead.
+                    var total = session.checkpoints.Count;
+                    var nonStart = Mathf.Max(total - 1, 1);
+                    var next = session.nextCheckpoint == 0
+                        ? nonStart
+                        : Mathf.Min(session.nextCheckpoint, nonStart);
+                    gateLabel.text = session.finished || total == 0
+                        ? ""
+                        : T("hud.gate", state) + " " + next + "/" + nonStart;
+                }
             }
             if (boostFill != null && session.motor != null)
             {
@@ -572,12 +605,31 @@ namespace FamilyRacing
             }
             if (speedLabel != null && session.motor != null)
                 speedLabel.text = T("hud.speed", state) + " " +
-                    ((int)(session.motor.speed * 3.6f)).ToString();
+                    ((int)(session.motor.speed * 3.6f)).ToString() + " " + T("hud.kmh", state);
             if (driftLabel != null)
                 driftLabel.text = session.motor != null && session.motor.drifting
                     ? T("input.drift", state) + "!" : "";
             if (gadgetLabel != null)
+            {
                 gadgetLabel.text = GadgetSlotText(state);
+                var held = LocalGadgetRow(state, GadgetWorldFor(state));
+                var kind = held != null && !string.IsNullOrEmpty(held.heldItemId) ? held.heldKind : "";
+                // The trial's larger card uses these localized details while
+                // the shared HUD keeps its existing input affordance.
+                var hint = root.Q<Label>("hud.gadget.hint");
+                if (hint != null) hint.text = string.IsNullOrEmpty(kind) ? T("hud.gadget.find",state)
+                    : T("hud.gadget."+kind,state) + "\n" + T("hud.gadget.use",state);
+                var icon = root.Q<Label>("hud.gadget.icon");
+                if (icon != null) icon.text = kind == "turbo" ? ">>" : kind == "bubble-shield" ? "O" : kind == "foam-trap" ? "~" : "?";
+                var button = root.Q<Button>("driving.gadget");
+                if (hint != null && button != null)
+                {
+                    button.text = "E  ·  " + (string.IsNullOrEmpty(kind) ? T("input.gadget",state) : gadgetLabel.text);
+                    var canUse = !string.IsNullOrEmpty(kind) && !state.paused && session.phase == "running";
+                    button.SetEnabled(canUse);
+                    if (playerPresentation) button.style.opacity = canUse ? 1f : 0.45f;
+                }
+            }
             if (tutorialPanel != null)
             {
                 var tutorial = session.tutorial;
