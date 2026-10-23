@@ -76,6 +76,7 @@ namespace FamilyRacing.Networking
         // A client's upstream resend request (P1RS) forces the next host
         // tick to publish rather than waiting for the snapshot cadence.
         private bool snapshotRequested;
+        private bool terminalSnapshotPending;
         private readonly List<DrivingEvent> stagedEvents = new List<DrivingEvent>();
         // participantId -> applied session facts; diffed every Pump so a
         // control transfer or epoch bump is applied at a host boundary.
@@ -480,6 +481,7 @@ namespace FamilyRacing.Networking
                 return;
             }
             race = created;
+            terminalSnapshotPending = false;
             inputs.BeginRace(hostSessionId, raceId);
             snapshotSequence = 0;
             eventBatchSequence = 0;
@@ -534,6 +536,7 @@ namespace FamilyRacing.Networking
         private void EndRace()
         {
             race = null;
+            terminalSnapshotPending = false;
             // The host simulation dies with the race: a physics world is
             // a whole local scene, so it unloads here — never lazily.
             if (hostSimulation != null) hostSimulation.Dispose();
@@ -708,6 +711,20 @@ namespace FamilyRacing.Networking
         private void HostTick(DriverInput localInput, IMotorWorld world,
             NetworkSessionState snap)
         {
+            if (race.Phase == NetworkRace.PhaseFinished)
+            {
+                // The simulation clock stops at the finish. Retry a full
+                // terminal snapshot independently of its tick parity when
+                // the reliable transport's send window was temporarily full.
+                if (terminalSnapshotPending || snapshotRequested)
+                {
+                    snapshotRequested = false;
+                    terminalSnapshotPending = !Publish(BuildSnapshot(race.Snapshot()))
+                        && session.HostConnections().Count > 0;
+                }
+                return;
+            }
+
             // The host's local racer rides the identical validated input
             // path as remote clients — no special case.
             var localParticipantId = snap.localParticipantId;
@@ -783,7 +800,8 @@ namespace FamilyRacing.Networking
             }
             // A client's resend request publishes immediately instead of
             // waiting for the every-other-tick cadence.
-            if (snapshotRequested || race.HostTick % NetworkSettings.SnapshotEveryTicks == 0)
+            if (race.Phase != NetworkRace.PhaseFinished
+                && (snapshotRequested || race.HostTick % NetworkSettings.SnapshotEveryTicks == 0))
             {
                 snapshotRequested = false;
                 Publish(BuildSnapshot(state));
@@ -797,14 +815,11 @@ namespace FamilyRacing.Networking
             else if (race.Phase == NetworkRace.PhaseFinished
                 && snap.phase == LanSessionService.PhaseRacing)
             {
-                // The regular every-other-tick publish can skip the
-                // final boundary entirely: a race that finalizes on an
-                // odd host tick would leave every remote client's last
-                // race snapshot at "running" forever — the result and
-                // phase facts ride the ledger, but the networkRace slice
-                // must land "finished" too, so publish once more
-                // explicitly before stepping stops.
-                Publish(BuildSnapshot(state));
+                // Publish every final boundary, retaining a retry if any
+                // connected peer's reliable send queue is currently full.
+                snapshotRequested = false;
+                terminalSnapshotPending = !Publish(BuildSnapshot(state))
+                    && session.HostConnections().Count > 0;
                 // Task 8: the immutable result is retained and offered to
                 // every participant before the phase flips — delivery and
                 // its persistence acks are the session service's job from
@@ -920,6 +935,7 @@ namespace FamilyRacing.Networking
             lastPublished = snapshot;
             SnapshotsPublished++;
             var sent = false;
+            var allSent = true;
             foreach (var connectionId in session.HostConnections())
             {
                 var ok = transport.Send(connectionId, packet);
@@ -927,8 +943,9 @@ namespace FamilyRacing.Networking
                     LastError = "snapshotSend:" + transport.LastError
                         + " len=" + packet.Length;
                 sent |= ok;
+                allSent &= ok;
             }
-            return sent;
+            return sent && allSent;
         }
 
         // Reliable ordered delivery of staged authoritative events. Each

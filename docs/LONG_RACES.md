@@ -48,7 +48,8 @@ python Tools/LongRaceScenario.py --course canyon-expedition-v1 --evidence Logs/n
 python Tools/LongRaceLanScenario.py --evidence Logs/new-lan-run
 ```
 
-Unity PlayMode filter: `FamilyRacing.Tests.LongRaceWorldPlayTests`.
+Unity PlayMode filters: `FamilyRacing.Tests.LongRaceWorldPlayTests` and
+`FamilyRacing.Tests.NetworkReplicationPlayTests`.
 The external scenarios use normal input holds and observed gate crossings; no
 teleports, checkpoint grants or forced finishes. They raise the bounded developer
 trace limit to 2 GB because the default short-test recording limit cannot retain
@@ -62,6 +63,10 @@ resume, camera switching and restart without another full traversal.
   performance classification for all local race modes, Time Trial rider framing
   and the 32 KB LAN snapshot budget. Actual initial packets measure 23,897–28,271
   bytes. Sparse 320 m checkpoints complement continuous barriers along the road.
+- All 7 network replication tests pass. A new real-transport regression fills
+  the reliable send queue at an odd final tick. Final snapshots now retry until
+  every connected peer accepts them, so a temporary full queue cannot leave a
+  guest on the race screen after the host finishes.
 - Complete deterministic simulation over actual Unity road collision: all six
   course × vehicle combinations finish with zero recoveries. Recorded times:
   coastal car 6:14 / motorcycle 5:48; forest 6:11 / 5:45; canyon 6:37 / 6:10.
@@ -83,4 +88,4 @@ resume, camera switching and restart without another full traversal.
   endpoints on this PC. The ordinary build does not expose developer automation.
 
 Evidence: `docs/qa/long-races-2026-10-24/`; developer build log:
-`Logs/grand-tour-qualified-build.log`.
+`Logs/grand-tour-delivery-build.log`.
