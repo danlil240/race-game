@@ -1,0 +1,140 @@
+{
+  "purpose": "Opt-in art trial, free downloads only",
+  "sources": [
+    "https://kenney.nl/assets/car-kit",
+    "https://quaternius.itch.io/stylized-nature-megakit",
+    "https://kenney.nl/assets/city-kit-suburban",
+    "https://kenney.nl/assets/watercraft-kit"
+  ],
+  "costUsd": 0,
+  "files": [
+    {
+      "path": "Assets/FamilyRacing/Art/AssetTrial/Kenney/colormap.png",
+      "sha256": "f3622a03a20c6696065cae9cbe391351be873508af190c2ebd1d420c055787a5"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/AssetTrial/Kenney/License.txt",
+      "sha256": "c33b7f6453d134deae7b1b8493717d9ccfa754c25ab97f6de89b88f8fda19b00"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/AssetTrial/Kenney/race-future.fbx",
+      "sha256": "9fd7faa615b99c811496ee743995068b010db0e95d916f0a2c5f147d6b9f9573"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/AssetTrial/Quaternius/Bush_Common.fbx",
+      "sha256": "88d06836c90d6ea9ea135de0e977996e4a46f99aa2886b0d9f68c1d869101eca"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/AssetTrial/Quaternius/Bush_Common_Flowers.fbx",
+      "sha256": "ee6a09c059ab96f8563008d2f4a087dd84cc6b6a9f4cb4ca19f9416e5ea1d720"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/AssetTrial/Quaternius/CommonTree_1.fbx",
+      "sha256": "fdddc50c46eb286a68cedacecef5ccf937837d2bd9326ff9b4ab2b030c7d842b"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/AssetTrial/Quaternius/CommonTree_3.fbx",
+      "sha256": "fce1c6ec64dacc5887c98dd6ced4b08737381c14927717ce7a49403d0d23a86e"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/AssetTrial/Quaternius/Flower_3_Group.fbx",
+      "sha256": "619e7bf8e450706169b6f1958ac355a88a61ac245c5d6930f351f480aad3c6ea"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/AssetTrial/Quaternius/License_Standard.txt",
+      "sha256": "120710e542c3ebaf83856c4eb55b4a1e680593b39302eba7fdc5d942dfe78c58"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/AssetTrial/Quaternius/Rock_Medium_1.fbx",
+      "sha256": "428d46fcd894115070ba323212e443249bb98d6a21fa3be933891124d0480787"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/AssetTrial/Quaternius/Rock_Medium_2.fbx",
+      "sha256": "178576f884fdcc3a5c3cd824dbdceb54c8b96c791d06a69045d6553bf65cc526"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/AssetTrial/Quaternius/Textures/Bark_NormalTree.png",
+      "sha256": "f36e94fdd73255347325b998e02a0b2575fdf714b0315bfe5e8ff34bc8e13603"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/AssetTrial/Quaternius/Textures/Bark_NormalTree_Normal.png",
+      "sha256": "852f6155404b8c39e100e41e26970e02a6a5c81b482d3726618dab28e3ad03a2"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/AssetTrial/Quaternius/Textures/Flowers.png",
+      "sha256": "5c531f2329c241c625aafd6cb769de29f33b480ef2a16491c2489f3c68e62a6a"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/AssetTrial/Quaternius/Textures/Leaves.png",
+      "sha256": "23248cebe28a24e78add32db3c2ee2f4d7b9219e9d2467279722f0197a7b6bd5"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/AssetTrial/Quaternius/Textures/Leaves_NormalTree_C.png",
+      "sha256": "998612bdf0b76a22f5f54d65cd7a457815d2842d89653fa4348a4ebb42933ad3"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/AssetTrial/Quaternius/Textures/Leaves_TwistedTree_C.png",
+      "sha256": "0e459b56b14c0e81b1b7cf3d1e8c6f0bb71790eb6c46bb02a76a922d8df646ea"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/AssetTrial/Quaternius/Textures/Rocks_Diffuse.png",
+      "sha256": "b813696df6081f469a127092eb0ce45cc39d56f3ccc0699152bfcd3804810b48"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/AssetTrial/KenneySuburban/building-type-a.fbx",
+      "sha256": "04512ed6761e63e04f9a3bf85a5c86d80dea3944c9b2401e66a523a6661d8d53"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/AssetTrial/KenneySuburban/building-type-d.fbx",
+      "sha256": "0121dfcafbe2dd61948be244bd345c04dfc472f7745bff5d1185dfd480a875a3"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/AssetTrial/KenneySuburban/building-type-k.fbx",
+      "sha256": "1723fb1219007a44bdbe49f3c22af4b1872bb2421129cff154d094fb8876c5a6"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/AssetTrial/KenneySuburban/building-type-m.fbx",
+      "sha256": "5b9418d64659e93e20f5d628b9170530c3aad7016f488adb534d98a3b2711eb6"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/AssetTrial/KenneySuburban/colormap.png",
+      "sha256": "9b5de86078c25ef02351a80d35ff3c978693a1044565b73eedd9ae9b5b80665d"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/AssetTrial/KenneySuburban/License.txt",
+      "sha256": "d778fa769a89a7d9f167bc337fdf8fc2144e47d9abb0c35eb6ad897c0ee24d0a"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/AssetTrial/KenneySuburban/variation-c.png",
+      "sha256": "f11cf0a7b0a110da56602851b2fc65fd3ce10065f9359691da8a5689732c5903"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/AssetTrial/KenneyWatercraft/boat-fishing-small.fbx",
+      "sha256": "1783a061e46b87eeee32514b1da4de3c846e5361db57f24c237198c9e4eac59d"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/AssetTrial/KenneyWatercraft/boat-sail-a.fbx",
+      "sha256": "a60292d2eea984a2841189b344b461c6b681392d5227c87caca3ee400bfb1b41"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/AssetTrial/KenneyWatercraft/boat-speed-a.fbx",
+      "sha256": "48fe3e6b3227c5abf8c459f528892f276c9571be894f33bf0930fde7faf2951d"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/AssetTrial/KenneyWatercraft/buoy-flag.fbx",
+      "sha256": "6452b8e1fc2453ad52d81762ca5b84a748cfeba592fdb2a4cd902aec94c6c6cf"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/AssetTrial/KenneyWatercraft/buoy.fbx",
+      "sha256": "5bdc6587b0c448f440c8fbfe023842d210faa56a5868a999af6ca17854e078f4"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/AssetTrial/KenneyWatercraft/colormap.png",
+      "sha256": "311138350e74e35c5497a1bd8076a01740b7c302bed11027639fa553459a68de"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/AssetTrial/KenneyWatercraft/License.txt",
+      "sha256": "f5f520f81277128fb422aebe334d2f08e6d8e5f7face6008885d8ff920253724"
+    }
+  ]
+}

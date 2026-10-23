@@ -1,0 +1,35 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c1b2c3d4e5f64789a0b1c2d3e4f50909, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: FamilyRacing.Runtime::FamilyRacing.CampaignDefinitionAsset
+  worldId: desert-canyon-trial
+  nameEn: Desert Canyon
+  nameHe: "\u05E7\u05E0\u05D9\u05D5\u05DF \u05D4\u05DE\u05D3\u05D1\u05E8"
+  requiredEventCompletions: 4
+  requiredRegionalStars: 6
+  courseIds:
+  - desert-canyon
+  regularEventIds:
+  - trial-desert-canyon-car-circuit
+  - trial-desert-canyon-car-time
+  - trial-desert-canyon-motorcycle-circuit
+  - trial-desert-canyon-motorcycle-time
+  finales:
+  - eventId: trial-desert-canyon-car-finale
+    classId: car
+    rivalId: trial-rival-2-car
+    rewardVehicleId: car-01
+  - eventId: trial-desert-canyon-motorcycle-finale
+    classId: motorcycle
+    rivalId: trial-rival-2-motorcycle
+    rewardVehicleId: motorcycle-01

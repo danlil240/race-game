@@ -1,0 +1,396 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e1737e445efac134bbec13747fa282c1, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: FamilyRacing.Runtime::FamilyRacing.TrackDefinitionAsset
+  courseId: desert-canyon
+  nameEn: Desert Canyon
+  nameHe: "\u05E7\u05E0\u05D9\u05D5\u05DF \u05D4\u05DE\u05D3\u05D1\u05E8"
+  spawnPosition: {x: 826.0025, y: 0.065, z: -58.000206}
+  spawnHeadingDegrees: -107.73626
+  gates:
+  - id: start
+    center: {x: 815, y: 0.04, z: -55}
+    halfWidth: 9.2
+    direction: {x: -0.61684996, y: 0.7870808}
+    recoverPosition: {x: 817.4729, y: 0.065, z: -56.698444}
+    recoverHeadingDegrees: -55.51798
+  - id: gate-1
+    center: {x: 806.125, y: 0.04, z: -11.0625}
+    halfWidth: 9.2
+    direction: {x: -0.04625633, y: 0.9989296}
+    recoverPosition: {x: 806.35046, y: 0.065, z: -14.054018}
+    recoverHeadingDegrees: -4.309565
+  - id: gate-2
+    center: {x: 810, y: 0.04, z: 38}
+    halfWidth: 9.2
+    direction: {x: 0.32274246, y: 0.9464868}
+    recoverPosition: {x: 809.3036, y: 0.065, z: 35.081955}
+    recoverHeadingDegrees: 13.423333
+  - id: gate-3
+    center: {x: 829.625, y: 0.04, z: 59.25}
+    halfWidth: 9.2
+    direction: {x: 0.89167345, y: 0.45267922}
+    recoverPosition: {x: 827.05237, y: 0.065, z: 57.70675}
+    recoverHeadingDegrees: 59.041515
+  - id: gate-4
+    center: {x: 857, y: 0.04, z: 66}
+    halfWidth: 9.2
+    direction: {x: 0.99990773, y: -0.013585306}
+    recoverPosition: {x: 854.0125, y: 0.065, z: 65.72604}
+    recoverHeadingDegrees: 84.76046
+  - id: gate-5
+    center: {x: 885, y: 0.04, z: 54.375}
+    halfWidth: 9.2
+    direction: {x: 0.8565615, y: -0.5160451}
+    recoverPosition: {x: 882.4345, y: 0.065, z: 55.930027}
+    recoverHeadingDegrees: 121.22113
+  - id: gate-6
+    center: {x: 914, y: 0.04, z: 43}
+    halfWidth: 9.2
+    direction: {x: 0.9968366, y: 0.07947881}
+    recoverPosition: {x: 911.014, y: 0.065, z: 43.289234}
+    recoverHeadingDegrees: 95.53258
+  - id: gate-7
+    center: {x: 943.125, y: 0.04, z: 60.25}
+    halfWidth: 9.2
+    direction: {x: 0.7770484, y: 0.62944084}
+    recoverPosition: {x: 940.803, y: 0.065, z: 58.35049}
+    recoverHeadingDegrees: 50.715603
+  - id: gate-8
+    center: {x: 969, y: 0.04, z: 73}
+    halfWidth: 9.2
+    direction: {x: 0.96214885, y: -0.27252445}
+    recoverPosition: {x: 966.001, y: 0.065, z: 73.0769}
+    recoverHeadingDegrees: 91.4688
+  - id: gate-9
+    center: {x: 989.625, y: 0.04, z: 50.0625}
+    halfWidth: 9.2
+    direction: {x: 0.4598615, y: -0.88799065}
+    recoverPosition: {x: 988.11176, y: 0.065, z: 52.65289}
+    recoverHeadingDegrees: 149.70764
+  - id: gate-10
+    center: {x: 1000, y: 0.04, z: 14}
+    halfWidth: 9.2
+    direction: {x: 0.031945903, y: -0.9994896}
+    recoverPosition: {x: 999.681, y: 0.065, z: 16.982994}
+    recoverHeadingDegrees: 173.89647
+  - id: gate-11
+    center: {x: 992.25, y: 0.04, z: -26.375}
+    halfWidth: 9.2
+    direction: {x: -0.33397353, y: -0.9425825}
+    recoverPosition: {x: 993.15076, y: 0.065, z: -23.513416}
+    recoverHeadingDegrees: -162.52753
+  - id: gate-12
+    center: {x: 973, y: 0.04, z: -61}
+    halfWidth: 9.2
+    direction: {x: -0.7104696, y: -0.7037279}
+    recoverPosition: {x: 974.9137, y: 0.065, z: -58.689613}
+    recoverHeadingDegrees: -140.36543
+  - id: gate-13
+    center: {x: 943.4375, y: 0.04, z: -74.1875}
+    halfWidth: 9.2
+    direction: {x: -0.986852, y: -0.1616267}
+    recoverPosition: {x: 946.3705, y: 0.065, z: -73.55682}
+    recoverHeadingDegrees: -102.13551
+  - id: gate-14
+    center: {x: 912, y: 0.04, z: -74}
+    halfWidth: 9.2
+    direction: {x: -0.9726918, y: 0.23210056}
+    recoverPosition: {x: 914.9722, y: 0.065, z: -74.407295}
+    recoverHeadingDegrees: -82.197105
+  - id: gate-15
+    center: {x: 890.625, y: 0.04, z: -58}
+    halfWidth: 9.2
+    direction: {x: -0.6685572, y: 0.7436607}
+    recoverPosition: {x: 892.6361, y: 0.065, z: -60.226097}
+    recoverHeadingDegrees: -42.095142
+  - id: gate-16
+    center: {x: 870, y: 0.04, z: -42}
+    halfWidth: 9.2
+    direction: {x: -0.9876384, y: 0.1567494}
+    recoverPosition: {x: 872.80884, y: 0.065, z: -43.053787}
+    recoverHeadingDegrees: -69.43541
+  - id: gate-17
+    center: {x: 840.1875, y: 0.04, z: -52.3125}
+    halfWidth: 9.2
+    direction: {x: -0.89726317, y: -0.4414962}
+    recoverPosition: {x: 842.8566, y: 0.065, z: -50.94297}
+    recoverHeadingDegrees: -117.16213
+  spawnSlots:
+  - position: {x: 826.7032, y: 0.065, z: -60.190884}
+    headingDegrees: -107.73626
+  - position: {x: 825.3018, y: 0.065, z: -55.80953}
+    headingDegrees: -107.73626
+  - position: {x: 832.418, y: 0.065, z: -58.363068}
+    headingDegrees: -107.73626
+  - position: {x: 831.01666, y: 0.065, z: -53.981712}
+    headingDegrees: -107.73626
+  aiRoute:
+  - x: 815
+    z: -55
+    radius: 3
+  - x: 811.62695
+    z: -48.00293
+    radius: 3
+  - x: 809.0156
+    z: -37.679688
+    radius: 3
+  - x: 807.17773
+    z: -25.032227
+    radius: 3
+  - x: 806.125
+    z: -11.0625
+    radius: 3
+  - x: 805.86914
+    z: 3.227539
+    radius: 3
+  - x: 806.4219
+    z: 16.835938
+    radius: 3
+  - x: 807.7949
+    z: 28.760742
+    radius: 3
+  - x: 810
+    z: 38
+    radius: 3
+  - x: 813.31836
+    z: 44.958984
+    radius: 3
+  - x: 817.8594
+    z: 50.765625
+    radius: 3
+  - x: 823.37695
+    z: 55.501953
+    radius: 3
+  - x: 829.625
+    z: 59.25
+    radius: 3
+  - x: 836.3574
+    z: 62.091797
+    radius: 3
+  - x: 843.3281
+    z: 64.109375
+    radius: 3
+  - x: 850.291
+    z: 65.384766
+    radius: 3
+  - x: 857
+    z: 66
+    radius: 3
+  - x: 863.66016
+    z: 65.203125
+    radius: 3
+  - x: 870.59375
+    z: 62.59375
+    radius: 3
+  - x: 877.73047
+    z: 58.78125
+    radius: 3
+  - x: 885
+    z: 54.375
+    radius: 3
+  - x: 892.33203
+    z: 49.984375
+    radius: 3
+  - x: 899.65625
+    z: 46.21875
+    radius: 3
+  - x: 906.90234
+    z: 43.6875
+    radius: 3
+  - x: 914
+    z: 43
+    radius: 3
+  - x: 921.13477
+    z: 44.822266
+    radius: 3
+  - x: 928.4531
+    z: 48.859375
+    radius: 3
+  - x: 935.8262
+    z: 54.279297
+    radius: 3
+  - x: 943.125
+    z: 60.25
+    radius: 3
+  - x: 950.2207
+    z: 65.93945
+    radius: 3
+  - x: 956.9844
+    z: 70.515625
+    radius: 3
+  - x: 963.2871
+    z: 73.146484
+    radius: 3
+  - x: 969
+    z: 73
+    radius: 3
+  - x: 974.4199
+    z: 69.993164
+    radius: 3
+  - x: 979.7969
+    z: 64.88281
+    radius: 3
+  - x: 984.93164
+    z: 58.09668
+    radius: 3
+  - x: 989.625
+    z: 50.0625
+    radius: 3
+  - x: 993.67773
+    z: 41.208008
+    radius: 3
+  - x: 996.8906
+    z: 31.960938
+    radius: 3
+  - x: 999.06445
+    z: 22.749023
+    radius: 3
+  - x: 1000
+    z: 14
+    radius: 3
+  - x: 999.6328
+    z: 4.966797
+    radius: 3
+  - x: 998.125
+    z: -5.078125
+    radius: 3
+  - x: 995.6172
+    z: -15.677734
+    radius: 3
+  - x: 992.25
+    z: -26.375
+    radius: 3
+  - x: 988.16406
+    z: -36.71289
+    radius: 3
+  - x: 983.5
+    z: -46.234375
+    radius: 3
+  - x: 978.39844
+    z: -54.48242
+    radius: 3
+  - x: 973
+    z: -61
+    radius: 3
+  - x: 966.8721
+    z: -65.899414
+    radius: 3
+  - x: 959.6953
+    z: -69.66406
+    radius: 3
+  - x: 951.7803
+    z: -72.393555
+    radius: 3
+  - x: 943.4375
+    z: -74.1875
+    radius: 3
+  - x: 934.97754
+    z: -75.14551
+    radius: 3
+  - x: 926.71094
+    z: -75.36719
+    radius: 3
+  - x: 918.94824
+    z: -74.95215
+    radius: 3
+  - x: 912
+    z: -74
+    radius: 3
+  - x: 905.9297
+    z: -71.8457
+    radius: 3
+  - x: 900.46875
+    z: -68.109375
+    radius: 3
+  - x: 895.4297
+    z: -63.31836
+    radius: 3
+  - x: 890.625
+    z: -58
+    radius: 3
+  - x: 885.8672
+    z: -52.68164
+    radius: 3
+  - x: 880.96875
+    z: -47.890625
+    radius: 3
+  - x: 875.7422
+    z: -44.154297
+    radius: 3
+  - x: 870
+    z: -42
+    radius: 3
+  - x: 863.4053
+    z: -42.19629
+    radius: 3
+  - x: 855.9922
+    z: -44.570312
+    radius: 3
+  - x: 848.1299
+    z: -48.237305
+    radius: 3
+  - x: 840.1875
+    z: -52.3125
+    radius: 3
+  - x: 832.5342
+    z: -55.911133
+    radius: 3
+  - x: 825.53906
+    z: -58.148438
+    radius: 3
+  - x: 819.5713
+    z: -58.13965
+    radius: 3
+  recoveryBounds:
+  - min: {x: 735, y: -3, z: -145}
+    max: {x: 1065, y: 15, z: 145}
+  safePoses: []
+  pickupSites:
+  - id: desert-canyon-pickup-0-0
+    center: {x: 809.7418, y: 0.04, z: 47.160927}
+    radiusMeters: 2.25
+    verticalRangeMeters: 2
+  - id: desert-canyon-pickup-0-1
+    center: {x: 813.31836, y: 0.04, z: 44.958984}
+    radiusMeters: 2.25
+    verticalRangeMeters: 2
+  - id: desert-canyon-pickup-0-2
+    center: {x: 816.8949, y: 0.04, z: 42.757042}
+    radiusMeters: 2.25
+    verticalRangeMeters: 2
+  - id: desert-canyon-pickup-1-0
+    center: {x: 919.5568, y: 0.04, z: 48.71457}
+    radiusMeters: 2.25
+    verticalRangeMeters: 2
+  - id: desert-canyon-pickup-1-1
+    center: {x: 921.13477, y: 0.04, z: 44.822266}
+    radiusMeters: 2.25
+    verticalRangeMeters: 2
+  - id: desert-canyon-pickup-1-2
+    center: {x: 922.7127, y: 0.04, z: 40.929962}
+    radiusMeters: 2.25
+    verticalRangeMeters: 2
+  - id: desert-canyon-pickup-2-0
+    center: {x: 1003.8127, y: 0.04, z: 4.5559998}
+    radiusMeters: 2.25
+    verticalRangeMeters: 2
+  - id: desert-canyon-pickup-2-1
+    center: {x: 999.6328, y: 0.04, z: 4.966797}
+    radiusMeters: 2.25
+    verticalRangeMeters: 2
+  - id: desert-canyon-pickup-2-2
+    center: {x: 995.45294, y: 0.04, z: 5.377594}
+    radiusMeters: 2.25
+    verticalRangeMeters: 2
+  shortcutLanes: []
