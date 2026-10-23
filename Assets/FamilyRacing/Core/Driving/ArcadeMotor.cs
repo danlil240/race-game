@@ -103,6 +103,17 @@ namespace FamilyRacing.Core.Driving
             var accel = (state.boostActive
                 ? tuning.boostAcceleration : tuning.acceleration)
                 * gadgetAccel;
+            var surface = state.grounded ? world.ProbeGround(new MotorPose
+                { x = state.x, y = state.y, z = state.z, heading = state.heading }, tuning.groundProbe) : default;
+            bool rough = surface.hit && surface.offRoad;
+            if (rough)
+            {
+                // Boost cannot turn the run-off shoulder into a faster route.
+                // Drag removes excess momentum smoothly, without freezing steering.
+                speedLimit = Math.Min(speedLimit, tuning.maxSpeed * .35f);
+                accel *= .45f;
+                if (state.speed > speedLimit) state.speed = Math.Max(speedLimit, state.speed - 20f * dt);
+            }
             if (state.grounded)
             {
                 if (throttle > 0f)
@@ -137,6 +148,7 @@ namespace FamilyRacing.Core.Driving
                 state.lateralSpeed = state.lateralSpeed * Math.Max(0f, 1f - tuning.grip * dt);
                 if (Math.Abs(state.lateralSpeed) < 0.001f) state.lateralSpeed = 0f;
             }
+            if (rough) state.lateralSpeed *= Math.Max(0f, 1f - 7f * dt);
 
             // --- horizontal displacement with swept contact -----------------
             var fx = (float)Math.Sin(state.heading);

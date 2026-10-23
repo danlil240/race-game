@@ -14,6 +14,9 @@ namespace FamilyRacing.Core.Driving
         public float normalZ;
         public float distance;
         public string surfaceId;
+        // False by default preserves older worlds. Rough ground is an
+        // explicit surface classification supplied by the collision adapter.
+        public bool offRoad;
     }
 
     // Result of a swept body-volume query. `fraction` is the portion of the
