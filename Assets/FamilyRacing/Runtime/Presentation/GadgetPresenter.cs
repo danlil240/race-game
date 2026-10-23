@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
+using FamilyRacing.Core.Driving;
 using FamilyRacing.Core.Foundation;
 using FamilyRacing.Core.Networking;
 using FamilyRacing.Core.Racing;
 using UnityEngine;
+using UnityEngine.Rendering;
 
 namespace FamilyRacing
 {
@@ -34,7 +36,9 @@ namespace FamilyRacing
         private const float PickupSize = 1.6f;
         private const float InactivePickupAlpha = 0.18f;
         private const float PatchHeightMeters = 0.06f;
-        private const float ShieldDiameterMeters = 3.2f;
+        private const float ShieldDiameterMeters = 3.8f;
+        private const float ShieldHeightOffsetMeters = 0.9f;
+        private const float TeleportSnapDistance = 4f;
 
         private sealed class PickupView
         {
@@ -61,11 +65,17 @@ namespace FamilyRacing
             internal string participantId;
             internal GameObject go;
             internal Renderer renderer;
+            internal Vector3 prevPos;
+            internal Vector3 curPos;
+            internal long lastTick = -1;
+            internal bool hasPose;
             internal bool active;
         }
 
         private Transform container;
+        private DrivingWorld drivingWorld;
         private Material pickupMaterial;
+        private Material inactivePickupMaterial;
         private Material patchMaterial;
         private Material shieldMaterial;
         private readonly List<PickupView> pickups = new List<PickupView>();
@@ -119,6 +129,12 @@ namespace FamilyRacing
         // retires every view.
         public void ApplyFrame(FoundationState state, float deltaSeconds)
         {
+            ApplyFrame(state, deltaSeconds, 1f);
+        }
+
+        public void ApplyFrame(FoundationState state, float deltaSeconds,
+            float visualAlpha)
+        {
             var world = WorldFor(state);
             var raceId = RaceIdFor(state);
             if (world == null)
@@ -139,7 +155,7 @@ namespace FamilyRacing
             if (!paused) bobPhase += deltaSeconds;
             SyncPickups(world);
             SyncPatches(world);
-            SyncShields(state, world);
+            SyncShields(state, world, visualAlpha);
         }
 
         // --- world resolution ------------------------------------------------
@@ -207,6 +223,9 @@ namespace FamilyRacing
                 // A consumed pickup stays at a dim ghost while its
                 // respawn clock runs — the site is honest about being
                 // "not yet live" instead of popping back.
+                if (view.renderer != null)
+                    view.renderer.sharedMaterial = site.active
+                        ? PickupMaterial() : InactivePickupMaterial();
                 var alpha = site.active ? 1f : InactivePickupAlpha;
                 SetAlpha(view.renderer, view.mpb, alpha);
             }
@@ -265,8 +284,14 @@ namespace FamilyRacing
         private void SyncPatches(GadgetWorldState world)
         {
             var live = world.patches;
-            var seen = live != null && live.Count > 0
-                ? new HashSet<string>(StringComparer.Ordinal) : null;
+            HashSet<string> seen = null;
+            if (live != null && live.Count > 0)
+            {
+                seen = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var patch in live)
+                    if (patch != null && !string.IsNullOrEmpty(patch.patchId))
+                        seen.Add(patch.patchId);
+            }
             // Retire views whose patch left the authoritative world.
             for (var i = patches.Count - 1; i >= 0; i--)
             {
@@ -282,21 +307,22 @@ namespace FamilyRacing
             {
                 if (patch == null || string.IsNullOrEmpty(patch.patchId))
                     continue;
-                seen.Add(patch.patchId);
                 var view = PatchFor(patch);
                 if (view == null) continue;
                 view.active = true;
+                if (view.go != null && !view.go.activeSelf)
+                    view.go.SetActive(true);
                 var t = view.go.transform;
                 t.position = new Vector3(patch.x,
                     patch.y + PatchHeightMeters, patch.z);
                 t.localScale = new Vector3(patch.radiusMeters * 2f,
-                    1f, patch.radiusMeters * 2f);
+                    PatchHeightMeters, patch.radiusMeters * 2f);
                 // Fade with the authoritative remaining lifetime: the
                 // disc's alpha is the patch's own clock, so a client
                 // reconnecting mid-effect renders the same decay.
                 var fraction = Mathf.Clamp01(patch.ticksRemaining / 180f);
                 var color = view.baseColor;
-                color.a = Mathf.Lerp(0.25f, 0.75f, fraction);
+                color.a = Mathf.Lerp(0.35f, 0.85f, fraction);
                 SetColor(view.renderer, view.mpb, color);
             }
         }
@@ -318,7 +344,7 @@ namespace FamilyRacing
                 {
                     go = BuildPatch(),
                     mpb = new MaterialPropertyBlock(),
-                    baseColor = new Color(0.98f, 0.96f, 0.88f, 0.7f)
+                    baseColor = new Color(0.98f, 0.96f, 0.88f, 0.75f)
                 };
                 view.renderer = view.go.GetComponentInChildren<Renderer>();
                 patches.Add(view);
@@ -341,10 +367,13 @@ namespace FamilyRacing
             var go = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
             go.name = "gadget-patch";
             go.transform.SetParent(Container(), false);
-            go.transform.localScale = new Vector3(1f, 0.02f, 1f);
+            go.transform.localScale = new Vector3(1f, PatchHeightMeters, 1f);
             var collider = go.GetComponent<Collider>();
             if (collider != null) Destroy(collider);
-            go.GetComponent<Renderer>().sharedMaterial = PatchMaterial();
+            var renderer = go.GetComponent<Renderer>();
+            renderer.sharedMaterial = PatchMaterial();
+            renderer.shadowCastingMode = ShadowCastingMode.Off;
+            renderer.receiveShadows = false;
             go.SetActive(false);
             return go;
         }
@@ -352,25 +381,31 @@ namespace FamilyRacing
         // --- shields ----------------------------------------------------------
 
         private void SyncShields(FoundationState state,
-            GadgetWorldState world)
+            GadgetWorldState world, float visualAlpha)
         {
             foreach (var view in shields) view.active = false;
             if (world.racers != null)
                 foreach (var row in world.racers)
                 {
                     if (row == null || row.shieldCharges <= 0) continue;
-                    var pose = PoseFor(state, row.participantId);
-                    if (!pose.HasValue) continue;
                     var view = ShieldFor(row.participantId);
                     if (view == null) continue;
+                    var pose = ResolveShieldPose(state, row.participantId,
+                        visualAlpha, view);
+                    if (!pose.HasValue) continue;
                     view.active = true;
                     view.go.transform.position = pose.Value
-                        + Vector3.up * (ShieldDiameterMeters * 0.5f - 0.4f);
+                        + Vector3.up * ShieldHeightOffsetMeters;
                 }
             foreach (var view in shields)
             {
                 if (view.go != null) view.go.SetActive(view.active);
-                if (!view.active) { view.participantId = null; }
+                if (!view.active)
+                {
+                    view.participantId = null;
+                    view.hasPose = false;
+                    view.lastTick = -1;
+                }
             }
         }
 
@@ -393,6 +428,8 @@ namespace FamilyRacing
                 shields.Add(view);
             }
             view.participantId = participantId;
+            view.hasPose = false;
+            view.lastTick = -1;
             return view;
         }
 
@@ -404,15 +441,63 @@ namespace FamilyRacing
             go.transform.localScale = Vector3.one * ShieldDiameterMeters;
             var collider = go.GetComponent<Collider>();
             if (collider != null) Destroy(collider);
-            go.GetComponent<Renderer>().sharedMaterial = ShieldMaterial();
+            var renderer = go.GetComponent<Renderer>();
+            renderer.sharedMaterial = ShieldMaterial();
+            renderer.shadowCastingMode = ShadowCastingMode.Off;
+            renderer.receiveShadows = false;
             go.SetActive(false);
             return go;
         }
 
-        // The committed pose of a participant from whichever race slice
-        // presents them — shield bubbles anchor on the same motors the
-        // racer rigs render.
-        private static Vector3? PoseFor(FoundationState state,
+        // Anchors the shield bubble on the racer's rendered vehicle
+        // transform when DrivingWorld presents it (which already carries
+        // sub-tick interpolation and LAN prediction/interpolation), and
+        // falls back to sub-tick interpolation of the committed motor
+        // state when no vehicle view is active.
+        private Vector3? ResolveShieldPose(FoundationState state,
+            string participantId, float visualAlpha, ShieldView view)
+        {
+            if (drivingWorld == null)
+                drivingWorld = GetComponent<DrivingWorld>();
+            if (drivingWorld != null)
+            {
+                var racerPres = drivingWorld.RacerPresentation(participantId);
+                if (racerPres != null && racerPres.gameObject.activeInHierarchy)
+                    return racerPres.transform.position;
+                var soloPres = drivingWorld.SoloPresentation;
+                if (soloPres != null && soloPres.gameObject.activeInHierarchy
+                    && ((state != null && state.driving != null
+                        && (state.driving.gadgets == null
+                            || state.driving.gadgets.racers == null
+                            || state.driving.gadgets.racers.Count == 1
+                            || RowIsLocal(state.driving, participantId)))
+                        || (state != null && state.soloRace != null
+                            && state.soloRace.trial != null)))
+                {
+                    return soloPres.transform.position;
+                }
+            }
+            var motor = MotorFor(state, participantId);
+            if (motor == null) return null;
+            var pos = new Vector3(motor.x, motor.y, motor.z);
+            if (!view.hasPose || motor.tick != view.lastTick)
+            {
+                view.prevPos = view.hasPose ? view.curPos : pos;
+                view.curPos = pos;
+                view.lastTick = motor.tick;
+                if (!view.hasPose
+                    || (view.curPos - view.prevPos).sqrMagnitude
+                        > TeleportSnapDistance * TeleportSnapDistance)
+                {
+                    view.prevPos = view.curPos;
+                }
+                view.hasPose = true;
+            }
+            return Vector3.LerpUnclamped(view.prevPos, view.curPos,
+                Mathf.Clamp01(visualAlpha));
+        }
+
+        private static MotorState MotorFor(FoundationState state,
             string participantId)
         {
             if (state == null) return null;
@@ -422,8 +507,7 @@ namespace FamilyRacing
                     || state.driving.gadgets.racers.Count == 1
                     || RowIsLocal(state.driving, participantId)))
             {
-                var motor = state.driving.motor;
-                return new Vector3(motor.x, motor.y, motor.z);
+                return state.driving.motor;
             }
             var solo = state.soloRace;
             if (solo != null)
@@ -434,12 +518,9 @@ namespace FamilyRacing
                             && racer.participantId == participantId
                             && racer.session != null
                             && racer.session.motor != null)
-                            return new Vector3(racer.session.motor.x,
-                                racer.session.motor.y,
-                                racer.session.motor.z);
+                            return racer.session.motor;
                 if (solo.trial != null && solo.trial.motor != null)
-                    return new Vector3(solo.trial.motor.x,
-                        solo.trial.motor.y, solo.trial.motor.z);
+                    return solo.trial.motor;
             }
             var race = state.networkRace;
             if (race != null && race.racers != null)
@@ -448,8 +529,7 @@ namespace FamilyRacing
                         && racer.participantId == participantId
                         && racer.session != null
                         && racer.session.motor != null)
-                        return new Vector3(racer.session.motor.x,
-                            racer.session.motor.y, racer.session.motor.z);
+                        return racer.session.motor;
             return null;
         }
 
@@ -483,6 +563,8 @@ namespace FamilyRacing
             {
                 view.active = false;
                 view.participantId = null;
+                view.hasPose = false;
+                view.lastTick = -1;
                 if (view.go != null) view.go.SetActive(false);
             }
             freeShields.Clear();
@@ -508,13 +590,24 @@ namespace FamilyRacing
             return pickupMaterial;
         }
 
+        private Material InactivePickupMaterial()
+        {
+            if (inactivePickupMaterial == null)
+            {
+                inactivePickupMaterial = BuildMaterial(
+                    new Color(0.35f, 0.85f, 0.95f, InactivePickupAlpha));
+                ConfigureTransparent(inactivePickupMaterial);
+            }
+            return inactivePickupMaterial;
+        }
+
         private Material PatchMaterial()
         {
             if (patchMaterial == null)
             {
                 patchMaterial = BuildMaterial(
-                    new Color(0.98f, 0.96f, 0.88f, 0.7f));
-                patchMaterial.SetFloat("_Surface", 1f);
+                    new Color(0.98f, 0.96f, 0.88f, 0.75f));
+                ConfigureTransparent(patchMaterial);
             }
             return patchMaterial;
         }
@@ -524,8 +617,8 @@ namespace FamilyRacing
             if (shieldMaterial == null)
             {
                 shieldMaterial = BuildMaterial(
-                    new Color(0.55f, 0.8f, 1f, 0.35f));
-                shieldMaterial.SetFloat("_Surface", 1f);
+                    new Color(0.45f, 0.82f, 1f, 0.28f));
+                ConfigureTransparent(shieldMaterial);
             }
             return shieldMaterial;
         }
@@ -538,7 +631,33 @@ namespace FamilyRacing
             if (shader == null) shader = Shader.Find("Universal Render Pipeline/Lit");
             if (shader == null) shader = Shader.Find("Standard");
             var material = new Material(shader) { color = color };
+            if (material.HasProperty("_BaseColor"))
+                material.SetColor("_BaseColor", color);
+            if (material.HasProperty("_Color"))
+                material.SetColor("_Color", color);
             return material;
+        }
+
+        // Runtime URP materials do not run the editor ShaderGUI blend
+        // setup when _Surface is set alone: explicit SrcAlpha/OneMinusSrcAlpha
+        // blend factors, ZWrite Off, the Transparent render queue and the
+        // transparent surface keyword are required so shields and patches
+        // actually render translucent instead of solid opaque.
+        private static void ConfigureTransparent(Material material)
+        {
+            if (material == null) return;
+            material.SetFloat("_Surface", 1f);
+            material.SetFloat("_Blend", 0f);
+            material.SetFloat("_Mode", 3f);
+            material.SetInt("_SrcBlend", (int)BlendMode.SrcAlpha);
+            material.SetInt("_DstBlend", (int)BlendMode.OneMinusSrcAlpha);
+            material.SetInt("_SrcBlendAlpha", (int)BlendMode.One);
+            material.SetInt("_DstBlendAlpha", (int)BlendMode.OneMinusSrcAlpha);
+            material.SetInt("_ZWrite", 0);
+            material.SetOverrideTag("RenderType", "Transparent");
+            material.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+            material.EnableKeyword("_ALPHABLEND_ON");
+            material.renderQueue = (int)RenderQueue.Transparent;
         }
 
         private static void SetAlpha(Renderer renderer,

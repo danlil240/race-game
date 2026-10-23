@@ -334,12 +334,12 @@ namespace FamilyRacing
             if (steps == MaxStepsPerFrame && accumulator >= step)
                 presentation.stepOverloads++;
             var state = service.Snapshot();
+            // Fraction of the current sim tick already elapsed — the
+            // vehicle and shield visuals interpolate between committed
+            // poses by this alpha instead of stepping at the 30 Hz tick rate.
+            var alpha = Mathf.Clamp01(accumulator / step);
             if (drivingWorld != null)
             {
-                // Fraction of the current sim tick already elapsed — the
-                // vehicle visual interpolates between committed poses by
-                // this alpha instead of stepping at the 30 Hz tick rate.
-                var alpha = Mathf.Clamp01(accumulator / step);
                 var netRace = state.networkRace;
                 var lanRace = netRace != null && netRace.racers != null
                     && netRace.racers.Count > 0;
@@ -424,7 +424,7 @@ namespace FamilyRacing
             // state — pickups, foam patches and shield bubbles read the
             // authoritative slice exactly like the effects presenter.
             if (gadgetPresenter != null)
-                gadgetPresenter.ApplyFrame(state, Time.unscaledDeltaTime);
+                gadgetPresenter.ApplyFrame(state, Time.unscaledDeltaTime, alpha);
             // Entering the shared network pause neutralizes held local
             // input and requires re-arm, the same cleanup focus loss runs:
             // held steering must not seep through the resume boundary.

@@ -470,5 +470,93 @@ namespace FamilyRacing.Tests
             Assert.That(presenter.ActivePatchCount, Is.EqualTo(0));
             Assert.That(presenter.ActiveShieldCount, Is.EqualTo(0));
         }
+
+        [Test]
+        public void PatchAndShieldViewsRenderActiveTransparentAndSmoothlyFollowVehicle()
+        {
+            WireWorld(AuthoredGadgets());
+            service.SetDrivingContent(world.Load());
+            service.SetGadgetCatalog(world.Gadgets);
+            StartRace();
+            var presenter = host.AddComponent<GadgetPresenter>();
+
+            var state = service.Snapshot();
+            var localId = state.driving.gadgets.racers[0].participantId;
+            state.driving.gadgets.racers[0].shieldCharges = 1;
+            state.driving.gadgets.patches.Add(new GadgetPatchState
+            {
+                patchId = "patch-1",
+                ownerParticipantId = localId,
+                x = 2f,
+                y = 0f,
+                z = -40f,
+                radiusMeters = 3f,
+                verticalRangeMeters = 2.5f,
+                ticksRemaining = 180,
+                slowMultiplier = 0.7f,
+                slowTicks = 45,
+                immunityTicks = 60
+            });
+
+            // Tick 10 at z = -50, then tick 11 at z = -49 (1.0 m step).
+            // At alpha = 0.5 the vehicle visual interpolates to z = -49.5;
+            // the bubble shield must anchor smoothly to that interpolated
+            // pose instead of snapping to -49.0 at 30 Hz.
+            state.driving.motor.tick = 10;
+            state.driving.motor.x = 0f;
+            state.driving.motor.y = 0f;
+            state.driving.motor.z = -50f;
+            world.ApplyFrame(state, 1f);
+            presenter.ApplyFrame(state, 1f / 60f);
+
+            state.driving.motor.tick = 11;
+            state.driving.motor.z = -49f;
+            world.ApplyFrame(state, 0.5f);
+            presenter.ApplyFrame(state, 1f / 60f);
+
+            var patchGo = GameObject.Find("gadget-patch-patch-1");
+            Assert.That(patchGo, Is.Not.Null,
+                "active foam patch must have an active scene GameObject");
+            Assert.That(patchGo.activeInHierarchy, Is.True,
+                "foam trap GameObject must be active/visible in the hierarchy");
+            Assert.That(patchGo.transform.localScale.y, Is.LessThan(0.2f),
+                "foam trap must be a flat ground disc, not a 2m cylinder");
+
+            var patchMat = patchGo.GetComponent<Renderer>().sharedMaterial;
+            Assert.That(patchMat.GetInt("_ZWrite"), Is.EqualTo(0),
+                "foam patch material disables depth write for transparency");
+            Assert.That(patchMat.renderQueue,
+                Is.EqualTo((int)UnityEngine.Rendering.RenderQueue.Transparent));
+
+            var shieldGo = GameObject.Find("gadget-shield");
+            Assert.That(shieldGo, Is.Not.Null,
+                "shielded racer must have an active shield GameObject");
+            Assert.That(shieldGo.activeInHierarchy, Is.True);
+            var shieldRenderer = shieldGo.GetComponent<Renderer>();
+            var shieldMat = shieldRenderer.sharedMaterial;
+            Assert.That(shieldMat.GetInt("_ZWrite"), Is.EqualTo(0),
+                "bubble shield material must disable ZWrite for transparency");
+            Assert.That(shieldMat.GetInt("_SrcBlend"),
+                Is.EqualTo((int)UnityEngine.Rendering.BlendMode.SrcAlpha),
+                "bubble shield material must use SrcAlpha blending");
+            Assert.That(shieldMat.GetInt("_DstBlend"),
+                Is.EqualTo((int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha),
+                "bubble shield material must use OneMinusSrcAlpha blending");
+            Assert.That(shieldMat.renderQueue,
+                Is.EqualTo((int)UnityEngine.Rendering.RenderQueue.Transparent),
+                "bubble shield material must render in the Transparent queue");
+            Assert.That(shieldMat.IsKeywordEnabled("_SURFACE_TYPE_TRANSPARENT"),
+                Is.True, "URP transparent surface keyword must be enabled");
+            Assert.That(shieldRenderer.shadowCastingMode,
+                Is.EqualTo(UnityEngine.Rendering.ShadowCastingMode.Off),
+                "bubble shield must not cast opaque shadows onto the vehicle");
+
+            var carPos = world.SoloPresentation.transform.position;
+            Assert.That(carPos.z, Is.EqualTo(-49.5f).Within(0.01f),
+                "vehicle visual sits at the mid-tick interpolated position");
+            Assert.That(shieldGo.transform.position.z,
+                Is.EqualTo(carPos.z).Within(0.001f),
+                "bubble shield must track the interpolated vehicle pose smoothly without 30 Hz stepping");
+        }
     }
 }
