@@ -708,6 +708,14 @@ namespace FamilyRacing
                 return RenderPerformanceCapture.PhaseRacing;
             if (state.driving != null && state.driving.phase == "finished")
                 return RenderPerformanceCapture.PhaseResults;
+            var solo = state.soloRace;
+            if (solo != null)
+            {
+                if (solo.paused) return RenderPerformanceCapture.PhasePaused;
+                if (solo.phase == "countdown") return RenderPerformanceCapture.PhaseCountdown;
+                if (solo.phase == "running") return RenderPerformanceCapture.PhaseRacing;
+                if (solo.phase == "finished") return RenderPerformanceCapture.PhaseResults;
+            }
             var net = state.network;
             if (net != null)
             {
@@ -734,6 +742,15 @@ namespace FamilyRacing
             if (state == null) return "";
             if (state.driving != null && state.driving.vehicleId != null)
                 return state.driving.vehicleId;
+            var solo = state.soloRace;
+            if (solo != null)
+            {
+                if (solo.trial != null) return solo.trial.vehicleId ?? "";
+                if (solo.race != null && solo.race.racers != null)
+                    foreach (var racer in solo.race.racers)
+                        if (racer != null && racer.participantId == solo.participantId)
+                            return racer.vehicleId ?? "";
+            }
             var race = state.networkRace;
             var localId = state.network != null
                 ? state.network.localParticipantId : null;

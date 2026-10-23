@@ -116,7 +116,7 @@ namespace FamilyRacing
 
         internal void ApplyFrame(FoundationState state, float deltaSeconds)
         {
-            var session = state != null ? state.driving : null;
+            var session = state != null ? state.driving ?? state.soloRace?.trial : null;
             var motor = session != null ? session.motor : null;
             if (cam == null) cam = Camera.main;
             if (motor == null || cam == null)
