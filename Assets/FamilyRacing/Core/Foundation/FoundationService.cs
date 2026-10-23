@@ -275,6 +275,7 @@ namespace FamilyRacing.Core.Foundation
         private ProfileSave savedProfile;
         private ProfileSave draftProfile;
         private DriverInput input;
+        private bool pendingGadgetPress;
         private int holdTicksRemaining;
         private PresentationState presentation = new PresentationState();
         private DrivingContentCatalog drivingContent;
@@ -384,7 +385,7 @@ namespace FamilyRacing.Core.Foundation
             if (driving == null || paused) return;
             var simulation = EnsureDrivingSimulation();
             if (simulation == null) return;
-            var request = driving.PrepareStep(input);
+            var request = driving.PrepareStep(ConsumeSimulationInput());
             DrivingStepResult result;
             if (request == null)
             {
@@ -664,6 +665,7 @@ namespace FamilyRacing.Core.Foundation
         public void ClearInput()
         {
             holdTicksRemaining = 0;
+            pendingGadgetPress = false;
             input = new DriverInput(0f, false, false, false, false, false, false);
             if (driving != null)
             {
@@ -677,6 +679,18 @@ namespace FamilyRacing.Core.Foundation
                 soloRace.CancelPending("cleared");
                 DrainSoloEvents();
             }
+        }
+
+        // A physical press can begin and end between two 30 Hz boundaries.
+        // Retain that edge separately from the latest held steering sample.
+        private DriverInput ConsumeSimulationInput()
+        {
+            var sample = new DriverInput(input.Steering, input.Drift, input.Boost,
+                input.Gadget || pendingGadgetPress, input.Recover,
+                input.ChangeCamera, input.Pause,
+                input.HasThrottleOverride ? (float?)input.Throttle : null, input.Brake);
+            pendingGadgetPress = false;
+            return sample;
         }
 
         // Runtime-only callback the app wires to its physical input
@@ -1148,6 +1162,8 @@ namespace FamilyRacing.Core.Foundation
                 }
                 return Result(command, CommandResult.Applied, "");
             }
+            if (drivingActive && !paused && gadget && !input.Gadget)
+                pendingGadgetPress = true;
             input = new DriverInput(steering, drift, boost, gadget, recover,
                 changeCamera, pausePulse, throttle, brake);
             holdTicksRemaining = duration;
@@ -1165,6 +1181,7 @@ namespace FamilyRacing.Core.Foundation
             if (pausePulse)
             {
                 paused = !paused;
+                if (paused) pendingGadgetPress = false;
                 if (paused && driving != null)
                 {
                     driving.CancelPending("paused");

@@ -135,7 +135,7 @@ namespace FamilyRacing.Core.Foundation
             if (soloRace == null || paused) return;
             var simulation = EnsureSoloSimulation();
             if (simulation == null) return;
-            var state = soloRace.Step(input, simulation);
+            var state = soloRace.Step(ConsumeSimulationInput(), simulation);
             AppendDrivingEvents(state.events);
             if (state.result != null) TryApplyLocalResult(state);
         }

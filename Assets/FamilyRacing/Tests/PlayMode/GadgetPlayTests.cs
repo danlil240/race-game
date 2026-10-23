@@ -320,8 +320,9 @@ namespace FamilyRacing.Tests
 
         // --- session flow over the real course -------------------------
 
-        [Test]
-        public void DriveThroughCollectsAndGadgetInputUsesTheItem()
+        [TestCase(false)]
+        [TestCase(true)]
+        public void DriveThroughCollectsAndGadgetInputUsesTheItem(bool releaseBeforeSimulation)
         {
             WireWorld(AuthoredGadgets());
             service.SetDrivingContent(world.Load());
@@ -364,6 +365,7 @@ namespace FamilyRacing.Tests
             // key emit uses the held item — edge-latched, attributed to
             // the human seat.
             PressGadget();
+            if (releaseBeforeSimulation) ReleaseGadget();
             Step(1);
             var events = service.Snapshot().drivingEvents;
             var used = false;
