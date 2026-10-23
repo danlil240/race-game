@@ -534,7 +534,8 @@ namespace FamilyRacing
         // chain so a stripped render pipeline still renders honestly.
         private static Material BuildMaterial(Color color)
         {
-            var shader = Shader.Find("Universal Render Pipeline/Lit");
+            var shader = Shader.Find("Universal Render Pipeline/Simple Lit");
+            if (shader == null) shader = Shader.Find("Universal Render Pipeline/Lit");
             if (shader == null) shader = Shader.Find("Standard");
             var material = new Material(shader) { color = color };
             return material;

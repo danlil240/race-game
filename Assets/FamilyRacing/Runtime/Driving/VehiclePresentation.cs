@@ -474,7 +474,8 @@ namespace FamilyRacing
             var pivot = new GameObject("LeanPivot");
             pivot.transform.SetParent(transform, false);
             leanPivot = pivot.transform;
-            var shader = Shader.Find("Universal Render Pipeline/Lit");
+            var shader = Shader.Find("Universal Render Pipeline/Simple Lit");
+            if (shader == null) shader = Shader.Find("Universal Render Pipeline/Lit");
             if (shader == null) shader = Shader.Find("Standard");
             bodyMaterial = new Material(shader);
             darkMaterial = new Material(shader) { color = new Color(0.16f, 0.17f, 0.19f) };
