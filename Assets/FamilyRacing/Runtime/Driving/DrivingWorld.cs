@@ -23,6 +23,8 @@ namespace FamilyRacing
         // cosmetic is the slot avatar.
         [SerializeField] private CharacterDefinitionAsset[] characters;
         [SerializeField] private TrackDefinitionAsset track;
+        // Optional multi-course inventory. Empty preserves legacy single-track scenes.
+        [SerializeField] private TrackDefinitionAsset[] tracks;
         [SerializeField] private EventDefinitionAsset[] events;
         [SerializeField] private TutorialDefinitionAsset tutorial;
         // M4 Task 5: the authored cue/effect catalog the race effects and
@@ -301,16 +303,19 @@ namespace FamilyRacing
                     tunings.Add(tuning);
                     vehicleAssets[tuning.vehicleId] = asset;
                 }
-            CourseDefinition course = null;
-            if (track != null)
+            var courses = new List<CourseDefinition>();
+            var trackAssets = tracks != null && tracks.Length > 0 ? tracks : new[] { track };
+            foreach (var trackAsset in trackAssets)
             {
+                if (trackAsset == null) continue;
                 string error;
-                course = track.ToCourse(out error);
+                var course = trackAsset.ToCourse(out error);
                 if (course == null)
                 {
                     Debug.LogError("DrivingWorld: " + error);
                     return null;
                 }
+                courses.Add(course);
             }
             var defs = new List<EventDefinition>();
             if (events != null)
@@ -345,7 +350,7 @@ namespace FamilyRacing
             try
             {
                 catalog = DrivingContentCatalog.Create(contentVersion,
-                    tunings, course == null ? null : new[] { course }, defs,
+                    tunings, courses, defs,
                     simulationBackend);
             }
             catch (System.ArgumentException error)
@@ -433,6 +438,7 @@ namespace FamilyRacing
                 vehicleView.SetActive(active);
             if (active)
             {
+                SelectVisibleCourse(session.courseId);
                 var motor = session.motor;
                 ApplyVehicleVisual(session.vehicleId, motor,
                     session.input != null ? session.input.steering : 0f,
@@ -512,6 +518,8 @@ namespace FamilyRacing
             var active = racers != null && racers.Count > 0;
             raceCourseActive = active;
             RefreshCourseInstance();
+            if (active && racers[0] != null && racers[0].session != null)
+                SelectVisibleCourse(racers[0].session.courseId);
             raceFacts.Clear();
             if (!active)
             {
@@ -829,6 +837,12 @@ namespace FamilyRacing
             cameraFacts.mode = "none";
             cameraFacts.px = cameraFacts.py = cameraFacts.pz = 0f;
             cameraFacts.tx = cameraFacts.ty = cameraFacts.tz = 0f;
+        }
+
+        private void SelectVisibleCourse(string courseId)
+        {
+            if (courseInstance != null && courseInstance.TryGetComponent<LongRaceVisibility>(out var visibility))
+                visibility.SelectCourse(courseId);
         }
 
         private void RefreshCourseInstance()

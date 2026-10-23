@@ -151,6 +151,11 @@ namespace FamilyRacing.Core.Racing
         public const float MinSpawnSeparationMeters = 3.5f;
 
         public string id = "";
+        public string nameEn = "";
+        public string nameHe = "";
+        // False preserves all existing loop content. Open routes finish at
+        // their last ordered gate and never wrap the racing line to the start.
+        public bool isOpenRoute;
         public float spawnX;
         public float spawnY;
         public float spawnZ;
@@ -289,6 +294,9 @@ namespace FamilyRacing.Core.Racing
             var copy = new CourseDefinition
             {
                 id = id,
+                nameEn = nameEn,
+                nameHe = nameHe,
+                isOpenRoute = isOpenRoute,
                 spawnX = spawnX,
                 spawnY = spawnY,
                 spawnZ = spawnZ,

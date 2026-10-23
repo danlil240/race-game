@@ -17,6 +17,7 @@ namespace FamilyRacing
         public TrackDefinitionAsset track;
         public int laps = 2;
         public int countdownTicks = 90;
+        public int finishGraceSeconds = 60;
         public string[] vehicleIds = { "car-01", "motorcycle-01" };
         // Coins a finalized race awards each finisher; zero keeps the
         // event reward-free (solo events award nothing here — rewards
@@ -138,6 +139,7 @@ namespace FamilyRacing
                 courseId = track.courseId,
                 laps = laps,
                 countdownTicks = countdownTicks,
+                finishGraceSeconds = finishGraceSeconds,
                 vehicleIds = new List<string>(vehicleIds ?? new string[0]),
                 recovery = new RecoverySettings
                 {

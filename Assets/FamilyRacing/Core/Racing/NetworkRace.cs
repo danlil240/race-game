@@ -615,7 +615,7 @@ namespace FamilyRacing.Core.Racing
                     {
                         firstFinishElapsedTicks = racer.finishTicks;
                         finishDeadlineElapsedTicks = racer.finishTicks
-                            + NetworkSettings.FinishGraceTicks;
+                            + (long)evt.finishGraceSeconds * NetworkSettings.SimulationTicksPerSecond;
                     }
                 }
             }

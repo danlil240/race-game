@@ -29,7 +29,7 @@ namespace FamilyRacing.Core.Racing
             {
                 using (var writer = new BinaryWriter(stream, Encoding.UTF8, true))
                 {
-                    writer.Write(1); // canonical schema epoch
+                    writer.Write(2); // canonical schema epoch: route topology and event finish grace
                     WriteDrivingBody(writer, catalog);
                     writer.Flush();
                     return Hex(stream);
@@ -69,7 +69,7 @@ namespace FamilyRacing.Core.Racing
             {
                 using (var writer = new BinaryWriter(stream, Encoding.UTF8, true))
                 {
-                    writer.Write(4); // canonical schema epoch: multiworld + shortcut lanes
+                    writer.Write(5); // canonical schema epoch: explicit route topology
                     if (catalog.Driving == null)
                     {
                         writer.Write(false);
@@ -216,6 +216,7 @@ namespace FamilyRacing.Core.Racing
                 F(writer, course.spawnY);
                 F(writer, course.spawnZ);
                 F(writer, course.spawnHeading);
+                writer.Write(course.isOpenRoute);
                 var gates = course.checkpoints;
                 writer.Write(gates != null ? gates.Count : 0);
                 if (gates != null)
@@ -288,6 +289,7 @@ namespace FamilyRacing.Core.Racing
                 Str(writer, evt.courseId);
                 writer.Write(evt.laps);
                 writer.Write(evt.countdownTicks);
+                writer.Write(evt.finishGraceSeconds);
                 var vehicles = evt.vehicleIds;
                 writer.Write(vehicles != null ? vehicles.Count : 0);
                 if (vehicles != null)

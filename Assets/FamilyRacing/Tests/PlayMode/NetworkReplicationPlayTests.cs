@@ -60,6 +60,34 @@ namespace FamilyRacing.Tests
             new DriverInput(0f, false, false, false, false, false, false);
         private const float TimeoutSeconds = 8f;
 
+        [UnityTest]
+        public IEnumerator FinalSnapshotRetriesAfterReliableQueueBackpressure()
+        {
+            var access=new StubNetworkAccess();var host=new Rig("p-host",access);var client=new Rig("p-guest",access);
+            try
+            {
+                var content=Catalog();var course=content.Courses["course-lan"];
+                course.isOpenRoute=true;course.checkpoints[1].z=30;course.checkpoints[1].recoverZ=25;
+                content.Events["lan-mixed"].countdownTicks=8;
+                host.Session.SetContent(content);host.Bridge.SetContent(content);
+                client.Session.SetContent(content);client.Bridge.SetContent(content);
+                yield return StartTwoPlayerRace(host,client);
+                // Stop pumping sockets while the genuine race runs to its
+                // finish. Its normal snapshots fill the reliable send queue.
+                for(int i=0;i<1000&&host.Bridge.LatestState.phase!=NetworkRace.PhaseFinished;i++)
+                    host.Bridge.StepTick(Neutral,World);
+                Assert.That(host.Bridge.LatestState.phase,Is.EqualTo(NetworkRace.PhaseFinished));
+                Assert.That(host.Bridge.LatestState.hostTick%2,Is.EqualTo(1),"Exercise the odd final boundary that has no regular publish cadence");
+                Assert.That(host.Bridge.LastError,Does.Contain("snapshotSend"),"Test must encounter real transport backpressure");
+                yield return PumpUntil(()=> {
+                    host.Bridge.StepTick(Neutral,World);
+                    return client.Bridge.LatestState!=null&&client.Bridge.LatestState.phase==NetworkRace.PhaseFinished;
+                },host,client);
+                Assert.That(client.Bridge.LatestState.result,Is.Not.Null);
+            }
+            finally{host.Dispose();client.Dispose();}
+        }
+
         // One full peer: real UDP transport + real session protocol + the
         // Task-5 replication bridge, driven the same way FoundationApp
         // drives them.

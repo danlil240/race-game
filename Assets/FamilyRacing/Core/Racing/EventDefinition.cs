@@ -49,6 +49,7 @@ namespace FamilyRacing.Core.Racing
         public string courseId = "";
         public int laps = 1;
         public int countdownTicks = 90;
+        public int finishGraceSeconds = 60;
         public List<string> vehicleIds = new List<string>();
         public RecoverySettings recovery = new RecoverySettings();
         // Authored completion reward (coins) applied to racers that finish
@@ -77,6 +78,7 @@ namespace FamilyRacing.Core.Racing
             if (string.IsNullOrEmpty(courseId)) { error = "courseId"; return false; }
             if (laps < 1) { error = "laps"; return false; }
             if (countdownTicks < 0) { error = "countdownTicks"; return false; }
+            if (finishGraceSeconds < 1 || finishGraceSeconds > 3600) { error = "finishGraceSeconds"; return false; }
             if (vehicleIds == null || vehicleIds.Count == 0) { error = "vehicleIds"; return false; }
             foreach (var vehicleId in vehicleIds)
                 if (string.IsNullOrEmpty(vehicleId)) { error = "vehicleIds"; return false; }
@@ -155,6 +157,7 @@ namespace FamilyRacing.Core.Racing
                 courseId = courseId,
                 laps = laps,
                 countdownTicks = countdownTicks,
+                finishGraceSeconds = finishGraceSeconds,
                 vehicleIds = vehicleIds == null ? null : new List<string>(vehicleIds),
                 recovery = recovery == null ? null : recovery.Copy(),
                 completionCoins = completionCoins,

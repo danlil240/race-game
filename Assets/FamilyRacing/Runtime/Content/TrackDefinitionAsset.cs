@@ -91,6 +91,9 @@ namespace FamilyRacing
         }
 
         public string courseId = "graybox-01";
+        public bool isOpenRoute;
+        public string nameEn = "";
+        public string nameHe = "";
         public Vector3 spawnPosition = new Vector3(0f, 0f, -60f);
         public float spawnHeadingDegrees;
         public Gate[] gates = new Gate[0];
@@ -117,6 +120,9 @@ namespace FamilyRacing
             var course = new CourseDefinition
             {
                 id = courseId,
+                isOpenRoute = isOpenRoute,
+                nameEn = nameEn,
+                nameHe = nameHe,
                 spawnX = spawnPosition.x,
                 spawnY = spawnPosition.y,
                 spawnZ = spawnPosition.z,

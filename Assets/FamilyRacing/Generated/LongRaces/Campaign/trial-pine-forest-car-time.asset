@@ -1,0 +1,48 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 48965197638dc104ba595782dcdf10f0, type: 3}
+  m_Name: trial-pine-forest-car-time(Clone)
+  m_EditorClassIdentifier: FamilyRacing.Runtime::FamilyRacing.EventDefinitionAsset
+  eventId: trial-pine-forest-car-time
+  track: {fileID: 11400000, guid: 9a9cc17866514104b838a2e0f1054b53, type: 2}
+  laps: 1
+  countdownTicks: 90
+  finishGraceSeconds: 240
+  vehicleIds:
+  - car-01
+  completionCoins: 20
+  offCourseSeconds: 1.5
+  minCourseY: -40
+  stuckSpeed: 0.75
+  stuckSeconds: 3
+  beachedSeconds: 8
+  overturnedSeconds: 2
+  outsideBoundsSeconds: 1.5
+  eventType: time
+  vehicleClass: car
+  parTicks: 12600
+  isFinale: 0
+  objectives:
+  - objectiveId: trial-pine-forest-car-time-intro
+    kind: introductory
+    alternatives:
+    - metric: finishWithinTicks
+      comparator: atMost
+      threshold: 18000
+      alsoRequires: []
+  - objectiveId: trial-pine-forest-car-time-mastery
+    kind: mastery
+    alternatives:
+    - metric: finishWithinTicks
+      comparator: atMost
+      threshold: 12600
+      alsoRequires: []

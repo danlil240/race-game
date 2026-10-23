@@ -161,14 +161,15 @@ namespace FamilyRacing.Core.Racing
                 {
                     if (motor.recovering && !wasRecovering)
                         wedgeSkips = (wedgeSkips + 1) % route.Count;
-                    routeIndex = (NearestIndex(motor, route) + wedgeSkips)
-                        % route.Count;
+                    routeIndex = RouteIndex(NearestIndex(motor, route) + wedgeSkips, route.Count, course.isOpenRoute);
                     initialized = true;
                 }
                 wasRecovering = motor.recovering;
-                AdvanceIndex(motor, route);
+                AdvanceIndex(motor, route, course.isOpenRoute);
                 var wp = route[routeIndex];
-                var prev = route[(routeIndex - 1 + route.Count) % route.Count];
+                var prev = route[RouteIndex(routeIndex - 1, route.Count, course.isOpenRoute)];
+                // At the first open waypoint use the forward tangent.
+                if (course.isOpenRoute && routeIndex == 0 && route.Count > 1) prev = null;
                 if (wp == null) return default;
                 var sx = prev != null ? wp.x - prev.x : 0f;
                 var sz = prev != null ? wp.z - prev.z : 0f;
@@ -296,8 +297,7 @@ namespace FamilyRacing.Core.Racing
                         if (route != null && route.Count > 0)
                         {
                             wedgeSkips = (wedgeSkips + 1) % route.Count;
-                            routeIndex = (routeIndex + 1 + wedgeSkips)
-                                % route.Count;
+                            routeIndex = RouteIndex(routeIndex + 1 + wedgeSkips, route.Count, course.isOpenRoute);
                         }
                     }
                     progressAnchorX = motor.x;
@@ -421,6 +421,11 @@ namespace FamilyRacing.Core.Racing
             var visited = 0;
             while (travelled <= lookahead && visited < route.Count)
             {
+                if (course.isOpenRoute && (i == 0 || i == route.Count - 1))
+                {
+                    if (i == route.Count - 1) break;
+                    i++; continue;
+                }
                 var prev = route[(i - 1 + route.Count) % route.Count];
                 var cur = route[i];
                 var next = route[(i + 1) % route.Count];
@@ -581,12 +586,16 @@ namespace FamilyRacing.Core.Racing
         // Move the follow index forward past reached waypoints and past
         // waypoints already behind the travel direction (bounded by the
         // passed factor so a far-away overshoot still turns back to it).
-        private void AdvanceIndex(MotorState motor, List<RouteWaypoint> route)
+        private static int RouteIndex(int index, int count, bool open)
+            => open ? Math.Clamp(index, 0, count - 1) : (index % count + count) % count;
+
+        private void AdvanceIndex(MotorState motor, List<RouteWaypoint> route, bool open)
         {
             var fx = (float)Math.Sin(motor.heading);
             var fz = (float)Math.Cos(motor.heading);
             for (var guard = 0; guard < route.Count; guard++)
             {
+                if (open && routeIndex == route.Count - 1) break;
                 var wp = route[routeIndex];
                 if (wp == null) break;
                 var dx = wp.x - motor.x;
@@ -597,7 +606,7 @@ namespace FamilyRacing.Core.Racing
                     : NetworkSettings.AiWaypointReachMeters;
                 if (d2 < reach * reach)
                 {
-                    routeIndex = (routeIndex + 1) % route.Count;
+                    routeIndex = RouteIndex(routeIndex + 1, route.Count, open);
                     continue;
                 }
                 // Overshoot forgiveness: the waypoint sits behind the
@@ -607,7 +616,7 @@ namespace FamilyRacing.Core.Racing
                 var passed = reach * NetworkSettings.AiWaypointPassedFactor;
                 if (dx * fx + dz * fz < 0f && d2 < passed * passed)
                 {
-                    routeIndex = (routeIndex + 1) % route.Count;
+                    routeIndex = RouteIndex(routeIndex + 1, route.Count, open);
                     continue;
                 }
                 break;

@@ -1,0 +1,49 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 726a8f92293971f41af73f35bb4a2b04, type: 3}
+  m_Name: car-01(Clone)(Clone)
+  m_EditorClassIdentifier: FamilyRacing.Runtime::FamilyRacing.VehicleDefinitionAsset
+  vehicleId: car-01
+  maxSpeed: 37.5
+  acceleration: 11.5
+  steeringRate: 1.65
+  steeringReferenceSpeed: 6
+  grip: 5.5
+  driftMinSpeed: 6
+  driftSteeringFactor: 1.5
+  driftLateralAcceleration: 6
+  driftChargePerSecond: 0.3
+  boostMaxSpeed: 51.4
+  boostAcceleration: 20
+  boostDurationSeconds: 3.4
+  boostDrainPerSecond: 0.29
+  boostMinCharge: 0.1
+  boostChargeSeconds: 6
+  cleanLandingCredit: 0.2
+  landingMinAirSeconds: 0.25
+  landingMinDrop: 0.4
+  driftSteeringThreshold: 0.15
+  gravity: 22
+  terminalFallSpeed: 30
+  groundProbe: 0.8
+  rideHeight: 0.55
+  halfWidth: 0.9
+  halfLength: 1.6
+  height: 1.1
+  wallSpeedRetention: 0.15
+  simulationBackend: 0
+  physicsTuning: {fileID: 0}
+  silhouette: car
+  leanDegrees: 4
+  bodyScale: {x: 1.8, y: 1.1, z: 3.2}
+  bodyColor: {r: 0.91, g: 0.51, b: 0.42, a: 1}
+  visual: {fileID: 11400000, guid: 5f0773c6e1f7c3f459eac41cc667797c, type: 2}

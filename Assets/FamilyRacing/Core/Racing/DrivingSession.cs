@@ -95,6 +95,8 @@ namespace FamilyRacing.Core.Racing
                         throw new ArgumentException("Duplicate event id: " + evt.id);
                     if (!courseMap.ContainsKey(evt.courseId))
                         throw new ArgumentException("Event " + evt.id + " references unknown course " + evt.courseId);
+                    if (courseMap[evt.courseId].isOpenRoute && evt.laps != 1)
+                        throw new ArgumentException("Open route events require one traversal: " + evt.id);
                     foreach (var vehicleId in evt.vehicleIds)
                         if (!vehicleMap.ContainsKey(vehicleId))
                             throw new ArgumentException(
@@ -210,6 +212,8 @@ namespace FamilyRacing.Core.Racing
                 throw new ArgumentException("Invalid course: " + courseError);
             if (!evt.Validate(out var eventError))
                 throw new ArgumentException("Invalid event: " + eventError);
+            if (course.isOpenRoute && evt.laps != 1)
+                throw new ArgumentException("Open route events require one traversal.");
             var spawn = startPose ?? new MotorPose
             {
                 x = course.spawnX,
@@ -874,6 +878,7 @@ namespace FamilyRacing.Core.Racing
                 elapsedTicks = elapsedTicks,
                 lap = progress.lap,
                 lapsRequired = evt.laps,
+                isOpenRoute = course.isOpenRoute,
                 nextCheckpoint = progress.expectedCheckpoint,
                 finished = phase == PhaseFinished,
                 finishTicks = finishTicks,
@@ -928,6 +933,20 @@ namespace FamilyRacing.Core.Racing
                     progress.expectedCheckpoint == 0
                         ? gateCount - 1
                         : progress.expectedCheckpoint - 1;
+                if (course.isOpenRoute)
+                {
+                    float total = 0f, completed = 0f;
+                    for (int i = 1; i < gateCount; i++)
+                    {
+                        var a = course.checkpoints[i - 1]; var b = course.checkpoints[i];
+                        float dx = b.x - a.x, dz = b.z - a.z;
+                        float length = (float)Math.Sqrt(dx * dx + dz * dz);
+                        total += length;
+                        if (i < progress.expectedCheckpoint) completed += length;
+                    }
+                    state.routeProgress = progress.finished ? 1f : total > 0f
+                        ? Math.Clamp((completed + state.segmentProgressMeters) / total, 0f, 1f) : 0f;
+                }
             }
             foreach (var entry in pending)
             {

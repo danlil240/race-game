@@ -89,6 +89,8 @@ namespace FamilyRacing.Core.Racing
         public long elapsedTicks;         // race clock: running phase only
         public int lap;
         public int lapsRequired;
+        public bool isOpenRoute;
+        public float routeProgress;
         public int nextCheckpoint;
         // Progress facts for authoritative standings: gates accepted on
         // the current lap plus clamped metres along the segment into the
@@ -170,6 +172,8 @@ namespace FamilyRacing.Core.Racing
                 elapsedTicks = elapsedTicks,
                 lap = lap,
                 lapsRequired = lapsRequired,
+                isOpenRoute = isOpenRoute,
+                routeProgress = routeProgress,
                 nextCheckpoint = nextCheckpoint,
                 acceptedGatesThisLap = acceptedGatesThisLap,
                 segmentProgressMeters = segmentProgressMeters,
