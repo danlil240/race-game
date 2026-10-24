@@ -67,7 +67,8 @@ Check "suite not run on invalid NUnit path" ($output -notmatch "RESULT:") "suite
 $fixtureSrc = Join-Path (Split-Path -Parent $VerifyScript) 'Tests\AndroidToolFixture.cs'
 $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 $fixtureExe = Join-Path $temp 'ToolFixture.exe'
-& $compiler /nologo /target:exe /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll "/out:$fixtureExe" $fixtureSrc
+# Unity is a GUI executable; a console fixture hides asynchronous launch/exit bugs.
+& $compiler /nologo /target:winexe /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll "/out:$fixtureExe" $fixtureSrc
 Check "external-process fixture compiles" ($LASTEXITCODE -eq 0) "csc exit=$LASTEXITCODE"
 if ($LASTEXITCODE -eq 0) {
     Copy-Item -LiteralPath $fixtureExe -Destination (Join-Path $editorDir 'Editor\Unity.exe') -Force
@@ -75,6 +76,10 @@ if ($LASTEXITCODE -eq 0) {
     $repoRoot = (Resolve-Path -LiteralPath (Join-Path (Split-Path -Parent $VerifyScript) '..')).Path
     $argumentsFile = Join-Path $repoRoot 'unity-arguments.txt'
     try {
+        Set-Content -LiteralPath (Join-Path $editorDir 'Editor\behavior.txt') -Value 'export-failure'
+        $output = & $pwsh -NoProfile -File $VerifyScript -Mode Setup -EditorRoot $editorRoot 2>&1 | Out-String
+        Check 'GUI Unity failure exit code propagates' ($LASTEXITCODE -eq 29) "exit=$LASTEXITCODE output=$output"
+        Set-Content -LiteralPath (Join-Path $editorDir 'Editor\behavior.txt') -Value 'incomplete-export'
         foreach ($case in @(
             @{ Mode = 'VisualBenchmarkSetup';           Method = 'FamilyRacing.EditorTools.FoundationBuild.VisualBenchmarkSetup' },
             @{ Mode = 'WindowsVisualBenchmark';         Method = 'FamilyRacing.EditorTools.FoundationBuild.WindowsVisualBenchmark' },

@@ -206,8 +206,13 @@ switch ($Mode) {
             }
         }
         Write-Host "Verify: Unity $Mode -> $log"
-        & $editorExe @unityArgs
-        exit $LASTEXITCODE
+        # Unity.exe is a GUI executable. PowerShell 5.1 can return immediately
+        # from '& Unity.exe' with a stale/null LASTEXITCODE. Wait explicitly so
+        # CI cannot pass while Unity is still importing or failing its license.
+        $quotedArgs = @($unityArgs | ForEach-Object { '"' + $_ + '"' })
+        $unityProcess = Start-Process -FilePath $editorExe -ArgumentList $quotedArgs `
+            -Wait -PassThru -WindowStyle Hidden
+        exit $unityProcess.ExitCode
     }
 
     "CheckEnvironment" {
