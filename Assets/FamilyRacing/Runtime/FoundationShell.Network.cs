@@ -641,47 +641,53 @@ namespace FamilyRacing
             spacer.style.flexGrow = 1f;
             root.Add(spacer);
 
-            // Physical steering arrows keep left/right meaning in RTL:
-            // the row is locked LTR exactly like the solo HUD.
-            var controls = Row(root);
-            controls.name = "lan.controls";
-            controls.languageDirection = LanguageDirection.LTR;
-            AddHoldButton(controls, "◀", Ocean,
-                held => app.Input.TouchLeft(held), "lan.race.steerLeft");
-            AddHoldButton(controls, "▶", Ocean,
-                held => app.Input.TouchRight(held), "lan.race.steerRight");
-            AddHoldButton(controls, T("input.brake", state), Deep,
-                held => app.Input.TouchBrake(held), "lan.race.brake");
-            AddHoldButton(controls, T("input.drift", state), Seafoam,
-                held => app.Input.TouchDrift(held), "lan.race.drift");
-            AddHoldButton(controls, T("input.boost", state), Coral,
-                held => app.Input.TouchBoost(held), "lan.race.boost");
-            foreach (var held in controls.Children())
-                ApplyAvailability(held, "input.set");
+            if (TouchRaceLayout)
+                BuildRaceTouchControls(state, true);
+            else
+            {
+                // Physical steering arrows keep left/right meaning in RTL:
+                // the row is locked LTR exactly like the solo HUD.
+                var controls = Row(root);
+                controls.name = "lan.controls";
+                controls.languageDirection = LanguageDirection.LTR;
+                AddHoldButton(controls, "◀", Ocean,
+                    held => app.Input.TouchLeft(held), "lan.race.steerLeft");
+                AddHoldButton(controls, "▶", Ocean,
+                    held => app.Input.TouchRight(held), "lan.race.steerRight");
+                AddHoldButton(controls, T("input.brake", state), Deep,
+                    held => app.Input.TouchBrake(held), "lan.race.brake");
+                AddHoldButton(controls, T("input.drift", state), Seafoam,
+                    held => app.Input.TouchDrift(held), "lan.race.drift");
+                AddHoldButton(controls, T("input.boost", state), Coral,
+                    held => app.Input.TouchBoost(held), "lan.race.boost");
+                foreach (var held in controls.Children())
+                    ApplyAvailability(held, "input.set");
 
-            var keys = AddLabel(root, T("hud.keys", state), 15, Deep);
-            keys.name = "lan.hud.keys";
-            keys.style.opacity = 0.75f;
-            HudStrip(keys);
+                var keys = AddLabel(root, T("hud.keys", state), 15, Deep);
+                keys.name = "lan.hud.keys";
+                keys.style.opacity = 0.75f;
+                HudStrip(keys);
 
-            var actions = Row(root);
-            var recover = AddButton(actions, T("input.recovery", state), Deep,
-                () => app.Input.TouchRecover(), "lan.race.recover");
-            // The gadget bit rides the next input frame to the host —
-            // the edge latch lives in the authoritative rules.
-            var gadget = AddButton(actions, T("input.gadget", state), Seafoam,
-                () => app.Input.TouchGadget(), "lan.race.gadget");
-            var camera = AddButton(actions, T("settings.camera", state), Ocean,
-                () => app.Dispatch("camera.toggle", emptyParams), "lan.race.camera");
-            var pause = AddButton(actions, T("input.pause", state), Coral,
-                () => app.Dispatch("pause.toggle", emptyParams), "lan.race.pause");
-            var leave = AddButton(actions, T("lan.leave", state), Deep,
-                () => app.Dispatch("lan.leave", emptyParams), "lan.race.leave");
-            ApplyAvailability(recover, "input.set");
-            ApplyAvailability(gadget, "input.set");
-            ApplyAvailability(camera, "camera.toggle");
-            ApplyAvailability(pause, "pause.toggle");
-            ApplyAvailability(leave, "lan.leave");
+                var actions = Row(root);
+                var recover = AddButton(actions, T("input.recovery", state), Deep,
+                    () => app.Input.TouchRecover(), "lan.race.recover");
+                // The gadget bit rides the next input frame to the host —
+                // the edge latch lives in the authoritative rules.
+                var gadget = AddButton(actions, T("input.gadget", state), Seafoam,
+                    () => app.Input.TouchGadget(), "lan.race.gadget");
+                var camera = AddButton(actions, T("settings.camera", state), Ocean,
+                    () => app.Dispatch("camera.toggle", emptyParams), "lan.race.camera");
+                var pause = AddButton(actions, T("input.pause", state), Coral,
+                    () => app.Dispatch("pause.toggle", emptyParams), "lan.race.pause");
+                var leave = AddButton(actions, T("lan.leave", state), Deep,
+                    () => app.Dispatch("lan.leave", emptyParams), "lan.race.leave");
+                ApplyAvailability(recover, "input.set");
+                ApplyAvailability(gadget, "input.set");
+                ApplyAvailability(camera, "camera.toggle");
+                ApplyAvailability(pause, "pause.toggle");
+                ApplyAvailability(leave, "lan.leave");
+
+            }
 
             statusLabel = AddLabel(root, "", 18, Deep);
             statusLabel.name = "status.persistence";

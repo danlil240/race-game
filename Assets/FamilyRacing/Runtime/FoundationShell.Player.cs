@@ -196,6 +196,12 @@ namespace FamilyRacing
             ApplyAvailability(langEnButton, "ui.language");
             ApplyAvailability(langHeButton, "ui.language");
 
+            var exit = AddButton(langRow, T("action.exitGame", state), PlayerNavy,
+                () => Application.Quit(), "action.exitGame");
+            exit.style.minWidth = 180;
+            exit.style.minHeight = 54;
+            exit.style.fontSize = 18;
+
             warningLabel = AddLabel(root, "", 16, Coral);
             warningLabel.name = "status.fontWarning";
             warningLabel.style.whiteSpace = WhiteSpace.Normal;
@@ -366,17 +372,19 @@ namespace FamilyRacing
             ApplyAvailability(practice, "race.start");
             ApplyAvailability(lan, "ui.navigate");
 
-            // Footer utility row: Settings + Switch Driver.
+            // Footer utility row: Settings, Switch Driver and Exit Game.
             var utility = Row(scroll);
             utility.name = "home.utility";
             var settings = AddButton(utility, T("action.settings", state), PlayerNavy,
                 () => app.Dispatch("ui.navigate", Screen("settings")), "action.settings");
             var back = AddButton(utility, T("player.switchDriver", state), PlayerNavy,
                 () => app.Dispatch("ui.navigate", Screen("profiles")), "action.back");
-            foreach (var btn in new[] { settings, back })
+            var exit = AddButton(utility, T("action.exitGame", state), PlayerNavy,
+                () => Application.Quit(), "action.exitGame");
+            foreach (var btn in new[] { settings, back, exit })
             {
                 btn.style.minWidth = 180;
-                btn.style.minHeight = 46;
+                btn.style.minHeight = 54;
                 btn.style.fontSize = 18;
             }
             ApplyAvailability(settings, "ui.navigate");
@@ -788,7 +796,7 @@ namespace FamilyRacing
             var exitBtn = root.Q<Button>("driving.exit");
             var actionsRow = recoverBtn != null ? recoverBtn.parent : null;
 
-            if (!Application.isMobilePlatform)
+            if (!TouchRaceLayout)
             {
                 if (controls != null) controls.style.display = DisplayStyle.None;
                 if (pauseBtn != null)
@@ -837,6 +845,13 @@ namespace FamilyRacing
                     }
                 }
                 if (actionsRow != null) actionsRow.style.display = DisplayStyle.None;
+            }
+
+            if (TouchRaceLayout)
+            {
+                // The deck owns the localized action buttons. Keep the
+                // gadget readout below the compact top utility dock.
+                gadgetCard.style.top = 104;
             }
 
             foreach (var panel in new[] { pausePanel, finishPanel, resultsPanel })

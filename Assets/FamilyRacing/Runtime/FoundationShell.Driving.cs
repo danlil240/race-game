@@ -402,50 +402,56 @@ namespace FamilyRacing
             spacer.style.flexGrow = 1f;
             root.Add(spacer);
 
-            // Steering keeps its physical meaning in both locales: the row
-            // is locked LTR so the left steer button stays on the left of
-            // the screen and the right one on the right under Hebrew RTL.
-            var controls = Row(root);
-            controls.name = "hud.controls";
-            controls.languageDirection = LanguageDirection.LTR;
-            AddHoldButton(controls, "◀", Ocean,
-                held => app.Input.TouchLeft(held), "driving.steerLeft");
-            AddHoldButton(controls, "▶", Ocean,
-                held => app.Input.TouchRight(held), "driving.steerRight");
-            AddHoldButton(controls, T("input.brake", state), Deep,
-                held => app.Input.TouchBrake(held), "driving.brake");
-            AddHoldButton(controls, T("input.drift", state), Seafoam,
-                held => app.Input.TouchDrift(held), "driving.drift");
-            AddHoldButton(controls, T("input.boost", state), Coral,
-                held => app.Input.TouchBoost(held), "driving.boost");
-            foreach (var held in controls.Children()) ApplyAvailability(held, "input.set");
+            if (TouchRaceLayout)
+                BuildRaceTouchControls(state, false);
+            else
+            {
+                // Steering keeps its physical meaning in both locales: the row
+                // is locked LTR so the left steer button stays on the left of
+                // the screen and the right one on the right under Hebrew RTL.
+                var controls = Row(root);
+                controls.name = "hud.controls";
+                controls.languageDirection = LanguageDirection.LTR;
+                AddHoldButton(controls, "◀", Ocean,
+                    held => app.Input.TouchLeft(held), "driving.steerLeft");
+                AddHoldButton(controls, "▶", Ocean,
+                    held => app.Input.TouchRight(held), "driving.steerRight");
+                AddHoldButton(controls, T("input.brake", state), Deep,
+                    held => app.Input.TouchBrake(held), "driving.brake");
+                AddHoldButton(controls, T("input.drift", state), Seafoam,
+                    held => app.Input.TouchDrift(held), "driving.drift");
+                AddHoldButton(controls, T("input.boost", state), Coral,
+                    held => app.Input.TouchBoost(held), "driving.boost");
+                foreach (var held in controls.Children()) ApplyAvailability(held, "input.set");
 
-            // Keyboard legend next to the touch controls — small, so it
-            // helps without competing with the big child-facing buttons.
-            var keys = AddLabel(root, T("hud.keys", state), 15, Deep);
-            keys.name = "hud.keys";
-            keys.style.opacity = 0.75f;
-            HudStrip(keys);
+                // Keyboard legend next to the touch controls — small, so it
+                // helps without competing with the big child-facing buttons.
+                var keys = AddLabel(root, T("hud.keys", state), 15, Deep);
+                keys.name = "hud.keys";
+                keys.style.opacity = 0.75f;
+                HudStrip(keys);
 
-            var actions = Row(root);
-            var recover = AddButton(actions, T("input.recovery", state), Deep,
-                () => app.Input.TouchRecover(), "driving.recover");
-            var camera = AddButton(actions, T("settings.camera", state), Ocean,
-                () => app.Dispatch("camera.toggle", emptyParams), "driving.camera");
-            // Gadgets are live (M5 Task 5): the button fires the held
-            // item through the same edge-latched input.set path the
-            // keyboard E key uses — the slot label names it.
-            var gadget = AddButton(actions, T("input.gadget", state), Seafoam,
-                () => app.Input.TouchGadget(), "driving.gadget");
-            var pause = AddButton(actions, T("input.pause", state), Coral,
-                () => app.Dispatch("pause.toggle", emptyParams), "driving.pause");
-            var exit = AddButton(actions, T("driving.exit", state), Deep,
-                () => app.Dispatch("race.exit", emptyParams), "driving.exit");
-            ApplyAvailability(recover, "input.set");
-            ApplyAvailability(camera, "camera.toggle");
-            ApplyAvailability(gadget, "input.set");
-            ApplyAvailability(pause, "pause.toggle");
-            ApplyAvailability(exit, "race.exit");
+                var actions = Row(root);
+                var recover = AddButton(actions, T("input.recovery", state), Deep,
+                    () => app.Input.TouchRecover(), "driving.recover");
+                var camera = AddButton(actions, T("settings.camera", state), Ocean,
+                    () => app.Dispatch("camera.toggle", emptyParams), "driving.camera");
+                // Gadgets are live (M5 Task 5): the button fires the held
+                // item through the same edge-latched input.set path the
+                // keyboard E key uses — the slot label names it.
+                var gadget = AddButton(actions, T("input.gadget", state), Seafoam,
+                    () => app.Input.TouchGadget(), "driving.gadget");
+                var pause = AddButton(actions, T("input.pause", state), Coral,
+                    () => app.Dispatch("pause.toggle", emptyParams), "driving.pause");
+                var exit = AddButton(actions, T("driving.exit", state), Deep,
+                    () => app.Dispatch("race.exit", emptyParams), "driving.exit");
+                ApplyAvailability(recover, "input.set");
+                ApplyAvailability(camera, "camera.toggle");
+                ApplyAvailability(gadget, "input.set");
+                ApplyAvailability(pause, "pause.toggle");
+                ApplyAvailability(exit, "race.exit");
+
+            }
 
             // Pause and finish overlays cover the screen when shown; both
             // keep the world dimly visible and offer their own actions.
@@ -618,13 +624,14 @@ namespace FamilyRacing
                 // the shared HUD keeps its existing input affordance.
                 var hint = root.Q<Label>("hud.gadget.hint");
                 if (hint != null) hint.text = string.IsNullOrEmpty(kind) ? T("hud.gadget.find",state)
-                    : T("hud.gadget."+kind,state) + "\n" + T("hud.gadget.use",state);
+                    : T("hud.gadget."+kind,state) + "\n" + T(TouchRaceLayout ? "hud.gadget.tap" : "hud.gadget.use",state);
                 var icon = root.Q<Label>("hud.gadget.icon");
                 if (icon != null) icon.text = kind == "turbo" ? ">>" : kind == "bubble-shield" ? "O" : kind == "foam-trap" ? "~" : "?";
                 var button = root.Q<Button>("driving.gadget");
                 if (hint != null && button != null)
                 {
-                    button.text = "E  ·  " + (string.IsNullOrEmpty(kind) ? T("input.gadget",state) : gadgetLabel.text);
+                    button.text = TouchRaceLayout ? T("input.gadget", state)
+                        : "E  ·  " + (string.IsNullOrEmpty(kind) ? T("input.gadget",state) : gadgetLabel.text);
                     var canUse = !string.IsNullOrEmpty(kind) && !state.paused && session.phase == "running";
                     button.SetEnabled(canUse);
                     if (playerPresentation) button.style.opacity = canUse ? 1f : 0.45f;
