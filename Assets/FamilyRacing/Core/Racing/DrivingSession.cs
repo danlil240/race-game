@@ -575,7 +575,8 @@ namespace FamilyRacing.Core.Racing
                     finished = phase == PhaseFinished,
                     x = motor.x,
                     y = motor.y,
-                    z = motor.z
+                    z = motor.z,
+                    heading = motor.heading
                 };
                 var poses = SegmentPoses(request, result);
                 for (var i = 0; i + 1 < poses.Count; i++)

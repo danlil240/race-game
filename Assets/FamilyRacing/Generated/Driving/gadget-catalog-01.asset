@@ -48,3 +48,48 @@ MonoBehaviour:
     slowMultiplier: 0.7
     slowDurationTicks: 45
     immunityTicks: 60
+  - gadgetId: homing-missile-01
+    kind: homing-missile
+    durationTicks: 0
+    accelerationMultiplier: 1
+    speedCapMultiplier: 1
+    charges: 0
+    patchRadiusMeters: 1.5
+    patchLifetimeTicks: 90
+    slowMultiplier: 0.4
+    slowDurationTicks: 27
+    immunityTicks: 45
+    projectileSpeedMetersPerSecond: 45
+    targetingRangeMeters: 70
+    turnRadiansPerSecond: 3
+    armingTicks: 18
+  - gadgetId: mine-01
+    kind: mine
+    durationTicks: 0
+    accelerationMultiplier: 1
+    speedCapMultiplier: 1
+    charges: 0
+    patchRadiusMeters: 2.5
+    patchLifetimeTicks: 360
+    slowMultiplier: 0.35
+    slowDurationTicks: 36
+    immunityTicks: 45
+    projectileSpeedMetersPerSecond: 45
+    targetingRangeMeters: 70
+    turnRadiansPerSecond: 3
+    armingTicks: 18
+  - gadgetId: emp-pulse-01
+    kind: emp-pulse
+    durationTicks: 0
+    accelerationMultiplier: 1
+    speedCapMultiplier: 1
+    charges: 0
+    patchRadiusMeters: 12
+    patchLifetimeTicks: 15
+    slowMultiplier: 0.6
+    slowDurationTicks: 45
+    immunityTicks: 45
+    projectileSpeedMetersPerSecond: 45
+    targetingRangeMeters: 70
+    turnRadiansPerSecond: 3
+    armingTicks: 18

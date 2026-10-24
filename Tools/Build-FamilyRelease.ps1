@@ -74,7 +74,7 @@ $logsDir = Join-Path $project "Logs\family-release\$runId"
 $ExpectedGameplayVersion = 'gameplay-4'          # NetworkSettings.GameplayVersion
 $ExpectedContentVersion  = 'full-content-1'      # GameplayCatalog.ContentVersion
 $ExpectedDrivingVersion  = 'full-content-1'      # FullContentSetup.DrivingVersion
-$ExpectedLanProtocol     = 3                     # NetworkSettings.LanProtocolVersion
+$ExpectedLanProtocol     = 4                     # NetworkSettings.LanProtocolVersion
 $ExpectedObservationSchema = 7                   # NetworkSettings.StateSchemaVersion
 $ExpectedProfileSchema   = 3                     # ProfileValidation.SchemaVersion
 

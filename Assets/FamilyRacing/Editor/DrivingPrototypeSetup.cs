@@ -257,6 +257,26 @@ namespace FamilyRacing.EditorTools
                     patchRadiusMeters = 3f, patchLifetimeTicks = 180,
                     slowMultiplier = 0.70f, slowDurationTicks = 45,
                     immunityTicks = 60
+                },
+                new GadgetCatalogAsset.GadgetRow
+                {
+                    gadgetId = "homing-missile-01", kind = "homing-missile",
+                    patchRadiusMeters = 1.5f, patchLifetimeTicks = 90,
+                    projectileSpeedMetersPerSecond = 45f, targetingRangeMeters = 70f,
+                    turnRadiansPerSecond = 3f, slowMultiplier = .4f,
+                    slowDurationTicks = 27, immunityTicks = 45
+                },
+                new GadgetCatalogAsset.GadgetRow
+                {
+                    gadgetId = "mine-01", kind = "mine", armingTicks = 18,
+                    patchRadiusMeters = 2.5f, patchLifetimeTicks = 360,
+                    slowMultiplier = .35f, slowDurationTicks = 36, immunityTicks = 45
+                },
+                new GadgetCatalogAsset.GadgetRow
+                {
+                    gadgetId = "emp-pulse-01", kind = "emp-pulse",
+                    patchRadiusMeters = 12f, patchLifetimeTicks = 15,
+                    slowMultiplier = .6f, slowDurationTicks = 45, immunityTicks = 45
                 }
             };
             EditorUtility.SetDirty(asset);

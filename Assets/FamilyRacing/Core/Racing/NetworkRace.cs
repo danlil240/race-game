@@ -535,6 +535,7 @@ namespace FamilyRacing.Core.Racing
                         racerInput.x = committed.x;
                         racerInput.y = committed.y;
                         racerInput.z = committed.z;
+                        racerInput.heading = committed.heading;
                     }
                     // The swept segments are the boundary's real
                     // substep path — a respawn teleport can never
@@ -678,14 +679,24 @@ namespace FamilyRacing.Core.Racing
             {
                 if (i == racer.slot || preStep[i] == null) continue;
                 var peer = preStep[i].motor;
-                if (peer == null) continue;
+                if (peer == null || preStep[i].finished || preStep[i].phase != DrivingSession.PhaseRunning
+                    || Math.Abs(peer.y - motor.y) > 2.5f) continue;
                 var dx = peer.x - motor.x;
                 var dz = peer.z - motor.z;
+                var distance2 = dx * dx + dz * dz;
+                var forward = dx * fx + dz * fz;
+                if (def != null && distance2 <= def.targetingRangeMeters * def.targetingRangeMeters
+                    && distance2 > 0 && forward >= .5f * (float)Math.Sqrt(distance2))
+                    context.rivalAhead = true;
+                if (def != null && distance2 <= def.patchRadiusMeters * def.patchRadiusMeters)
+                    context.rivalNearby = true;
                 if (dx * dx + dz * dz <= behind * behind
                     && dx * fx + dz * fz < 0f)
                     context.rivalNearBehind = true;
             }
             var ahead = NetworkSettings.AiGadgetPatchAheadMeters;
+            foreach (var missile in gadgetWorld.projectiles)
+                if (missile.targetParticipantId == racer.participantId) context.patchAhead = true;
             if (gadgetWorld.patches != null)
                 foreach (var patch in gadgetWorld.patches)
                 {

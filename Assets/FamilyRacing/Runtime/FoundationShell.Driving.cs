@@ -344,6 +344,10 @@ namespace FamilyRacing
             // race authors no gadget content at all.
             gadgetLabel = AddLabel(top, "", 22, Coral);
             gadgetLabel.name = "hud.gadget";
+            var gadgetIcon = new Label("?") { name = "hud.gadget.icon" };
+            gadgetIcon.style.width = 36;
+            gadgetIcon.style.height = 36;
+            top.Add(gadgetIcon);
 
             var boostRow = Row(root);
             // Same exposure as the readout strip: the caption is dark
@@ -626,7 +630,12 @@ namespace FamilyRacing
                 if (hint != null) hint.text = string.IsNullOrEmpty(kind) ? T("hud.gadget.find",state)
                     : T("hud.gadget."+kind,state) + "\n" + T(TouchRaceLayout ? "hud.gadget.tap" : "hud.gadget.use",state);
                 var icon = root.Q<Label>("hud.gadget.icon");
-                if (icon != null) icon.text = kind == "turbo" ? ">>" : kind == "bubble-shield" ? "O" : kind == "foam-trap" ? "~" : "?";
+                if (icon != null)
+                {
+                    var texture = GadgetIcons.TextureFor(kind);
+                    icon.text = texture != null ? "" : "?";
+                    icon.style.backgroundImage = texture != null ? new StyleBackground(texture) : StyleKeyword.None;
+                }
                 var button = root.Q<Button>("driving.gadget");
                 if (hint != null && button != null)
                 {

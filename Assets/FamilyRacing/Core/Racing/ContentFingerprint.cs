@@ -552,6 +552,10 @@ namespace FamilyRacing.Core.Racing
                     F(writer, gadget.slowMultiplier);
                     writer.Write(gadget.slowDurationTicks);
                     writer.Write(gadget.immunityTicks);
+                    F(writer, gadget.projectileSpeedMetersPerSecond);
+                    F(writer, gadget.targetingRangeMeters);
+                    F(writer, gadget.turnRadiansPerSecond);
+                    writer.Write(gadget.armingTicks);
                 }
         }
 

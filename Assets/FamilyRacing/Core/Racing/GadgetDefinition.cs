@@ -3,17 +3,20 @@ using System.Collections.Generic;
 
 namespace FamilyRacing.Core.Racing
 {
-    // Closed gadget kind set for the first world. Data only — Task 5 owns
-    // the authoritative behavior; this file pins the authored numbers.
+    // Authored gadget vocabulary. GadgetRules owns authoritative behavior.
     public static class GadgetKind
     {
         public const string Turbo = "turbo";
         public const string BubbleShield = "bubble-shield";
         public const string FoamTrap = "foam-trap";
+        public const string HomingMissile = "homing-missile";
+        public const string Mine = "mine";
+        public const string EmpPulse = "emp-pulse";
 
         public static bool IsValid(string kind)
         {
-            return kind == Turbo || kind == BubbleShield || kind == FoamTrap;
+            return kind == Turbo || kind == BubbleShield || kind == FoamTrap
+                || kind == HomingMissile || kind == Mine || kind == EmpPulse;
         }
     }
 
@@ -29,16 +32,20 @@ namespace FamilyRacing.Core.Racing
         public int durationTicks;
         public float accelerationMultiplier = 1f;
         public float speedCapMultiplier = 1f;
-        // Bubble shield: charges until it blocks one rival foam hit or
+        // Bubble shield: charges until it blocks one rival attack or
         // the race ends.
         public int charges;
-        // Foam trap: ground patch geometry/lifetime and the slowdown it
-        // applies to opponents (owner unaffected; no stacking).
+        // Offensive gadgets share hit effect parameters. Radius/lifetime
+        // describe the patch, missile collider, or EMP area by kind.
         public float patchRadiusMeters;
         public int patchLifetimeTicks;
         public float slowMultiplier = 1f;
         public int slowDurationTicks;
         public int immunityTicks;
+        public float projectileSpeedMetersPerSecond = 45f;
+        public float targetingRangeMeters = 70f;
+        public float turnRadiansPerSecond = 3f;
+        public int armingTicks = 18;
 
         public bool Validate(out string error)
         {
@@ -57,7 +64,8 @@ namespace FamilyRacing.Core.Racing
             {
                 if (charges <= 0) { error = "charges"; return false; }
             }
-            else if (kind == GadgetKind.FoamTrap)
+            else if (kind == GadgetKind.FoamTrap || kind == GadgetKind.Mine
+                || kind == GadgetKind.HomingMissile || kind == GadgetKind.EmpPulse)
             {
                 if (!Finite(patchRadiusMeters) || patchRadiusMeters <= 0f)
                 { error = "patchRadiusMeters"; return false; }
@@ -66,6 +74,17 @@ namespace FamilyRacing.Core.Racing
                 { error = "slowMultiplier"; return false; }
                 if (slowDurationTicks <= 0) { error = "slowDurationTicks"; return false; }
                 if (immunityTicks < 0) { error = "immunityTicks"; return false; }
+                if (kind == GadgetKind.Mine && armingTicks < 0)
+                { error = "armingTicks"; return false; }
+                if (kind == GadgetKind.HomingMissile)
+                {
+                    if (!Finite(projectileSpeedMetersPerSecond) || projectileSpeedMetersPerSecond <= 0f)
+                    { error = "projectileSpeedMetersPerSecond"; return false; }
+                    if (!Finite(targetingRangeMeters) || targetingRangeMeters <= 0f)
+                    { error = "targetingRangeMeters"; return false; }
+                    if (!Finite(turnRadiansPerSecond) || turnRadiansPerSecond <= 0f)
+                    { error = "turnRadiansPerSecond"; return false; }
+                }
             }
             return true;
         }

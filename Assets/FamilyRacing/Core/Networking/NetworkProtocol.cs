@@ -6,7 +6,7 @@ using FamilyRacing.Core.Racing;
 
 namespace FamilyRacing.Core.Networking
 {
-    // LAN session wire vocabulary (protocol 3) and its bounded codec.
+    // LAN session wire vocabulary (protocol 4) and its bounded codec.
     // The FRN2 magic is retained from the protocol-2 wire — the version
     // field `v` on join.request is what fences older peers.
     //

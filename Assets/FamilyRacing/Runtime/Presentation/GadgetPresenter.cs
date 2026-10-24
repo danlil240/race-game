@@ -28,7 +28,7 @@ namespace FamilyRacing
     // All motion (bob/spin/fade) is local wall-clock decoration; the
     // state itself is never touched. Paused frames freeze spin the same
     // way the authoritative clocks freeze.
-    public sealed class GadgetPresenter : MonoBehaviour
+    public sealed partial class GadgetPresenter : MonoBehaviour
     {
         private const float PickupSpinDegreesPerSecond = 120f;
         private const float PickupBobMeters = 0.25f;
@@ -155,6 +155,7 @@ namespace FamilyRacing
             if (!paused) bobPhase += deltaSeconds;
             SyncPickups(world);
             SyncPatches(world);
+            SyncWeapons(world, visualAlpha);
             SyncShields(state, world, visualAlpha);
         }
 
@@ -289,7 +290,7 @@ namespace FamilyRacing
             {
                 seen = new HashSet<string>(StringComparer.Ordinal);
                 foreach (var patch in live)
-                    if (patch != null && !string.IsNullOrEmpty(patch.patchId))
+                    if (patch != null && patch.kind != GadgetKind.Mine && !string.IsNullOrEmpty(patch.patchId))
                         seen.Add(patch.patchId);
             }
             // Retire views whose patch left the authoritative world.
@@ -305,7 +306,7 @@ namespace FamilyRacing
             if (live == null) return;
             foreach (var patch in live)
             {
-                if (patch == null || string.IsNullOrEmpty(patch.patchId))
+                if (patch == null || patch.kind == GadgetKind.Mine || string.IsNullOrEmpty(patch.patchId))
                     continue;
                 var view = PatchFor(patch);
                 if (view == null) continue;
@@ -547,11 +548,12 @@ namespace FamilyRacing
 
         private int ActiveCount()
         {
-            return ActivePickupCount + ActivePatchCount + ActiveShieldCount;
+            return ActivePickupCount + ActivePatchCount + ActiveShieldCount + ActiveWeaponCount;
         }
 
         private void DeactivateAll()
         {
+            DeactivateWeapons();
             foreach (var view in pickups)
             {
                 view.active = false;

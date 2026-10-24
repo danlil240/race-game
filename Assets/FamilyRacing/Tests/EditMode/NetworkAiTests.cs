@@ -19,6 +19,23 @@ namespace FamilyRacing.Tests
     {
         private const float Pi = (float)Math.PI;
 
+        [TestCase("homing-missile")]
+        [TestCase("mine")]
+        [TestCase("emp-pulse")]
+        public void NewWeaponsWaitForUsefulOpportunityAndReleaseInheritedLatch(string kind)
+        {
+            var racer = RacerAt(0, -10, 0, 12);
+            var context = new AiGadgetContext { heldItemId = kind, kind = kind, heldTicks = 90, heldGeneration = 9 };
+            var ai = new AiDriver();
+            Assert.IsFalse(ai.Sample(racer, WideSquareCourse(), context).Gadget, "do not waste weapon without a rival");
+            context.rivalAhead = context.rivalNearby = context.rivalNearBehind = true;
+            context.pressLatched = true;
+            Assert.IsFalse(ai.Sample(racer, WideSquareCourse(), context).Gadget, "release inherited button first");
+            context.pressLatched = false;
+            Assert.IsTrue(ai.Sample(racer, WideSquareCourse(), context).Gadget, "use when a rival enters the weapon window");
+            Assert.IsFalse(ai.Sample(racer, WideSquareCourse(), context).Gadget, "one use per generation");
+        }
+
         private sealed class FlatWorld : IMotorWorld
         {
             public GroundHit ProbeGround(MotorPose pose, float probeDistance)

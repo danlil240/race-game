@@ -154,7 +154,9 @@ namespace FamilyRacing
         private void PlayCueFor(DrivingEvent ev, FoundationState state)
         {
             if (catalog == null || ev == null) return;
-            var cue = catalog.CueForEvent(ev.kind);
+            var soundKind = ev.kind == GadgetRules.EventMissileHit || ev.kind == GadgetRules.EventMineHit
+                || ev.kind == GadgetRules.EventEmpHit ? GadgetRules.EventFoamHit : ev.kind;
+            var cue = catalog.CueForEvent(soundKind);
             if (cue == null) return;
             if (cue.clip == null)
             {

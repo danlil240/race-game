@@ -71,6 +71,8 @@ namespace FamilyRacing.Core.Racing
     [Serializable]
     public sealed class GadgetPatchState
     {
+        public string kind = GadgetKind.FoamTrap;
+        public int armingTicksRemaining;
         public string patchId = "";
         public string ownerParticipantId = "";
         public float x;
@@ -157,6 +159,8 @@ namespace FamilyRacing.Core.Racing
             new List<GadgetPickupState>();
         public List<GadgetPatchState> patches =
             new List<GadgetPatchState>();
+        public List<GadgetProjectileState> projectiles = new List<GadgetProjectileState>();
+        public List<GadgetPulseState> pulses = new List<GadgetPulseState>();
         public List<GadgetRacerState> racers =
             new List<GadgetRacerState>();
 
@@ -190,6 +194,10 @@ namespace FamilyRacing.Core.Racing
                 copy.patches.Add(patch != null ? patch.Copy() : null);
             foreach (var racer in racers)
                 copy.racers.Add(racer != null ? racer.Copy() : null);
+            foreach (var projectile in projectiles)
+                copy.projectiles.Add(projectile != null ? projectile.Copy() : null);
+            foreach (var pulse in pulses)
+                copy.pulses.Add(pulse != null ? pulse.Copy() : null);
             return copy;
         }
 
@@ -200,12 +208,14 @@ namespace FamilyRacing.Core.Racing
         {
             error = null;
             if (pickups == null || patches == null || racers == null
-                || itemBag == null)
+                || itemBag == null || projectiles == null || pulses == null)
             { error = "gadgetLists"; return false; }
             if (pickups.Count > NetworkSettings.GadgetPickupCapacity
                 || patches.Count > NetworkSettings.GadgetPatchCapacity
                 || racers.Count > NetworkSettings.ParticipantCapacity
-                || itemBag.Count > NetworkSettings.GadgetPickupCapacity)
+                || itemBag.Count > NetworkSettings.GadgetPickupCapacity
+                || projectiles.Count > NetworkSettings.GadgetProjectileCapacity
+                || pulses.Count > NetworkSettings.GadgetPulseCapacity)
             { error = "gadgetCapacity"; return false; }
             var seenPickups = new HashSet<string>(StringComparer.Ordinal);
             foreach (var pickup in pickups)
@@ -231,6 +241,38 @@ namespace FamilyRacing.Core.Racing
                 { error = "gadgetPatch"; return false; }
                 if (!seenPatches.Add(patch.patchId))
                 { error = "gadgetPatch.duplicate"; return false; }
+                if ((patch.kind != GadgetKind.FoamTrap && patch.kind != GadgetKind.Mine)
+                    || patch.armingTicksRemaining < 0 || patch.ticksRemaining <= 0
+                    || patch.slowMultiplier <= 0 || patch.slowMultiplier > 1
+                    || patch.slowTicks <= 0 || patch.immunityTicks < 0)
+                { error = "gadgetPatch.effect"; return false; }
+                if (patch.kind == GadgetKind.Mine && Racer(patch.ownerParticipantId) == null)
+                { error = "gadgetPatch.participant"; return false; }
+            }
+            var effects = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var p in projectiles)
+            {
+                if (p == null || string.IsNullOrEmpty(p.projectileId) || !effects.Add(p.projectileId)
+                    || string.IsNullOrEmpty(p.ownerParticipantId) || !Finite(p.x) || !Finite(p.y) || !Finite(p.z)
+                    || !Finite(p.heading) || !Finite(p.speed) || p.speed <= 0 || !Finite(p.turnRate) || p.turnRate <= 0
+                    || !Finite(p.radiusMeters) || p.radiusMeters <= 0 || p.ticksRemaining <= 0
+                    || !Finite(p.slowMultiplier) || p.slowMultiplier <= 0 || p.slowMultiplier > 1
+                    || p.slowTicks <= 0 || p.immunityTicks < 0 || p.targetParticipantId == null)
+                { error = "gadgetProjectile"; return false; }
+                if (Racer(p.ownerParticipantId) == null
+                    || (p.targetParticipantId != "" && (Racer(p.targetParticipantId) == null
+                        || p.targetParticipantId == p.ownerParticipantId)))
+                { error = "gadgetProjectile.participant"; return false; }
+            }
+            foreach (var p in pulses)
+            {
+                if (p == null || string.IsNullOrEmpty(p.pulseId) || !effects.Add(p.pulseId)
+                    || string.IsNullOrEmpty(p.ownerParticipantId) || !Finite(p.x) || !Finite(p.y) || !Finite(p.z)
+                    || !Finite(p.radiusMeters) || p.radiusMeters <= 0 || p.totalTicks <= 0
+                    || p.ticksRemaining <= 0 || p.ticksRemaining > p.totalTicks)
+                { error = "gadgetPulse"; return false; }
+                if (Racer(p.ownerParticipantId) == null)
+                { error = "gadgetPulse.participant"; return false; }
             }
             var seenRacers = new HashSet<string>(StringComparer.Ordinal);
             foreach (var racer in racers)
@@ -259,5 +301,29 @@ namespace FamilyRacing.Core.Racing
         {
             return !(float.IsNaN(v) || float.IsInfinity(v));
         }
+    }
+
+    [Serializable]
+    public sealed class GadgetProjectileState
+    {
+        public string projectileId = "";
+        public string ownerParticipantId = "";
+        public string targetParticipantId = "";
+        public float x, y, z, heading;
+        public float speed, turnRate, radiusMeters;
+        public int ticksRemaining;
+        public float slowMultiplier;
+        public int slowTicks, immunityTicks;
+        public GadgetProjectileState Copy() { return (GadgetProjectileState)MemberwiseClone(); }
+    }
+
+    [Serializable]
+    public sealed class GadgetPulseState
+    {
+        public string pulseId = "";
+        public string ownerParticipantId = "";
+        public float x, y, z, radiusMeters;
+        public int ticksRemaining, totalTicks;
+        public GadgetPulseState Copy() { return (GadgetPulseState)MemberwiseClone(); }
     }
 }

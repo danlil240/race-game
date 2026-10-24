@@ -38,6 +38,7 @@ namespace FamilyRacing.Core.Racing
         public float x;
         public float y;
         public float z;
+        public float heading;
         public List<GadgetSegment> segments = new List<GadgetSegment>();
     }
 
@@ -78,7 +79,9 @@ namespace FamilyRacing.Core.Racing
     //   4. collections resolve in slot order over authored site order —
     //      a same-tick tie always goes to the lower slot, and a full
     //      slot leaves the pickup untouched;
-    //   5. foam patches resolve in slot order over patch order — owner
+    //   5. missiles move and resolve swept contact, then mines resolve
+    //      against the earliest crossing rival (slot order breaks ties);
+    //   6. foam patches resolve in slot order over patch order — owner
     //      and already-resolved patches skip, shield absorbs one hit.
     // Event ids mint as "gadget-<raceId>-<tick>-<ordinal>" —
     // deterministic per boundary AND scoped to the race identity, so a
@@ -86,7 +89,7 @@ namespace FamilyRacing.Core.Racing
     // wire-side dedup window; the namespace stays disjoint from the
     // raceId-scoped "<raceId>-e<n>" ids the sessions and coordinator
     // emit.
-    public static class GadgetRules
+    public static partial class GadgetRules
     {
         public const string EventPickup = "gadget.pickup";
         public const string EventUsed = "gadget.used";
@@ -245,9 +248,9 @@ namespace FamilyRacing.Core.Racing
                 if (row == null) continue;
                 var pressed = entry.gadgetHeld && !row.gadgetHeld;
                 row.gadgetHeld = entry.gadgetHeld;
-                if (!pressed || entry.recovering) continue;
+                if (!pressed || entry.recovering || entry.finished) continue;
                 if (!string.IsNullOrEmpty(row.heldItemId))
-                    UseItem(state, row, entry, catalog, result.events,
+                    UseItem(state, row, entry, racers, catalog, result.events,
                         ref seq);
             }
 
@@ -262,6 +265,8 @@ namespace FamilyRacing.Core.Racing
                     result.events, ref seq);
             }
 
+            MoveProjectiles(state, racers, result.events, ref seq);
+            ResolveMines(state, racers, result.events, ref seq);
             // Patch hits last, in slot order over patch order.
             foreach (var entry in racers)
             {
@@ -342,9 +347,14 @@ namespace FamilyRacing.Core.Racing
             {
                 var patch = state.patches[i];
                 if (patch == null) { state.patches.RemoveAt(i); continue; }
+                if (patch.armingTicksRemaining > 0) patch.armingTicksRemaining--;
                 if (--patch.ticksRemaining <= 0)
                     state.patches.RemoveAt(i);
             }
+            for (var i = state.projectiles.Count - 1; i >= 0; i--)
+                if (--state.projectiles[i].ticksRemaining <= 0) state.projectiles.RemoveAt(i);
+            for (var i = state.pulses.Count - 1; i >= 0; i--)
+                if (--state.pulses[i].ticksRemaining <= 0) state.pulses.RemoveAt(i);
         }
 
         private static void TickRacerClocks(GadgetRacerState row)
@@ -363,6 +373,7 @@ namespace FamilyRacing.Core.Racing
         // authored charges, foam drops a bounded patch under the racer.
         private static void UseItem(GadgetWorldState state,
             GadgetRacerState row, GadgetRacerInput entry,
+            List<GadgetRacerInput> racers,
             GadgetDefinitionCatalog catalog, List<DrivingEvent> events,
             ref int seq)
         {
@@ -386,7 +397,14 @@ namespace FamilyRacing.Core.Racing
                     row.shieldCharges = def.charges;
                     break;
                 case GadgetKind.FoamTrap:
+                case GadgetKind.Mine:
                     DropPatch(state, entry, def, events, ref seq);
+                    break;
+                case GadgetKind.HomingMissile:
+                    LaunchMissile(state, entry, racers, def, events, ref seq);
+                    break;
+                case GadgetKind.EmpPulse:
+                    FireEmp(state, entry, racers, def, events, ref seq);
                     break;
             }
         }
@@ -401,12 +419,14 @@ namespace FamilyRacing.Core.Racing
                 state.patches.RemoveAt(0);
             var patch = new GadgetPatchState
             {
+                kind = def.kind,
+                armingTicksRemaining = def.kind == GadgetKind.Mine ? def.armingTicks : 0,
                 patchId = "patch-" + (++state.nextPatchSerial)
                     .ToString(System.Globalization.CultureInfo.InvariantCulture),
                 ownerParticipantId = entry.participantId ?? "",
-                x = entry.x,
+                x = entry.x - (def.kind == GadgetKind.Mine ? (float)Math.Sin(entry.heading) * 3f : 0f),
                 y = entry.y,
-                z = entry.z,
+                z = entry.z - (def.kind == GadgetKind.Mine ? (float)Math.Cos(entry.heading) * 3f : 0f),
                 radiusMeters = def.patchRadiusMeters,
                 verticalRangeMeters = PatchVerticalRangeMeters,
                 ticksRemaining = def.patchLifetimeTicks,
@@ -415,7 +435,7 @@ namespace FamilyRacing.Core.Racing
                 immunityTicks = def.immunityTicks
             };
             state.patches.Add(patch);
-            events.Add(Emit(state, EventFoamDropped, entry.participantId,
+            events.Add(Emit(state, def.kind == GadgetKind.Mine ? EventMineDropped : EventFoamDropped, entry.participantId,
                 patch.patchId, ref seq));
         }
 
@@ -481,10 +501,10 @@ namespace FamilyRacing.Core.Racing
             List<DrivingEvent> events, ref int seq)
         {
             if (state.patches == null || state.patches.Count == 0) return;
-            if (row.foamImmunityTicksRemaining > 0) return;
             foreach (var patch in state.patches)
             {
                 if (patch == null) continue;
+                if (patch.kind == GadgetKind.Mine || row.foamImmunityTicksRemaining > 0) continue;
                 if (patch.ownerParticipantId == entry.participantId)
                     continue;
                 if (row.immunePatchIds != null

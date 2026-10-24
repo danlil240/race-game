@@ -10,8 +10,8 @@ using UnityEngine;
 namespace FamilyRacing.Networking
 {
     /// <summary>
-    /// Bounded typed codec for the Task-9 gameplay wire (protocol 3 —
-    /// Task 5 gadget state extends the snapshot body).
+    /// Bounded typed codec for the gameplay wire (protocol 4 includes
+    /// moving missiles, armed mines, and EMP presentation state).
     /// Every packet is a 4-byte ASCII tag followed by a UTF-8 JSON body
     /// produced by JsonUtility against the serializable Core DTOs:
     ///
@@ -234,7 +234,7 @@ namespace FamilyRacing.Networking
             // outcome.
             if (snapshot.state.result != null && !snapshot.state.result.finalized)
                 snapshot.state.result = null;
-            // Gadget world (protocol 3): a stripped or absent field
+            // Gadget world: a stripped or absent field
             // decodes as the empty instance — normalize back to null so
             // a gadget-free race never masquerades as gadget-enabled.
             // A present world validates atomically: one malformed or
@@ -314,6 +314,8 @@ namespace FamilyRacing.Networking
                 && (world.itemBag == null || world.itemBag.Count == 0)
                 && (world.pickups == null || world.pickups.Count == 0)
                 && (world.patches == null || world.patches.Count == 0)
+                && (world.projectiles == null || world.projectiles.Count == 0)
+                && (world.pulses == null || world.pulses.Count == 0)
                 && (world.racers == null || world.racers.Count == 0);
         }
 

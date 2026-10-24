@@ -24,6 +24,8 @@ namespace FamilyRacing.Core.Racing
         // detector, so the follower must emit a release first.
         public bool pressLatched;
         public bool rivalNearBehind;
+        public bool rivalAhead;
+        public bool rivalNearby;
         public bool patchAhead;
     }
 
@@ -358,7 +360,14 @@ namespace FamilyRacing.Core.Racing
                                 <= NetworkSettings.AiBoostMaxSteer;
                             break;
                         case GadgetKind.FoamTrap:
+                        case GadgetKind.Mine:
                             window = gadgets.rivalNearBehind;
+                            break;
+                        case GadgetKind.HomingMissile:
+                            window = gadgets.rivalAhead;
+                            break;
+                        case GadgetKind.EmpPulse:
+                            window = gadgets.rivalNearby;
                             break;
                         case GadgetKind.BubbleShield:
                             window = gadgets.patchAhead;

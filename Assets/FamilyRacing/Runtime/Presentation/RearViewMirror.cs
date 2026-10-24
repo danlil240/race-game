@@ -70,7 +70,7 @@ namespace FamilyRacing
             // patch was dropped and expired between two rendered snapshots.
             foreach (var ev in cursor.Consume(state.drivingEvents))
             {
-                if (ev.kind == GadgetRules.EventFoamDropped && ev.participantId == localId)
+                if ((ev.kind == GadgetRules.EventFoamDropped || ev.kind == GadgetRules.EventMineDropped) && ev.participantId == localId)
                 {
                     RememberPatch(ev.detail);
                     if (!paused) { deployed = true; shotRemaining = ShotSeconds; }
@@ -78,7 +78,7 @@ namespace FamilyRacing
                 if (paused || !ownedPatches.Contains(ev.detail ?? "")
                     || ev.participantId == localId || Find(race, ev.participantId) == null)
                     continue;
-                if (ev.kind != GadgetRules.EventFoamHit && ev.kind != GadgetRules.EventShieldBlocked)
+                if (ev.kind != GadgetRules.EventFoamHit && ev.kind != GadgetRules.EventMineHit && ev.kind != GadgetRules.EventShieldBlocked)
                     continue;
                 focusedId = ev.participantId;
                 blocked = ev.kind == GadgetRules.EventShieldBlocked;

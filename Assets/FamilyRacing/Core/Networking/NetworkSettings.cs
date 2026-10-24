@@ -14,7 +14,9 @@ namespace FamilyRacing.Core.Networking
         // the snapshot — pickups, patches and per-racer rows — so a
         // protocol-2 client lacking the gadget contract is fenced before
         // a seat is dealt rather than silently racing without items.
-        public const int LanProtocolVersion = 3;
+        // Protocol 4 adds moving missiles, armed mines, and EMP visuals;
+        // protocol-3 clients cannot validate or render this weapon state.
+        public const int LanProtocolVersion = 4;
 
         // Observation schema emitted by FoundationState once the network
         // slice exists. Profile schema (1 -> 2 in a later task) is a
@@ -229,6 +231,8 @@ namespace FamilyRacing.Core.Networking
         // snapshot ceiling or grow unboundedly under spam.
         public const int GadgetPickupCapacity = 32;
         public const int GadgetPatchCapacity = 16;
+        public const int GadgetProjectileCapacity = 16;
+        public const int GadgetPulseCapacity = 8;
         public const int GadgetImmunePatchCapacity = 32;
 
         // --- Task 6: client prediction + remote presentation -----------

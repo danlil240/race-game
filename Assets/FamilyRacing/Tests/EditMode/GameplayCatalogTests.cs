@@ -782,6 +782,10 @@ namespace FamilyRacing.Tests
             }, "foam slow multiplier");
             Changes(c => c.Gadgets.pickupRespawnTicks = 301, "pickup respawn");
             Changes(c => c.Gadgets.heldSlotCapacity = 2, "held slot capacity");
+            Changes(c => c.Gadgets.gadgets[0].projectileSpeedMetersPerSecond = 46, "missile speed");
+            Changes(c => c.Gadgets.gadgets[0].targetingRangeMeters = 71, "missile range");
+            Changes(c => c.Gadgets.gadgets[0].turnRadiansPerSecond = 4, "missile turn rate");
+            Changes(c => c.Gadgets.gadgets[0].armingTicks = 19, "mine arming");
 
             // Difficulty presets.
             Changes(c => c.Difficulties[0].brakeMarginScale = 1.11f,
@@ -932,7 +936,7 @@ namespace FamilyRacing.Tests
             Assert.That(
                 FamilyRacing.Core.Networking.NetworkSettings
                     .LanProtocolVersion,
-                Is.EqualTo(3));
+                Is.EqualTo(4));
             Assert.That(
                 FamilyRacing.Core.Networking.NetworkSettings
                     .StateSchemaVersion,

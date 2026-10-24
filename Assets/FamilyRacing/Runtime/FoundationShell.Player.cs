@@ -762,10 +762,12 @@ namespace FamilyRacing
                 gadgetLabel.style.marginLeft = gadgetLabel.style.marginRight = 0;
                 gadgetLabel.style.whiteSpace = WhiteSpace.Normal;
             }
-            var icon = new Label("?") { name = "hud.gadget.icon" };
+            var icon = root.Q<Label>("hud.gadget.icon") ?? new Label("?") { name = "hud.gadget.icon" };
             icon.style.position = Position.Absolute;
             icon.style.left = 14;
             icon.style.top = 18;
+            icon.style.width = 40;
+            icon.style.height = 40;
             icon.style.fontSize = 30;
             icon.style.unityFontStyleAndWeight = FontStyle.Bold;
             icon.style.color = PlayerMint;

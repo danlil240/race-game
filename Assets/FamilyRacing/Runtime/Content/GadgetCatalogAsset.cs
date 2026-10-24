@@ -16,7 +16,7 @@ namespace FamilyRacing
         public sealed class GadgetRow
         {
             public string gadgetId = "";
-            // One of GadgetKind: turbo | bubble-shield | foam-trap.
+            // One of the recognized GadgetKind values.
             public string kind = "";
             // Turbo.
             public int durationTicks;
@@ -30,6 +30,10 @@ namespace FamilyRacing
             public float slowMultiplier = 1f;
             public int slowDurationTicks;
             public int immunityTicks;
+            public float projectileSpeedMetersPerSecond = 45f;
+            public float targetingRangeMeters = 70f;
+            public float turnRadiansPerSecond = 3f;
+            public int armingTicks = 18;
         }
 
         public int pickupRespawnTicks = 300;
@@ -63,7 +67,11 @@ namespace FamilyRacing
                         patchLifetimeTicks = row.patchLifetimeTicks,
                         slowMultiplier = row.slowMultiplier,
                         slowDurationTicks = row.slowDurationTicks,
-                        immunityTicks = row.immunityTicks
+                        immunityTicks = row.immunityTicks,
+                        projectileSpeedMetersPerSecond = row.projectileSpeedMetersPerSecond,
+                        targetingRangeMeters = row.targetingRangeMeters,
+                        turnRadiansPerSecond = row.turnRadiansPerSecond,
+                        armingTicks = row.armingTicks
                     });
                 }
             if (!catalog.Validate(out error))

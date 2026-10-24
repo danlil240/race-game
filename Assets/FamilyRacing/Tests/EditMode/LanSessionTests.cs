@@ -417,8 +417,10 @@ namespace FamilyRacing.Tests
         }
 
         [Test]
-        public void ProtocolThreeIsTheLanContract()
+        public void ProtocolFourIsTheLanContract()
         {
+            // Combat weapons advance the LAN contract to protocol 4;
+            // earlier clients cannot interpret moving/armed effect state.
             // Task 9: the physical replication epoch introduced protocol
             // 2; M5 Task 5 bumps it to 3 — the snapshot body now carries
             // the authoritative gadget world, so old peers must not join
@@ -428,7 +430,7 @@ namespace FamilyRacing.Tests
             // gameplay-3: the GameplayCatalog contract (objectives,
             // difficulty, economy, gadgets) is now part of what peers
             // must agree on.
-            Assert.That(NetworkSettings.LanProtocolVersion, Is.EqualTo(3));
+            Assert.That(NetworkSettings.LanProtocolVersion, Is.EqualTo(4));
             Assert.That(NetworkSettings.GameplayVersion,
                 Is.EqualTo("gameplay-4"));
             Assert.That(NetworkSettings.StateSchemaVersion, Is.EqualTo(7));
@@ -441,7 +443,7 @@ namespace FamilyRacing.Tests
             Dictionary<string, string> fields;
             Assert.That(NetworkProtocol.TryDecode(
                 JoinRequest("p-1"), out type, out fields));
-            Assert.That(fields["v"], Is.EqualTo("3"));
+            Assert.That(fields["v"], Is.EqualTo("4"));
             Assert.That(fields["fp"],
                 Is.EqualTo(LanCatalog().CompatibilityFingerprint),
                 "join.request carries the canonical tuning fingerprint");
@@ -531,7 +533,7 @@ namespace FamilyRacing.Tests
         {
             var host = StandaloneHost(link, probe);
             var descriptor = host.Snapshot().descriptor;
-            Assert.That(descriptor.lanProtocol, Is.EqualTo(3));
+            Assert.That(descriptor.lanProtocol, Is.EqualTo(4));
             Assert.That(descriptor.contentVersion,
                 Is.EqualTo("lan-content-1"));
             Assert.That(descriptor.contentFingerprint,

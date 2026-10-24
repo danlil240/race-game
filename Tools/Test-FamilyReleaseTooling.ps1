@@ -631,7 +631,7 @@ try {
          $manifest.identity.applicationId -eq 'com.daniel.familyracing' -and
          $manifest.gameplay.gameplayVersion -eq 'gameplay-4' -and
          $manifest.gameplay.contentVersion -eq 'full-content-1' -and
-         $manifest.gameplay.lanProtocol -eq 3 -and
+         $manifest.gameplay.lanProtocol -eq 4 -and
          $manifest.gameplay.observationSchema -eq 7 -and
          $manifest.gameplay.profileSchema -eq 3 -and
          $manifest.gameplay.backend -eq 'arcade' -and

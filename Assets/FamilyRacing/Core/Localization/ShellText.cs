@@ -91,11 +91,17 @@ namespace FamilyRacing.Core.Localization
             ["hud.gadget.use"] = new[] { "E / click to use", "E / לחצו להפעלה" },
             ["hud.gadget.tap"] = new[] { "Tap Gadget to use", "לחצו על גאדג'ט להפעלה" },
             ["hud.gadget.turbo"] = new[] { "A burst of extra speed", "פרץ מהירות נוסף" },
-            ["hud.gadget.bubble-shield"] = new[] { "Blocks one foam hit", "חוסם פגיעת קצף אחת" },
+            ["hud.gadget.bubble-shield"] = new[] { "Blocks one incoming attack", "חוסם התקפה אחת" },
             ["hud.gadget.foam-trap"] = new[] { "Drops a trap behind you", "מפיל מלכודת מאחוריכם" },
             ["gadget.turbo"] = new[] { "Turbo", "טורבו" },
             ["gadget.bubble-shield"] = new[] { "Bubble shield", "מגן בועות" },
             ["gadget.foam-trap"] = new[] { "Foam trap", "מלכודת קצף" },
+            ["gadget.homing-missile"] = new[] { "Homing missile", "טיל מתביית" },
+            ["gadget.mine"] = new[] { "Mine", "מוקש" },
+            ["gadget.emp-pulse"] = new[] { "EMP pulse", "פעימה אלקטרומגנטית" },
+            ["hud.gadget.homing-missile"] = new[] { "Chases a rival ahead", "רודף אחרי יריב מלפנים" },
+            ["hud.gadget.mine"] = new[] { "Drops an armed mine behind you", "מניח מוקש מאחוריכם" },
+            ["hud.gadget.emp-pulse"] = new[] { "Slows nearby rivals", "מאט יריבים קרובים" },
             // Keyboard legend: key names stay Latin in both locales — they
             // name the physical key caps, not words to translate.
             ["hud.keys"] = new[] {
