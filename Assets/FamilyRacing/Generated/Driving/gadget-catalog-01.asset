@@ -17,9 +17,9 @@ MonoBehaviour:
   gadgets:
   - gadgetId: turbo-01
     kind: turbo
-    durationTicks: 60
-    accelerationMultiplier: 1.25
-    speedCapMultiplier: 1.1
+    durationTicks: 150
+    accelerationMultiplier: 1.75
+    speedCapMultiplier: 1.5
     charges: 0
     patchRadiusMeters: 0
     patchLifetimeTicks: 0

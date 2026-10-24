@@ -110,7 +110,7 @@ namespace FamilyRacing.Core.Racing
         private float CorneringMargin()
         {
             return NetworkSettings.AiCorneringMargin
-                * (difficulty != null ? difficulty.brakeMarginScale : 1f);
+                / (difficulty != null ? difficulty.brakeMarginScale : 1f);
         }
 
         // Effective boost-spend threshold: the authored charge the
@@ -234,13 +234,13 @@ namespace FamilyRacing.Core.Racing
                 && pursuitBrake <= 0f
                 && Math.Abs(steer) >= NetworkSettings.AiDriftSteerThreshold
                 && motor.speed >= NetworkSettings.AiDriftMinSpeed;
-            // Boost is held on straights with a charged meter — the same
-            // hold-to-fire semantics a human uses; the motor's charge and
-            // duration rules bound it. Boosting while braking or leaning
-            // hard is suppressed the way a human would feather off.
+            // The charge threshold starts a burst; it must not cut that
+            // burst short as the meter drains. Keep holding while active
+            // on a safe straight and let the motor bound charge/duration.
+            // Braking or significant steering still releases the boost.
             var boost = brake <= 0f
                 && Math.Abs(steer) <= NetworkSettings.AiBoostMaxSteer
-                && motor.boostCharge >= BoostMinCharge();
+                && (motor.boostActive || motor.boostCharge >= BoostMinCharge());
 
             // A grounded near-stopped streak requests the ordinary
             // recover one-shot (queued and consumed like any command).

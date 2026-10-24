@@ -225,8 +225,8 @@ namespace FamilyRacing.EditorTools
         }
 
         // The authored first-world gadget catalog (M5 Task 5): the
-        // exact defaults the task brief pins — 60-tick turbo at 1.25x
-        // acceleration/1.10x cap, a one-charge bubble shield, and a
+        // balanced pickup defaults — a five-second turbo at 1.75x
+        // acceleration/1.50x cap, a one-charge bubble shield, and a
         // 3 m/180-tick foam trap slowing rivals to 0.70x for 45 ticks
         // with 60 ticks of post-hit immunity. The pickup respawn is
         // 300 ticks at one held slot. Re-runs rewrite the rows to the
@@ -242,9 +242,9 @@ namespace FamilyRacing.EditorTools
                 new GadgetCatalogAsset.GadgetRow
                 {
                     gadgetId = "turbo-01", kind = "turbo",
-                    durationTicks = 60,
-                    accelerationMultiplier = 1.25f,
-                    speedCapMultiplier = 1.10f
+                    durationTicks = 150,
+                    accelerationMultiplier = 1.75f,
+                    speedCapMultiplier = 1.50f
                 },
                 new GadgetCatalogAsset.GadgetRow
                 {
