@@ -1,6 +1,6 @@
 # Foundations continuation report: environment verification, Tasks 1–2
 
-Date: 2026-10-11. Workspace: `C:\Users\daniel\race-game`, unborn `feature/family-racing` (all files untracked; nothing committed).
+Date: 2026-10-11. Workspace: `C:\Users\example-user\race-game`, unborn `feature/family-racing` (all files untracked; nothing committed).
 
 ## Environment verification
 
@@ -12,7 +12,7 @@ Date: 2026-10-11. Workspace: `C:\Users\daniel\race-game`, unborn `feature/family
 | Installed modules | `Editor\Data\PlaybackEngines`: `windowsstandalonesupport`, `WebGLSupport`; offline documentation installed. **Missing: Android Build Support/SDK/NDK/OpenJDK and Windows IL2CPP** required by the plan. |
 | License | Unity Personal entitlement **activated** (Hub licensing log: entitlement licenses activated, personal EULA agreed; license file under the Hub package `LocalCache\Local\Unity\licenses`). The 6000.6.5f1 editor launched once in batch mode (`%LOCALAPPDATA%\Unity\Editor\Editor.log`). |
 | .NET | SDK `10.0.401`, runtime `10.0.12`, `Microsoft.NETCore.App.Ref` pack present under `C:\Program Files\dotnet`. |
-| NuGet cache | `C:\Users\daniel\.nuget\packages` does not exist — **no cached packages**, so `dotnet restore`/`dotnet test` for `Tools/CoreTests` requires network and was NOT run. |
+| NuGet cache | `C:\Users\example-user\.nuget\packages` does not exist — **no cached packages**, so `dotnet restore`/`dotnet test` for `Tools/CoreTests` requires network and was NOT run. |
 
 ### Blockers for later tasks
 

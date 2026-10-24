@@ -1,6 +1,6 @@
 # Foundation task: local profiles and persistence
 
-Owner: profile implementer. Workspace: C:\Users\daniel\race-game.
+Owner: profile implementer. Workspace: C:\Users\example-user\race-game.
 
 Implement only the profile foundation from GAME_PLAN.md, with tests first. Do not implement racing, progression rewards, purchases, UI, Unity editor bootstrap, networking, or generated content. Do not install tools or spawn agents. Do not commit until root integration review. Root is installing .NET SDK 10 and Unity 6000.3.26f1.
 

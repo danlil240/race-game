@@ -2,7 +2,7 @@
 
 ## 1. Summary and agreed boundaries
 
-**Deliverable:** `C:\Users\daniel\race-game\GAME_PLAN.md`.
+**Deliverable:** `C:\Users\example-user\race-game\GAME_PLAN.md`.
 
 **File status:** Saved in the project root on 2026-10-11. This is the approved design; implementation and validation status are tracked separately in `IMPLEMENTATION_STATUS.md`.
 
