@@ -35,7 +35,7 @@ The next implementation package is Harbor Havoc course authoring, followed by co
 
 ## Verification and review
 
-The Windows preview built successfully after the review fixes; its [build record](playful-chaos-preview/build.json) identifies the build environment. Captured layouts: [English touch race](playful-chaos-preview/touch-race-en.png), [Hebrew touch race](playful-chaos-preview/touch-race-he.png), [English tutorial](playful-chaos-preview/tutorial-en.png), [Hebrew tutorial](playful-chaos-preview/tutorial-he.png), [home](playful-chaos-preview/home-en.png), and [completed race](playful-chaos-preview/results-en.png). The final targeted layout rerun passed 2/2 tests.
+The Windows preview built successfully after the review fixes. The final targeted layout rerun passed 2/2 tests. Build records and English/Hebrew screenshots are local generated evidence under `docs/playtests/playful-chaos-preview/` and are excluded from Git.
 
 The first package passed 849 core tests, 977 EditMode tests (one inherited ignored), 333 Python tooling tests and 27 verification-tooling checks. The runtime smoke run completed a two-lap race through ordinary driving inputs, displayed results, and started a fresh rematch without granting progression rewards. The player finished in 56.2 seconds; all three AI finished by 62.1 seconds. This existing course is shorter than the planned Harbor Havoc target.
 

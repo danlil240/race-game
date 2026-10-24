@@ -41,3 +41,7 @@ credentials.json
 service-account*.json
 # Agent connection files contain per-run authentication tokens
 connection.json
+
+# Generated QA sessions and playtest evidence stay local
+/docs/qa/
+/docs/playtests/*/
