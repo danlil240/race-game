@@ -73,6 +73,8 @@ namespace FamilyRacing
         public void Bind(FoundationApp owner)
         {
             app = owner;
+            releaseUpdates = GetComponent<ReleaseUpdateChecker>();
+            if (releaseUpdates == null) releaseUpdates = gameObject.AddComponent<ReleaseUpdateChecker>();
             document = GetComponent<UIDocument>();
             root = document.rootVisualElement;
             playerHud = GetComponent<AssetTrialHud>();
@@ -120,6 +122,9 @@ namespace FamilyRacing
             root.languageDirection = state.language == "he"
                 ? LanguageDirection.RTL : LanguageDirection.LTR;
             var key = state.screen + "|" + state.language + "|" + state.activeSlot;
+            // A late network response must never rebuild racing controls or drop touch capture.
+            if (state.screen == "profiles" || state.screen == "sandbox")
+                key += "|update:" + UpdateNoticeKey;
             foreach (var slot in state.slots) key += "|" + slot.status;
             // LAN screens rebuild on roster/discovery/config/delivery
             // changes as well — the signature is cheap and covers only the
@@ -222,6 +227,7 @@ namespace FamilyRacing
                     break;
             }
             if (playerPresentation) StylePlayerScreen(state);
+            BuildUpdateNotice(state);
         }
 
         private Label AddLabel(VisualElement parent, string text, int size, Color color)

@@ -12,6 +12,10 @@ namespace FamilyRacing.Core.Localization
 
         private static readonly Dictionary<string, string[]> Catalog = new Dictionary<string, string[]>
         {
+            ["update.available"] = new[] { "New version available:", "גרסה חדשה זמינה:" },
+            ["update.installed"] = new[] { "installed", "מותקנת" },
+            ["update.open"] = new[] { "View update on GitHub", "צפייה בעדכון ב-GitHub" },
+            ["update.later"] = new[] { "Later", "מאוחר יותר" },
             ["shell.title"] = new[] { "Family Racing", "מירוץ משפחתי" },
             ["home.title"] = new[] { "Race Planet", "כוכב המרוצים" },
             ["home.subtitle"] = new[] { "Choose a mode and hit the track", "בחרו מצב משחק וצאו למסלול" },
