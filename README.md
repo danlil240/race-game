@@ -5,6 +5,9 @@ early development. Design and acceptance criteria live in `GAME_PLAN.md`;
 progress is tracked in `IMPLEMENTATION_STATUS.md` and
 `docs/FOUNDATIONS_PLAN.md`.
 
+Production CI, signed release setup and startup GitHub update notifications:
+[production guide](docs/PRODUCTION.md).
+
 ## What exists today
 
 **Graybox driving prototype (M2, under review).** On top of the
