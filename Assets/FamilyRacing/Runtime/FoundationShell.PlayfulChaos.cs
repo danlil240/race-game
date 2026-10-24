@@ -61,25 +61,25 @@ namespace FamilyRacing
             // Preserve the shared deck's nested clusters, safe areas and utility controls.
             if (!sharedDeck)
             {
-            controls.style.position = Position.Absolute;
-            controls.style.left = controls.style.right = 12;
-            controls.style.bottom = 12;
-            controls.style.height = 180;
-            controls.pickingMode = PickingMode.Ignore;
-            foreach (var element in controls.Children())
-            {
-                element.style.position = Position.Absolute;
-                element.style.minWidth = element.style.width = 100;
-                element.style.minHeight = element.style.height = 80;
-                element.style.fontSize = 21;
-                element.style.bottom = 0;
-                if (element.name == "driving.steerLeft") element.style.left = 0;
-                else if (element.name == "driving.steerRight") element.style.left = 110;
-                else if (element.name == "driving.brake")
-                { element.style.left = 0; element.style.bottom = 90; }
-                else if (element.name == "driving.drift") element.style.right = 110;
-                else element.style.right = 0;
-            }
+                controls.style.position = Position.Absolute;
+                controls.style.left = controls.style.right = 12;
+                controls.style.bottom = 12;
+                controls.style.height = 180;
+                controls.pickingMode = PickingMode.Ignore;
+                foreach (var element in controls.Children())
+                {
+                    element.style.position = Position.Absolute;
+                    element.style.minWidth = element.style.width = 100;
+                    element.style.minHeight = element.style.height = 80;
+                    element.style.fontSize = 21;
+                    element.style.bottom = 0;
+                    if (element.name == "driving.steerLeft") element.style.left = 0;
+                    else if (element.name == "driving.steerRight") element.style.left = 110;
+                    else if (element.name == "driving.brake")
+                    { element.style.left = 0; element.style.bottom = 90; }
+                    else if (element.name == "driving.drift") element.style.right = 110;
+                    else element.style.right = 0;
+                }
             }
             keys.text = T("fun.keys", state);
             keys.style.display = touch ? DisplayStyle.None : DisplayStyle.Flex;
@@ -92,30 +92,35 @@ namespace FamilyRacing
 
             if (!sharedDeck)
             {
-            actions.style.position = Position.Absolute;
-            actions.style.right = 12;
-            actions.style.bottom = 104;
-            actions.pickingMode = PickingMode.Ignore;
-            foreach (var element in actions.Children())
+                actions.style.position = Position.Absolute;
+                actions.style.right = 12;
+                actions.style.bottom = 104;
+                actions.pickingMode = PickingMode.Ignore;
+                foreach (var element in actions.Children())
+                {
+                    element.style.minWidth = element.style.width = 100;
+                    element.style.minHeight = element.style.height = 80;
+                    element.style.fontSize = 19;
+                    element.style.whiteSpace = WhiteSpace.Normal;
+                    element.style.display = touch && (element.name == "driving.gadget"
+                        || element.name == "driving.recover")
+                        ? DisplayStyle.Flex : DisplayStyle.None;
+                    if (element.name == "driving.recover")
+                        element.style.minWidth = element.style.width = 120;
+                }
+            }
+            if (!sharedDeck || !touch)
             {
-                element.style.minWidth = element.style.width = 100;
-                element.style.minHeight = element.style.height = 80;
-                element.style.fontSize = 19;
-                element.style.whiteSpace = WhiteSpace.Normal;
-                element.style.display = touch && (element.name == "driving.gadget"
-                    || element.name == "driving.recover")
-                    ? DisplayStyle.Flex : DisplayStyle.None;
-                if (element.name == "driving.recover")
-                    element.style.minWidth = element.style.width = 120;
+                pause.RemoveFromHierarchy();
+                // Keep keyboard pause below the modal overlays. Touch pause
+                // stays in the shared utility dock with its safe-area layout.
+                root.Insert(root.IndexOf(pauseOverlay), pause);
+                pause.style.display = DisplayStyle.Flex;
+                pause.style.position = Position.Absolute;
+                pause.style.top = pause.style.right = 12;
+                pause.style.height = pause.style.minHeight = 48;
+                pause.style.width = pause.style.minWidth = 100;
             }
-            }
-            pause.RemoveFromHierarchy();
-            root.Add(pause);
-            pause.style.display = DisplayStyle.Flex;
-            pause.style.position = Position.Absolute;
-            pause.style.top = pause.style.right = 12;
-            pause.style.height = pause.style.minHeight = 48;
-            pause.style.width = pause.style.minWidth = 100;
             var menu = Row(pauseOverlay);
             AddButton(menu, T("settings.camera", state), Ocean,
                 () => app.Dispatch("camera.toggle", emptyParams), "driving.menuCamera");

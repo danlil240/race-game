@@ -67,6 +67,24 @@ namespace FamilyRacing.Tests
         }
 
         [UnityTest]
+        public IEnumerator TouchPauseStaysInSafeAreaDockBelowModalOverlays()
+        {
+            Send("quickRace.start", new Dictionary<string, string>
+            { { "courseId", "graybox-01" }, { "classId", "car" }, { "vehicleId", "car-01" }, { "difficulty", "easy" } });
+            for (var frame = 0; frame < 4; frame++) yield return null;
+            var root = document.rootVisualElement;
+            var deck = root.Q<VisualElement>("hud.controls");
+            var pause = root.Q<Button>("driving.pause");
+            Assert.That(pause.parent.ClassListContains("race-utilities"), Is.True,
+                "Touch pause must retain the shared utility dock's safe-area geometry.");
+            Assert.That(deck.Contains(pause), Is.True);
+            Assert.That(root.IndexOf(deck), Is.LessThan(root.IndexOf(root.Q("overlay.pause"))),
+                "The pause overlay must render above its launch control.");
+            Assert.That(root.IndexOf(deck), Is.LessThan(root.IndexOf(root.Q("overlay.results"))),
+                "Results must render above touch controls.");
+        }
+
+        [UnityTest]
         public IEnumerator TouchRecoveryRemainsReachableAndDispatchesNormalInput()
         {
             Send("quickRace.start", new Dictionary<string, string>
