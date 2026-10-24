@@ -177,12 +177,11 @@ namespace FamilyRacing
             frame?.RemoveFromHierarchy();
             frame = new VisualElement { name = "hud.mirror", pickingMode = PickingMode.Ignore };
             frame.style.position = Position.Absolute;
-            frame.style.top = 66;
-            frame.style.left = Length.Percent(50);
-            frame.style.translate = new Translate(Length.Percent(-50), 0);
-            frame.style.width = Length.Percent(27);
-            frame.style.maxWidth = 324;
-            frame.style.minWidth = 220;
+            // Keep the driving line clear: stack under the left-side boost
+            // meter rather than covering the vanishing point of the road.
+            frame.style.top = 108;
+            frame.style.left = 16;
+            frame.style.width = 236;
             frame.style.backgroundColor = new Color(.055f, .10f, .15f, .98f);
             frame.style.paddingLeft = frame.style.paddingRight = 5;
             frame.style.paddingTop = 4; frame.style.paddingBottom = 5;
