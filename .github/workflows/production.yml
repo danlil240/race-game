@@ -2,7 +2,8 @@ name: Production release
 
 on:
   push:
-    tags: ['v*']
+    # Preview/beta/RC tags publish separately from stable production builds.
+    tags: ['v*', '!v*-*']
 
 permissions:
   contents: read
