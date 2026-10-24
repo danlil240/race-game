@@ -121,7 +121,10 @@ namespace FamilyRacing
             // in the chain reports unready rather than throwing.
             try
             {
-                return defaultFont.HasCharacters(RequiredCharacters, out _, true, true);
+                // Bind warms the atlas once. A readiness read must not ask
+                // the Latin font to add missing Hebrew glyphs every frame
+                // before searching the already-warmed fallback chain.
+                return defaultFont.HasCharacters(RequiredCharacters, out _, true, false);
             }
             catch (Exception)
             {

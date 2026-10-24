@@ -754,6 +754,87 @@ namespace FamilyRacing.Tests
         // --- semantic controls ------------------------------------------------
 
         [UnityTest]
+        public IEnumerator TouchDeckSeparatesThumbsAndPressFeedbackSurvivesRefresh()
+        {
+            yield return ToRunning();
+            var left = Widget<Button>("driving.steerLeft");
+            var right = Widget<Button>("driving.steerRight");
+            var boost = Widget<Button>("driving.boost");
+            Assert.That(left.parent.name, Is.EqualTo("hud.controls.steering"));
+            Assert.That(boost.parent.name, Is.EqualTo("hud.controls.actions"));
+            Assert.That(left.worldBound.xMax, Is.LessThan(right.worldBound.xMin));
+            Assert.That(right.worldBound.xMax + 100, Is.LessThan(boost.worldBound.xMin),
+                "Leave the center of the track unobstructed between thumb clusters.");
+            Assert.That(left.Q("control.icon"), Is.Not.Null);
+            Assert.That(Widget<Button>("driving.pause").parent.name, Is.EqualTo("hud.utilities"));
+            PointerDownOn(left, fingerId: 0);
+            PointerDownOn(boost, fingerId: 1);
+            Pump();
+            shell.Refresh(Snapshot());
+            Assert.That(left.ClassListContains("race-control--pressed"), Is.True);
+            Assert.That(boost.ClassListContains("race-control--pressed"), Is.True);
+            Assert.That(Snapshot().input.steering, Is.EqualTo(-1));
+            Assert.That(Snapshot().input.boost, Is.True);
+            PointerUpOn(left, fingerId: 0);
+            Assert.That(left.ClassListContains("race-control--pressed"), Is.False);
+            Assert.That(boost.ClassListContains("race-control--pressed"), Is.True);
+            PointerCancelOn(boost, fingerId: 1);
+            Assert.That(boost.ClassListContains("race-control--pressed"), Is.False);
+            Pump();
+            Assert.That(Snapshot().input.boost, Is.False);
+        }
+
+        [UnityTest]
+        public IEnumerator TouchDeckKeepsPhysicalSteeringOrderInHebrew()
+        {
+            yield return ToRunning();
+            var state = Snapshot();
+            state.language = "he";
+            shell.Refresh(state);
+            yield return null;
+            var left = Widget<Button>("driving.steerLeft");
+            var right = Widget<Button>("driving.steerRight");
+            Assert.That(left.worldBound.xMax, Is.LessThan(right.worldBound.xMin));
+            Assert.That(Widget<VisualElement>("hud.controls").languageDirection, Is.EqualTo(LanguageDirection.LTR));
+            Assert.That(Widget<Button>("driving.boost").text,
+                Is.EqualTo(Core.Localization.ShellText.Get("input.boost", "he")));
+            var deck = Widget<VisualElement>("hud.controls");
+            Assert.That(deck.pickingMode, Is.EqualTo(PickingMode.Ignore));
+            Assert.That(Widget<Button>("driving.brake").worldBound.yMax,
+                Is.LessThanOrEqualTo(document.rootVisualElement.worldBound.yMax));
+        }
+
+        [UnityTest]
+        public IEnumerator TouchActionReleaseClearsFeedbackWhileDisabled()
+        {
+            yield return ToRunning();
+            var button = Widget<Button>("driving.recover");
+            PointerDownOn(button, fingerId: 0);
+            Assert.That(button.ClassListContains("race-control--pressed"), Is.True);
+            button.SetEnabled(false);
+            PointerUpOn(button, fingerId: 0);
+            yield return null;
+            button.SetEnabled(true);
+            Assert.That(button.ClassListContains("race-control--pressed"), Is.False,
+                "Pausing or spending an item during a touch must not leave its button pressed.");
+        }
+
+        [UnityTest]
+        public IEnumerator SecondFingerOnActionDoesNotCancelTheFirstClick()
+        {
+            yield return ToRunning();
+            var button = Widget<Button>("driving.recover");
+            PointerDownOn(button, fingerId: 0);
+            PointerDownOn(button, fingerId: 1);
+            PointerUpOn(button, fingerId: 1);
+            Assert.That(button.ClassListContains("race-control--pressed"), Is.True);
+            PointerUpOn(button, fingerId: 0);
+            Pump();
+            Assert.That(Snapshot().input.recover, Is.True);
+            Assert.That(button.ClassListContains("race-control--pressed"), Is.False);
+        }
+
+        [UnityTest]
         public IEnumerator SimultaneousHoldsComposeSteerDriftBoost()
         {
             yield return ToRunning();
@@ -1346,6 +1427,32 @@ namespace FamilyRacing.Tests
         }
 
         // --- Task 8: horizon-stable camera + bounded physical feedback ----
+        [Test]
+        public void FastVehicleKeepsOneTickInterpolationWhenRenderSkipsATick()
+        {
+            var go = new GameObject("skipped-tick-car");
+            loose.Add(go);
+            var presentation = go.AddComponent<VehiclePresentation>();
+            presentation.SetVehicle(Asset<VehicleDefinitionAsset>(a =>
+            {
+                a.vehicleId = "car-01"; a.silhouette = "car";
+                a.bodyScale = Vector3.one; a.bodyColor = Color.white;
+            }));
+            presentation.ApplyPose(new MotorState { tick = 10, z = 10f, speed = 45f }, 0f, 1f);
+            // 45 m/s at 30 Hz: two legal steps cover 3 m, exceeding the
+            // old fixed teleport threshold. The interpolation window must
+            // cover only the final tick, from z=11.5 to z=13.
+            presentation.ApplyPose(new MotorState { tick = 12, z = 13f, speed = 45f }, 0f, 0.25f);
+            Assert.That(go.transform.position.z, Is.EqualTo(11.875f).Within(0.001f));
+            presentation.ApplyPose(new MotorState { tick = 12, z = 13f, speed = 45f }, 0f, 0.75f);
+            Assert.That(go.transform.position.z, Is.EqualTo(12.625f).Within(0.001f));
+            // Recovery can happen on the skipped tick; the next commit
+            // has already cleared recovering and is accelerating from rest.
+            presentation.ApplyPose(new MotorState { tick = 14, z = 16f, speed = 0.4f }, 0f, 0f);
+            Assert.That(go.transform.position.z, Is.EqualTo(16f).Within(0.001f), "A recovery on a skipped tick must still snap.");
+            presentation.ApplyPose(new MotorState { tick = 16, z = 50f, recovering = true }, 0f, 0f);
+            Assert.That(go.transform.position.z, Is.EqualTo(50f).Within(0.001f), "Real recovery still snaps immediately.");
+        }
 
         // A committed physical sample for camera tests: the legacy
         // envelope plus the VehiclePhysicsState the physical backend

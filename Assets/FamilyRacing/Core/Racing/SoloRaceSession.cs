@@ -316,6 +316,8 @@ namespace FamilyRacing.Core.Racing
             IVehicleSimulation simulation)
         {
             var emitted = new List<DrivingEvent>();
+            NetworkRaceState steppedRace = null;
+            DrivingSessionState steppedTrial = null;
             if (paused || abortReason.Length > 0)
                 return Build(emitted);
 
@@ -327,6 +329,7 @@ namespace FamilyRacing.Core.Racing
                     { participantId, input }
                 };
                 var state = race.Step(inputs, simulation);
+                steppedRace = state;
                 emitted.AddRange(state.events);
                 if (race.Result != null && result == null)
                     result = race.Result;
@@ -372,6 +375,7 @@ namespace FamilyRacing.Core.Racing
                 }
                 emitted.AddRange(completed.events);
                 var snap = completed.state;
+                steppedTrial = snap;
                 var finished = snap != null && snap.finished;
                 // Metric facts count at completed simulated boundaries
                 // only — a finished session's drain boundary can never
@@ -399,7 +403,7 @@ namespace FamilyRacing.Core.Racing
                         trial.evt.courseId, trial.classId);
                 }
             }
-            return Build(emitted);
+            return Build(emitted, steppedRace, steppedTrial);
         }
 
         // The solo pause contract: entering pause holds the session's own
@@ -494,7 +498,9 @@ namespace FamilyRacing.Core.Racing
                 trial.session.CancelPending(reason);
         }
 
-        private SoloRaceState Build(List<DrivingEvent> emitted)
+        private SoloRaceState Build(List<DrivingEvent> emitted,
+            NetworkRaceState steppedRace = null,
+            DrivingSessionState steppedTrial = null)
         {
             var state = new SoloRaceState
             {
@@ -516,7 +522,10 @@ namespace FamilyRacing.Core.Racing
             };
             if (race != null)
             {
-                var raceState = race.Snapshot();
+                var raceState = steppedRace ?? race.Snapshot();
+                // Events publish once on the solo boundary, as before;
+                // its nested race snapshot is an observation-only slice.
+                if (steppedRace != null) raceState.events.Clear();
                 state.race = raceState;
                 state.phase = raceState.phase;
                 state.paused = state.paused || raceState.paused;
@@ -525,7 +534,7 @@ namespace FamilyRacing.Core.Racing
             }
             else if (trial != null)
             {
-                var snap = trial.session.Snapshot();
+                var snap = steppedTrial ?? trial.session.Snapshot();
                 state.trial = snap;
                 state.phase = snap != null ? snap.phase : "";
                 foreach (var metric in trialMetrics.Snapshot())

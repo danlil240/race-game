@@ -153,18 +153,44 @@ namespace FamilyRacing
             var pos = new Vector3(motor.x, motor.y, motor.z);
             if (motor.tick != interpTick)
             {
+                var tickGap = motor.tick - interpTick;
+                var reset = interpTick < 0 || tickGap <= 0 || motor.recovering;
+                var span = Mathf.Max(1f, tickGap);
                 interpPrevPos = interpCurPos;
                 interpPrevYaw = interpCurYaw;
                 interpCurPos = pos;
                 interpCurYaw = motor.heading;
                 interpTick = motor.tick;
-                // A respawn or any teleport-scale jump must snap, never
-                // sweep the body across the course for a frame.
-                if ((interpCurPos - interpPrevPos).sqrMagnitude
-                        > TeleportSnapDistance * TeleportSnapDistance)
+                // The render frame can span several simulation ticks.
+                // Compare travel per tick so normal fast motion is not
+                // mistaken for a teleport after a missed frame.
+                var snapDistance = TeleportSnapDistance;
+                if (tickGap > 1)
+                {
+                    // A skipped recovery can already have cleared its
+                    // one-tick flag. Its near-zero velocity must not
+                    // qualify a relocation as continuous fast travel.
+                    var velocity = new Vector3(motor.speed, motor.lateralSpeed, motor.verticalSpeed);
+                    var travel = velocity.magnitude * span
+                        / Core.Networking.NetworkSettings.SimulationTicksPerSecond;
+                    snapDistance = Mathf.Max(TeleportSnapDistance,
+                        Mathf.Min(TeleportSnapDistance * span, travel + 0.5f));
+                }
+                if (reset || (interpCurPos - interpPrevPos).sqrMagnitude
+                        > snapDistance * snapDistance)
                 {
                     interpPrevPos = interpCurPos;
                     interpPrevYaw = interpCurYaw;
+                }
+                else if (tickGap > 1)
+                {
+                    // Reconstruct the final one-tick window from the
+                    // observed span. Reusing the older rendered commit
+                    // would rewind the visual when alpha wraps to zero.
+                    var fraction = 1f - 1f / span;
+                    interpPrevPos = Vector3.LerpUnclamped(interpPrevPos, interpCurPos, fraction);
+                    interpPrevYaw += Mathf.DeltaAngle(interpPrevYaw * Mathf.Rad2Deg,
+                        interpCurYaw * Mathf.Rad2Deg) * Mathf.Deg2Rad * fraction;
                 }
             }
             var a = Mathf.Clamp01(alpha);
@@ -183,8 +209,8 @@ namespace FamilyRacing
 
         // Committed poses the visual interpolates between, plus the last
         // tick applied. TeleportSnapDistance exceeds the largest legal
-        // per-tick move (boost top speed ~28 m/s ≈ 0.94 m a tick), so
-        // anything bigger is a respawn, not motion.
+        // per-tick move (Grand Tour boost speed <= 54.2 m/s, or 1.81 m
+        // per 30 Hz tick). Render-frame travel is scaled by its tick span.
         private const float TeleportSnapDistance = 2f;
         private Vector3 interpPrevPos, interpCurPos;
         private float interpPrevYaw, interpCurYaw;

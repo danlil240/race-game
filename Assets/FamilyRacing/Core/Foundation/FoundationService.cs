@@ -320,6 +320,7 @@ namespace FamilyRacing.Core.Foundation
         }
 
         public bool Paused { get { return paused; } }
+        public string CurrentScreen { get { return screen; } }
         public bool Racing { get { return driving != null || soloRace != null; } }
 
         // The currently held (leased) local input. Task 5's LAN path feeds

@@ -1,0 +1,8 @@
+<linker>
+  <!-- Gadget visuals create these primitives dynamically, then remove their
+       colliders. Keep the component types available in stripped IL2CPP builds. -->
+  <assembly fullname="UnityEngine.PhysicsModule">
+    <type fullname="UnityEngine.SphereCollider" preserve="all" />
+    <type fullname="UnityEngine.CapsuleCollider" preserve="all" />
+  </assembly>
+</linker>

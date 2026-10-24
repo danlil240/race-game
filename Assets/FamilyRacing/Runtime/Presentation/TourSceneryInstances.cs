@@ -28,9 +28,14 @@ namespace FamilyRacing
             foreach(var group in groups)
             {
                 if(group.mesh==null||group.material==null||group.localMatrices==null||group.localMatrices.Length==0)continue;
-                if(rebuild||group.worldMatrices==null)
+                if(rebuild||group.worldMatrices==null
+                    ||group.worldMatrices.Length!=group.localMatrices.Length)
                 {
-                    group.worldMatrices=new Matrix4x4[group.localMatrices.Length];
+                    // Visibility toggles static chunks as the car moves.
+                    // Recompute placements without reallocating their buffers.
+                    if(group.worldMatrices==null
+                        ||group.worldMatrices.Length!=group.localMatrices.Length)
+                        group.worldMatrices=new Matrix4x4[group.localMatrices.Length];
                     for(int i=0;i<group.worldMatrices.Length;i++)group.worldMatrices[i]=matrix*group.localMatrices[i];
                 }
                 if(SystemInfo.supportsInstancing)

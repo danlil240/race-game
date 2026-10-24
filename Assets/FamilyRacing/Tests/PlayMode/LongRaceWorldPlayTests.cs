@@ -128,6 +128,40 @@ namespace FamilyRacing.Tests
             }
             finally{Object.DestroyImmediate(parent);Object.DestroyImmediate(mat);}
         }
+        [Test] public void ReactivatedSceneryReusesItsPlacementBufferAndUpdatesItsPose()
+        {
+            var parent = new GameObject("SceneryCacheTest");
+            var cube = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            var material = new Material(Shader.Find("Universal Render Pipeline/Unlit")) {
+                enableInstancing = true
+            };
+            try
+            {
+                var instances = parent.AddComponent<TourSceneryInstances>();
+                var group = new TourSceneryInstances.Group {
+                    mesh = cube.GetComponent<MeshFilter>().sharedMesh,
+                    material = material,
+                    localMatrices = new[] { Matrix4x4.Translate(new Vector3(2, 0, 5)) }
+                };
+                instances.groups = new[] { group };
+                instances.Draw();
+                var buffer = group.worldMatrices;
+                parent.SetActive(false);
+                parent.transform.position = new Vector3(10, 3, 0);
+                parent.SetActive(true);
+                instances.Draw();
+                Assert.That(group.worldMatrices, Is.SameAs(buffer),
+                    "Streaming scenery back into view must not allocate fresh placement buffers.");
+                Assert.That(group.worldMatrices[0].MultiplyPoint3x4(Vector3.zero),
+                    Is.EqualTo(new Vector3(12, 3, 5)),
+                    "Reusing storage must still rebuild the transformed placement.");
+            }
+            finally
+            {
+                Object.DestroyImmediate(parent); Object.DestroyImmediate(cube);
+                Object.DestroyImmediate(material);
+            }
+        }
         [Test] public void LongRoutesHaveContinuousPavedGridAndRecoveryPoses()
         {
 #if UNITY_EDITOR

@@ -283,6 +283,23 @@ namespace FamilyRacing.Tests
             }
         }
 
+        [Test]
+        public void ReadinessDoesNotRetryAddingGlyphsAfterWarmup()
+        {
+            Assert.That(FontsReady(document), Is.True);
+            var recorder = UnityEngine.Profiling.Recorder.Get("FontAsset.TryAddCharacter");
+            Assert.That(recorder.isValid, Is.True);
+            recorder.enabled = false;
+            recorder.FilterToCurrentThread();
+            recorder.enabled = true;
+            bool ready;
+            try { ready = FontsReady(document); }
+            finally { recorder.enabled = false; recorder.CollectFromAllThreads(); }
+            Assert.That(ready, Is.True);
+            Assert.That(recorder.sampleBlockCount, Is.Zero,
+                "Per-frame readiness must only inspect glyph coverage; Bind already populated the font atlases.");
+        }
+
         private static int WarmupInvocationCount()
         {
             var field = typeof(FoundationApp).Assembly

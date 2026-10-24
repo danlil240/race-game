@@ -863,6 +863,22 @@ namespace FamilyRacing.Core.Racing
             return entry;
         }
 
+        // The coordinator samples all AI/gadget inputs from the same
+        // pre-step boundary. Those readers need only these fields, not
+        // a newly copied checkpoint ledger for every racer and tick.
+        internal DrivingSessionState InputSnapshot()
+        {
+            return new DrivingSessionState
+            {
+                motor = motor.Copy(),
+                vehicleId = vehicleId,
+                phase = phase,
+                nextCheckpoint = progress.expectedCheckpoint,
+                simulationBackend = raceBackend == VehicleSimulationBackend.PhysicalAssisted
+                    ? "physicalAssisted" : "arcade"
+            };
+        }
+
         public DrivingSessionState Snapshot()
         {
             var state = new DrivingSessionState

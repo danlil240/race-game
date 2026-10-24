@@ -417,7 +417,7 @@ namespace FamilyRacing.Core.Racing
             }
 
             // The single pre-step view every AI sample reads this tick.
-            var preStep = SnapshotAll();
+            var preStep = SnapshotAll(forInput: true);
 
             // --- 1) prepare every request (+ pending resets) ------------
             var prepared = new List<Prepared>(racers.Length);
@@ -620,7 +620,13 @@ namespace FamilyRacing.Core.Racing
                 }
             }
             TryFinalize(emitted);
-            return BuildState(emitted);
+            // CompleteStep already produced independent session snapshots.
+            // Reuse those owned copies instead of copying every checkpoint
+            // and motor again at this same publication boundary.
+            var committedStates = new DrivingSessionState[racers.Length];
+            for (var i = 0; i < prepared.Count; i++)
+                committedStates[prepared[i].racer.slot] = completed[i].state;
+            return BuildState(emitted, committedStates);
         }
 
         // Ordered concatenation for the metrics view: the session's own
@@ -935,11 +941,12 @@ namespace FamilyRacing.Core.Racing
             emitted.Add(CoordinatorEvent("race.finalized", result.resultId));
         }
 
-        private DrivingSessionState[] SnapshotAll()
+        private DrivingSessionState[] SnapshotAll(bool forInput = false)
         {
             var snaps = new DrivingSessionState[racers.Length];
             for (var i = 0; i < racers.Length; i++)
-                snaps[i] = racers[i].session.Snapshot();
+                snaps[i] = forInput ? racers[i].session.InputSnapshot()
+                    : racers[i].session.Snapshot();
             return snaps;
         }
 
@@ -974,9 +981,12 @@ namespace FamilyRacing.Core.Racing
             return a.slot.CompareTo(b.slot);
         }
 
-        private NetworkRaceState BuildState(List<DrivingEvent> emitted)
+        private NetworkRaceState BuildState(List<DrivingEvent> emitted,
+            DrivingSessionState[] committedStates = null)
         {
-            var snaps = SnapshotAll();
+            var snaps = committedStates ?? SnapshotAll();
+            for (var i = 0; i < snaps.Length; i++)
+                if (snaps[i] == null) snaps[i] = racers[i].session.Snapshot();
             var order = StandingOrder(snaps);
             var positionOf = new int[racers.Length];
             for (var i = 0; i < order.Count; i++) positionOf[order[i]] = i + 1;
