@@ -41,7 +41,7 @@ namespace FamilyRacing.Tests
             Assert.That(profile.slot, Is.EqualTo(slot));
             Assert.That(profile.avatar, Is.EqualTo(avatar));
             Assert.That(profile.colorIndex, Is.EqualTo(slot));
-            Assert.That(profile.schemaVersion, Is.EqualTo(2));
+            Assert.That(profile.schemaVersion, Is.EqualTo(3));
             Assert.That(Guid.TryParseExact(profile.id, "D", out _), Is.True);
             Assert.That(profile.language, Is.EqualTo("he"));
             Assert.That(profile.camera, Is.EqualTo("chase"));
@@ -53,6 +53,17 @@ namespace FamilyRacing.Tests
             Assert.That(profile.unlockedVehicles, Is.EquivalentTo(new[] { "car-01", "motorcycle-01" }));
             Assert.That(profile.appliedResults, Is.Not.Null);
             Assert.That(profile.appliedResults.Count, Is.Zero);
+            Assert.That(profile.eventProgress, Is.Not.Null);
+            Assert.That(profile.worldProgress, Is.Not.Null);
+            Assert.That(profile.finaleProgress, Is.Not.Null);
+            Assert.That(profile.vehicleUpgrades, Is.Not.Null);
+            Assert.That(profile.ownedCosmetics, Is.Not.Null);
+            Assert.That(profile.equippedCosmetics, Is.Not.Null);
+            Assert.That(profile.activeBounties, Is.Not.Null);
+            Assert.That(profile.bountyRotationCursor, Is.Zero);
+            Assert.That(profile.timeTrialRecords, Is.Not.Null);
+            Assert.That(profile.purchaseReceipts, Is.Not.Null);
+            Assert.That(profile.pendingRaceContexts, Is.Not.Null);
         }
 
         [Test]
@@ -219,7 +230,7 @@ namespace FamilyRacing.Tests
         public void FuturePrimaryBlocksEvenWithValidOlderBackup()
         {
             var future = ValidProfile(0);
-            future.schemaVersion = 3;
+            future.schemaVersion = 4;
             File.WriteAllText(Primary(0), serializer.Serialize(future));
             File.WriteAllText(Backup(0), serializer.Serialize(ValidProfile(0)));
             var before = File.ReadAllText(Primary(0));
@@ -235,7 +246,7 @@ namespace FamilyRacing.Tests
         {
             File.WriteAllText(Primary(0), serializer.Serialize(ValidProfile(0)));
             var future = ValidProfile(0);
-            future.schemaVersion = 3;
+            future.schemaVersion = 4;
             File.WriteAllText(Backup(0), serializer.Serialize(future));
             Assert.That(Store().Load(0).Status, Is.EqualTo(ProfileLoadStatus.Loaded));
         }
@@ -246,7 +257,7 @@ namespace FamilyRacing.Tests
         public void SaveRefusesDestructiveOverwriteOfBlockedPrimary(string kind)
         {
             var blocked = ValidProfile(0);
-            if (kind == "future") blocked.schemaVersion = 3;
+            if (kind == "future") blocked.schemaVersion = 4;
             if (kind == "invalid") blocked.coins = -1;
             var original = kind == "corrupt" ? "private corrupt content" : serializer.Serialize(blocked);
             File.WriteAllText(Primary(0), original);
@@ -265,7 +276,7 @@ namespace FamilyRacing.Tests
         {
             File.WriteAllText(Primary(0), serializer.Serialize(ValidProfile(0)));
             var profile = ValidProfile(0);
-            profile.schemaVersion = 3;
+            profile.schemaVersion = 4;
             var backup = future ? serializer.Serialize(profile) : "corrupt backup";
             File.WriteAllText(Backup(0), backup);
             var original = File.ReadAllText(Primary(0));
@@ -508,7 +519,7 @@ namespace FamilyRacing.Tests
         {
             return new ProfileSave
             {
-                schemaVersion = 2,
+                schemaVersion = 3,
                 id = "11111111-1111-4111-8111-111111111111",
                 slot = slot,
                 avatar = "fox",
@@ -520,7 +531,18 @@ namespace FamilyRacing.Tests
                 voiceVolume = 1f,
                 coins = 0,
                 unlockedVehicles = new List<string> { "car-01", "motorcycle-01" },
-                appliedResults = new List<AppliedResultReceipt>()
+                appliedResults = new List<AppliedResultReceipt>(),
+                eventProgress = new List<EventProgress>(),
+                worldProgress = new List<WorldProgress>(),
+                finaleProgress = new List<FinaleProgress>(),
+                vehicleUpgrades = new List<VehicleUpgrade>(),
+                ownedCosmetics = new List<string>(),
+                equippedCosmetics = new List<string>(),
+                activeBounties = ProfileProgressSeed.CreateInitialBounties(),
+                bountyRotationCursor = 0,
+                timeTrialRecords = new List<TimeTrialRecord>(),
+                purchaseReceipts = new List<PurchaseReceipt>(),
+                pendingRaceContexts = new List<RaceRewardContext>()
             };
         }
 
@@ -530,7 +552,7 @@ namespace FamilyRacing.Tests
             switch (invariant)
             {
                 case "schema": profile.schemaVersion = 0; break;
-                case "futureSchema": profile.schemaVersion = 3; break;
+                case "futureSchema": profile.schemaVersion = 4; break;
                 case "legacySchema": profile.schemaVersion = 1; break;
                 case "nullReceipts": profile.appliedResults = null; break;
                 case "nullReceipt":

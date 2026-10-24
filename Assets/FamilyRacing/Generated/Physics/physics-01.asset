@@ -27,3 +27,8 @@ MonoBehaviour:
   beachedSeconds: 8
   overturnedSeconds: 2
   outsideBoundsSeconds: 1.5
+  eventType: 
+  vehicleClass: 
+  parTicks: 0
+  isFinale: 0
+  objectives: []

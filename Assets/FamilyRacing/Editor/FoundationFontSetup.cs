@@ -40,6 +40,65 @@ namespace FamilyRacing.EditorTools
             if (text.defaultFontAsset != latin)
                 EnsureFallbacks(text.defaultFontAsset, latin, hebrew, symbols);
             EnableAdvancedText();
+            // Keep populated glyph tables/atlas data through the player
+            // build — otherwise the engine clears dynamic font data at
+            // build time and the seeded atlas never reaches the player.
+            KeepDynamicDataOnBuild(latin, hebrew, symbols,
+                text.defaultFontAsset);
+            ClearKeepFlag(text);
+            PopulateAtlas(latin, hebrew, symbols, text.defaultFontAsset);
+        }
+
+        private static void KeepDynamicDataOnBuild(params FontAsset[] fonts)
+        {
+            foreach (var font in fonts)
+                if (font != null)
+                    ClearKeepFlag(font);
+        }
+
+        private static void ClearKeepFlag(UnityEngine.Object target)
+        {
+            var serialized = new SerializedObject(target);
+            var property = serialized.FindProperty("m_ClearDynamicDataOnBuild");
+            if (property != null && property.boolValue)
+            {
+                property.boolValue = false;
+                serialized.ApplyModifiedPropertiesWithoutUndo();
+                EditorUtility.SetDirty(target);
+            }
+        }
+
+        // Seeds the serialized atlas with the shipped UI repertoire so player
+        // cold starts render text against an already-uploaded texture instead
+        // of pending glyph additions (PCQA-001/PCQA-005). Runs at setup so
+        // regenerated assets re-populate; runtime FoundationFonts.Warmup
+        // remains as the belt-and-suspenders net.
+        private static void PopulateAtlas(params FontAsset[] fonts)
+        {
+            foreach (var font in fonts)
+                if (font != null &&
+                    font.atlasPopulationMode == AtlasPopulationMode.Dynamic)
+                    font.TryAddCharacters(FoundationFonts.RequiredCharacters);
+            FlushFontQueue();
+            foreach (var font in fonts)
+            {
+                if (font == null)
+                    continue;
+                PersistSubAssets(font);
+                var textures = font.atlasTextures;
+                if (textures != null)
+                    foreach (var texture in textures)
+                        if (texture != null)
+                            EditorUtility.SetDirty(texture);
+            }
+        }
+
+        private static void FlushFontQueue()
+        {
+            var method = typeof(FontAsset).GetMethod(
+                "UpdateFontAssetsInUpdateQueue",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            method?.Invoke(null, null);
         }
 
         private static FontAsset EnsureGeneratedFont(string assetPath, string sourcePath)

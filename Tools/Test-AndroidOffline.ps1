@@ -20,6 +20,9 @@ function Flavor-For-Mode([string]$Mode) {
         'AndroidVisualBenchmark'         { return 'Android-VisualBenchmark' }
         'AndroidVisualBenchmarkOrdinary' { return 'Android-VisualBenchmark-Ordinary' }
         'AndroidOrdinary'                { return 'Android-Ordinary' }
+        'AndroidFullContent'             { return 'Android-FullContent' }
+        'AndroidFullContentOrdinary'     { return 'Android-FullContent-Ordinary' }
+        'AndroidFullContentPreview'      { return 'Android-FullContent-Preview' }
         default                          { return 'Android' }
     }
 }
@@ -66,7 +69,7 @@ function Run-Case([string]$Name, [string]$Behavior = 'success', [string]$Missing
 try {
     $fixtureExe = Join-Path $fixtureRoot 'AndroidToolFixture.exe'
     $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
-    & $compiler /nologo /target:exe "/out:$fixtureExe" (Join-Path $PSScriptRoot 'Tests\AndroidToolFixture.cs')
+    & $compiler /nologo /target:exe /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll "/out:$fixtureExe" (Join-Path $PSScriptRoot 'Tests\AndroidToolFixture.cs')
     if ($LASTEXITCODE -ne 0) { throw 'Could not compile external-process fixture.' }
 
     $ok = Run-Case 'success'
@@ -77,6 +80,9 @@ try {
         @(Get-Content -LiteralPath (Join-Path $ok.Result.exportPath 'java-arguments.txt'))
     } else { @() }
     Check 'Gradle receives offline and bounded local-tool arguments' ($javaArguments -contains '--offline' -and $javaArguments -contains '--no-daemon' -and $javaArguments -contains '-Dorg.gradle.java.installations.auto-download=false' -and $javaArguments -contains '-Pandroid.builder.sdkDownload=false')
+    # Development and Ordinary must keep building the debug task; the
+    # signed release path is a separate -Configuration Release flavor.
+    Check 'development build keeps the debug Gradle task' ($javaArguments -contains ':launcher:assembleDebug' -and $javaArguments -notcontains ':launcher:assembleRelease') ($javaArguments -join ' ')
     $expectedJar = Join-Path $ok.Android 'Tools\gradle\lib\gradle-launcher-9.3.1.jar'
     Check 'Gradle uses bundled launcher JAR as one intact argument' ($javaArguments -contains $expectedJar)
     Check 'export and Gradle logs are distinct and preserved' ($null -ne $ok.Result -and $ok.Result.exportLog -ne $ok.Result.gradleLog -and (Test-Path -LiteralPath $ok.Result.exportLog) -and (Test-Path -LiteralPath $ok.Result.gradleLog))
@@ -113,6 +119,38 @@ try {
     }
     $vbFail = Run-Case 'vb-export-failure' 'export-failure' '' 'AndroidVisualBenchmark'
     Check 'benchmark export failure propagates exit and keeps stale APK' ($vbFail.ExitCode -eq 29 -and (Get-Content -LiteralPath $vbFail.Published -Raw) -eq 'old APK remains on failure') ("exit=" + $vbFail.ExitCode)
+
+    # Full-content flavors (M6 Task 4): matching export entry points,
+    # flavor-scoped offline roots and published APK paths. The preview is
+    # development-only and records FullContentPreview/Development.
+    foreach ($case in @(
+        @{ Name = 'fc-dev';  Mode = 'AndroidFullContent';         Method = 'FamilyRacing.EditorTools.FoundationBuild.ExportAndroidFullContent';         Flavor = 'Android-FullContent';         Configuration = 'Development'; Presentation = 'FullContent' },
+        @{ Name = 'fc-ord';  Mode = 'AndroidFullContentOrdinary'; Method = 'FamilyRacing.EditorTools.FoundationBuild.ExportAndroidFullContentOrdinary'; Flavor = 'Android-FullContent-Ordinary'; Configuration = 'Ordinary';    Presentation = 'FullContent' },
+        @{ Name = 'fc-prev'; Mode = 'AndroidFullContentPreview';  Method = 'FamilyRacing.EditorTools.FoundationBuild.ExportAndroidFullContentPreview';  Flavor = 'Android-FullContent-Preview';  Configuration = 'Development'; Presentation = 'FullContentPreview' })) {
+        $fc = Run-Case $case.Name 'success' '' $case.Mode
+        Check "$($case.Mode) completes export and offline build" ($fc.ExitCode -eq 0) $fc.Output
+        Check "$($case.Mode) publishes fresh APK under Builds\$($case.Flavor)" ($fc.Published -eq (Join-Path $fc.Project ('Builds\' + $case.Flavor + '\FamilyRacing.apk')) -and (Get-Content -LiteralPath $fc.Published -Raw) -eq 'fresh fixture APK') ("published=" + $fc.Published)
+        $fcUnityArgs = @()
+        if (Test-Path -LiteralPath (Join-Path $fc.Project 'unity-arguments.txt')) {
+            $fcUnityArgs = @(Get-Content -LiteralPath (Join-Path $fc.Project 'unity-arguments.txt'))
+        }
+        $fcMethodIndex = [array]::IndexOf($fcUnityArgs, '-executeMethod')
+        Check "$($case.Mode) selects $($case.Method)" ($fcMethodIndex -ge 0 -and $fcMethodIndex + 1 -lt $fcUnityArgs.Count -and $fcUnityArgs[$fcMethodIndex + 1] -eq $case.Method) ($fcUnityArgs -join ' ')
+        $fcExportIndex = [array]::IndexOf($fcUnityArgs, '--android-export-dir')
+        Check "$($case.Mode) export dir stays under Builds\$($case.Flavor)\offline" ($fcExportIndex -ge 0 -and $fcExportIndex + 1 -lt $fcUnityArgs.Count -and $fcUnityArgs[$fcExportIndex + 1].Replace('/', '\').StartsWith((Join-Path $fc.Project ('Builds\' + $case.Flavor + '\offline')) + '\')) ($fcUnityArgs -join ' ')
+        Check "$($case.Mode) result records $($case.Presentation)/$($case.Configuration)" ($null -ne $fc.Result -and $fc.Result.presentation -eq $case.Presentation -and $fc.Result.configuration -eq $case.Configuration) ($fc.Result | ConvertTo-Json -Compress)
+    }
+    # An ordinary preview is refused outright: a partial-content build can
+    # never pose as an accepted or ordinary full-content candidate.
+    $helperScript = Join-Path (Split-Path $VerifyScript) 'Build-AndroidOffline.ps1'
+    $oldPreference = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $rejectOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $helperScript `
+        -ProjectPath $fixtureRoot -EditorRoot (Join-Path $fixtureRoot 'no-editor') `
+        -Presentation FullContentPreview -Configuration Ordinary 2>&1 | Out-String
+    $rejectCode = $LASTEXITCODE
+    $ErrorActionPreference = $oldPreference
+    Check 'FullContentPreview+Ordinary is refused before any build step' ($rejectCode -ne 0 -and $rejectOutput -match 'development-only') ("exit=$rejectCode output=$rejectOutput")
 
     foreach ($missing in @('editor', 'java', 'gradle')) {
         $case = Run-Case ('missing-' + $missing) 'success' $missing

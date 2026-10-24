@@ -1,4 +1,4 @@
-# Family Racing — tutorial voice lines (16 files)
+# Family Racing — tutorial voice lines (18 files)
 #
 # Generate one WAV per line below and save it as the given filename under
 # Assets/FamilyRacing/Audio/Tutorial/ (24 kHz mono WAV preferred; any
@@ -22,6 +22,7 @@ cue-drift-en.wav :: Hold drift while turning to slide!
 cue-boost-en.wav :: Press boost to zoom super fast!
 cue-jump-en.wav :: Drive up the ramp and jump into the air!
 cue-recovery-en.wav :: Stuck or fell off? Press recovery to get back on track!
+cue-gadget-en.wav :: Drive through a gadget box, then press gadget to use it!
 cue-trial-en.wav :: Great job! Now drive one whole lap to finish!
 cue-finished-en.wav :: You did it! You are ready to race!
 
@@ -33,5 +34,6 @@ cue-drift-he.wav :: החזיקו דריפט בזמן הפניה כדי להחל�
 cue-boost-he.wav :: לחצו על האצה כדי לנסוע ממש מהר!
 cue-jump-he.wav :: נסעו על הרמפה וקפצו באוויר!
 cue-recovery-he.wav :: נתקעתם או נפלתם? לחצו על חזרה למסלול!
+cue-gadget-he.wav :: נסעו דרך קופסת גאדג'ט ואז לחצו על גאדג'ט כדי להשתמש בו!
 cue-trial-he.wav :: כל הכבוד! עכשיו השלימו הקפה שלמה כדי לסיים!
 cue-finished-he.wav :: עשיתם את זה! אתם מוכנים למירוץ!

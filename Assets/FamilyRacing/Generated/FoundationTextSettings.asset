@@ -19,7 +19,7 @@ MonoBehaviour:
   m_FallbackOSFontAssets: []
   m_MatchMaterialPreset: 0
   m_MissingCharacterUnicode: 0
-  m_ClearDynamicDataOnBuild: 1
+  m_ClearDynamicDataOnBuild: 0
   m_EnableEmojiSupport: 0
   m_EmojiFallbackTextAssets: []
   m_DefaultSpriteAsset: {fileID: 0}

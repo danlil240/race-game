@@ -12,8 +12,33 @@ namespace FamilyRacing.Core.Localization
 
         private static readonly Dictionary<string, string[]> Catalog = new Dictionary<string, string[]>
         {
+            ["update.available"] = new[] { "New version available:", "גרסה חדשה זמינה:" },
+            ["update.installed"] = new[] { "installed", "מותקנת" },
+            ["update.open"] = new[] { "View update on GitHub", "צפייה בעדכון ב-GitHub" },
+            ["update.later"] = new[] { "Later", "מאוחר יותר" },
             ["shell.title"] = new[] { "Family Racing", "מירוץ משפחתי" },
-            ["shell.disclaimer"] = new[] { "Foundation preview: profiles, settings, and controls only — no racing yet.", "גרסת יסודות בלבד: פרופילים, הגדרות ופקדים — עדיין אין מירוץ." },
+            ["home.title"] = new[] { "Race Planet", "כוכב המרוצים" },
+            ["home.subtitle"] = new[] { "Choose a mode and hit the track", "בחרו מצב משחק וצאו למסלול" },
+            ["home.primaryHint"] = new[] { "Choose your route and hit the road", "בחרו מסלול וצאו לדרך" },
+            ["player.profile.new"] = new[] { "New racer", "נהג חדש" },
+            ["player.profile.ready"] = new[] { "Ready to race", "מוכן למירוץ" },
+            ["player.profile.start"] = new[] { "Start racing", "התחילו להתחרות" },
+            ["player.profile.play"] = new[] { "Select racer", "בחרו נהג" },
+            ["player.switchDriver"] = new[] { "Switch driver", "החלפת נהג" },
+            ["hud.kmh"] = new[] { "km/h", "קמ״ש" },
+            ["fun.title"] = new[] { "Ready, set, race!", "מוכנים? למירוץ!" },
+            ["fun.tagline"] = new[] { "Sunny Island · Four racers · One more round", "אי השמש · ארבעה מתחרים · עוד סיבוב" },
+            ["fun.raceNow"] = new[] { "Race now", "למירוץ!" },
+            ["fun.raceHint"] = new[] { "Drift into a boost. Take the jump. Beat your rivals.", "דריפט, האצה וקפיצה — בדרך לניצחון!" },
+            ["fun.welcome"] = new[] { "Choose a driver for a quick race, driving practice or a race together.", "בחרו נהג למירוץ מהיר, אימון נהיגה או מירוץ ביחד." },
+            ["fun.raceAgain"] = new[] { "Race again", "עוד מירוץ" },
+            ["fun.keys"] = new[] { "◀ ▶ Steer · Space Drift · Shift Boost · E Gadget · R Recover · Esc Pause", "◀ ▶ היגוי · רווח דריפט · Shift האצה · E גאדג׳ט · R חזרה למסלול · Esc השהיה" },
+            ["shell.disclaimer"] = new[] { "Family preview: campaign races, quick race, time trial, garage and home-network racing are all playable.", "גרסת תצוגה משפחתית: מירוצי המסע, מירוץ מהיר, מירוץ נגד זמן, המוסך ומירוץ הרשת הביתית — הכל פתוח למשחק." },
+            // PCQA-003: the honest variant for builds whose gated loop
+            // entries report contentUnavailable — names what IS playable.
+            ["shell.disclaimer.unavailable"] = new[] {
+                "Family preview: driving practice, the driving lesson and home-network racing are playable — campaign races, quick race, time trial and the garage are not in this build yet.",
+                "גרסת תצוגה משפחתית: אימון הנהיגה, שיעור הנהיגה ומירוץ הרשת הביתית פתוחים למשחק — מירוצי המסע, מירוץ מהיר, מירוץ נגד זמן והמוסך עדיין לא בגרסה הזאת." },
             ["profile.select"] = new[] { "Choose your driver", "בחרו נהג" },
             ["profile.animal.fox"] = new[] { "Fox", "שועל" },
             ["profile.animal.rabbit"] = new[] { "Rabbit", "ארנב" },
@@ -52,26 +77,62 @@ namespace FamilyRacing.Core.Localization
             ["tutorial.cue.boost"] = new[] { "Press Boost to zoom super fast!", "לחצו על האצה כדי לנסוע ממש מהר!" },
             ["tutorial.cue.jump"] = new[] { "Drive up the ramp and jump into the air!", "נסעו על הרמפה וקפצו באוויר!" },
             ["tutorial.cue.recovery"] = new[] { "Stuck or fell off? Press Recovery to get back on track!", "נתקעתם או נפלתם? לחצו על חזרה למסלול!" },
+            ["tutorial.cue.gadget"] = new[] { "Drive through a gadget box, then press Gadget to use it!", "נסעו דרך קופסת גאדג'ט ואז לחצו על גאדג'ט כדי להשתמש בו!" },
             ["tutorial.cue.trial"] = new[] { "Great job! Now drive one whole lap to finish!", "כל הכבוד! עכשיו השלימו הקפה שלמה כדי לסיים!" },
             ["tutorial.done"] = new[] { "You did it! You are ready to race!", "עשיתם את זה! אתם מוכנים למירוץ!" },
             ["driving.exit"] = new[] { "Exit", "יציאה" },
             ["hud.time"] = new[] { "Time", "זמן" },
             ["hud.speed"] = new[] { "Speed", "מהירות" },
             ["hud.lap"] = new[] { "Lap", "הקפה" },
+            ["hud.routeProgress"] = new[] { "Journey", "מסע" },
+            ["route.journey"] = new[] { "Start to finish", "מהזינוק לסיום" },
+            ["route.circuit"] = new[] { "2 laps", "2 הקפות" },
+            ["route.duration"] = new[] { "5–8 min", "5–8 דקות" },
             ["hud.gate"] = new[] { "Gate", "שער" },
             ["hud.paused"] = new[] { "Paused", "מושהה" },
             ["hud.resume"] = new[] { "Resume", "המשך" },
             ["hud.retry"] = new[] { "Try again", "נסו שוב" },
             ["hud.finished"] = new[] { "Finished!", "הסתיים!" },
-            ["hud.gadget.soon"] = new[] { "Gadget (soon)", "גאדג'ט (בקרוב)" },
-            ["hud.gadget.unavailable"] = new[] { "Gadgets are not in this practice yet.", "גאדג'טים עוד לא באימון הזה." },
+            // Gadget slot readout (M5 Task 5): the held item's name, or
+            // the empty-slot marker. Item names key on the authored
+            // gadget kind so the HUD never shows a raw catalog id.
+            ["hud.gadget"] = new[] { "Gadget", "גאדג'ט" },
+            ["hud.gadget.empty"] = new[] { "empty", "ריק" },
+            ["hud.gadget.find"] = new[] { "Collect a glowing box", "אספו קופסה זוהרת" },
+            ["hud.gadget.use"] = new[] { "E / click to use", "E / לחצו להפעלה" },
+            ["hud.gadget.tap"] = new[] { "Tap Gadget to use", "לחצו על גאדג'ט להפעלה" },
+            ["hud.gadget.turbo"] = new[] { "A burst of extra speed", "פרץ מהירות נוסף" },
+            ["hud.gadget.bubble-shield"] = new[] { "Blocks one incoming attack", "חוסם התקפה אחת" },
+            ["hud.gadget.foam-trap"] = new[] { "Drops a trap behind you", "מפיל מלכודת מאחוריכם" },
+            ["gadget.turbo"] = new[] { "Turbo", "טורבו" },
+            ["gadget.bubble-shield"] = new[] { "Bubble shield", "מגן בועות" },
+            ["gadget.foam-trap"] = new[] { "Foam trap", "מלכודת קצף" },
+            ["gadget.homing-missile"] = new[] { "Homing missile", "טיל מתביית" },
+            ["gadget.mine"] = new[] { "Mine", "מוקש" },
+            ["gadget.emp-pulse"] = new[] { "EMP pulse", "פעימה אלקטרומגנטית" },
+            ["hud.gadget.homing-missile"] = new[] { "Chases a rival ahead", "רודף אחרי יריב מלפנים" },
+            ["hud.gadget.mine"] = new[] { "Drops an armed mine behind you", "מניח מוקש מאחוריכם" },
+            ["hud.gadget.emp-pulse"] = new[] { "Slows nearby rivals", "מאט יריבים קרובים" },
             // Keyboard legend: key names stay Latin in both locales — they
             // name the physical key caps, not words to translate.
             ["hud.keys"] = new[] {
-                "Keys: ◀▶ steer · S/▼ brake · Space drift · Shift boost · R recover · C camera · Esc pause",
-                "מקשים: ◀▶ היגוי · S/▼ בלימה · Space דריפט · Shift האצה · R חזרה · C מצלמה · Esc השהיה" },
+                "Keys: ◀▶ steer · S/▼ brake · Space drift · Shift boost · E gadget · R recover · C camera · Esc pause",
+                "מקשים: ◀▶ היגוי · S/▼ בלימה · Space דריפט · Shift האצה · E גאדג'ט · R חזרה · C מצלמה · Esc השהיה" },
+            // --- garage (M5 Task 8): upgrades + cosmetics --------------
+            ["garage.title"] = new[] { "Garage", "מוסך" },
+            ["garage.coins"] = new[] { "Coins", "מטבעות" },
+            ["garage.level"] = new[] { "Level", "רמה" },
+            ["garage.cost"] = new[] { "Cost", "עלות" },
+            ["garage.max"] = new[] { "Max!", "מקסימום!" },
+            ["garage.buy"] = new[] { "Buy", "קניה" },
+            ["garage.locked"] = new[] { "Locked", "נעול" },
+            ["garage.cosmetics"] = new[] { "Cosmetics", "קוסמטיקה" },
+            ["garage.equip"] = new[] { "Equip", "התקנה" },
+            ["garage.unequip"] = new[] { "Unequip", "הסרה" },
             ["action.back"] = new[] { "Back", "חזרה" },
+            ["action.exitGame"] = new[] { "Exit game", "יציאה מהמשחק" },
             ["action.save"] = new[] { "Save", "שמירה" },
+            ["action.settings"] = new[] { "Settings", "הגדרות" },
             ["status.saved"] = new[] { "Settings saved.", "ההגדרות נשמרו." },
             ["status.blocked"] = new[] { "This profile's data cannot be read, so it was left unchanged.", "לא ניתן לקרוא את נתוני הפרופיל, לכן לא בוצע שום שינוי." },
             ["status.recovered"] = new[] { "This profile was loaded from a backup; the original files were left unchanged. Saving stays off until it is checked.", "הפרופיל נטען מגיבוי; הקבצים המקוריים לא השתנו. השמירה כבויה עד שהוא ייבדק." },
@@ -125,6 +186,18 @@ namespace FamilyRacing.Core.Localization
             ["lan.saving"] = new[] { "Saving…", "שומרים…" },
             ["lan.saveFailed"] = new[] { "Save failed", "השמירה נכשלה" },
             ["lan.err.title"] = new[] { "Network problem", "תקלת רשת" },
+            // PCQA-007: manual-join input feedback — shell-side validation
+            // texts; they never reach network.lastError.
+            ["lan.join.error.address"] = new[] { "Type the host address first.", "כותבים קודם את כתובת המארח." },
+            ["lan.join.error.addressBad"] = new[] { "That address does not look right.", "הכתובת הזאת לא נראית נכונה." },
+            ["lan.join.error.port"] = new[] { "The port must be a number between 0 and 65535.", "הפורט חייב להיות מספר בין 0 ל-65535." },
+            // PCQA-008: readable lobby identity — the slot-based fallback
+            // when a participant publishes no known animal, plus the LAN
+            // course names the shipped lan-* events resolve through
+            // EventName (unknown event ids still fall back to the raw id).
+            ["lan.player"] = new[] { "Player", "שחקן" },
+            ["lan.event.lan-car-01"] = new[] { "Car course", "מסלול מכוניות" },
+            ["lan.event.lan-motorcycle-01"] = new[] { "Motorcycle course", "מסלול אופנועים" },
             // Disabled-reason / error-code texts for the LAN surface; the
             // raw code stays the fallback for anything unlisted.
             ["lan.reason.inSession"] = new[] { "You are already in a race session.", "אתם כבר בתוך מירוץ." },
@@ -157,7 +230,86 @@ namespace FamilyRacing.Core.Localization
             ["lan.reason.duplicatePending"] = new[] { "Already sent.", "כבר נשלח." },
             ["lan.reason.unknownEvent"] = new[] { "Unknown course.", "מסלול לא ידוע." },
             ["lan.reason.missingParameter"] = new[] { "Missing details.", "חסרים פרטים." },
-            ["lan.reason.invalidParameter"] = new[] { "Bad details.", "פרטים שגויים." }
+            ["lan.reason.invalidParameter"] = new[] { "Bad details.", "פרטים שגויים." },
+            // --- gameplay loop screens (M5 Task 10) ----------------------
+            // Campaign map, quick-race and time-trial pickers, bounty
+            // board and the local results overlay. Numbers and times are
+            // composed LTR by the callers (FormatRaceTime prefixes a
+            // left-to-right mark); every sentence here stays logical
+            // order so the Hebrew reads naturally under RTL layout.
+            ["campaign.title"] = new[] { "Campaign map", "מפת המירוצים" },
+            // M6 Task 3: the ordered world strip — the header, the badge
+            // on the selected card and the whole-adventure banner once
+            // every world reports complete.
+            ["campaign.worlds"] = new[] { "Worlds", "עולמות" },
+            ["campaign.selected"] = new[] { "Playing here", "משחקים כאן" },
+            ["campaign.adventureComplete"] = new[] { "You finished every world — the whole adventure is complete!", "סיימתם את כל העולמות — ההרפתקה כולה הושלמה!" },
+            ["campaign.stars"] = new[] { "Stars", "כוכבים" },
+            ["campaign.events"] = new[] { "Races", "מירוצים" },
+            ["campaign.worldDone"] = new[] { "World complete!", "העולם הושלם!" },
+            ["campaign.reward"] = new[] { "Win to unlock", "נצחו כדי לפתוח" },
+            ["event.type.circuit"] = new[] { "Race", "מירוץ" },
+            ["event.type.boost"] = new[] { "Boost challenge", "אתגר האצה" },
+            ["event.type.stunt"] = new[] { "Stunt challenge", "אתגר פעלולים" },
+            ["event.type.time"] = new[] { "Time challenge", "אתגר זמן" },
+            ["event.type.gadget"] = new[] { "Gadget race", "מירוץ גאדג'ט" },
+            ["event.type.clean-driving"] = new[] { "Clean-driving challenge", "אתגר נהיגה נקייה" },
+            ["event.type.finale"] = new[] { "Rival finale", "גמר מול יריב" },
+            ["event.locked"] = new[] { "Finish the earlier races first", "קודם סיימו את המירוצים הקודמים" },
+            ["quick.title"] = new[] { "Quick race", "מירוץ מהיר" },
+            ["quick.hint"] = new[] { "Pick a course, a class and your vehicle.", "בחרו מסלול, סוג רכב ואת הרכב שלכם." },
+            ["trial.title"] = new[] { "Time trial", "מירוץ נגד הזמן" },
+            ["trial.hint"] = new[] { "Beat the clock in the starter vehicle!", "נצחו את השעון עם רכב ההתחלה!" },
+            ["trial.record"] = new[] { "Best time", "השיא שלכם" },
+            ["trial.noRecord"] = new[] { "No record yet", "אין עדיין שיא" },
+            ["trial.starter"] = new[] { "Race vehicle", "רכב המירוץ" },
+            ["trial.par"] = new[] { "Goal time", "זמן המטרה" },
+            ["difficulty.title"] = new[] { "Difficulty", "רמת קושי" },
+            ["difficulty.easy"] = new[] { "Easy", "קל" },
+            ["difficulty.medium"] = new[] { "Medium", "בינוני" },
+            ["difficulty.hard"] = new[] { "Hard", "קשה" },
+            ["bounties.title"] = new[] { "Challenges", "אתגרים" },
+            ["bounties.hint"] = new[] { "Finish challenges to earn coins!", "השלימו אתגרים כדי להרוויח מטבעות!" },
+            ["bounties.reward"] = new[] { "Reward", "פרס" },
+            ["bounties.done"] = new[] { "Done!", "בוצע!" },
+            ["bounties.progress"] = new[] { "Progress", "התקדמות" },
+            ["bounty.family.drift"] = new[] { "Drift time", "זמן דריפט" },
+            ["bounty.family.boost"] = new[] { "Boosts used", "האצות" },
+            ["bounty.family.landing"] = new[] { "Clean landings", "נחיתות נקיות" },
+            ["bounty.family.rival"] = new[] { "Rival victory", "ניצחון מול יריב" },
+            ["bounty.unit.count"] = new[] { "times", "פעמים" },
+            ["bounty.unit.seconds"] = new[] { "seconds", "שניות" },
+            ["bounty.unit.ticks"] = new[] { "ticks", "טיקים" },
+            ["results.title"] = new[] { "Race results", "תוצאות המירוץ" },
+            ["results.place"] = new[] { "Place", "מקום" },
+            ["results.coins"] = new[] { "Coins won", "מטבעות שהושגו" },
+            ["results.coins.finish"] = new[] { "Finish", "סיום" },
+            ["results.coins.place"] = new[] { "Place bonus", "בונוס מיקום" },
+            ["results.coins.star"] = new[] { "Star bonus", "בונוס כוכבים" },
+            ["results.coins.bounty"] = new[] { "Challenge bonus", "בונוס אתגרים" },
+            ["results.coins.rival"] = new[] { "Rival bonus", "בונוס יריב" },
+            ["results.newRecord"] = new[] { "New best time!", "שיא חדש!" },
+            ["results.retrySave"] = new[] { "Try saving again", "נסיון שמירה נוסף" },
+            ["results.again"] = new[] { "Race again", "עוד מירוץ" },
+            ["results.next"] = new[] { "Continue", "המשך" },
+            ["loop.race"] = new[] { "Race!", "למרוץ!" },
+            ["loop.pick"] = new[] { "Pick one", "בוחרים אחד" },
+            // Loop-screen reason codes shown under disabled buttons; the
+            // raw code stays the fallback for anything unlisted.
+            ["loop.reason.contentUnavailable"] = new[] { "This content is not in this build.", "התוכן הזה לא בגרסה הזאת." },
+            ["loop.reason.requiresSelectedProfile"] = new[] { "Pick a driver first.", "קודם בוחרים נהג." },
+            ["loop.reason.readOnlyProfile"] = new[] { "This profile was restored from a backup and cannot save yet.", "הפרופיל נטען מגיבוי — אי אפשר לשמור עדיין." },
+            ["loop.reason.raceActive"] = new[] { "Finish or leave the race first.", "קודם מסיימים את המירוץ." },
+            ["loop.reason.networkActive"] = new[] { "Leave the race session first.", "קודם עוזבים את המירוץ." },
+            ["loop.reason.rewardUnresolved"] = new[] { "Save your last prize first.", "קודם שומרים את הפרס האחרון." },
+            ["loop.reason.eventLocked"] = new[] { "Finish the earlier races first.", "קודם מסיימים את המירוצים הקודמים." },
+            // M6 Task 3: the world-gate reasons — campaign.selectWorld,
+            // the world cards and the world-aware course pickers all
+            // share these.
+            ["loop.reason.worldLocked"] = new[] { "Finish the previous world first.", "קודם סיימו את העולם הקודם." },
+            ["loop.reason.unknownWorld"] = new[] { "Unknown world.", "עולם לא ידוע." },
+            ["loop.reason.vehicleLocked"] = new[] { "Win that vehicle first.", "קודם מנצחים את הרכב הזה." },
+            ["loop.reason.unavailable"] = new[] { "Not available right now.", "לא זמין כרגע." }
         };
 
         public static IReadOnlyCollection<string> Keys

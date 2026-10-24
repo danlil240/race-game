@@ -140,7 +140,9 @@ namespace FamilyRacing
         private void FireTriggers(DrivingEvent ev, FoundationState state)
         {
             if (catalog == null || ev == null) return;
-            var triggers = catalog.TriggersFor(ev.kind);
+            var effectKind = ev.kind == GadgetRules.EventMissileHit || ev.kind == GadgetRules.EventMineHit
+                || ev.kind == GadgetRules.EventEmpHit ? GadgetRules.EventFoamHit : ev.kind;
+            var triggers = catalog.TriggersFor(effectKind);
             if (triggers.Count == 0) return;
             var position = RacePresentationUtil.PositionFor(state, ev);
             // The event detail carries a magnitude for some kinds

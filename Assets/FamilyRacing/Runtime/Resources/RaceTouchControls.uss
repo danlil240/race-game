@@ -1,0 +1,121 @@
+.race-deck {
+    position: absolute;
+    left: 0; right: 0; top: 0; bottom: 0;
+}
+.race-steering {
+    position: absolute;
+    left: 20px; bottom: 22px;
+    flex-direction: row;
+    padding: 8px;
+    background-color: rgba(12, 24, 43, 0.65);
+    border-radius: 38px;
+    border-width: 1px;
+    border-color: rgba(157, 220, 255, 0.24);
+}
+.race-actions {
+    position: absolute;
+    right: 20px; bottom: 22px;
+    width: 292px; height: 224px;
+}
+.race-utilities {
+    position: absolute;
+    right: 20px; top: 16px;
+    flex-direction: row;
+    padding: 4px;
+    background-color: rgba(12, 24, 43, 0.8);
+    border-radius: 24px;
+    border-width: 1px;
+    border-color: rgba(157, 220, 255, 0.2);
+}
+.race-control {
+    flex-shrink: 0;
+    width: 104px; height: 104px;
+    min-width: 0; min-height: 0;
+    margin: 4px;
+    padding: 54px 4px 4px 4px;
+    border-radius: 30px;
+    border-width: 2px 2px 7px 2px;
+    border-color: rgba(255, 255, 255, 0.65) rgba(255, 255, 255, 0.3) rgba(3, 17, 38, 0.65) rgba(255, 255, 255, 0.3);
+    color: white;
+    font-size: 14px;
+    -unity-font-style: bold;
+    -unity-text-align: middle-center;
+    white-space: normal;
+    transition-property: translate, scale, background-color, border-color;
+    transition-duration: 0.09s;
+    transition-timing-function: ease-out;
+}
+.race-control-icon {
+    position: absolute;
+    left: 20%; right: 20%; top: 10px;
+    height: 46px;
+}
+.race-control--cyan { background-color: rgb(32, 145, 216); }
+.race-control--gold { background-color: rgb(240, 151, 27); }
+.race-control--purple { background-color: rgb(140, 83, 217); }
+.race-control--red { background-color: rgb(220, 80, 101); }
+.race-control--mint { background-color: rgb(23, 166, 152); }
+.race-control--left, .race-control--right {
+    padding: 0;
+    width: 104px; height: 104px;
+}
+.race-control--left > .race-control-icon, .race-control--right > .race-control-icon {
+    top: 19px; height: 56px;
+}
+.race-control--boost {
+    position: absolute;
+    width: 120px; height: 120px;
+    right: 0; bottom: 0;
+    border-radius: 60px;
+    padding-top: 65px;
+    font-size: 17px;
+}
+.race-control--boost > .race-control-icon { top: 14px; height: 52px; }
+.race-control--drift {
+    position: absolute;
+    width: 96px; height: 96px;
+    left: 45px; top: 0;
+    border-radius: 48px;
+}
+.race-control--brake {
+    position: absolute;
+    width: 82px; height: 82px;
+    left: 6px; bottom: 0;
+    border-radius: 41px;
+    padding-top: 43px;
+    font-size: 12px;
+}
+.race-control--brake > .race-control-icon { top: 6px; height: 36px; }
+.race-control--gadget {
+    position: absolute;
+    width: 74px; height: 74px;
+    right: 0; top: 0;
+    border-radius: 37px;
+    padding-top: 37px;
+    font-size: 11px;
+}
+.race-control--gadget > .race-control-icon { top: 7px; height: 30px; }
+.race-control--utility {
+    position: relative;
+    width: 64px; height: 64px;
+    border-radius: 18px;
+    background-color: rgb(35, 54, 78);
+    padding-top: 30px;
+    font-size: 10px;
+    border-bottom-width: 4px;
+}
+.race-control--utility > .race-control-icon { top: 4px; height: 28px; }
+.race-control:focus { border-top-color: white; border-left-color: white; border-right-color: white; }
+.race-control--pressed, .race-control:active {
+    translate: 0 5px;
+    scale: 0.94 0.94;
+    background-color: rgb(58, 203, 219);
+    border-color: white;
+}
+.race-control--gold.race-control--pressed { background-color: rgb(255, 194, 67); }
+.race-control--purple.race-control--pressed { background-color: rgb(188, 134, 255); }
+.race-control--red.race-control--pressed { background-color: rgb(255, 129, 144); }
+.race-control--mint.race-control--pressed { background-color: rgb(65, 220, 186); }
+.race-control:disabled { opacity: 0.38; }
+.race-deck--compact .race-steering { scale: 0.85 0.85; transform-origin: left bottom; }
+.race-deck--compact .race-actions { scale: 0.85 0.85; transform-origin: right bottom; }

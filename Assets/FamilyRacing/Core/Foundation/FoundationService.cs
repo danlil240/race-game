@@ -29,6 +29,14 @@ namespace FamilyRacing.Core.Foundation
         private const string ScreenSandbox = "sandbox";
         private const string ScreenPractice = "practice";
         private const string ScreenDriving = "driving";
+        // M5 Task 10 loop screens: reachable only through their gated
+        // *.open commands — never through ui.navigate — so a screen can
+        // never exist without its content/profile availability verdict.
+        public const string ScreenCampaign = "campaign";
+        public const string ScreenQuickRace = "quickRace";
+        public const string ScreenTimeTrial = "timeTrial";
+        public const string ScreenGarage = "garage";
+        public const string ScreenBounties = "bounties";
         // Task 9 LAN screens: the browser is the only navigable entry
         // point; lobby/race/results/recovery are phase-derived (see
         // FoundationService.Network.cs SyncLanScreen) so a rendered screen
@@ -115,6 +123,10 @@ namespace FamilyRacing.Core.Foundation
 
         private static readonly string[] Languages = { "en", "he" };
         private static readonly string[] Cameras = { "chase", "overhead" };
+        // The local gameplay modes solo.start seats (M5 Task 4);
+        // practice keeps race.start and lan keeps the session surface.
+        private static readonly string[] SoloModes =
+            { "campaign", "quickRace", "timeTrial" };
         // "driving" is never a navigation target: race.start enters it and
         // race.exit is the only way back out. The same rule applies to the
         // LAN phase screens — "lan-browser" is the only LAN target; the
@@ -155,9 +167,69 @@ namespace FamilyRacing.Core.Foundation
                 Param("vehicleId", "string", null), Param("eventId", "string", null)),
             Schema("race.restart"),
             Schema("race.exit"),
+            // M5 Task 4 local modes: the mode chooses the shared
+            // four-racer coordinator (campaign | quickRace) or the lone
+            // trial session (timeTrial); every other selection field is
+            // validated mode-dependently inside SoloRaceSession.
+            Schema("solo.start",
+                Param("mode", "string", SoloModes),
+                OptionalParam("eventId", "string", null),
+                OptionalParam("courseId", "string", null),
+                OptionalParam("classId", "string", null),
+                OptionalParam("vehicleId", "string", null),
+                OptionalParam("difficulty", "string", null)),
             Schema("tutorial.start", Param("vehicleId", "string", null)),
             Schema("tutorial.replay"),
             Schema("tutorial.exit"),
+            // M5 Task 8 durable progression writes: the atomic upgrade
+            // purchase (receipt-keyed, idempotent) and cosmetic
+            // equipment. Both refuse during a race or LAN session; only
+            // the purchase honors the unresolved-reward gate — an equip
+            // carries no progression reward facts, so it can never
+            // interleave with the pending result transaction.
+            Schema("upgrade.purchase",
+                Param("purchaseId", "string", null),
+                Param("vehicleId", "string", null),
+                Param("category", "string", null),
+                Param("expectedLevel", "integer", null)),
+            Schema("cosmetic.equip",
+                Param("slot", "string", null),
+                Param("cosmeticId", "string", null),
+                // Omitting `equipped` equips; an explicit "false" is the
+                // unequip affordance.
+                OptionalParam("equipped", "boolean", Bools)),
+            // M5 Task 10: the semantic loop surface — every mode entry,
+            // setup screen and results affordance the family UI and the
+            // agent channel share. Starts converge on the same
+            // SoloRaceSession path solo.start uses; *.open commands are
+            // the only route to their gated screens; results.* manage
+            // the finished session and the unresolved-save gate.
+            Schema("campaign.open"),
+            // M6 Task 3: the transient world pick. The worldId names an
+            // authored campaign world; the handler gates it through
+            // AdventureRules so a locked or unknown world rejects with
+            // no mutation, and profile switches re-derive the default.
+            Schema("campaign.selectWorld",
+                Param("worldId", "string", null)),
+            Schema("campaign.start",
+                Param("eventId", "string", null),
+                Param("vehicleId", "string", null),
+                Param("difficulty", "string", null)),
+            Schema("quickRace.open"),
+            Schema("quickRace.start",
+                Param("courseId", "string", null),
+                Param("classId", "string", null),
+                Param("vehicleId", "string", null),
+                Param("difficulty", "string", null)),
+            Schema("timeTrial.open"),
+            Schema("timeTrial.start",
+                Param("courseId", "string", null),
+                Param("classId", "string", null)),
+            Schema("garage.open"),
+            Schema("bounties.open"),
+            Schema("results.retrySave"),
+            Schema("results.retry"),
+            Schema("results.continue"),
             // LAN session surface (Core/Networking): asynchronous commands
             // return accepted and complete through DrainNetworkOutcomes +
             // CompleteNetworkCommand on a later boundary.
@@ -203,6 +275,7 @@ namespace FamilyRacing.Core.Foundation
         private ProfileSave savedProfile;
         private ProfileSave draftProfile;
         private DriverInput input;
+        private bool pendingGadgetPress;
         private int holdTicksRemaining;
         private PresentationState presentation = new PresentationState();
         private DrivingContentCatalog drivingContent;
@@ -241,13 +314,14 @@ namespace FamilyRacing.Core.Foundation
                 slots[slot] = new SlotInfo
                 {
                     Status = load.Status.ToString(),
-                    Profile = CopyProfile(load.Profile)
+                    Profile = ProfileCopy.DeepCopy(load.Profile)
                 };
             }
         }
 
         public bool Paused { get { return paused; } }
-        public bool Racing { get { return driving != null; } }
+        public string CurrentScreen { get { return screen; } }
+        public bool Racing { get { return driving != null || soloRace != null; } }
 
         // The currently held (leased) local input. Task 5's LAN path feeds
         // this same sample through the validated network input path so the
@@ -312,7 +386,7 @@ namespace FamilyRacing.Core.Foundation
             if (driving == null || paused) return;
             var simulation = EnsureDrivingSimulation();
             if (simulation == null) return;
-            var request = driving.PrepareStep(input);
+            var request = driving.PrepareStep(ConsumeSimulationInput());
             DrivingStepResult result;
             if (request == null)
             {
@@ -458,8 +532,8 @@ namespace FamilyRacing.Core.Foundation
                     throttle = input.Throttle
                 },
                 slots = new List<SlotState>(),
-                savedProfile = CopyProfile(savedProfile),
-                draftProfile = CopyProfile(draftProfile),
+                savedProfile = ProfileCopy.DeepCopy(savedProfile),
+                draftProfile = ProfileCopy.DeepCopy(draftProfile),
                 pendingSettings = pendingSettings,
                 persistenceStatus = persistenceStatus,
                 captureValid = captureValid,
@@ -486,7 +560,14 @@ namespace FamilyRacing.Core.Foundation
                 remotePresentation = networkRemotePresentation != null
                     ? networkRemotePresentation.Copy() : null,
                 networkLink = networkLinkState != null
-                    ? networkLinkState.Copy() : null
+                    ? networkLinkState.Copy() : null,
+                // M5 Task 4 local modes: the live solo race session —
+                // null unless campaign/quickRace/timeTrial is active.
+                soloRace = soloRace != null ? soloRace.Snapshot() : null,
+                // M5 Task 10: the resolved progression surface rides
+                // every snapshot — menus, races and failed-save states
+                // alike, always a fresh deep copy.
+                progression = BuildProgressionState()
             };
             if (driving != null)
             {
@@ -510,7 +591,7 @@ namespace FamilyRacing.Core.Foundation
                 {
                     slot = slot,
                     status = slots[slot].Status,
-                    profile = CopyProfile(slots[slot].Profile)
+                    profile = ProfileCopy.DeepCopy(slots[slot].Profile)
                 });
             }
             return state;
@@ -585,12 +666,32 @@ namespace FamilyRacing.Core.Foundation
         public void ClearInput()
         {
             holdTicksRemaining = 0;
+            pendingGadgetPress = false;
             input = new DriverInput(0f, false, false, false, false, false, false);
             if (driving != null)
             {
                 driving.CancelPending("cleared");
                 DrainDrivingEvents();
             }
+            if (soloRace != null)
+            {
+                // Local-mode sessions carry the local racer's latched
+                // one-shots through the same cancellation policy.
+                soloRace.CancelPending("cleared");
+                DrainSoloEvents();
+            }
+        }
+
+        // A physical press can begin and end between two 30 Hz boundaries.
+        // Retain that edge separately from the latest held steering sample.
+        private DriverInput ConsumeSimulationInput()
+        {
+            var sample = new DriverInput(input.Steering, input.Drift, input.Boost,
+                input.Gadget || pendingGadgetPress, input.Recover,
+                input.ChangeCamera, input.Pause,
+                input.HasThrottleOverride ? (float?)input.Throttle : null, input.Brake);
+            pendingGadgetPress = false;
+            return sample;
         }
 
         // Runtime-only callback the app wires to its physical input
@@ -632,11 +733,17 @@ namespace FamilyRacing.Core.Foundation
         {
             try
             {
-                // Entering a LAN session while a solo race runs is refused:
-                // hosting/joining/reconnecting would tear down shared state
-                // the running race still claims. Session-internal lan.* and
-                // lan.discover keep their own availability answers.
-                if (driving != null && LanEntryBlockedDuringRace(command.Action))
+                // Entering a LAN session or writing durable progression
+                // while a solo race runs is refused: session entry would
+                // tear down shared state the running race still claims,
+                // and a purchase/equip mutating the profile mid-race
+                // could interleave with the bound reward context.
+                // Session-internal lan.* and lan.discover keep their
+                // own availability answers.
+                if ((driving != null || soloRace != null)
+                    && (LanEntryBlockedDuringRace(command.Action)
+                        || ProgressionWriteBlockedDuringRace(command.Action)
+                        || LoopScreenBlockedDuringRace(command.Action)))
                     return Result(command, CommandResult.Rejected, "raceActive");
                 // LAN commands route to the session service; pause.toggle
                 // is a shared toggle on the host and a pause request on a
@@ -665,9 +772,38 @@ namespace FamilyRacing.Core.Foundation
                     case "race.start": return RaceStart(command);
                     case "race.restart": return RaceRestart(command);
                     case "race.exit": return RaceExit(command);
+                    case "solo.start": return SoloStart(command);
                     case "tutorial.start": return TutorialStart(command);
                     case "tutorial.replay": return TutorialReplay(command);
                     case "tutorial.exit": return TutorialExit(command);
+                    case "upgrade.purchase": return UpgradePurchase(command);
+                    case "cosmetic.equip": return CosmeticEquip(command);
+                    // M5 Task 10 loop surface (FoundationService.
+                    // Progression.cs): screens through gated *.open
+                    // commands, mode starts through the shared solo
+                    // session path, results lifecycle on the finished
+                    // session and the unresolved-save gate.
+                    case "campaign.open":
+                        return OpenLoopScreen(command, ScreenCampaign);
+                    case "quickRace.open":
+                        return OpenLoopScreen(command, ScreenQuickRace);
+                    case "timeTrial.open":
+                        return OpenLoopScreen(command, ScreenTimeTrial);
+                    case "garage.open":
+                        return OpenLoopScreen(command, ScreenGarage);
+                    case "bounties.open":
+                        return OpenLoopScreen(command, ScreenBounties);
+                    case "campaign.selectWorld":
+                        return CampaignSelectWorld(command);
+                    case "campaign.start":
+                        return LoopStart(command, RaceMode.Campaign);
+                    case "quickRace.start":
+                        return LoopStart(command, RaceMode.QuickRace);
+                    case "timeTrial.start":
+                        return LoopStart(command, RaceMode.TimeTrial);
+                    case "results.retrySave": return ResultsRetrySave(command);
+                    case "results.retry": return ResultsRetry(command);
+                    case "results.continue": return ResultsContinue(command);
                     default: return Result(command, CommandResult.Rejected, "unknownAction");
                 }
             }
@@ -691,9 +827,48 @@ namespace FamilyRacing.Core.Foundation
                 case "race.start":
                 case "race.restart":
                 case "race.exit":
+                case "solo.start":
                 case "tutorial.start":
                 case "tutorial.replay":
                 case "tutorial.exit":
+                case "upgrade.purchase":
+                case "cosmetic.equip":
+                // M5 Task 10: loop screens and local starts are
+                // session-exclusive too — they could tear down or
+                // shadow the shared LAN state. results.retrySave stays
+                // legal: it resolves a durable debt (possibly produced
+                // BY this session) and mutates no session state.
+                case "campaign.open":
+                case "campaign.selectWorld":
+                case "quickRace.open":
+                case "timeTrial.open":
+                case "garage.open":
+                case "bounties.open":
+                case "campaign.start":
+                case "quickRace.start":
+                case "timeTrial.start":
+                case "results.retry":
+                case "results.continue":
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        // Loop-screen entries that must not fire while a race is live:
+        // they are navigation — a running race is never abandoned
+        // silently (the same rule Navigate enforces for the driving
+        // screen). results.retrySave stays legal: the failed commit it
+        // retries can belong to THIS still-open session's result.
+        private static bool LoopScreenBlockedDuringRace(string action)
+        {
+            switch (action)
+            {
+                case "campaign.open":
+                case "quickRace.open":
+                case "timeTrial.open":
+                case "garage.open":
+                case "bounties.open":
                     return true;
                 default:
                     return false;
@@ -711,6 +886,22 @@ namespace FamilyRacing.Core.Foundation
                 case "lan.host":
                 case "lan.join":
                 case "lan.reconnect":
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        // Durable progression writes fenced off a running solo race: a
+        // committed purchase/equip mid-race would interleave with the
+        // bound reward context's profile view. They apply again as soon
+        // as the race ends.
+        private static bool ProgressionWriteBlockedDuringRace(string action)
+        {
+            switch (action)
+            {
+                case "upgrade.purchase":
+                case "cosmetic.equip":
                     return true;
                 default:
                     return false;
@@ -736,12 +927,20 @@ namespace FamilyRacing.Core.Foundation
                 return Result(command, CommandResult.Failed, "saveFailed");
             }
             EndRace("lifecycle", command);
+            EndSoloRace("lifecycle", command);
             slots[slot].Status = "Loaded";
-            slots[slot].Profile = CopyProfile(created);
-            savedProfile = CopyProfile(created);
-            draftProfile = CopyProfile(created);
+            slots[slot].Profile = ProfileCopy.DeepCopy(created);
+            savedProfile = ProfileCopy.DeepCopy(created);
+            draftProfile = ProfileCopy.DeepCopy(created);
             activeSlot = slot;
             language = created.language;
+            // A retained unresolved reward belongs to the profile that
+            // produced it — the new selection must not inherit the gate.
+            unresolvedResult = null;
+            unresolvedContext = null;
+            // The world pick is profile-scoped transient state: the next
+            // snapshot resolves this profile's default world.
+            selectedWorldId = null;
             screen = ScreenSettings;
             pendingSettings = false;
             persistenceStatus = "saved";
@@ -762,9 +961,15 @@ namespace FamilyRacing.Core.Foundation
             if (info.Status != "Loaded" && info.Status != "RecoveredFromBackup")
                 return Result(command, CommandResult.Rejected, "unavailable");
             EndRace("lifecycle", command);
-            savedProfile = CopyProfile(info.Profile);
-            draftProfile = CopyProfile(info.Profile);
+            EndSoloRace("lifecycle", command);
+            savedProfile = ProfileCopy.DeepCopy(info.Profile);
+            draftProfile = ProfileCopy.DeepCopy(info.Profile);
             activeSlot = slot;
+            unresolvedResult = null;
+            unresolvedContext = null;
+            // World selection is transient per-profile state: the next
+            // snapshot re-derives the default for THIS profile.
+            selectedWorldId = null;
             language = info.Profile.language;
             pendingSettings = false;
             persistenceStatus = info.Status == "RecoveredFromBackup" ? "recovered" : "";
@@ -822,7 +1027,7 @@ namespace FamilyRacing.Core.Foundation
             var voice = ParseDecimal(command.Parameters["voiceVolume"]);
             if (!InUnitRange(music) || !InUnitRange(effects) || !InUnitRange(voice))
                 return Result(command, CommandResult.Rejected, "invalidParameter");
-            var draft = CopyProfile(savedProfile);
+            var draft = ProfileCopy.DeepCopy(savedProfile);
             draft.language = command.Parameters["language"];
             draft.camera = command.Parameters["camera"];
             draft.reducedCameraShake = command.Parameters["reducedCameraShake"] == "true";
@@ -839,7 +1044,11 @@ namespace FamilyRacing.Core.Foundation
         {
             if (!WritableSelected())
                 return Result(command, CommandResult.Rejected, "unavailable");
-            var candidate = CopyProfile(draftProfile);
+            // Settings save merges the draft's settings slice onto the
+            // live profile's progression — a stale draft can never roll
+            // coins, receipts or any schema-3 progression back.
+            var candidate = ProfileCopy.DeepCopy(savedProfile);
+            ProfileCopy.CopySettings(draftProfile, candidate);
             try
             {
                 store.Save(candidate);
@@ -848,15 +1057,15 @@ namespace FamilyRacing.Core.Foundation
             {
                 // Restore the prior saved draft and visible language; the
                 // persisted profile is unchanged by the store's safe save.
-                draftProfile = CopyProfile(savedProfile);
+                draftProfile = ProfileCopy.DeepCopy(savedProfile);
                 language = savedProfile.language;
                 pendingSettings = false;
                 persistenceStatus = "saveFailed";
                 return Result(command, CommandResult.Failed, "saveFailed");
             }
-            savedProfile = CopyProfile(candidate);
-            draftProfile = CopyProfile(candidate);
-            slots[activeSlot].Profile = CopyProfile(candidate);
+            savedProfile = ProfileCopy.DeepCopy(candidate);
+            draftProfile = ProfileCopy.DeepCopy(candidate);
+            slots[activeSlot].Profile = ProfileCopy.DeepCopy(candidate);
             pendingSettings = false;
             persistenceStatus = "saved";
             return Result(command, CommandResult.Applied, "");
@@ -864,7 +1073,8 @@ namespace FamilyRacing.Core.Foundation
 
         private CommandResult SetInput(GameCommand command)
         {
-            var drivingActive = screen == ScreenDriving && driving != null;
+            var drivingActive = screen == ScreenDriving
+                && (driving != null || soloRace != null);
             var lanRaceScreen = screen == ScreenLanRace && LanActive();
             if (screen != ScreenSandbox && !drivingActive && !lanRaceScreen)
                 return Result(command, CommandResult.Rejected, "unavailable");
@@ -900,20 +1110,27 @@ namespace FamilyRacing.Core.Foundation
             var recover = IsTrue(command.Parameters["recover"]);
             var changeCamera = IsTrue(command.Parameters["changeCamera"]);
             var pausePulse = IsTrue(command.Parameters["pause"]);
-            // Gadget actions are explicitly unavailable while driving
-            // (gadget gameplay is deferred); the whole sample is refused
-            // before any input state is touched.
-            if ((drivingActive || lanRaceScreen) && gadget)
-                return Result(command, CommandResult.Rejected, "unavailable");
+            // M5 Task 5: gadget is a live held control — it rides the
+            // same input sample everywhere and the authoritative rules
+            // edge-latch it (one item per press, never two).
             // A recovery press is latched with its command identity until a
             // simulation boundary consumes it; overflow refuses before the
             // held-input sample mutates.
             if (drivingActive && recover)
             {
                 string queueError;
-                if (!driving.QueuePending("recover", command.CommandId, out queueError))
+                if (driving != null)
+                {
+                    if (!driving.QueuePending("recover", command.CommandId, out queueError))
+                        return Result(command, CommandResult.Rejected, queueError);
+                    DrainDrivingEvents();
+                }
+                else if (soloRace != null
+                    && !soloRace.QueuePending("recover", command.CommandId, out queueError))
+                {
                     return Result(command, CommandResult.Rejected, queueError);
-                DrainDrivingEvents();
+                }
+                DrainSoloEvents();
             }
             // LAN race input: the recover flag rides the input frame to the
             // host (which queues and acknowledges the action); a pause pulse
@@ -933,7 +1150,10 @@ namespace FamilyRacing.Core.Foundation
                 // second one-shot beside the deduplicated action. The app
                 // submits recover as a one-shot action carrying this
                 // command's identity (see FoundationApp.ExecuteAndEmit).
-                input = new DriverInput(steering, drift, boost, false,
+                // Gadget DOES ride the frame (M5 Task 5): it is a held
+                // level the host's rules edge-latch — there is no
+                // one-shot acknowledgment contract for it.
+                input = new DriverInput(steering, drift, boost, gadget,
                     false, changeCamera, pausePulse, throttle, brake);
                 holdTicksRemaining = duration;
                 if (changeCamera && WritableSelected())
@@ -943,6 +1163,8 @@ namespace FamilyRacing.Core.Foundation
                 }
                 return Result(command, CommandResult.Applied, "");
             }
+            if (drivingActive && !paused && gadget && !input.Gadget)
+                pendingGadgetPress = true;
             input = new DriverInput(steering, drift, boost, gadget, recover,
                 changeCamera, pausePulse, throttle, brake);
             holdTicksRemaining = duration;
@@ -960,10 +1182,16 @@ namespace FamilyRacing.Core.Foundation
             if (pausePulse)
             {
                 paused = !paused;
+                if (paused) pendingGadgetPress = false;
                 if (paused && driving != null)
                 {
                     driving.CancelPending("paused");
                     DrainDrivingEvents();
+                }
+                if (soloRace != null)
+                {
+                    soloRace.SetPaused(paused);
+                    DrainSoloEvents();
                 }
             }
             return Result(command, CommandResult.Applied, "");
@@ -997,6 +1225,14 @@ namespace FamilyRacing.Core.Foundation
                 driving.CancelPending("paused");
                 DrainDrivingEvents();
             }
+            // The local session's own clock follows the same toggle —
+            // entering pause freezes every race timer and cancels
+            // latched one-shots; resume republishes race.resumed.
+            if (soloRace != null)
+            {
+                soloRace.SetPaused(paused);
+                DrainSoloEvents();
+            }
             ClearInput();
         }
 
@@ -1008,7 +1244,7 @@ namespace FamilyRacing.Core.Foundation
                 return Result(command, CommandResult.Rejected, "contentUnavailable");
             if (activeSlot < 0)
                 return Result(command, CommandResult.Rejected, "unavailable");
-            if (driving != null)
+            if (driving != null || soloRace != null)
                 return Result(command, CommandResult.Rejected, "raceActive");
             var vehicleId = command.Parameters["vehicleId"];
             var eventId = command.Parameters["eventId"];
@@ -1042,6 +1278,12 @@ namespace FamilyRacing.Core.Foundation
 
         private CommandResult RaceRestart(GameCommand command)
         {
+            // One uniform retry affordance: a local-mode session replays
+            // its stored request under a fresh race identity; the legacy
+            // practice session rebuilds from the catalog exactly as
+            // before.
+            if (driving == null && soloRace != null)
+                return SoloRestart(command);
             if (driving == null)
                 return Result(command, CommandResult.Rejected, "unavailable");
             VehicleTuning tuning;
@@ -1085,9 +1327,13 @@ namespace FamilyRacing.Core.Foundation
 
         private CommandResult RaceExit(GameCommand command)
         {
-            if (driving == null)
+            if (driving == null && soloRace == null)
                 return Result(command, CommandResult.Rejected, "unavailable");
-            EndRace("raceExit", command);
+            // One uniform exit affordance across practice and the local
+            // modes: the solo path aborts without a rewardable result,
+            // retires the unused context and emits race.exited.
+            if (soloRace != null) EndSoloRace("raceExit", command);
+            else EndRace("raceExit", command);
             screen = ScreenPractice;
             return Result(command, CommandResult.Applied, "");
         }
@@ -1106,7 +1352,7 @@ namespace FamilyRacing.Core.Foundation
                 return Result(command, CommandResult.Rejected, "contentUnavailable");
             if (activeSlot < 0)
                 return Result(command, CommandResult.Rejected, "unavailable");
-            if (driving != null)
+            if (driving != null || soloRace != null)
                 return Result(command, CommandResult.Rejected, "raceActive");
             var vehicleId = command.Parameters["vehicleId"];
             VehicleTuning tuning;
@@ -1266,7 +1512,9 @@ namespace FamilyRacing.Core.Foundation
                 command != null ? command.CommandId : "",
                 null, null,
                 drivingContent.CompatibilityFingerprint,
-                drivingContent.SimulationBackend);
+                drivingContent.SimulationBackend,
+                gameplayCatalog != null && gameplayCatalog.Gadgets != null
+                    ? gameplayCatalog.Gadgets : gadgetCatalog);
         }
 
         // Ends the active session: latched actions cancel with their
@@ -1351,6 +1599,18 @@ namespace FamilyRacing.Core.Foundation
         {
             available = true;
             reason = "";
+            if (gameplayCatalog != null && gameplayCatalog.QuickRaceOnly
+                && (action.StartsWith("campaign.", StringComparison.Ordinal)
+                    || action.StartsWith("timeTrial.", StringComparison.Ordinal)
+                    || action.StartsWith("garage.", StringComparison.Ordinal)
+                    || action.StartsWith("bounties.", StringComparison.Ordinal)
+                    || action.StartsWith("upgrade.", StringComparison.Ordinal)
+                    || action.StartsWith("cosmetic.", StringComparison.Ordinal)))
+            {
+                available = false;
+                reason = "contentUnavailable";
+                return;
+            }
             if (action.StartsWith("lan.", StringComparison.Ordinal))
             {
                 if (lanSession == null)
@@ -1439,18 +1699,61 @@ namespace FamilyRacing.Core.Foundation
                         available = false;
                         reason = "requiresSelectedProfile";
                     }
-                    else if (driving != null)
+                    else if (driving != null || soloRace != null)
                     {
                         available = false;
                         reason = "raceActive";
                     }
                     break;
                 case "race.restart":
-                case "race.exit":
-                    if (driving == null)
+                    if (driving == null && soloRace == null)
                     {
                         available = false;
                         reason = "noActiveRace";
+                    }
+                    else if (soloRace != null
+                        && unresolvedResult != null)
+                    {
+                        // SoloRestart refuses the same predicate: a
+                        // finished session (its overlay hosts retrySave)
+                        // or a progression replay while the debt holds.
+                        RaceMode restartMode;
+                        var stored = soloRace.Request;
+                        if (soloRace.Result != null
+                            || (stored != null
+                                && RaceModeRules.TryParse(stored.mode,
+                                    out restartMode)
+                                && RaceModeRules.IsProgression(
+                                    restartMode)))
+                        {
+                            available = false;
+                            reason = "rewardUnresolved";
+                        }
+                    }
+                    break;
+                case "race.exit":
+                    if (driving == null && soloRace == null)
+                    {
+                        available = false;
+                        reason = "noActiveRace";
+                    }
+                    break;
+                case "solo.start":
+                    if (gameplayCatalog == null || gameplayCatalog.IsLegacy
+                        || gameplayCatalog.Driving == null)
+                    {
+                        available = false;
+                        reason = "contentUnavailable";
+                    }
+                    else if (activeSlot < 0)
+                    {
+                        available = false;
+                        reason = "requiresSelectedProfile";
+                    }
+                    else if (driving != null || soloRace != null)
+                    {
+                        available = false;
+                        reason = "raceActive";
                     }
                     break;
                 case "tutorial.start":
@@ -1466,7 +1769,7 @@ namespace FamilyRacing.Core.Foundation
                         available = false;
                         reason = "requiresSelectedProfile";
                     }
-                    else if (driving != null)
+                    else if (driving != null || soloRace != null)
                     {
                         available = false;
                         reason = "raceActive";
@@ -1480,11 +1783,190 @@ namespace FamilyRacing.Core.Foundation
                         reason = "noActiveTutorial";
                     }
                     break;
+                case "upgrade.purchase":
+                    // Content first, exactly like solo.start: a missing
+                    // or legacy catalog reports honest unavailability
+                    // before any profile check.
+                    if (gameplayCatalog == null || gameplayCatalog.IsLegacy
+                        || gameplayCatalog.Driving == null
+                        || gameplayCatalog.Economy == null)
+                    {
+                        available = false;
+                        reason = "contentUnavailable";
+                    }
+                    else if (activeSlot < 0)
+                    {
+                        available = false;
+                        reason = "requiresSelectedProfile";
+                    }
+                    else if (!WritableSelected())
+                    {
+                        available = false;
+                        reason = "readOnlyProfile";
+                    }
+                    else if (driving != null || soloRace != null)
+                    {
+                        available = false;
+                        reason = "raceActive";
+                    }
+                    else if (unresolvedResult != null)
+                    {
+                        // The handler gates purchases on the unresolved
+                        // reward — the buy button must never light up
+                        // for a command that would reject.
+                        available = false;
+                        reason = "rewardUnresolved";
+                    }
+                    break;
+                case "cosmetic.equip":
+                    // Equips are not gated on the unresolved reward
+                    // (no progression write interleaves with the reward
+                    // transaction), so this mirrors CosmeticEquip's own
+                    // fences only.
+                    if (gameplayCatalog == null || gameplayCatalog.IsLegacy
+                        || gameplayCatalog.Driving == null
+                        || gameplayCatalog.Economy == null)
+                    {
+                        available = false;
+                        reason = "contentUnavailable";
+                    }
+                    else if (activeSlot < 0)
+                    {
+                        available = false;
+                        reason = "requiresSelectedProfile";
+                    }
+                    else if (!WritableSelected())
+                    {
+                        available = false;
+                        reason = "readOnlyProfile";
+                    }
+                    else if (driving != null || soloRace != null)
+                    {
+                        available = false;
+                        reason = "raceActive";
+                    }
+                    break;
                 case "ui.navigate":
                     if (screen == ScreenDriving)
                     {
                         available = false;
                         reason = "useRaceExit";
+                    }
+                    break;
+                // M5 Task 10 loop surface — the same gating order the
+                // handlers enforce: content, then profile, then the
+                // live-race fence.
+                case "campaign.open":
+                case "quickRace.open":
+                case "timeTrial.open":
+                case "timeTrial.start":
+                    // Opens and the non-progression trial start never
+                    // gate on the unresolved reward — StartSoloSession
+                    // only fences progression modes, so discovery must
+                    // not either.
+                    if (gameplayCatalog == null || gameplayCatalog.IsLegacy
+                        || gameplayCatalog.Driving == null)
+                    {
+                        available = false;
+                        reason = "contentUnavailable";
+                    }
+                    else if (activeSlot < 0)
+                    {
+                        available = false;
+                        reason = "requiresSelectedProfile";
+                    }
+                    else if (driving != null || soloRace != null)
+                    {
+                        available = false;
+                        reason = "raceActive";
+                    }
+                    break;
+                case "campaign.selectWorld":
+                    // Transient view selection: the content/profile
+                    // fences the handler enforces, and only those — the
+                    // pick writes nothing durable, so it stays legal
+                    // paused, and rejects inside a LAN session via the
+                    // SoloBlockedDuringLan fence above.
+                    if (gameplayCatalog == null || gameplayCatalog.IsLegacy
+                        || gameplayCatalog.Driving == null)
+                    {
+                        available = false;
+                        reason = "contentUnavailable";
+                    }
+                    else if (activeSlot < 0)
+                    {
+                        available = false;
+                        reason = "requiresSelectedProfile";
+                    }
+                    break;
+                case "campaign.start":
+                case "quickRace.start":
+                    if (gameplayCatalog == null || gameplayCatalog.IsLegacy
+                        || gameplayCatalog.Driving == null)
+                    {
+                        available = false;
+                        reason = "contentUnavailable";
+                    }
+                    else if (activeSlot < 0)
+                    {
+                        available = false;
+                        reason = "requiresSelectedProfile";
+                    }
+                    else if (driving != null || soloRace != null)
+                    {
+                        available = false;
+                        reason = "raceActive";
+                    }
+                    else if (unresolvedResult != null)
+                    {
+                        // Progression starts reject rewardUnresolved in
+                        // StartSoloSession — the picker must agree.
+                        available = false;
+                        reason = "rewardUnresolved";
+                    }
+                    break;
+                case "garage.open":
+                case "bounties.open":
+                    if (gameplayCatalog == null || gameplayCatalog.IsLegacy
+                        || gameplayCatalog.Driving == null
+                        || gameplayCatalog.Economy == null)
+                    {
+                        available = false;
+                        reason = "contentUnavailable";
+                    }
+                    else if (activeSlot < 0)
+                    {
+                        available = false;
+                        reason = "requiresSelectedProfile";
+                    }
+                    else if (driving != null || soloRace != null)
+                    {
+                        available = false;
+                        reason = "raceActive";
+                    }
+                    break;
+                case "results.retry":
+                case "results.continue":
+                    if (soloRace == null || soloRace.Result == null)
+                    {
+                        available = false;
+                        reason = "unavailable";
+                    }
+                    else if (unresolvedResult != null)
+                    {
+                        // The overlay's own gate: retry and continue
+                        // reject rewardUnresolved until the debt
+                        // resolves, so the buttons grey out with the
+                        // reason rather than silently refusing.
+                        available = false;
+                        reason = "rewardUnresolved";
+                    }
+                    break;
+                case "results.retrySave":
+                    if (unresolvedResult == null)
+                    {
+                        available = false;
+                        reason = "noPendingResult";
                     }
                     break;
             }
@@ -1598,42 +2080,10 @@ namespace FamilyRacing.Core.Foundation
             return result.Copy();
         }
 
-        private static ProfileSave CopyProfile(ProfileSave profile)
-        {
-            if (profile == null) return null;
-            return new ProfileSave
-            {
-                schemaVersion = profile.schemaVersion,
-                id = profile.id,
-                slot = profile.slot,
-                avatar = profile.avatar,
-                colorIndex = profile.colorIndex,
-                language = profile.language,
-                camera = profile.camera,
-                reducedCameraShake = profile.reducedCameraShake,
-                musicVolume = profile.musicVolume,
-                effectsVolume = profile.effectsVolume,
-                voiceVolume = profile.voiceVolume,
-                coins = profile.coins,
-                unlockedVehicles = profile.unlockedVehicles == null
-                    ? null
-                    : new List<string>(profile.unlockedVehicles),
-                appliedResults = CopyReceipts(profile.appliedResults)
-            };
-        }
-
-        // The receipt ledger deep-copies with the profile so no snapshot
-        // or draft can ever share — or silently drop — applied-result
-        // state. Receipts are never silently evicted.
-        private static List<AppliedResultReceipt> CopyReceipts(
-            List<AppliedResultReceipt> receipts)
-        {
-            if (receipts == null) return null;
-            var copy = new List<AppliedResultReceipt>(receipts.Count);
-            foreach (var receipt in receipts)
-                copy.Add(receipt != null ? receipt.Copy() : null);
-            return copy;
-        }
+        // Profile copies all flow through ProfileCopy.DeepCopy — the
+        // single lossless copy that keeps every snapshot, draft, slot
+        // cache and reward candidate deeply independent of the live
+        // profile's nested collections.
 
         private static KeyValuePair<string, ParameterSpec[]> Schema(string action, params ParameterSpec[] parameters)
         {

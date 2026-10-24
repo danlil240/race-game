@@ -105,5 +105,26 @@ namespace FamilyRacing.Tests
         {
             Assert.Throws<ArgumentNullException>(() => ShellText.Get(null, "en"));
         }
+
+        [Test]
+        public void EveryGameplayEventTypeHasAnEventKindLabel()
+        {
+            // The closed GameplayEventType set drives the shell's
+            // "event.type.<type>" kind labels — a new event type added
+            // without its bilingual pair must fail here.
+            var fields = typeof(FamilyRacing.Core.Racing.GameplayEventType)
+                .GetFields(System.Reflection.BindingFlags.Public
+                    | System.Reflection.BindingFlags.Static);
+            Assert.That(fields, Is.Not.Empty);
+            foreach (var field in fields)
+            {
+                var eventType = (string)field.GetValue(null);
+                var key = "event.type." + eventType;
+                Assert.That(ShellText.Keys, Does.Contain(key),
+                    "missing localization for event type " + eventType);
+                Assert.That(ShellText.Get(key, "en"), Is.Not.Empty, key);
+                Assert.That(ShellText.Get(key, "he"), Is.Not.Empty, key);
+            }
+        }
     }
 }

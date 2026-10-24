@@ -14,9 +14,13 @@ namespace FamilyRacing.Core.Driving
         private const float SweepBackoffFraction = 0.02f;
         private const float TwoPi = (float)(Math.PI * 2.0);
 
+        // `modifiers` is the rule layer's per-tick scaling (M5 Task 5):
+        // turbo raises acceleration and the speed cap; a foam slow only
+        // lowers the cap. Null means neutral — every pre-gadget caller
+        // keeps its exact step.
         public static MotorStepResult Step(MotorState previous, DriverInput input,
             VehicleTuning tuning, IMotorWorld world, float deltaSeconds,
-            IRacerContactSource racers = null)
+            IRacerContactSource racers = null, MotorModifiers modifiers = null)
         {
             if (tuning == null || !tuning.Validate(out _))
                 return MotorStepResult.Rejected(previous, "invalidTuning");
@@ -90,8 +94,26 @@ namespace FamilyRacing.Core.Driving
             // any positive brake suppresses drive force entirely, the same
             // suppression the physical backend's wheel solver applies.
             var throttle = input.Brake > 0f ? 0f : input.Throttle;
-            var speedLimit = state.boostActive ? tuning.boostMaxSpeed : tuning.maxSpeed;
-            var accel = state.boostActive ? tuning.boostAcceleration : tuning.acceleration;
+            var gadgetAccel = modifiers != null
+                ? modifiers.accelerationMultiplier : 1f;
+            var gadgetCap = modifiers != null
+                ? modifiers.speedCapMultiplier : 1f;
+            var speedLimit = (state.boostActive
+                ? tuning.boostMaxSpeed : tuning.maxSpeed) * gadgetCap;
+            var accel = (state.boostActive
+                ? tuning.boostAcceleration : tuning.acceleration)
+                * gadgetAccel;
+            var surface = state.grounded ? world.ProbeGround(new MotorPose
+                { x = state.x, y = state.y, z = state.z, heading = state.heading }, tuning.groundProbe) : default;
+            bool rough = surface.hit && surface.offRoad;
+            if (rough)
+            {
+                // Boost cannot turn the run-off shoulder into a faster route.
+                // Drag removes excess momentum smoothly, without freezing steering.
+                speedLimit = Math.Min(speedLimit, tuning.maxSpeed * .35f);
+                accel *= .45f;
+                if (state.speed > speedLimit) state.speed = Math.Max(speedLimit, state.speed - 20f * dt);
+            }
             if (state.grounded)
             {
                 if (throttle > 0f)
@@ -126,6 +148,7 @@ namespace FamilyRacing.Core.Driving
                 state.lateralSpeed = state.lateralSpeed * Math.Max(0f, 1f - tuning.grip * dt);
                 if (Math.Abs(state.lateralSpeed) < 0.001f) state.lateralSpeed = 0f;
             }
+            if (rough) state.lateralSpeed *= Math.Max(0f, 1f - 7f * dt);
 
             // --- horizontal displacement with swept contact -----------------
             var fx = (float)Math.Sin(state.heading);

@@ -153,18 +153,44 @@ namespace FamilyRacing
             var pos = new Vector3(motor.x, motor.y, motor.z);
             if (motor.tick != interpTick)
             {
+                var tickGap = motor.tick - interpTick;
+                var reset = interpTick < 0 || tickGap <= 0 || motor.recovering;
+                var span = Mathf.Max(1f, tickGap);
                 interpPrevPos = interpCurPos;
                 interpPrevYaw = interpCurYaw;
                 interpCurPos = pos;
                 interpCurYaw = motor.heading;
                 interpTick = motor.tick;
-                // A respawn or any teleport-scale jump must snap, never
-                // sweep the body across the course for a frame.
-                if ((interpCurPos - interpPrevPos).sqrMagnitude
-                        > TeleportSnapDistance * TeleportSnapDistance)
+                // The render frame can span several simulation ticks.
+                // Compare travel per tick so normal fast motion is not
+                // mistaken for a teleport after a missed frame.
+                var snapDistance = TeleportSnapDistance;
+                if (tickGap > 1)
+                {
+                    // A skipped recovery can already have cleared its
+                    // one-tick flag. Its near-zero velocity must not
+                    // qualify a relocation as continuous fast travel.
+                    var velocity = new Vector3(motor.speed, motor.lateralSpeed, motor.verticalSpeed);
+                    var travel = velocity.magnitude * span
+                        / Core.Networking.NetworkSettings.SimulationTicksPerSecond;
+                    snapDistance = Mathf.Max(TeleportSnapDistance,
+                        Mathf.Min(TeleportSnapDistance * span, travel + 0.5f));
+                }
+                if (reset || (interpCurPos - interpPrevPos).sqrMagnitude
+                        > snapDistance * snapDistance)
                 {
                     interpPrevPos = interpCurPos;
                     interpPrevYaw = interpCurYaw;
+                }
+                else if (tickGap > 1)
+                {
+                    // Reconstruct the final one-tick window from the
+                    // observed span. Reusing the older rendered commit
+                    // would rewind the visual when alpha wraps to zero.
+                    var fraction = 1f - 1f / span;
+                    interpPrevPos = Vector3.LerpUnclamped(interpPrevPos, interpCurPos, fraction);
+                    interpPrevYaw += Mathf.DeltaAngle(interpPrevYaw * Mathf.Rad2Deg,
+                        interpCurYaw * Mathf.Rad2Deg) * Mathf.Deg2Rad * fraction;
                 }
             }
             var a = Mathf.Clamp01(alpha);
@@ -183,8 +209,8 @@ namespace FamilyRacing
 
         // Committed poses the visual interpolates between, plus the last
         // tick applied. TeleportSnapDistance exceeds the largest legal
-        // per-tick move (boost top speed ~28 m/s ≈ 0.94 m a tick), so
-        // anything bigger is a respawn, not motion.
+        // per-tick move (Grand Tour boost speed <= 54.2 m/s, or 1.81 m
+        // per 30 Hz tick). Render-frame travel is scaled by its tick span.
         private const float TeleportSnapDistance = 2f;
         private Vector3 interpPrevPos, interpCurPos;
         private float interpPrevYaw, interpCurYaw;
@@ -337,13 +363,145 @@ namespace FamilyRacing
         public float LeanRoll { get { return leanRoll; } }
         public string ShownKey { get { return shownKey; } }
 
+        // --- M5 Task 8: durable-fact indicators -----------------------
+        // Purchased upgrade levels and equipped cosmetics are profile
+        // facts, not tuning: every mode renders the same installed parts
+        // and cosmetics for the seat bound to the owning profile. The
+        // parts are named children under the same LeanPivot the
+        // silhouette uses — `upgrade.<category>.<level>` one per bought
+        // level, `cosmetic.<id>` one per equipped item — and carry no
+        // colliders, so they can never touch stats or collision.
+        private readonly Dictionary<string, int> upgradeLevels =
+            new Dictionary<string, int>(System.StringComparer.Ordinal);
+        private readonly List<GameObject> upgradeParts = new List<GameObject>();
+        private string upgradeKey = "";
+        private readonly List<string> cosmeticIds = new List<string>();
+        private readonly List<GameObject> cosmeticParts = new List<GameObject>();
+        private string cosmeticKey = "";
+
+        // `levels` maps authored category id -> purchased level for the
+        // vehicle this view shows. A repeated identical map is a no-op.
+        public void SetUpgradeIndicators(
+            IReadOnlyDictionary<string, int> levels)
+        {
+            EnsureBuilt();
+            var key = IndicatorKey(levels);
+            if (key == upgradeKey) return;
+            upgradeKey = key;
+            upgradeLevels.Clear();
+            if (levels != null)
+                foreach (var entry in levels)
+                    if (entry.Value > 0)
+                        upgradeLevels[entry.Key] = entry.Value;
+            foreach (var part in upgradeParts)
+                if (part != null) DestroyImmediate(part);
+            upgradeParts.Clear();
+            var slot = 0;
+            foreach (var entry in upgradeLevels)
+                for (var level = 1; level <= entry.Value; level++)
+                {
+                    var part = GameObject.CreatePrimitive(
+                        PrimitiveType.Cube);
+                    var collider = part.GetComponent<Collider>();
+                    if (collider != null) DestroyImmediate(collider);
+                    part.name = "upgrade." + entry.Key + "."
+                        + level.ToString(
+                            System.Globalization.CultureInfo
+                                .InvariantCulture);
+                    part.transform.SetParent(leanPivot, false);
+                    // One visible marker per bought level, laid out
+                    // along the body — graybox affordance, never a
+                    // stat: only presence/naming is contract.
+                    part.transform.localPosition = new Vector3(
+                        -0.6f + 0.4f * (slot % 4),
+                        1.15f,
+                        -0.9f + 0.45f * (slot / 4));
+                    part.transform.localScale = new Vector3(
+                        0.28f, 0.28f, 0.28f);
+                    var renderer = part.GetComponent<Renderer>();
+                    if (renderer != null && darkMaterial != null)
+                        renderer.sharedMaterial = darkMaterial;
+                    upgradeParts.Add(part);
+                    slot++;
+                }
+        }
+
+        // The purchased level currently displayed for one authored
+        // category — 0 when nothing is installed.
+        public int UpgradeLevelShown(string category)
+        {
+            int level;
+            return category != null
+                && upgradeLevels.TryGetValue(category, out level)
+                ? level : 0;
+        }
+
+        // Equipped cosmetic ids bind one named visual each — honest
+        // presence: only what the profile actually equips ever shows.
+        public void SetCosmetics(IReadOnlyList<string> equippedIds)
+        {
+            EnsureBuilt();
+            var key = "";
+            if (equippedIds != null)
+                foreach (var id in equippedIds)
+                    key += (id ?? "") + "|";
+            if (key == cosmeticKey) return;
+            cosmeticKey = key;
+            cosmeticIds.Clear();
+            foreach (var part in cosmeticParts)
+                if (part != null) DestroyImmediate(part);
+            cosmeticParts.Clear();
+            var slot = 0;
+            if (equippedIds != null)
+                foreach (var id in equippedIds)
+                {
+                    if (string.IsNullOrEmpty(id)) continue;
+                    cosmeticIds.Add(id);
+                    var part = GameObject.CreatePrimitive(
+                        PrimitiveType.Sphere);
+                    var collider = part.GetComponent<Collider>();
+                    if (collider != null) DestroyImmediate(collider);
+                    part.name = "cosmetic." + id;
+                    part.transform.SetParent(leanPivot, false);
+                    part.transform.localPosition = new Vector3(
+                        0.55f * (slot % 3 - 1),
+                        1.45f + 0.15f * (slot / 3),
+                        -1.15f);
+                    part.transform.localScale = new Vector3(
+                        0.22f, 0.22f, 0.22f);
+                    var renderer = part.GetComponent<Renderer>();
+                    if (renderer != null && bodyMaterial != null)
+                        renderer.sharedMaterial = bodyMaterial;
+                    cosmeticParts.Add(part);
+                    slot++;
+                }
+        }
+
+        public bool CosmeticShown(string cosmeticId)
+        {
+            return cosmeticId != null && cosmeticIds.Contains(cosmeticId);
+        }
+
+        private static string IndicatorKey(
+            IReadOnlyDictionary<string, int> levels)
+        {
+            var key = "";
+            if (levels == null) return key;
+            var ordered = new List<string>(levels.Keys);
+            ordered.Sort(System.StringComparer.Ordinal);
+            foreach (var category in ordered)
+                key += category + "=" + levels[category] + ";";
+            return key;
+        }
+
         private void EnsureBuilt()
         {
             if (leanPivot != null) return;
             var pivot = new GameObject("LeanPivot");
             pivot.transform.SetParent(transform, false);
             leanPivot = pivot.transform;
-            var shader = Shader.Find("Universal Render Pipeline/Lit");
+            var shader = Shader.Find("Universal Render Pipeline/Simple Lit");
+            if (shader == null) shader = Shader.Find("Universal Render Pipeline/Lit");
             if (shader == null) shader = Shader.Find("Standard");
             bodyMaterial = new Material(shader);
             darkMaterial = new Material(shader) { color = new Color(0.16f, 0.17f, 0.19f) };

@@ -10,12 +10,61 @@ namespace FamilyRacing
     // FoundationShell.cs to keep each file focused.
     public sealed partial class FoundationShell
     {
+        // Settings' Back follows the entry route (PCQA-004): the last
+        // shell-navigable screen rendered before settings owns the
+        // return — profile creation arrives from profiles, the sandbox
+        // settings action arrives from the sandbox. Loop and LAN-phase
+        // screens are never ui.navigate targets, so they can never
+        // become the recorded origin.
+        private string settingsReturnScreen = "profiles";
+        // The gated loop entries whose published content verdict the
+        // profiles-screen disclaimer mirrors (PCQA-003).
+        private static readonly string[] LoopEntryActions =
+            { "campaign.open", "quickRace.open", "timeTrial.open",
+              "garage.open", "bounties.open" };
+
+        // Screens ui.navigate may target that are not settings itself —
+        // the only origins Back can legally return to.
+        private static bool IsSettingsOriginScreen(string screen)
+        {
+            return screen == "profiles" || screen == "sandbox"
+                || screen == "practice" || screen == "lan-browser";
+        }
+
+        // The disclaimer tracks the same published verdict the loop
+        // entries carry: while the gameplay catalog is absent every
+        // gated *.open descriptor reports contentUnavailable, so the
+        // welcome copy names what is playable instead of promising
+        // entries that would reject.
+        private bool LoopContentAvailable()
+        {
+            if (app == null || app.Service == null) return false;
+            var entries = 0;
+            foreach (var descriptor in app.Service.Discover())
+            {
+                if (Array.IndexOf(LoopEntryActions, descriptor.action) < 0)
+                    continue;
+                entries++;
+                if (descriptor.reason == "contentUnavailable") return false;
+            }
+            return entries == LoopEntryActions.Length;
+        }
+
         // --- profiles screen ----------------------------------------------
 
         private void BuildProfiles(FoundationState state)
         {
             AddLabel(root, T("shell.title", state), 44, Deep);
-            AddLabel(root, T("shell.disclaimer", state), 18, Deep);
+            var disclaimer = AddLabel(root, T(IsPlayfulChaos ? "fun.welcome" : LoopContentAvailable()
+                ? "shell.disclaimer" : "shell.disclaimer.unavailable",
+                state), 18, Deep);
+            disclaimer.name = "shell.disclaimer";
+            // PCQA2-001: the welcome copy runs past the client width —
+            // under the Advanced generator an unset whiteSpace resolves
+            // to NoWrap, so the single centered line clipped at both
+            // viewport edges. Same wrapping-label opt-in the world-name
+            // cards use (FoundationShell.Progression.cs).
+            disclaimer.style.whiteSpace = WhiteSpace.Normal;
             AddLabel(root, T("profile.select", state), 28, Deep);
             var cards = Row(root);
             for (var i = 0; i < state.slots.Count; i++)
@@ -123,8 +172,12 @@ namespace FamilyRacing
             saveButton = AddButton(actionRow, T("action.save", state), Coral,
                 () => app.Dispatch("settings.save", emptyParams), "settings.save");
             ApplyAvailability(saveButton, "settings.save");
+            // Back returns to the screen the user arrived from — the
+            // create flow keeps its profiles return while the sandbox
+            // route returns an existing profile to the sandbox.
             var back = AddButton(actionRow, T("action.back", state), Deep,
-                () => app.Dispatch("ui.navigate", Screen("profiles")), "action.back");
+                () => app.Dispatch("ui.navigate",
+                    Screen(settingsReturnScreen)), "action.back");
             ApplyAvailability(back, "ui.navigate");
             warningLabel = AddLabel(root, "", 18, Coral);
             warningLabel.name = "status.fontWarning";
@@ -173,6 +226,7 @@ namespace FamilyRacing
 
         private void BuildSandbox(FoundationState state)
         {
+            if (IsPlayfulChaos) { BuildPlayfulHome(state); return; }
             AddLabel(root, T("sandbox.title", state), 40, Deep);
             var indicators = Row(root);
             steeringLabel = AddLabel(indicators, T("input.steering", state) + ": 0", 22, Deep);
@@ -202,6 +256,11 @@ namespace FamilyRacing
                 () => app.Dispatch("ui.navigate", Screen("practice")), "action.practice");
             var lan = AddButton(actions, T("lan.title", state), Ocean,
                 () => app.Dispatch("ui.navigate", Screen("lan-browser")), "action.lan");
+            // PCQA-004: a selected profile's route back to Settings —
+            // until now only profile creation could reach the screen.
+            var settings = AddButton(actions, T("action.settings", state), Ocean,
+                () => app.Dispatch("ui.navigate", Screen("settings")),
+                "action.settings");
             var back = AddButton(actions, T("action.back", state), Deep,
                 () => app.Dispatch("ui.navigate", Screen("profiles")), "action.back");
             ApplyAvailability(gadget, "input.set");
@@ -210,7 +269,28 @@ namespace FamilyRacing
             ApplyAvailability(pause, "pause.toggle");
             ApplyAvailability(practice, "race.start");
             ApplyAvailability(lan, "ui.navigate");
+            ApplyAvailability(settings, "ui.navigate");
             ApplyAvailability(back, "ui.navigate");
+            // M5 Task 10: the gameplay-loop entries — gated *.open
+            // commands, exactly like an agent dispatching them. A
+            // disabled button carries the discovery reason as its tooltip.
+            var loop = Row(root);
+            loop.name = "loop.entries";
+            var campaign = AddButton(loop, T("campaign.title", state), Coral,
+                () => app.Dispatch("campaign.open", emptyParams), "loop.campaign");
+            var quick = AddButton(loop, T("quick.title", state), Seafoam,
+                () => app.Dispatch("quickRace.open", emptyParams), "loop.quickRace");
+            var trial = AddButton(loop, T("trial.title", state), Ocean,
+                () => app.Dispatch("timeTrial.open", emptyParams), "loop.timeTrial");
+            var garage = AddButton(loop, T("garage.title", state), Deep,
+                () => app.Dispatch("garage.open", emptyParams), "loop.garage");
+            var bounties = AddButton(loop, T("bounties.title", state), Seafoam,
+                () => app.Dispatch("bounties.open", emptyParams), "loop.bounties");
+            ApplyAvailability(campaign, "campaign.open");
+            ApplyAvailability(quick, "quickRace.open");
+            ApplyAvailability(trial, "timeTrial.open");
+            ApplyAvailability(garage, "garage.open");
+            ApplyAvailability(bounties, "bounties.open");
             pauseOverlay = AddLabel(root, T("input.pause", state), 40, Coral);
             pauseOverlay.name = "overlay.pause";
             statusLabel = AddLabel(root, "", 18, Deep);

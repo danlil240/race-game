@@ -8,7 +8,8 @@ using UnityEngine;
 namespace FamilyRacing.Networking
 {
     /// <summary>
-    /// Task-9 replication spine (protocol 2): the authoritative Task-3
+    /// Task-9 replication spine (protocol 3 — the M5 gadget world rides
+    /// the snapshot): the authoritative Task-3
     /// <see cref="NetworkRace"/> on the host, replicated over the Task-1
     /// transport's two channels under Task-2 session/ownership policy.
     ///
@@ -42,6 +43,10 @@ namespace FamilyRacing.Networking
         private readonly LanTransport transport;
         private readonly LanSessionService session;
         private DrivingContentCatalog content;
+        // M5 Task 5: the authored gadget catalog the host's race
+        // creation needs — same injection contract as the driving
+        // catalog; null leaves gadget worlds absent.
+        private GadgetDefinitionCatalog gadgets;
         // Task 4: the runtime injects the world provider once — backend
         // selection comes from the catalog's SimulationBackend at race
         // creation. Null keeps the legacy IMotorWorld arcade fallback.
@@ -71,6 +76,7 @@ namespace FamilyRacing.Networking
         // A client's upstream resend request (P1RS) forces the next host
         // tick to publish rather than waiting for the snapshot cadence.
         private bool snapshotRequested;
+        private bool terminalSnapshotPending;
         private readonly List<DrivingEvent> stagedEvents = new List<DrivingEvent>();
         // participantId -> applied session facts; diffed every Pump so a
         // control transfer or epoch bump is applied at a host boundary.
@@ -156,6 +162,13 @@ namespace FamilyRacing.Networking
         public void SetContent(DrivingContentCatalog catalog)
         {
             content = catalog;
+        }
+
+        // The validated gadget catalog the host races against — absence
+        // produces gadget-free races, never a fabricated default.
+        public void SetGadgetContent(GadgetDefinitionCatalog catalog)
+        {
+            gadgets = catalog;
         }
 
         // --- diagnostics / observation -------------------------------------
@@ -428,8 +441,14 @@ namespace FamilyRacing.Networking
                 || content == null) return;
             hostSessionId = descriptor.sessionId;
             raceOrdinal++;
-            raceId = hostSessionId + "-r" + raceOrdinal.ToString(
-                System.Globalization.CultureInfo.InvariantCulture);
+            // Task 4: the session service allocates the race identity at
+            // lan.start so every participant binds its reward context
+            // before the race begins — prefer it and keep the legacy
+            // bridge-computed id only as the no-allocation fallback.
+            raceId = !string.IsNullOrEmpty(snap.currentRaceId)
+                ? snap.currentRaceId
+                : hostSessionId + "-r" + raceOrdinal.ToString(
+                    System.Globalization.CultureInfo.InvariantCulture);
             var specs = new List<NetworkRacerSpec>();
             foreach (var participant in snap.participants)
             {
@@ -456,12 +475,13 @@ namespace FamilyRacing.Networking
             NetworkRace created;
             if (!NetworkRace.TryCreate(hostSessionId, raceId, content,
                     descriptor.eventId, descriptor.classId, specs,
-                    out created, out error))
+                    out created, out error, gadgets))
             {
                 LastError = "raceCreate:" + (error ?? "unknown");
                 return;
             }
             race = created;
+            terminalSnapshotPending = false;
             inputs.BeginRace(hostSessionId, raceId);
             snapshotSequence = 0;
             eventBatchSequence = 0;
@@ -516,6 +536,7 @@ namespace FamilyRacing.Networking
         private void EndRace()
         {
             race = null;
+            terminalSnapshotPending = false;
             // The host simulation dies with the race: a physics world is
             // a whole local scene, so it unloads here — never lazily.
             if (hostSimulation != null) hostSimulation.Dispose();
@@ -690,6 +711,20 @@ namespace FamilyRacing.Networking
         private void HostTick(DriverInput localInput, IMotorWorld world,
             NetworkSessionState snap)
         {
+            if (race.Phase == NetworkRace.PhaseFinished)
+            {
+                // The simulation clock stops at the finish. Retry a full
+                // terminal snapshot independently of its tick parity when
+                // the reliable transport's send window was temporarily full.
+                if (terminalSnapshotPending || snapshotRequested)
+                {
+                    snapshotRequested = false;
+                    terminalSnapshotPending = !Publish(BuildSnapshot(race.Snapshot()))
+                        && session.HostConnections().Count > 0;
+                }
+                return;
+            }
+
             // The host's local racer rides the identical validated input
             // path as remote clients — no special case.
             var localParticipantId = snap.localParticipantId;
@@ -765,7 +800,8 @@ namespace FamilyRacing.Networking
             }
             // A client's resend request publishes immediately instead of
             // waiting for the every-other-tick cadence.
-            if (snapshotRequested || race.HostTick % NetworkSettings.SnapshotEveryTicks == 0)
+            if (race.Phase != NetworkRace.PhaseFinished
+                && (snapshotRequested || race.HostTick % NetworkSettings.SnapshotEveryTicks == 0))
             {
                 snapshotRequested = false;
                 Publish(BuildSnapshot(state));
@@ -779,14 +815,11 @@ namespace FamilyRacing.Networking
             else if (race.Phase == NetworkRace.PhaseFinished
                 && snap.phase == LanSessionService.PhaseRacing)
             {
-                // The regular every-other-tick publish can skip the
-                // final boundary entirely: a race that finalizes on an
-                // odd host tick would leave every remote client's last
-                // race snapshot at "running" forever — the result and
-                // phase facts ride the ledger, but the networkRace slice
-                // must land "finished" too, so publish once more
-                // explicitly before stepping stops.
-                Publish(BuildSnapshot(state));
+                // Publish every final boundary, retaining a retry if any
+                // connected peer's reliable send queue is currently full.
+                snapshotRequested = false;
+                terminalSnapshotPending = !Publish(BuildSnapshot(state))
+                    && session.HostConnections().Count > 0;
                 // Task 8: the immutable result is retained and offered to
                 // every participant before the phase flips — delivery and
                 // its persistence acks are the session service's job from
@@ -873,10 +906,18 @@ namespace FamilyRacing.Networking
         }
 
         /// <summary>Publish a full four-racer snapshot to every
-        /// authenticated connection on the sequenced-unreliable channel.
-        /// The snapshot ceiling is enforced at encode AND at send; an
-        /// overflowing snapshot fails explicitly instead of truncating
-        /// racer state.</summary>
+        /// authenticated connection on the reliable-ordered channel. A
+        /// JSON snapshot exceeds one datagram, so it always fragments;
+        /// UTP's fragment reassembly requires contiguous in-order
+        /// fragments, which any real jitter profile breaks — on the
+        /// sequenced-unreliable lane reordered fragments are culled and
+        /// every snapshot is lost. The reliable lane retransmits and
+        /// reorders fragments, so impairment degrades to latency, not
+        /// total loss. Ordering is additionally fenced by
+        /// snapshotSequence in <see cref="ApplySnapshot"/>. The snapshot
+        /// ceiling is enforced at encode AND at send; an overflowing
+        /// snapshot fails explicitly instead of truncating racer state.
+        /// </summary>
         public bool Publish(NetworkSnapshot snapshot)
         {
             byte[] packet;
@@ -894,15 +935,17 @@ namespace FamilyRacing.Networking
             lastPublished = snapshot;
             SnapshotsPublished++;
             var sent = false;
+            var allSent = true;
             foreach (var connectionId in session.HostConnections())
             {
-                var ok = transport.SendGameplay(connectionId, packet);
+                var ok = transport.Send(connectionId, packet);
                 if (!ok)
                     LastError = "snapshotSend:" + transport.LastError
                         + " len=" + packet.Length;
                 sent |= ok;
+                allSent &= ok;
             }
-            return sent;
+            return sent && allSent;
         }
 
         // Reliable ordered delivery of staged authoritative events. Each
@@ -1150,6 +1193,13 @@ namespace FamilyRacing.Networking
             // new race must not replay them.
             pendingActions.Clear();
             pendingActionOrder.Clear();
+            // The event dedup window is per-race bookkeeping: ids mint
+            // inside one race identity, and a stale-race batch is fenced
+            // by its ordinal before the dedup check, so retiring the
+            // window here can never re-admit an old race's redelivery —
+            // it only frees capacity and keeps adoption honest.
+            seenEventIds.Clear();
+            seenEventOrder.Clear();
             // Prediction/interpolation history is per-race: the new race
             // reseeds from its own snapshots.
             if (prediction != null)
@@ -1162,7 +1212,10 @@ namespace FamilyRacing.Networking
             ReleasePredictionSimulation();
         }
 
-        private void ApplyEventBatch(NetworkEventBatch batch)
+        // Internal for the adapter-level rematch/dedup tests: the batch
+        // application contract (session fencing, ordinal adoption,
+        // per-race dedup) is unit-testable without a live socket.
+        internal void ApplyEventBatch(NetworkEventBatch batch)
         {
             var snap = session.Snapshot();
             var descriptor = snap.descriptor;
@@ -1304,18 +1357,38 @@ namespace FamilyRacing.Networking
             // Shared reliable channel: FRN2 text belongs to the session
             // protocol (LanSessionLink); only gameplay envelopes apply here.
             if (!NetworkWireCodec.IsGameplayPacket(payload)) return;
-            if (NetworkWireCodec.TagOf(payload) == NetworkWireCodec.TagEventBatch
-                && session.Snapshot().role == LanSessionService.RoleClient)
+            var role = session.Snapshot().role;
+            switch (NetworkWireCodec.TagOf(payload))
             {
-                NetworkEventBatch batch;
-                string error;
-                if (!NetworkWireCodec.TryDecodeEventBatch(payload, out batch, out error))
-                {
-                    DroppedPackets++;
-                    LastError = error;
+                case NetworkWireCodec.TagEventBatch:
+                    if (role != LanSessionService.RoleClient) return;
+                    NetworkEventBatch batch;
+                    string batchError;
+                    if (!NetworkWireCodec.TryDecodeEventBatch(payload,
+                            out batch, out batchError))
+                    {
+                        DroppedPackets++;
+                        LastError = batchError;
+                        return;
+                    }
+                    ApplyEventBatch(batch);
                     return;
-                }
-                ApplyEventBatch(batch);
+                case NetworkWireCodec.TagSnapshot:
+                    // Snapshots ride the reliable channel: multi-fragment
+                    // packets cannot survive impairment on the sequenced
+                    // lane (UTP reassembly requires in-order fragments).
+                    if (role != LanSessionService.RoleClient) return;
+                    NetworkSnapshot snapshot;
+                    string snapError;
+                    if (!NetworkWireCodec.TryDecodeSnapshot(payload,
+                            out snapshot, out snapError))
+                    {
+                        DroppedPackets++;
+                        LastError = snapError;
+                        return;
+                    }
+                    ApplySnapshot(snapshot);
+                    return;
             }
         }
 

@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using FamilyRacing.Core.Driving;
+using FamilyRacing.Core.Progression;
 using FamilyRacing.Core.Racing;
 using NUnit.Framework;
 
@@ -211,6 +212,74 @@ namespace FamilyRacing.Tests
             Assert.That(catalog.CompatibilityVersion,
                 Is.EqualTo("physics-1|sim=1"),
                 "the content token binds the physical backend");
+        }
+
+        // --- M6 Task 1: ordered multiworld gameplay fingerprints -------
+
+        [Test]
+        public void GameplayFingerprintBindsWorldOrderAndEveryWorld()
+        {
+            var baseline = GameplayCatalogTests.MultiCatalog();
+            var baselineFingerprint = baseline.CompatibilityFingerprint;
+            Assert.That(Hex64.IsMatch(baselineFingerprint), Is.True);
+
+            // Authored world order is progression content: the same three
+            // worlds in a different order are a different adventure.
+            var reordered = GameplayCatalogTests.MultiCampaigns();
+            var swap = reordered[1];
+            reordered[1] = reordered[2];
+            reordered[2] = swap;
+            var shuffled = GameplayCatalogTests.MultiCatalog(reordered);
+            Assert.That(shuffled.CompatibilityFingerprint,
+                Is.Not.EqualTo(baselineFingerprint),
+                "authored world order is content, not presentation");
+
+            // Event order within a world is bound too.
+            var eventsSwapped = GameplayCatalogTests.MultiCatalog();
+            var ids = eventsSwapped.Campaigns[0].regularEventIds;
+            var first = ids[0];
+            ids[0] = ids[1];
+            ids[1] = first;
+            Assert.That(eventsSwapped.CompatibilityFingerprint,
+                Is.Not.EqualTo(baselineFingerprint),
+                "event order within a world");
+
+            // A later world's gate is part of the token.
+            var gated = GameplayCatalogTests.MultiCatalog();
+            gated.Campaigns[2].requiredRegionalStars = 31;
+            Assert.That(gated.CompatibilityFingerprint,
+                Is.Not.EqualTo(baselineFingerprint),
+                "a later world's star gate");
+            var completions = GameplayCatalogTests.MultiCatalog();
+            completions.Campaigns[1].requiredEventCompletions = 23;
+            Assert.That(completions.CompatibilityFingerprint,
+                Is.Not.EqualTo(baselineFingerprint),
+                "a later world's completion gate");
+
+            // A later world's finale reward association is part of it.
+            var rewarded = GameplayCatalogTests.MultiCatalog();
+            rewarded.Campaigns[1].finales[0].rewardVehicleId = "car-04";
+            Assert.That(rewarded.CompatibilityFingerprint,
+                Is.Not.EqualTo(baselineFingerprint),
+                "a later world's finale reward vehicle");
+
+            // A later world's authored course pickup data is part of it.
+            var sited = GameplayCatalogTests.MultiCatalog();
+            sited.Driving.Courses["aurora-pass"].pickupSites.Add(
+                new GadgetPickupSite { id = "aurora-site", x = 3f, z = 9f });
+            Assert.That(sited.CompatibilityFingerprint,
+                Is.Not.EqualTo(baselineFingerprint),
+                "a later world's course pickup data");
+
+            // Translated/cosmetic display names never move the token.
+            var renamed = GameplayCatalogTests.MultiCatalog();
+            renamed.Campaigns[0].nameEn = "Sunny Isle";
+            renamed.Campaigns[1].nameEn = "Redrock";
+            renamed.Campaigns[1].nameHe = "רדרוק";
+            renamed.Campaigns[2].nameHe = "סנואי";
+            Assert.That(renamed.CompatibilityFingerprint,
+                Is.EqualTo(baselineFingerprint),
+                "translated names are presentation, not content");
         }
     }
 }

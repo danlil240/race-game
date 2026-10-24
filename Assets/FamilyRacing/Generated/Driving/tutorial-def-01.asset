@@ -94,6 +94,19 @@ MonoBehaviour:
       icon: "\u21BB"
       english: {fileID: 0}
       hebrew: {fileID: 0}
+  - lessonId: gadget
+    rule: event
+    eventKind: gadget.used
+    requiredCount: 1
+    requiredSteerTicks: 30
+    minSteering: 0.25
+    requiredBrakeTicks: 20
+    minBrake: 0.5
+    cue:
+      textKey: tutorial.cue.gadget
+      icon: "\u25C6"
+      english: {fileID: 0}
+      hebrew: {fileID: 0}
   trialCue:
     textKey: tutorial.cue.trial
     icon: "\u2605"

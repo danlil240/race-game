@@ -7,6 +7,7 @@ using FamilyRacing.Core.Driving;
 using FamilyRacing.Core.Foundation;
 using FamilyRacing.Core.Profiles;
 using FamilyRacing.Core.Racing;
+using FamilyRacing.Core.Tutorial;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
@@ -31,6 +32,21 @@ namespace FamilyRacing.Tests
         private const string PanelSettingsPath =
             "Assets/FamilyRacing/Generated/FoundationPanelSettings.asset";
         private const string RunId = "driving-presentation-test";
+
+        [UnityTest]
+        public IEnumerator SpeedFeedbackWidensViewAndReducedMotionKeepsItFixed()
+        {
+            Inject(drivingCamera, "speedFeedbackEnabled", true);
+            var baselineFov = renderCamera.fieldOfView;
+            var motor = new MotorState { y = 1f, speed = 26f, boostActive = true, grounded = true };
+            drivingCamera.ApplyMotor(motor, false, false, 0.5f);
+            Assert.That(renderCamera.fieldOfView, Is.GreaterThan(baselineFov + 1f));
+            drivingCamera.ApplyMotor(motor, false, true, 0.5f);
+            Assert.That(renderCamera.fieldOfView, Is.EqualTo(baselineFov).Within(0.01f));
+            drivingCamera.ApplyMotor(null, false, false, 0.1f);
+            Assert.That(renderCamera.fieldOfView, Is.EqualTo(baselineFov).Within(0.01f));
+            yield return null;
+        }
 
         private string profilesDirectory;
         private ProfileStore store;
@@ -622,6 +638,87 @@ namespace FamilyRacing.Tests
                 "the driving HUD must not paint an opaque root over the course");
         }
 
+        // PCQA-010: the tutorial free-drive stage rides the authored
+        // 99-lap event, so an unfiltered counter reads "Lap 1/99" — a
+        // child could take it for a 99-lap requirement. The lessons
+        // phase hides the readout (the tutorial strip already carries
+        // "lesson x/7"); the trial and non-tutorial races show it.
+        [UnityTest]
+        public IEnumerator TutorialLessonsHideLapCounterUntilTrial()
+        {
+            yield return ToRunning();
+            var lap = Widget<Label>("hud.lap");
+            Assert.That(lap, Is.Not.Null);
+            Assert.That(lap.style.display.value, Is.EqualTo(DisplayStyle.Flex),
+                "a normal race shows the real lap counter");
+            Assert.That(lap.text, Does.Contain("1/2"));
+
+            // Lessons run on the free-drive event — lapsRequired is the
+            // authored free-drive bound, not a goal.
+            var lessons = Snapshot();
+            lessons.driving.lapsRequired = 99;
+            lessons.driving.tutorial = new TutorialState
+            {
+                tutorialId = "tutorial-play",
+                phase = "lessons",
+                lessonId = "steering",
+                lessonIndex = 0,
+                lessonTotal = 7,
+                cueId = "steering",
+                objective = "tutorial.cue.steering"
+            };
+            shell.Refresh(lessons);
+            Assert.That(lap.style.display.value, Is.EqualTo(DisplayStyle.None),
+                "lesson phases must hide the free-drive lap counter");
+
+            // The graduation trial seats the real one-lap event: the
+            // counter returns with a meaningful count.
+            var trial = Snapshot();
+            trial.driving.tutorial = new TutorialState
+            {
+                tutorialId = "tutorial-play",
+                phase = "trial",
+                cueId = "trial",
+                objective = "tutorial.cue.trial"
+            };
+            shell.Refresh(trial);
+            Assert.That(lap.style.display.value, Is.EqualTo(DisplayStyle.Flex),
+                "the trial phase restores the lap counter");
+            Assert.That(lap.text, Does.Contain("1/2"));
+
+            // Back to a plain non-tutorial frame: the readout stays on.
+            shell.Refresh(Snapshot());
+            Assert.That(lap.style.display.value, Is.EqualTo(DisplayStyle.Flex));
+        }
+
+        // PCQA-011: the top readout strip and the other floating HUD
+        // text draw over live track geometry — they carry the shared
+        // semi-opaque wash so dark labels keep their contrast, while the
+        // HUD root itself stays transparent to the course.
+        [UnityTest]
+        public IEnumerator HudStripsCarrySemiOpaqueBackdrop()
+        {
+            StartRace();
+            RefreshDriving();
+            yield return WaitForWidget<VisualElement>("hud.readouts");
+
+            var strip = Widget<VisualElement>("hud.readouts");
+            Assert.That(strip.resolvedStyle.backgroundColor.a,
+                Is.GreaterThan(0.5f),
+                "the top readout strip must paint a real backdrop over the world");
+            Assert.That(Widget<VisualElement>("hud.boostRow")
+                    .resolvedStyle.backgroundColor.a,
+                Is.GreaterThan(0.5f),
+                "the boost row is equally exposed and carries the same wash");
+            Assert.That(Widget<Label>("hud.keys")
+                    .resolvedStyle.backgroundColor.a,
+                Is.GreaterThan(0.5f),
+                "the keyboard legend keeps the same backdrop");
+            Assert.That(document.rootVisualElement.style.backgroundColor.value.a,
+                Is.EqualTo(0f).Within(0.001f),
+                "only the strips get a backdrop — the HUD root stays transparent");
+        }
+
         [UnityTest]
         public IEnumerator DrivingHudShowsKeyboardLegendAndDriftFeedback()
         {
@@ -653,18 +750,104 @@ namespace FamilyRacing.Tests
         }
 
         [UnityTest]
-        public IEnumerator GadgetButtonIsHonestAboutBeingUnavailable()
+        public IEnumerator GadgetButtonDrivesTheSharedGadgetInput()
         {
+            // M5 Task 5: the gadget control is live — the touch button
+            // emits the same input.set gadget bit the E key does.
             yield return ToRunning();
             var gadget = Widget<Button>("driving.gadget");
             Assert.That(gadget, Is.Not.Null, "a gadget affordance exists in the HUD");
-            Assert.That(gadget.enabledSelf, Is.False,
-                "unimplemented gadget input must be visibly disabled");
-            Assert.That(gadget.text, Does.Contain("Gadget"),
-                "the label names the feature honestly rather than promising it works");
+            Assert.That(gadget.enabledSelf, Is.True,
+                "the gadget control is enabled — it is a live input");
+            Assert.That(gadget.text, Does.Contain("Gadget"));
+            Press(gadget);
+            Pump();
+            Assert.That(Snapshot().input.gadget, Is.True,
+                "the button press reaches the same input path as E");
         }
 
         // --- semantic controls ------------------------------------------------
+
+        [UnityTest]
+        public IEnumerator TouchDeckSeparatesThumbsAndPressFeedbackSurvivesRefresh()
+        {
+            yield return ToRunning();
+            var left = Widget<Button>("driving.steerLeft");
+            var right = Widget<Button>("driving.steerRight");
+            var boost = Widget<Button>("driving.boost");
+            Assert.That(left.parent.name, Is.EqualTo("hud.controls.steering"));
+            Assert.That(boost.parent.name, Is.EqualTo("hud.controls.actions"));
+            Assert.That(left.worldBound.xMax, Is.LessThan(right.worldBound.xMin));
+            Assert.That(right.worldBound.xMax + 100, Is.LessThan(boost.worldBound.xMin),
+                "Leave the center of the track unobstructed between thumb clusters.");
+            Assert.That(left.Q("control.icon"), Is.Not.Null);
+            Assert.That(Widget<Button>("driving.pause").parent.name, Is.EqualTo("hud.utilities"));
+            PointerDownOn(left, fingerId: 0);
+            PointerDownOn(boost, fingerId: 1);
+            Pump();
+            shell.Refresh(Snapshot());
+            Assert.That(left.ClassListContains("race-control--pressed"), Is.True);
+            Assert.That(boost.ClassListContains("race-control--pressed"), Is.True);
+            Assert.That(Snapshot().input.steering, Is.EqualTo(-1));
+            Assert.That(Snapshot().input.boost, Is.True);
+            PointerUpOn(left, fingerId: 0);
+            Assert.That(left.ClassListContains("race-control--pressed"), Is.False);
+            Assert.That(boost.ClassListContains("race-control--pressed"), Is.True);
+            PointerCancelOn(boost, fingerId: 1);
+            Assert.That(boost.ClassListContains("race-control--pressed"), Is.False);
+            Pump();
+            Assert.That(Snapshot().input.boost, Is.False);
+        }
+
+        [UnityTest]
+        public IEnumerator TouchDeckKeepsPhysicalSteeringOrderInHebrew()
+        {
+            yield return ToRunning();
+            var state = Snapshot();
+            state.language = "he";
+            shell.Refresh(state);
+            yield return null;
+            var left = Widget<Button>("driving.steerLeft");
+            var right = Widget<Button>("driving.steerRight");
+            Assert.That(left.worldBound.xMax, Is.LessThan(right.worldBound.xMin));
+            Assert.That(Widget<VisualElement>("hud.controls").languageDirection, Is.EqualTo(LanguageDirection.LTR));
+            Assert.That(Widget<Button>("driving.boost").text,
+                Is.EqualTo(Core.Localization.ShellText.Get("input.boost", "he")));
+            var deck = Widget<VisualElement>("hud.controls");
+            Assert.That(deck.pickingMode, Is.EqualTo(PickingMode.Ignore));
+            Assert.That(Widget<Button>("driving.brake").worldBound.yMax,
+                Is.LessThanOrEqualTo(document.rootVisualElement.worldBound.yMax));
+        }
+
+        [UnityTest]
+        public IEnumerator TouchActionReleaseClearsFeedbackWhileDisabled()
+        {
+            yield return ToRunning();
+            var button = Widget<Button>("driving.recover");
+            PointerDownOn(button, fingerId: 0);
+            Assert.That(button.ClassListContains("race-control--pressed"), Is.True);
+            button.SetEnabled(false);
+            PointerUpOn(button, fingerId: 0);
+            yield return null;
+            button.SetEnabled(true);
+            Assert.That(button.ClassListContains("race-control--pressed"), Is.False,
+                "Pausing or spending an item during a touch must not leave its button pressed.");
+        }
+
+        [UnityTest]
+        public IEnumerator SecondFingerOnActionDoesNotCancelTheFirstClick()
+        {
+            yield return ToRunning();
+            var button = Widget<Button>("driving.recover");
+            PointerDownOn(button, fingerId: 0);
+            PointerDownOn(button, fingerId: 1);
+            PointerUpOn(button, fingerId: 1);
+            Assert.That(button.ClassListContains("race-control--pressed"), Is.True);
+            PointerUpOn(button, fingerId: 0);
+            Pump();
+            Assert.That(Snapshot().input.recover, Is.True);
+            Assert.That(button.ClassListContains("race-control--pressed"), Is.False);
+        }
 
         [UnityTest]
         public IEnumerator SimultaneousHoldsComposeSteerDriftBoost()
@@ -1259,6 +1442,32 @@ namespace FamilyRacing.Tests
         }
 
         // --- Task 8: horizon-stable camera + bounded physical feedback ----
+        [Test]
+        public void FastVehicleKeepsOneTickInterpolationWhenRenderSkipsATick()
+        {
+            var go = new GameObject("skipped-tick-car");
+            loose.Add(go);
+            var presentation = go.AddComponent<VehiclePresentation>();
+            presentation.SetVehicle(Asset<VehicleDefinitionAsset>(a =>
+            {
+                a.vehicleId = "car-01"; a.silhouette = "car";
+                a.bodyScale = Vector3.one; a.bodyColor = Color.white;
+            }));
+            presentation.ApplyPose(new MotorState { tick = 10, z = 10f, speed = 45f }, 0f, 1f);
+            // 45 m/s at 30 Hz: two legal steps cover 3 m, exceeding the
+            // old fixed teleport threshold. The interpolation window must
+            // cover only the final tick, from z=11.5 to z=13.
+            presentation.ApplyPose(new MotorState { tick = 12, z = 13f, speed = 45f }, 0f, 0.25f);
+            Assert.That(go.transform.position.z, Is.EqualTo(11.875f).Within(0.001f));
+            presentation.ApplyPose(new MotorState { tick = 12, z = 13f, speed = 45f }, 0f, 0.75f);
+            Assert.That(go.transform.position.z, Is.EqualTo(12.625f).Within(0.001f));
+            // Recovery can happen on the skipped tick; the next commit
+            // has already cleared recovering and is accelerating from rest.
+            presentation.ApplyPose(new MotorState { tick = 14, z = 16f, speed = 0.4f }, 0f, 0f);
+            Assert.That(go.transform.position.z, Is.EqualTo(16f).Within(0.001f), "A recovery on a skipped tick must still snap.");
+            presentation.ApplyPose(new MotorState { tick = 16, z = 50f, recovering = true }, 0f, 0f);
+            Assert.That(go.transform.position.z, Is.EqualTo(50f).Within(0.001f), "Real recovery still snaps immediately.");
+        }
 
         // A committed physical sample for camera tests: the legacy
         // envelope plus the VehiclePhysicsState the physical backend

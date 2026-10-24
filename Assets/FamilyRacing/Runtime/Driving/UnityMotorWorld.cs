@@ -15,7 +15,9 @@ namespace FamilyRacing
     // motor's wedged path (step-climb / slide / block) engages instead.
     public sealed class UnityMotorWorld : IMotorWorld
     {
-        private const float ProbeOriginLift = 0.1f;
+        // Start above small road/shoulder height differences. Otherwise a
+        // car rejoining from lower ground casts from underneath the road.
+        private const float ProbeOriginLift = 0.35f;
         private const float ContactSkin = 0.05f;
         private const float SkinDrop = 0.05f;
         // The grounded snap gate is `state.y - ground.y <= probeDistance`,
@@ -43,7 +45,8 @@ namespace FamilyRacing
                     normalY = hit.normal.y,
                     normalZ = hit.normal.z,
                     distance = hit.distance - ProbeOriginLift,
-                    surfaceId = hit.collider != null ? hit.collider.name : ""
+                    surfaceId = hit.collider != null ? hit.collider.name : "",
+                    offRoad = hit.collider != null && hit.collider.TryGetComponent<DrivingSurface>(out var surface) && surface.offRoad
                 };
             }
             return new GroundHit { hit = false };
@@ -116,7 +119,13 @@ namespace FamilyRacing
         private static Vector3 SeparatingNormal(Collider blocker,
             Vector3 center, Vector3 castDir)
         {
-            var away = center - blocker.ClosestPoint(center);
+            // PhysX does not implement Collider.ClosestPoint for non-convex
+            // meshes. Our road ribbons are flat meshes: their bounds give
+            // the exact vertical separating direction for an overlapping
+            // floor, allowing horizontal travel instead of treating it as a wall.
+            var closest = blocker is MeshCollider mesh && !mesh.convex
+                ? blocker.bounds.ClosestPoint(center) : blocker.ClosestPoint(center);
+            var away = center - closest;
             return away.sqrMagnitude > 1e-4f ? away.normalized : -castDir;
         }
     }

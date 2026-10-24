@@ -67,7 +67,16 @@ $out = Join-Path $outDir "FamilyRacing.OfflineTests.dll"
 Copy-Item $nunit.FullName (Join-Path $outDir "nunit.framework.dll") -Force
 
 $compileArgs = @($csc, "/nologo", "/noconfig", "/nostdlib", "/target:exe", "/langversion:9", "/out:$out") + $refs + $sources
-& $dotnet $compileArgs
+# Worktree paths can push this complete source list past Windows' 32K
+# process command-line limit. Roslyn response files keep the invocation
+# bounded and preserve paths containing spaces.
+$responsePath = Join-Path $outDir "compile.rsp"
+$responseArgs = $compileArgs | Select-Object -Skip 1 | Where-Object { $_ -ne '/noconfig' } | ForEach-Object {
+    '"' + $_.Replace('"', '\"') + '"'
+}
+[System.IO.File]::WriteAllLines($responsePath, [string[]]$responseArgs,
+    (New-Object System.Text.UTF8Encoding($false)))
+& $dotnet $csc /noconfig "@$responsePath"
 if ($LASTEXITCODE -ne 0) { throw "Compilation failed (csc exit $LASTEXITCODE)." }
 
 $sharedDir = Get-LatestVersionDir (Join-Path $dotnetRoot "shared\Microsoft.NETCore.App") "10."

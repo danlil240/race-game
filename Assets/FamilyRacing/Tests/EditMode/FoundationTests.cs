@@ -59,9 +59,9 @@ namespace FamilyRacing.Tests
             }
             Assert.That(state.featureCoverage.tutorial, Is.EqualTo("notImplemented"));
             Assert.That(state.featureCoverage.drivingSimulation, Is.EqualTo("implemented"));
-            Assert.That(state.featureCoverage.campaign, Is.EqualTo("notImplemented"));
-            Assert.That(state.featureCoverage.rewardsUpgradesCosmetics, Is.EqualTo("notImplemented"));
-            Assert.That(state.featureCoverage.lan, Is.EqualTo("notImplemented"));
+            Assert.That(state.featureCoverage.campaign, Is.EqualTo("implemented"));
+            Assert.That(state.featureCoverage.rewardsUpgradesCosmetics, Is.EqualTo("implemented"));
+            Assert.That(state.featureCoverage.lan, Is.EqualTo("implemented"));
             Assert.That(state.featureCoverage.content, Is.EqualTo("graybox"));
         }
 
@@ -834,7 +834,19 @@ namespace FamilyRacing.Tests
                 "app.focusLost",
                 "camera.toggle", "pause.toggle",
                 "race.start", "race.restart", "race.exit",
+                "solo.start",
                 "tutorial.start", "tutorial.replay", "tutorial.exit",
+                // M5 Task 8: the durable progression writes.
+                "upgrade.purchase", "cosmetic.equip",
+                // M5 Task 10: the semantic loop surface — screens,
+                // mode starts and results lifecycle.
+                "campaign.open", "campaign.start",
+                // M6 Task 3: the transient campaign-world pick.
+                "campaign.selectWorld",
+                "quickRace.open", "quickRace.start",
+                "timeTrial.open", "timeTrial.start",
+                "garage.open", "bounties.open",
+                "results.retrySave", "results.retry", "results.continue",
                 "lan.host", "lan.discover", "lan.discovery.stop", "lan.join",
                 "lan.configure", "lan.vehicle", "lan.ready", "lan.start",
                 "lan.pause.request", "lan.pause.set", "lan.reconnect",
@@ -1043,7 +1055,7 @@ namespace FamilyRacing.Tests
         {
             return new ProfileSave
             {
-                schemaVersion = 2,
+                schemaVersion = 3,
                 id = "11111111-1111-4111-8111-111111111111",
                 slot = slot,
                 avatar = "fox",
@@ -1055,7 +1067,18 @@ namespace FamilyRacing.Tests
                 voiceVolume = 1f,
                 coins = 0,
                 unlockedVehicles = new List<string> { "car-01", "motorcycle-01" },
-                appliedResults = new List<AppliedResultReceipt>()
+                appliedResults = new List<AppliedResultReceipt>(),
+                eventProgress = new List<EventProgress>(),
+                worldProgress = new List<WorldProgress>(),
+                finaleProgress = new List<FinaleProgress>(),
+                vehicleUpgrades = new List<VehicleUpgrade>(),
+                ownedCosmetics = new List<string>(),
+                equippedCosmetics = new List<string>(),
+                activeBounties = ProfileProgressSeed.CreateInitialBounties(),
+                bountyRotationCursor = 0,
+                timeTrialRecords = new List<TimeTrialRecord>(),
+                purchaseReceipts = new List<PurchaseReceipt>(),
+                pendingRaceContexts = new List<RaceRewardContext>()
             };
         }
 

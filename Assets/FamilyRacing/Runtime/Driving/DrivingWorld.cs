@@ -23,6 +23,8 @@ namespace FamilyRacing
         // cosmetic is the slot avatar.
         [SerializeField] private CharacterDefinitionAsset[] characters;
         [SerializeField] private TrackDefinitionAsset track;
+        // Optional multi-course inventory. Empty preserves legacy single-track scenes.
+        [SerializeField] private TrackDefinitionAsset[] tracks;
         [SerializeField] private EventDefinitionAsset[] events;
         [SerializeField] private TutorialDefinitionAsset tutorial;
         // M4 Task 5: the authored cue/effect catalog the race effects and
@@ -30,6 +32,16 @@ namespace FamilyRacing
         // the presenters publish catalogId "none" and play nothing —
         // never a silent fallback onto unauthored assets.
         [SerializeField] private RacePresentationCatalogAsset presentationCatalog;
+        // M5 Task 4: the gameplay-loop catalog (campaign, bounties,
+        // economy, gadgets, AI difficulties) bound over this world's
+        // driving content. Optional: absent means solo.start reports
+        // contentUnavailable while practice/LAN keep working.
+        [SerializeField] private GameplayCatalogAsset gameplayCatalog;
+        // M5 Task 5: the authored gadget catalog for practice/tutorial
+        // free-drive and LAN races, which do not gate on the gameplay
+        // catalog. When the gameplay catalog IS bound its gadget section
+        // wins so a single authored source owns the numbers.
+        [SerializeField] private GadgetCatalogAsset gadgetCatalog;
         [SerializeField] private GameObject coursePrefab;
         [SerializeField] private string contentVersion = "driving-0.1";
         // Developer-facing race-level backend selection, bound to this
@@ -58,6 +70,15 @@ namespace FamilyRacing
         private GameObject vehicleView;
         private VehiclePresentation presentation;
         private string shownVehicleId = "";
+        // M5 Task 8: the selected profile the presentation binds durable
+        // facts from — purchased upgrade levels and equipped cosmetics.
+        // FoundationApp re-seats it every frame; views rebind only when
+        // the facts actually change.
+        private Core.Profiles.ProfileSave localProfile;
+        private readonly Dictionary<string, int> upgradeLevelsScratch =
+            new Dictionary<string, int>(System.StringComparer.Ordinal);
+        private static readonly IReadOnlyDictionary<string, int>
+            NoUpgradeLevels = new Dictionary<string, int>(0);
 
         // One participant-keyed vehicle view for a network race: same
         // construction as the solo visual (a VehiclePresentation on a
@@ -170,6 +191,15 @@ namespace FamilyRacing
         // tutorial.start simply reports contentUnavailable.
         public Core.Tutorial.TutorialDefinition Tutorial { get; private set; }
         public TutorialDefinitionAsset TutorialAsset { get { return tutorial; } }
+        // The validated gameplay catalog built over this world's driving
+        // content (M5 Task 4); null when no asset is bound or conversion
+        // failed — solo.start reports contentUnavailable honestly.
+        public Core.Progression.GameplayCatalog Gameplay { get; private set; }
+        // The validated gadget catalog: the gameplay catalog's gadget
+        // section when bound, else the standalone gadget asset's
+        // conversion. Null means gadget-free races — honest absence,
+        // never a fabricated default.
+        public Core.Racing.GadgetDefinitionCatalog Gadgets { get; private set; }
         public RacePresentationCatalogAsset PresentationCatalog
         {
             get { return presentationCatalog; }
@@ -191,6 +221,56 @@ namespace FamilyRacing
             return participantId != null
                 && racerViews.TryGetValue(participantId, out view)
                 && view != null ? view.presentation : null;
+        }
+
+        // Binds the selected profile whose durable progression facts the
+        // racer views present: upgrade part indicators and equipped
+        // cosmetics show on the seat the profile owns — every other
+        // seat reports the honest empty set (purchases are never the
+        // field's). The reference is read-only; snapshots hand a fresh
+        // deep copy each frame anyway.
+        public void SetLocalProfile(Core.Profiles.ProfileSave profile)
+        {
+            localProfile = profile;
+        }
+
+        // The profile's purchased levels for one vehicle, or the shared
+        // empty map — AI and remote seats never inherit the wallet.
+        private IReadOnlyDictionary<string, int> LevelsFor(string vehicleId)
+        {
+            upgradeLevelsScratch.Clear();
+            if (localProfile != null
+                && localProfile.vehicleUpgrades != null)
+                foreach (var row in localProfile.vehicleUpgrades)
+                    if (row != null && row.vehicleId == vehicleId)
+                    {
+                        if (row.acceleration > 0)
+                            upgradeLevelsScratch["acceleration"]
+                                = row.acceleration;
+                        if (row.handling > 0)
+                            upgradeLevelsScratch["handling"] = row.handling;
+                        if (row.boost > 0)
+                            upgradeLevelsScratch["boost"] = row.boost;
+                    }
+            return upgradeLevelsScratch.Count > 0
+                ? upgradeLevelsScratch : NoUpgradeLevels;
+        }
+
+        // The equipped cosmetic ids the local seat presents, or an
+        // honest empty set for any other seat.
+        private System.Collections.Generic.IReadOnlyList<string>
+            CosmeticsFor(string participantId)
+        {
+            return localProfile != null
+                && participantId != null
+                && participantId == localProfile.id
+                ? localProfile.equippedCosmetics : null;
+        }
+
+        private bool IsLocalSeat(string participantId)
+        {
+            return localProfile != null && participantId != null
+                && participantId == localProfile.id;
         }
 
         // FoundationApp calls this once a DrivingCamera is bound/active;
@@ -223,16 +303,19 @@ namespace FamilyRacing
                     tunings.Add(tuning);
                     vehicleAssets[tuning.vehicleId] = asset;
                 }
-            CourseDefinition course = null;
-            if (track != null)
+            var courses = new List<CourseDefinition>();
+            var trackAssets = tracks != null && tracks.Length > 0 ? tracks : new[] { track };
+            foreach (var trackAsset in trackAssets)
             {
+                if (trackAsset == null) continue;
                 string error;
-                course = track.ToCourse(out error);
+                var course = trackAsset.ToCourse(out error);
                 if (course == null)
                 {
                     Debug.LogError("DrivingWorld: " + error);
                     return null;
                 }
+                courses.Add(course);
             }
             var defs = new List<EventDefinition>();
             if (events != null)
@@ -267,13 +350,38 @@ namespace FamilyRacing
             try
             {
                 catalog = DrivingContentCatalog.Create(contentVersion,
-                    tunings, course == null ? null : new[] { course }, defs,
+                    tunings, courses, defs,
                     simulationBackend);
             }
             catch (System.ArgumentException error)
             {
                 Debug.LogError("DrivingWorld: " + error.Message);
                 return null;
+            }
+            // Gameplay content validates over the driving catalog it was
+            // authored against: a conversion failure stays null so
+            // solo.start reports contentUnavailable rather than running
+            // against partially bound progression content.
+            Gameplay = null;
+            if (gameplayCatalog != null)
+            {
+                string gameplayError;
+                Gameplay = gameplayCatalog.ToCatalog(catalog, out gameplayError);
+                if (Gameplay == null)
+                    Debug.LogError("DrivingWorld: " + gameplayError);
+            }
+            // M5 Task 5: gadget content resolves once here — the bound
+            // gameplay catalog's gadget section wins over the standalone
+            // asset so the numbers have exactly one authored source.
+            Gadgets = null;
+            if (Gameplay != null && Gameplay.Gadgets != null)
+                Gadgets = Gameplay.Gadgets;
+            else if (gadgetCatalog != null)
+            {
+                string gadgetError;
+                Gadgets = gadgetCatalog.ToCatalog(out gadgetError);
+                if (Gadgets == null)
+                    Debug.LogError("DrivingWorld: " + gadgetError);
             }
             if (coursePrefab != null && courseInstance == null)
             {
@@ -314,7 +422,15 @@ namespace FamilyRacing
 
         public void ApplyFrame(FoundationState state, float visualAlpha)
         {
-            var session = state != null ? state.driving : null;
+            // Practice still publishes under `driving`; a time trial's
+            // lone session publishes under soloRace.trial — same visual
+            // contract. The four-racer local modes carry no session here:
+            // ApplyRaceFrame owns their views, so the solo visual stays
+            // correctly hidden.
+            var session = state != null
+                ? (state.driving ?? (state.soloRace != null
+                    ? state.soloRace.trial : null))
+                : null;
             var active = session != null && session.motor != null;
             soloCourseActive = active;
             RefreshCourseInstance();
@@ -322,6 +438,7 @@ namespace FamilyRacing
                 vehicleView.SetActive(active);
             if (active)
             {
+                SelectVisibleCourse(session.courseId);
                 var motor = session.motor;
                 ApplyVehicleVisual(session.vehicleId, motor,
                     session.input != null ? session.input.steering : 0f,
@@ -401,6 +518,8 @@ namespace FamilyRacing
             var active = racers != null && racers.Count > 0;
             raceCourseActive = active;
             RefreshCourseInstance();
+            if (active && racers[0] != null && racers[0].session != null)
+                SelectVisibleCourse(racers[0].session.courseId);
             raceFacts.Clear();
             if (!active)
             {
@@ -510,6 +629,14 @@ namespace FamilyRacing
                 }
                 view.cosmeticsKey = cosmeticsKey;
             }
+            // Durable-fact indicators (Task 8): the seat the selected
+            // profile owns shows its purchased levels and equipped
+            // cosmetics; every other seat binds the honest empty set.
+            var localSeat = IsLocalSeat(racer.participantId);
+            view.presentation.SetUpgradeIndicators(localSeat
+                ? LevelsFor(racer.vehicleId) : NoUpgradeLevels);
+            view.presentation.SetCosmetics(
+                CosmeticsFor(racer.participantId));
             var wasFinished = view.wasFinished;
             view.wasFinished = racer.finished;
             if (racer.finished && !wasFinished)
@@ -588,6 +715,14 @@ namespace FamilyRacing
                 }
                 soloCosmeticsKey = cosmeticsKey;
             }
+            // The solo vehicle IS the selected profile's seat: same
+            // durable-fact indicators the race views get.
+            var seatProfile = localProfile ?? profile;
+            presentation.SetUpgradeIndicators(
+                seatProfile != null ? LevelsFor(vehicleId)
+                    : NoUpgradeLevels);
+            presentation.SetCosmetics(
+                seatProfile != null ? seatProfile.equippedCosmetics : null);
             presentation.ApplyPose(motor, steering, visualAlpha);
             soloFact = new RacerPresentationState
             {
@@ -702,6 +837,12 @@ namespace FamilyRacing
             cameraFacts.mode = "none";
             cameraFacts.px = cameraFacts.py = cameraFacts.pz = 0f;
             cameraFacts.tx = cameraFacts.ty = cameraFacts.tz = 0f;
+        }
+
+        private void SelectVisibleCourse(string courseId)
+        {
+            if (courseInstance != null && courseInstance.TryGetComponent<LongRaceVisibility>(out var visibility))
+                visibility.SelectCourse(courseId);
         }
 
         private void RefreshCourseInstance()

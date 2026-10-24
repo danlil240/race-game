@@ -25,6 +25,7 @@ namespace FamilyRacing
     public sealed class DrivingCamera : MonoBehaviour
     {
         [SerializeField] private float chaseBack = 8f;
+        [SerializeField] private bool speedFeedbackEnabled;
         [SerializeField] private float chaseUp = 4.5f;
         [SerializeField] private float overheadUp = 30f;
         [SerializeField] private float overheadBack = 7f;
@@ -57,6 +58,7 @@ namespace FamilyRacing
         private bool savedPose;
         private Vector3 savedPosition;
         private Quaternion savedRotation;
+        private float savedFieldOfView = 60f;
         private Vector3 smoothTarget;
         private bool hasTarget;
         private float pullDistance = -1f;
@@ -102,6 +104,7 @@ namespace FamilyRacing
             {
                 savedPosition = cam.transform.position;
                 savedRotation = cam.transform.rotation;
+                savedFieldOfView = cam.fieldOfView;
                 savedPose = true;
             }
         }
@@ -116,7 +119,7 @@ namespace FamilyRacing
 
         internal void ApplyFrame(FoundationState state, float deltaSeconds)
         {
-            var session = state != null ? state.driving : null;
+            var session = state != null ? state.driving ?? state.soloRace?.trial : null;
             var motor = session != null ? session.motor : null;
             if (cam == null) cam = Camera.main;
             if (motor == null || cam == null)
@@ -168,6 +171,15 @@ namespace FamilyRacing
             var rate = reduced ? reducedFollowRate : followRate;
             var dt = Mathf.Max(0f, deltaSeconds);
             var blend = 1f - Mathf.Exp(-rate * dt);
+            if (speedFeedbackEnabled)
+            {
+                // A fixed horizon and a small lens change convey acceleration.
+                // Reduced motion disables the lens animation entirely.
+                var extraFov = overhead ? 0f : Mathf.Clamp01(motor.speed / 26f) * 5f
+                    + (motor.boostActive ? 3f : 0f);
+                cam.fieldOfView = reduced ? savedFieldOfView
+                    : Mathf.Lerp(cam.fieldOfView, savedFieldOfView + extraFov, blend);
+            }
 
             var rawTarget = new Vector3(motor.x, motor.y + targetUp, motor.z);
             var firstFrame = !hasTarget;
@@ -381,7 +393,10 @@ namespace FamilyRacing
             // The Awake-captured menu pose survives every disengage:
             // each race leaving restores it, not just the first.
             if (cam != null && savedPose)
+            {
                 cam.transform.SetPositionAndRotation(savedPosition, savedRotation);
+                cam.fieldOfView = savedFieldOfView;
+            }
         }
 
         // mode:"none" carries no pose: consumers keying on coordinates

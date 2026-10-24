@@ -31,15 +31,49 @@
 #   -Mode AndroidVisualBenchmark / -Mode AndroidVisualBenchmarkOrdinary
 #                          Offline wrapper with -Presentation VisualBenchmark;
 #                          output under Builds\Android-VisualBenchmark[-Ordinary].
+#   -Mode FullContentSetup Validate the authored three-world full-content
+#                          inventory under Generated\FullContent; fails the
+#                          gate honestly while Tasks 5-8 content is missing.
+#   -Mode WindowsFullContent[Ordinary]
+#                          Windows Mono full-content player flavors ->
+#                          Builds\Windows-FullContent[-Ordinary] with a
+#                          contentStage=complete manifest.
+#   -Mode WindowsFullContentPreview / -Mode AndroidFullContentPreview
+#                          Development-only intermediate checks: generic
+#                          catalog validation over authored content only,
+#                          Builds\<Platform>-FullContent-Preview roots and a
+#                          contentStage=partial manifest — never a candidate.
+#   -Mode AndroidFullContent / -Mode AndroidFullContentOrdinary
+#                          Offline wrapper with -Presentation FullContent;
+#                          output under Builds\Android-FullContent[-Ordinary].
+#   -Mode AndroidFamilyRelease
+#                          Offline wrapper with -Presentation FullContent
+#                          -Configuration Release: unsigned release Gradle
+#                          output, zipalign + release-key signing via
+#                          Tools/Sign-AndroidRelease.ps1, certificate and
+#                          metadata verification, published under
+#                          Builds\Android-FamilyRelease. Signing secrets
+#                          come from the FAMILY_RACING_* process env only.
+#   -Mode WindowsFamilyRelease
+#                          Windows Mono ordinary player stamped with the
+#                          release identity (FoundationBuild.
+#                          WindowsFamilyRelease): the FullContent
+#                          production gate runs first and validation
+#                          endpoints are compiled out; output under
+#                          Builds\Windows-FamilyRelease.
 #
 # All Unity modes use the pinned editor only; each writes its own log under
 # Logs\ and propagates failures. Android keeps distinct export/build logs
 # and a result.json under Logs\android-offline\<run-id>.
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet("CoreOffline", "Core", "CheckEnvironment", "Setup", "EditMode", "PlayMode", "Windows", "WindowsOrdinary", "Android",
+    [ValidateSet("CoreOffline", "Core", "CheckEnvironment", "Setup", "EditMode", "PlayMode", "Windows", "WindowsOrdinary", "WindowsPlayfulChaos", "Android",
         "VisualBenchmarkSetup", "WindowsVisualBenchmark", "WindowsVisualBenchmarkOrdinary",
-        "AndroidVisualBenchmark", "AndroidVisualBenchmarkOrdinary")]
+        "AndroidVisualBenchmark", "AndroidVisualBenchmarkOrdinary",
+        "FullContentSetup", "WindowsFullContent", "WindowsFullContentOrdinary",
+        "WindowsFullContentPreview",
+        "AndroidFullContent", "AndroidFullContentOrdinary", "AndroidFullContentPreview",
+        "AndroidFamilyRelease", "WindowsFamilyRelease")]
     [string]$Mode,
 
     [string]$EditorRoot = "C:\Program Files\Unity\Hub\Editor",
@@ -59,6 +93,11 @@ function Find-Dotnet {
 }
 
 switch ($Mode) {
+    "WindowsPlayfulChaos" {
+        & (Join-Path $repo "Tools\Build-Windows.ps1") -ProjectPath $repo -EditorRoot $EditorRoot `
+            -Configuration PlayfulChaos
+        exit $LASTEXITCODE
+    }
     "Android" {
         & (Join-Path $repo "Tools\Build-AndroidOffline.ps1") -ProjectPath $repo -EditorRoot $EditorRoot
         exit $LASTEXITCODE
@@ -68,6 +107,39 @@ switch ($Mode) {
         $configuration = if ($Mode -eq "AndroidVisualBenchmarkOrdinary") { "Ordinary" } else { "Development" }
         & (Join-Path $repo "Tools\Build-AndroidOffline.ps1") -ProjectPath $repo -EditorRoot $EditorRoot `
             -Presentation VisualBenchmark -Configuration $configuration
+        exit $LASTEXITCODE
+    }
+
+    { $_ -in "AndroidFullContent", "AndroidFullContentOrdinary" } {
+        $configuration = if ($Mode -eq "AndroidFullContentOrdinary") { "Ordinary" } else { "Development" }
+        & (Join-Path $repo "Tools\Build-AndroidOffline.ps1") -ProjectPath $repo -EditorRoot $EditorRoot `
+            -Presentation FullContent -Configuration $configuration
+        exit $LASTEXITCODE
+    }
+
+    # The signed family release flavor: Release is allowed only with
+    # FullContent (the wrapper enforces the gate). Signing credentials
+    # arrive through the FAMILY_RACING_* process environment.
+    "AndroidFamilyRelease" {
+        & (Join-Path $repo "Tools\Build-AndroidOffline.ps1") -ProjectPath $repo -EditorRoot $EditorRoot `
+            -Presentation FullContent -Configuration Release
+        exit $LASTEXITCODE
+    }
+
+    # Windows release flavor: ordinary Mono player stamped with the
+    # release identity; the FullContent production gate runs inside the
+    # editor entry point, so an incomplete inventory fails here honestly.
+    "WindowsFamilyRelease" {
+        & (Join-Path $repo "Tools\Build-Windows.ps1") -ProjectPath $repo -EditorRoot $EditorRoot `
+            -Configuration FamilyRelease
+        exit $LASTEXITCODE
+    }
+
+    # The preview is development-only; there is deliberately no ordinary
+    # preview flavor.
+    "AndroidFullContentPreview" {
+        & (Join-Path $repo "Tools\Build-AndroidOffline.ps1") -ProjectPath $repo -EditorRoot $EditorRoot `
+            -Presentation FullContentPreview -Configuration Development
         exit $LASTEXITCODE
     }
 
@@ -86,7 +158,9 @@ switch ($Mode) {
     }
 
     { $_ -in "Setup", "EditMode", "PlayMode", "Windows", "WindowsOrdinary",
-        "VisualBenchmarkSetup", "WindowsVisualBenchmark", "WindowsVisualBenchmarkOrdinary" } {
+        "VisualBenchmarkSetup", "WindowsVisualBenchmark", "WindowsVisualBenchmarkOrdinary",
+        "FullContentSetup", "WindowsFullContent", "WindowsFullContentOrdinary",
+        "WindowsFullContentPreview" } {
         $editorExe = Join-Path $EditorRoot "$PinnedEditorVersion\Editor\Unity.exe"
         if (-not (Test-Path $editorExe)) {
             Write-Error "Pinned editor $PinnedEditorVersion not found at $editorExe."
@@ -115,6 +189,18 @@ switch ($Mode) {
             "WindowsVisualBenchmarkOrdinary" {
                 $unityArgs += "-executeMethod", "FamilyRacing.EditorTools.FoundationBuild.WindowsVisualBenchmarkOrdinary", "-quit"
             }
+            "FullContentSetup" {
+                $unityArgs += "-executeMethod", "FamilyRacing.EditorTools.FoundationBuild.FullContentSetup", "-quit"
+            }
+            "WindowsFullContent" {
+                $unityArgs += "-executeMethod", "FamilyRacing.EditorTools.FoundationBuild.WindowsFullContent", "-quit"
+            }
+            "WindowsFullContentOrdinary" {
+                $unityArgs += "-executeMethod", "FamilyRacing.EditorTools.FoundationBuild.WindowsFullContentOrdinary", "-quit"
+            }
+            "WindowsFullContentPreview" {
+                $unityArgs += "-executeMethod", "FamilyRacing.EditorTools.FoundationBuild.WindowsFullContentPreview", "-quit"
+            }
             "EditMode" {
                 $unityArgs += "-runTests", "-testPlatform", "EditMode",
                     "-testResults", (Join-Path $repo "Logs\verify-editmode-results.xml")
@@ -125,8 +211,13 @@ switch ($Mode) {
             }
         }
         Write-Host "Verify: Unity $Mode -> $log"
-        & $editorExe @unityArgs
-        exit $LASTEXITCODE
+        # Unity.exe is a GUI executable. PowerShell 5.1 can return immediately
+        # from '& Unity.exe' with a stale/null LASTEXITCODE. Wait explicitly so
+        # CI cannot pass while Unity is still importing or failing its license.
+        $quotedArgs = @($unityArgs | ForEach-Object { '"' + $_ + '"' })
+        $unityProcess = Start-Process -FilePath $editorExe -ArgumentList $quotedArgs `
+            -Wait -PassThru -WindowStyle Hidden
+        exit $unityProcess.ExitCode
     }
 
     "CheckEnvironment" {

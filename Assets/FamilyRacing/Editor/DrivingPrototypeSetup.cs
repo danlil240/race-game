@@ -54,9 +54,11 @@ namespace FamilyRacing.EditorTools
             // bundled recordings must be re-wired after it. Missing WAVs
             // leave honest null slots — the presenter reports the miss.
             WireTutorialCueClips(tutorial);
+            var gadgetCatalog = EnsureGadgetCatalog();
             var course = EnsureCoursePrefab(groundMat, wallMat, gateMat, driftMat);
 
-            WireScene(car, moto, track, practice, intro, free, tutorial, course);
+            WireScene(car, moto, track, practice, intro, free, tutorial,
+                gadgetCatalog, course);
             AssetDatabase.SaveAssets();
         }
 
@@ -169,8 +171,33 @@ namespace FamilyRacing.EditorTools
                 SafePose(90.5f, -5f, 180f),
                 SafePose(55f, -52f, -90f)
             };
+            // M5 Task 5 pickup columns: one per straight so every gate
+            // leg passes a box, plus one beside the ramp landing. All
+            // sit at road height (y=0) — the vertical band keeps airtime
+            // above it clean of collection.
+            asset.pickupSites = new[]
+            {
+                Pickup("pickup-south", 0f, -20f),
+                Pickup("pickup-northwest", 0f, 45f),
+                Pickup("pickup-northeast", 78f, 55f),
+                Pickup("pickup-east", 95f, -28f),
+                Pickup("pickup-southeast", 32f, -55f),
+                Pickup("pickup-ramp", -60f, 42f)
+            };
             EditorUtility.SetDirty(asset);
             return asset;
+        }
+
+        private static TrackDefinitionAsset.PickupSite Pickup(
+            string id, float x, float z)
+        {
+            return new TrackDefinitionAsset.PickupSite
+            {
+                id = id,
+                center = new Vector3(x, 0f, z),
+                radiusMeters = 2f,
+                verticalRangeMeters = 2.5f
+            };
         }
 
         private static TrackDefinitionAsset.SpawnSlot SafePose(
@@ -195,6 +222,65 @@ namespace FamilyRacing.EditorTools
                 recoverPosition = new Vector3(x - dirX * 3f, 0f, z - dirZ * 3f),
                 recoverHeadingDegrees = Mathf.Atan2(dirX, dirZ) * Mathf.Rad2Deg
             };
+        }
+
+        // The authored first-world gadget catalog (M5 Task 5): the
+        // balanced pickup defaults — a five-second turbo at 1.75x
+        // acceleration/1.50x cap, a one-charge bubble shield, and a
+        // 3 m/180-tick foam trap slowing rivals to 0.70x for 45 ticks
+        // with 60 ticks of post-hit immunity. The pickup respawn is
+        // 300 ticks at one held slot. Re-runs rewrite the rows to the
+        // contract so the asset can never drift silently.
+        private static GadgetCatalogAsset EnsureGadgetCatalog()
+        {
+            var asset = EnsureAsset<GadgetCatalogAsset>(
+                "gadget-catalog-01.asset");
+            asset.pickupRespawnTicks = 300;
+            asset.heldSlotCapacity = 1;
+            asset.gadgets = new[]
+            {
+                new GadgetCatalogAsset.GadgetRow
+                {
+                    gadgetId = "turbo-01", kind = "turbo",
+                    durationTicks = 150,
+                    accelerationMultiplier = 1.75f,
+                    speedCapMultiplier = 1.50f
+                },
+                new GadgetCatalogAsset.GadgetRow
+                {
+                    gadgetId = "bubble-shield-01", kind = "bubble-shield",
+                    charges = 1
+                },
+                new GadgetCatalogAsset.GadgetRow
+                {
+                    gadgetId = "foam-trap-01", kind = "foam-trap",
+                    patchRadiusMeters = 3f, patchLifetimeTicks = 180,
+                    slowMultiplier = 0.70f, slowDurationTicks = 45,
+                    immunityTicks = 60
+                },
+                new GadgetCatalogAsset.GadgetRow
+                {
+                    gadgetId = "homing-missile-01", kind = "homing-missile",
+                    patchRadiusMeters = 1.5f, patchLifetimeTicks = 90,
+                    projectileSpeedMetersPerSecond = 45f, targetingRangeMeters = 70f,
+                    turnRadiansPerSecond = 3f, slowMultiplier = .4f,
+                    slowDurationTicks = 27, immunityTicks = 45
+                },
+                new GadgetCatalogAsset.GadgetRow
+                {
+                    gadgetId = "mine-01", kind = "mine", armingTicks = 18,
+                    patchRadiusMeters = 2.5f, patchLifetimeTicks = 360,
+                    slowMultiplier = .35f, slowDurationTicks = 36, immunityTicks = 45
+                },
+                new GadgetCatalogAsset.GadgetRow
+                {
+                    gadgetId = "emp-pulse-01", kind = "emp-pulse",
+                    patchRadiusMeters = 12f, patchLifetimeTicks = 15,
+                    slowMultiplier = .6f, slowDurationTicks = 45, immunityTicks = 45
+                }
+            };
+            EditorUtility.SetDirty(asset);
+            return asset;
         }
 
         private static EventDefinitionAsset EnsureEvent(
@@ -246,7 +332,17 @@ namespace FamilyRacing.EditorTools
                 Lesson("jump", "event", "motor.landed", 1, 0, 0f,
                     "tutorial.cue.jump", "⌃"),
                 Lesson("recovery", "event", "race.recovered", 1, 0, 0f,
-                    "tutorial.cue.recovery", "↻")
+                    "tutorial.cue.recovery", "↻"),
+                // M5 Task 5 gadget lesson: the child drives through one
+                // authored pickup column and spends the granted item —
+                // completion counts the real authoritative
+                // "gadget.used" event, exactly like every other
+                // event-rule lesson. On a course without pickup sites
+                // the lesson never blocks graduation: the rules emit
+                // no gadget events there, so keep it LAST so earlier
+                // lessons cannot be skipped by a dead affordance.
+                Lesson("gadget", "event", "gadget.used", 1, 0, 0f,
+                    "tutorial.cue.gadget", "◆")
             };
             asset.trialCue = Cue("tutorial.cue.trial", "★");
             asset.finishedCue = Cue("tutorial.done", "★");
@@ -396,7 +492,7 @@ namespace FamilyRacing.EditorTools
         // already open stay open; scenes we opened are closed afterwards.
         private static void WireScene(Object car, Object moto, Object track,
             Object practice, Object intro, Object free, Object tutorial,
-            GameObject course)
+            Object gadgetCatalog, GameObject course)
         {
             var alreadyOpen = false;
             var scene = new Scene();
@@ -423,6 +519,10 @@ namespace FamilyRacing.EditorTools
                 dirty |= Assign(serialized, "track", track);
                 dirty |= AssignArray(serialized, "events", practice, intro, free);
                 dirty |= Assign(serialized, "tutorial", tutorial);
+                // M5 Task 5: the authored gadget catalog feeds
+                // practice/tutorial free-drive and LAN hosts; the
+                // gameplay catalog reference stays optional separately.
+                dirty |= Assign(serialized, "gadgetCatalog", gadgetCatalog);
                 dirty |= Assign(serialized, "presentationCatalog",
                     AssetDatabase.LoadAssetAtPath<RacePresentationCatalogAsset>(
                         RacePresentationAuthoring.CatalogPath));

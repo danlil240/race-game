@@ -1,0 +1,87 @@
+Family Racing — Third-Party Notices
+===================================
+
+This package ships original, project-owned game content plus the
+redistributable components listed below. All game art, audio, text,
+translations, scenarios and gameplay code are original works authored
+for this project — see docs/ASSET_INVENTORY.md for the per-asset
+provenance table. Recorded third-party spending to date: US$0.
+
+Engine and platform runtime
+---------------------------
+- Unity Engine runtime (UnityPlayer.dll, UnityCrashHandler64.exe,
+  MonoBleedingEdge runtime support). Copyright (c) Unity Technologies.
+  Distributed under the Unity Editor/Runtime license; no attribution
+  text is mandated for the player runtime.
+- Mono runtime and base class libraries (MonoBleedingEdge/, Managed/
+  Mono.*, mscorlib and System.* assemblies). The Mono Project —
+  licensed under the MIT License and LGPLv2 where noted by the
+  upstream project.
+- D3D12Core.dll — Microsoft DirectX 12 Agility SDK redistributable,
+  bundled by the Unity build pipeline. (c) Microsoft Corporation.
+- AMDUnityPlugin.dll — AMD redistributable bundled by the Unity build
+  pipeline. (c) Advanced Micro Devices, Inc.
+- NVUnityPlugin.dll, nvngx_dlss.dll — NVIDIA redistributables bundled
+  by the Unity build pipeline. (c) NVIDIA Corporation.
+
+Unity packages compiled into the player
+---------------------------------------
+Distributed under the Unity Package License (use within Unity
+projects); versions pinned in Packages/packages-lock.json:
+- Universal Render Pipeline (com.unity.render-pipelines.universal) 17.3.0
+- Netcode for GameObjects (com.unity.netcode.gameobjects) 2.7.0
+- Unity Transport (com.unity.transport) 2.6.0
+- Input System (com.unity.inputsystem) 1.20.0
+- uGUI (com.unity.ugui) 2.0.0
+- TextMeshPro, Burst, Collections, Mathematics and related engine
+  modules shipped as Unity.* managed assemblies.
+
+Newtonsoft.Json
+---------------
+Managed/Newtonsoft.Json.dll — Json.NET (com.unity.nuget.newtonsoft-json
+3.2.2 wrapper). Copyright (c) Newtonsoft, licensed under the MIT
+License:
+
+  Permission is hereby granted, free of charge, to any person obtaining
+  a copy of this software and associated documentation files (the
+  "Software"), to deal in the Software without restriction, including
+  without limitation the rights to use, copy, modify, merge, publish,
+  distribute, sublicense, and/or sell copies of the Software, and to
+  permit persons to whom the Software is furnished to do so, subject to
+  the following conditions:
+
+  The above copyright notice and this permission notice shall be
+  included in all copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND.
+
+Fonts
+-----
+Three Noto fonts ship unmodified, downloaded 2026-10-11 from
+https://github.com/notofonts/noto-fonts at pinned revision
+ffebf8c1ee449e544955a7e813c54f9b73848eac. Copyright 2018 The Noto
+Project Authors; licensed under the SIL Open Font License 1.1
+(Assets/FamilyRacing/Fonts/OFL.txt, verbatim upstream LICENSE):
+
+- NotoSans-Regular.ttf        (Latin UI text; sha256 b85c38ec…d232d5)
+- NotoSansHebrew-Regular.ttf  (Hebrew catalog/UI; sha256 a7fa16ff…62eca85)
+- NotoSansSymbols2-Regular.ttf (directional arrows; sha256 630846d5…de13c6)
+
+Full provenance and SHA-256 digests: Assets/FamilyRacing/Fonts/README.md.
+OFL 1.1 permits bundling with the software as long as the fonts are not
+sold by themselves; the license text ships in the source tree and the
+font names are unchanged (no Reserved Font Name is declared upstream).
+
+Text, translations and audio
+-----------------------------
+The English/Hebrew text tables (compiled into the player from
+Assets/FamilyRacing/Core/Localization) and every .wav cue are original
+work produced for this project; no third-party text or voice asset
+ships. Costs recorded in docs/ASSET_INVENTORY.md remain US$0.
+
+Signature status
+----------------
+The Windows player is NOT Authenticode-signed (no paid code-signing
+certificate is part of this private family release). The Android
+package is signed with the family release key whose SHA-256
+certificate fingerprint is recorded in release-manifest.json.

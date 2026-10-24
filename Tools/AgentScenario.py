@@ -37,7 +37,15 @@ BOUNDARY_TYPES = {"snapshot", "state", "delta"}
 # Schema 5 (M4) is additive presentation truth: the applied render
 # profile and a bounded render-performance summary on `presentation` —
 # bounded scalars only, never frame-sized buffers.
-SUPPORTED_STATE_SCHEMAS = {1, 2, 3, 4, 5}
+# Schema 6 (M5 Task 10) adds the local solo-race slice (`soloRace`) and
+# the resolved progression surface (`progression`: campaign access,
+# bounty tray, unresolved-reward gate) — both present from the first
+# boundary, menus and failed saves included.
+# Schema 7 (M6 Task 3) adds the ordered multiworld surface:
+# `progression.worlds` carries every authored world row (availability,
+# lock reason, regional counts, finale facts, selection) and
+# `progression.adventureComplete` reports the whole-adventure verdict.
+SUPPORTED_STATE_SCHEMAS = {1, 2, 3, 4, 5, 6, 7}
 
 
 def _remove_path(state, path):
@@ -188,6 +196,116 @@ def validate_state_schema(event, state):
                 "Schema-4 discovered host is missing compat"
     if schema >= 5:
         validate_schema5_presentation(state)
+    if schema >= 6:
+        validate_schema6_progression(state)
+    if schema >= 7:
+        validate_schema7_worlds(state)
+
+
+def validate_schema7_worlds(state):
+    """The schema-7 ordered-multiworld contract a boundary must carry.
+
+    Additive over schema 6: `progression.worlds` publishes every
+    authored world in catalog order — identity, bilingual names,
+    availability with the machine-safe lock reason `campaign.selectWorld`
+    would reject with, regional completion/star counts, finale facts,
+    the completion reward vehicles and the world-complete verdict —
+    plus `progression.adventureComplete` for the whole-adventure state.
+    The keys exist on EVERY schema-7 boundary; an unbound catalog shows
+    an empty list, never a missing key.
+    """
+    progression = state["progression"]
+    for key in ("worlds", "adventureComplete"):
+        assert key in progression, "progression slice is missing " + key
+    assert type(progression["adventureComplete"]) is bool
+    worlds = progression["worlds"]
+    assert isinstance(worlds, list), "progression.worlds must be a list"
+    selected = []
+    for row in worlds:
+        assert isinstance(row, dict), "worlds rows are objects"
+        for key in ("worldId", "nameEn", "nameHe", "selected",
+                    "available", "lockedReason", "completedEvents",
+                    "requiredEvents", "stars", "requiredStars",
+                    "finalesOpen", "completedFinales", "totalFinales",
+                    "worldComplete", "rewardVehicleIds"):
+            assert key in row, "worlds row missing " + key
+        assert isinstance(row["worldId"], str) and row["worldId"], \
+            "worlds row worldId must be a non-empty string"
+        for key in ("nameEn", "nameHe", "lockedReason"):
+            assert isinstance(row[key], str), \
+                "worlds row " + key + " must be a string"
+        for key in ("selected", "available", "finalesOpen",
+                    "worldComplete"):
+            assert type(row[key]) is bool, \
+                "worlds row " + key + " must be a bool"
+        for key in ("completedEvents", "requiredEvents", "stars",
+                    "requiredStars", "completedFinales", "totalFinales"):
+            assert type(row[key]) is int, \
+                "worlds row " + key + " must be an int"
+        assert isinstance(row["rewardVehicleIds"], list), \
+            "worlds row rewardVehicleIds must be a list"
+        # The row's lock verdict mirrors the selectWorld rejection: a
+        # closed world must name its reason and an open one must not
+        # carry a stray code.
+        if row["available"]:
+            assert row["lockedReason"] == "", \
+                "an available world cannot report a lock reason"
+        else:
+            assert row["lockedReason"] != "", \
+                "a locked world must report its machine-safe reason"
+        if row["selected"]:
+            selected.append(row)
+    assert len(selected) <= 1, "at most one world row may be selected"
+    if selected:
+        assert progression.get("campaignWorldId") == \
+            selected[0]["worldId"], \
+            "campaignWorldId must name the selected world row"
+
+
+def validate_schema6_progression(state):
+    """The schema-6 local-loop contract a boundary state must carry.
+
+    Additive over schema 5: `soloRace` (null outside a local mode —
+    campaign and quickRace populate `race`, timeTrial `trial`; a
+    finalized run carries the immutable `result`) and `progression`,
+    the resolved campaign/bounty/reward-gate view rebuilt from durable
+    profile facts. Both keys exist on EVERY schema-6 boundary — a menu
+    snapshot or a failed save must never omit them.
+    """
+    for key in ("soloRace", "progression"):
+        assert key in state, "Schema-6 state is missing " + key
+    solo = state["soloRace"]
+    if solo is not None:
+        assert isinstance(solo, dict), "soloRace must be an object or null"
+        for key in ("mode", "raceId", "phase", "race", "trial",
+                    "result", "tuningSource"):
+            assert key in solo, "soloRace slice is missing " + key
+        assert solo["mode"] in ("campaign", "quickRace", "timeTrial",
+                                "practice"), \
+            "Unknown solo mode " + repr(solo["mode"])
+        # A running LAN race never publishes a local session either.
+        assert state.get("networkRace") is None or solo is None, \
+            "LAN race state must not masquerade as a local solo session"
+    progression = state["progression"]
+    assert isinstance(progression, dict), \
+        "progression must be an object on every boundary"
+    for key in ("available", "contentIdentity", "campaignEvents",
+                "bounties", "rewardUnresolved", "rewardUnresolvedRaceId"):
+        assert key in progression, "progression slice is missing " + key
+    assert type(progression["available"]) is bool
+    assert type(progression["rewardUnresolved"]) is bool
+    assert isinstance(progression["campaignEvents"], list)
+    assert isinstance(progression["bounties"], list)
+    for row in progression["campaignEvents"]:
+        assert isinstance(row, dict), "campaignEvents rows are objects"
+        for key in ("eventId", "stars", "locked", "lockReason",
+                    "completed", "objectiveMask"):
+            assert key in row, "campaignEvents row missing " + key
+    for row in progression["bounties"]:
+        assert isinstance(row, dict), "bounties rows are objects"
+        for key in ("assignmentId", "bountyId", "progress", "threshold",
+                    "rewardCoins", "completed", "resolved"):
+            assert key in row, "bounties row missing " + key
 
 
 def validate_schema5_presentation(state):
@@ -339,6 +457,16 @@ class Client:
         self.action_states = {}
         self.sock = socket.create_connection(("127.0.0.1", connection["port"]), timeout=10)
         self.reader = self.sock.makefile("rb")
+        # Command-latency accounting: every command frame sent is owed a
+        # result inside the documented deadline (COMMANDS.md). A command
+        # that outlives the deadline is stuck — overdue_commands() names
+        # it so a stuck input fails instead of hiding behind resends.
+        self.pending_commands = {}
+        self.results = {}
+        # The first non-EOF failure observed while draining this client
+        # from another peer's wait — recorded, never swallowed silently.
+        self.drain_error = None
+        self._drained_terminal = False
         # A dedicated pump consumes this socket continuously and queues raw
         # frames: the player's stream writer fails honestly after a bounded
         # send timeout, so a scenario thread blocked waiting on ANOTHER
@@ -379,6 +507,9 @@ class Client:
         self.outgoing.write(json.dumps(logged, ensure_ascii=False) + "\n")
         self.outgoing.flush()
         self.sock.sendall((json.dumps(frame) + "\n").encode("utf-8"))
+        command_id = frame.get("commandId")
+        if command_id is not None:
+            self.pending_commands[command_id] = time.monotonic()
 
     _MAX_LINE = 1024 * 1024 + 1
     _uses_pump = True
@@ -446,48 +577,136 @@ class Client:
             assert len(self.state["slots"]) == 4, "Incomplete profile state"
         self.incoming.write(json.dumps(event, ensure_ascii=False) + "\n")
         self.incoming.flush()
+        if event.get("type") == "result" \
+                and event.get("commandId") is not None:
+            # Any result proves the frame reached the command pipeline —
+            # an intermediate "accepted" counts; the terminal outcome is
+            # still owned by the waiting caller's own bounded wait.
+            self.results[event["commandId"]] = event.get("status")
+            self.pending_commands.pop(event["commandId"], None)
         self.events.append(event)
         return event
+
+    # The documented command deadline (COMMANDS.md): an unanswered
+    # command older than this is stuck, not "in flight".
+    COMMAND_RESULT_DEADLINE_SECONDS = 5.0
+
+    def overdue_commands(self,
+            deadline=COMMAND_RESULT_DEADLINE_SECONDS):
+        """Commands sent longer ago than `deadline` with no result at all.
+        Returns {commandId: age_seconds} — the watchdog input for drivers
+        that fire-and-forget (LanDriver sends input.set without an
+        immediate wait, so only this check can name a stuck command)."""
+        # A closed endpoint (process killed by fault injection, capture
+        # torn down) can never answer again — its unanswered frames are
+        # honestly recorded in commands.ndjson, but they are dead, not
+        # stuck, so they must not trip the deadline watchdog.
+        if self._closing:
+            return {}
+        now = time.monotonic()
+        # Snapshot the pairs: a peer drain on another client's wait
+        # thread resolves results into this same dict concurrently.
+        return {command_id: now - sent
+                for command_id, sent in list(self.pending_commands.items())
+                if now - sent > deadline}
 
     def _drain_peers(self):
         """Consume whatever other live clients already sent; otherwise a
         long wait on this endpoint starves their validation sinks.
-        Peers whose socket is gone (closed, or a test double without a
-        real descriptor) are skipped rather than selected on."""
+
+        Pumped peers buffer lines on their pump thread, so draining reads
+        the queued backlog — polling the raw socket would always look
+        empty while the pump races us and would leave the backlog to age.
+        A terminal peer (honest EOF from a finished capture) is skipped.
+        A non-terminal read failure — validation assert, evidence-write
+        error — is a live defect: recorded on the peer, persisted to its
+        evidence directory, and never retried silently while the backlog
+        keeps flowing. wait() then fails fast with the peer named, so a
+        frozen backlog can never age into an unattributable timeout."""
         for other in list(_ACTIVE_CLIENTS):
-            if other is self:
+            if other is self or other._drained_terminal \
+                    or other.drain_error is not None:
                 continue
-            sock = getattr(other, "sock", None)
-            try:
-                if sock is None or sock.fileno() < 0:
+            if getattr(other, "_uses_pump", False):
+                budget = other._lines.qsize()
+            else:
+                sock = getattr(other, "sock", None)
+                try:
+                    if sock is None or sock.fileno() < 0 \
+                            or not select.select([sock], [], [], 0)[0]:
+                        continue
+                except (OSError, ValueError, AttributeError):
                     continue
-            except (OSError, ValueError, AttributeError):
-                continue
-            try:
-                while select.select([sock], [], [], 0)[0]:
-                    try:
-                        other.read(0.02)
-                    except socket.timeout:
-                        break
-            except (OSError, ValueError, AssertionError):
-                # An AssertionError from read() is an honest EOF: the peer's
-                # server side closed the session (a finished capture does
-                # this deliberately). A closed peer is not a drain target.
-                continue
+                budget = 256
+            for _ in range(min(budget, 512)):
+                try:
+                    other.read(0.02)
+                except socket.timeout:
+                    break
+                except AssertionError as error:
+                    if getattr(other, "_terminal", None) is not None:
+                        # Honest EOF: the peer's server side closed the
+                        # session (a finished capture does this
+                        # deliberately) — not a drain target any more.
+                        other._drained_terminal = True
+                    else:
+                        other._record_drain_error(error)
+                    break
+                except (OSError, ValueError) as error:
+                    other._record_drain_error(error)
+                    break
+
+    def _record_drain_error(self, error):
+        """Persist a drain failure so the peer's evidence names the real
+        cause — the write itself is best-effort (the evidence path may be
+        the component that failed)."""
+        self.drain_error = error
+        try:
+            (self.evidence / "drain-error.txt").write_text(
+                repr(error) + "\n", encoding="utf-8")
+        except Exception:
+            pass
+
+    def _peer_drain_errors(self):
+        """Live drain failures recorded on any active peer."""
+        return [(other.info.get("port", "?"), other.drain_error)
+                for other in list(_ACTIVE_CLIENTS)
+                if other.drain_error is not None]
+
+    def _raise_peer_drain_error(self):
+        failures = self._peer_drain_errors()
+        if failures:
+            port, error = failures[0]
+            raise AssertionError(
+                "Peer drain for port %s failed: %r" % (port, error))
 
     def wait(self, predicate, timeout=20, on_event=None):
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
+            # A recorded peer drain failure is a live defect — fail now
+            # with its real cause rather than waiting out the deadline
+            # while its backlog stays frozen.
+            self._raise_peer_drain_error()
             try:
-                event = self.read(deadline - time.monotonic())
+                # Bounded slices keep the drain-health check reachable
+                # even when no events arrive.
+                event = self.read(min(0.5, deadline - time.monotonic()))
             except (socket.timeout, TimeoutError):
+                self._drain_peers()
                 continue
             if on_event is not None:
                 on_event(event)
             if predicate(event):
                 return event
             self._drain_peers()
-        raise AssertionError("Timed out waiting for a recorded outcome")
+        hint = ""
+        failures = self._peer_drain_errors()
+        if failures:
+            hint = " (peer drain failures: %s)" % "; ".join(
+                "port %s: %r" % (port, error)
+                for port, error in failures)
+        raise AssertionError(
+            "Timed out waiting for a recorded outcome" + hint)
 
     def command(self, action, parameters=None, command_id=None):
         command_id = command_id or str(uuid.uuid4())
@@ -531,6 +750,16 @@ class Client:
             pass
         self.incoming.close()
         self.outgoing.close()
+        # Dead endpoint: pending frames stay visible in commands.ndjson
+        # (sent, never answered) but leave the watchdog map — nothing
+        # will ever resolve them and they are not a stuck-command defect.
+        self.pending_commands.clear()
+        # A drain failure recorded while a peer waited on us must not die
+        # silently at teardown either — name it here as well.
+        if self.drain_error is not None:
+            raise AssertionError(
+                "Client closed with an unresolved drain failure: %r"
+                % self.drain_error)
 
 
 # --- external process-memory sampling (M4 Task 2) -------------------------
@@ -603,6 +832,20 @@ def _windows_process_sample(pid):
         return value, stamp
     finally:
         kernel32.CloseHandle(handle)
+
+
+def process_start_stamp(pid):
+    """Process-start identity for a pid — the creation stamp that
+    separates a live process from a recycled pid number. Returns None
+    when the platform has no stamp concept or the probe failed; the
+    caller records the gap, never fabricates one."""
+    if sys.platform != "win32":
+        return None
+    try:
+        _value, stamp = _windows_process_sample(pid)
+        return stamp
+    except Exception:
+        return None
 
 
 def _android_total_pss_bytes(serial, package, adb="adb"):

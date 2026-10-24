@@ -50,6 +50,18 @@ namespace FamilyRacing.EditorTools
             Report(report, "Windows Mono ordinary build (no validation)");
         }
 
+        public static void WindowsPlayfulChaos()
+        {
+            PlayfulChaosSetup.Create();
+            NetworkPrototypeSetup.VerifyBuildConfiguration(BuildTarget.StandaloneWindows64);
+            var report = Build("Builds/Windows-PlayfulChaos/FamilyRacing.exe",
+                BuildTarget.StandaloneWindows64, BuildOptions.Development,
+                new[] { PlayfulChaosSetup.ScenePath });
+            Report(report, "Playful Chaos development preview (partial content)");
+            File.WriteAllText("Builds/Windows-PlayfulChaos/content-stage.txt",
+                "partial\nplayful-chaos-1\nProfiles: PlayfulChaos/Profiles\n");
+        }
+
         // Opt-in physical-backend development player: regenerates the
         // physics content (tunings, vehicles, course, lab + race scenes)
         // and builds the self-bootstrapping PhysicsRace scene — the same
@@ -117,6 +129,81 @@ namespace FamilyRacing.EditorTools
             };
         }
 
+        // --- M6 Task 4: full-content flavors ---------------------------
+        // The content gate runs BEFORE any other packaging step so an
+        // incomplete inventory can never emit a "full-content" player:
+        // on today's un-authored tree every flavor below fails at
+        // FullContentSetup — that is the intended, test-pinned behavior.
+        // The two preview flavors are development-only: they bind only
+        // authored content through generic catalog validation and stamp
+        // contentStage=partial, so a preview can never stand in as an
+        // ordinary or accepted full-content candidate.
+
+        public static void FullContentSetup()
+        {
+            FamilyRacing.EditorTools.FullContentSetup.Create();
+            FoundationProjectSetup.Create();
+            Debug.Log("FullContentSetup: production content valid");
+        }
+
+        public static void WindowsFullContent()
+        {
+            FamilyRacing.EditorTools.FullContentSetup.Create();
+            FoundationProjectSetup.Create();
+            NetworkPrototypeSetup.VerifyBuildConfiguration(BuildTarget.StandaloneWindows64);
+            var report = Build("Builds/Windows-FullContent/FamilyRacing.exe",
+                BuildTarget.StandaloneWindows64, BuildOptions.Development);
+            Report(report, "Windows Mono full-content development build");
+            FamilyRacing.EditorTools.FullContentSetup.WriteManifest(
+                "Builds/Windows-FullContent", "Development", "complete");
+        }
+
+        // Ordinary full-content build: same validated content, no
+        // development flag — validation endpoints are compiled out.
+        public static void WindowsFullContentOrdinary()
+        {
+            FamilyRacing.EditorTools.FullContentSetup.Create();
+            FoundationProjectSetup.Create();
+            NetworkPrototypeSetup.VerifyBuildConfiguration(BuildTarget.StandaloneWindows64);
+            var report = Build("Builds/Windows-FullContent-Ordinary/FamilyRacing.exe",
+                BuildTarget.StandaloneWindows64, BuildOptions.None);
+            Report(report, "Windows Mono full-content ordinary build (no validation)");
+            FamilyRacing.EditorTools.FullContentSetup.WriteManifest(
+                "Builds/Windows-FullContent-Ordinary", "Ordinary", "complete");
+        }
+
+        // Development-only intermediate check: generic catalog
+        // validation over whatever is authored, contentStage=partial.
+        public static void WindowsFullContentPreview()
+        {
+            FamilyRacing.EditorTools.FullContentSetup.CreatePreview();
+            FoundationProjectSetup.Create();
+            NetworkPrototypeSetup.VerifyBuildConfiguration(BuildTarget.StandaloneWindows64);
+            var report = Build("Builds/Windows-FullContent-Preview/FamilyRacing.exe",
+                BuildTarget.StandaloneWindows64, BuildOptions.Development);
+            Report(report, "Windows Mono full-content preview build (partial content)");
+            FamilyRacing.EditorTools.FullContentSetup.WriteManifest(
+                "Builds/Windows-FullContent-Preview", "Development", "partial");
+        }
+
+        public static void ExportAndroidFullContent()
+        {
+            ExportAndroid("Android-FullContent", development: true,
+                visualBenchmark: false, contentStage: "complete");
+        }
+
+        public static void ExportAndroidFullContentOrdinary()
+        {
+            ExportAndroid("Android-FullContent-Ordinary", development: false,
+                visualBenchmark: false, contentStage: "complete");
+        }
+
+        public static void ExportAndroidFullContentPreview()
+        {
+            ExportAndroid("Android-FullContent-Preview", development: true,
+                visualBenchmark: false, contentStage: "partial");
+        }
+
         public static void Android()
         {
             // Retain the old entry point, but never implicitly invoke online
@@ -151,37 +238,88 @@ namespace FamilyRacing.EditorTools
             ExportAndroid("Android-VisualBenchmark-Ordinary", development: false, visualBenchmark: true);
         }
 
-        private static void ExportAndroid(string flavor, bool development,
-            bool visualBenchmark)
+        // --- M7 Task 1: family release flavors --------------------------
+        // Ordinary-only full-content entry points that stamp the durable
+        // release identity (Release/release.json) onto the validated
+        // player. The production content gate, generic setup and release
+        // apply all run before packaging; a failed build can never leave
+        // the temporary Android export flags flipped.
+        public static void WindowsFamilyRelease()
         {
-            var args = Environment.GetCommandLineArgs();
-            string exportPath = null;
-            for (var i = 0; i < args.Length; i++)
-            {
-                if (args[i] != "--android-export-dir") continue;
-                if (exportPath != null || i + 1 == args.Length)
-                    throw new ArgumentException("Expected one --android-export-dir value.");
-                exportPath = args[++i];
-            }
-            if (string.IsNullOrEmpty(exportPath))
-                throw new ArgumentException("Use Tools/Verify.ps1 -Mode Android to export and build offline.");
-            exportPath = Path.GetFullPath(exportPath);
-            var root = Path.GetFullPath(Path.Combine(Application.dataPath,
-                "../Builds/" + flavor + "/offline")) + Path.DirectorySeparatorChar;
-            if (!exportPath.StartsWith(root, StringComparison.OrdinalIgnoreCase))
-                throw new ArgumentException("Android export must stay under Builds/" + flavor + "/offline.");
-            if (Directory.Exists(exportPath) || File.Exists(exportPath))
-                throw new IOException("Android export directory must be new: " + exportPath);
-            if (!BuildPipeline.IsBuildTargetSupported(BuildTargetGroup.Android, BuildTarget.Android))
-                throw new InvalidOperationException("Android Build Support is not installed.");
+            FamilyRacing.EditorTools.FullContentSetup.Create();
+            FoundationProjectSetup.Create();
+            FamilyReleaseSettings.Apply(
+                FamilyReleaseSettings.ResolveConfigPath());
+            NetworkPrototypeSetup.VerifyBuildConfiguration(BuildTarget.StandaloneWindows64);
+            var report = Build("Builds/Windows-FamilyRelease/FamilyRacing.exe",
+                BuildTarget.StandaloneWindows64, BuildOptions.None);
+            Report(report, "Windows Mono family release build (no validation)");
+            FamilyRacing.EditorTools.FullContentSetup.WriteManifest(
+                "Builds/Windows-FamilyRelease", "Ordinary", "complete");
+        }
 
+        public static void ExportAndroidFamilyRelease()
+        {
+            ExportAndroid("Android-FamilyRelease", development: false,
+                visualBenchmark: false, contentStage: "complete",
+                releaseConfigPath: FamilyReleaseSettings.ResolveConfigPath());
+        }
+
+        private static void ExportAndroid(string flavor, bool development,
+            bool visualBenchmark, string contentStage = null,
+            string releaseConfigPath = null)
+        {
+            // The export flags are editor state, not per-build state:
+            // capture them first, flip inside try, and restore in finally
+            // so ANY failure — content gate, argument validation, missing
+            // Android support, or the build itself — leaves the editor
+            // exactly as it found it.
             var oldExport = EditorUserBuildSettings.exportAsGoogleAndroidProject;
             var oldBundle = EditorUserBuildSettings.buildAppBundle;
             try
             {
                 EditorUserBuildSettings.exportAsGoogleAndroidProject = true;
                 EditorUserBuildSettings.buildAppBundle = false;
+
+                // Full-content flavors run their content gate before any
+                // other packaging step so a catalog defect can never
+                // reach packaging.
+                if (contentStage == "complete")
+                    FamilyRacing.EditorTools.FullContentSetup.Create();
+                else if (contentStage == "partial")
+                    FamilyRacing.EditorTools.FullContentSetup.CreatePreview();
+                else if (contentStage != null)
+                    throw new ArgumentException("Unknown content stage: "
+                        + contentStage);
+
+                var args = Environment.GetCommandLineArgs();
+                string exportPath = null;
+                for (var i = 0; i < args.Length; i++)
+                {
+                    if (args[i] != "--android-export-dir") continue;
+                    if (exportPath != null || i + 1 == args.Length)
+                        throw new ArgumentException("Expected one --android-export-dir value.");
+                    exportPath = args[++i];
+                }
+                if (string.IsNullOrEmpty(exportPath))
+                    throw new ArgumentException("Use Tools/Verify.ps1 -Mode Android to export and build offline.");
+                exportPath = Path.GetFullPath(exportPath);
+                var root = Path.GetFullPath(Path.Combine(Application.dataPath,
+                    "../Builds/" + flavor + "/offline")) + Path.DirectorySeparatorChar;
+                if (!exportPath.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+                    throw new ArgumentException("Android export must stay under Builds/" + flavor + "/offline.");
+                if (Directory.Exists(exportPath) || File.Exists(exportPath))
+                    throw new IOException("Android export directory must be new: " + exportPath);
+                if (!BuildPipeline.IsBuildTargetSupported(BuildTargetGroup.Android, BuildTarget.Android))
+                    throw new InvalidOperationException("Android Build Support is not installed.");
+
                 FoundationProjectSetup.Create();
+                // Release flavors re-apply the resolved config after
+                // normal setup: the ordering guarantees the built player
+                // carries the declared release identity even when the
+                // config path is overridden by tooling.
+                if (releaseConfigPath != null)
+                    FamilyReleaseSettings.Apply(releaseConfigPath);
                 if (visualBenchmark)
                     FamilyRacing.EditorTools.VisualBenchmarkSetup.Create();
                 NetworkPrototypeSetup.VerifyBuildConfiguration(BuildTarget.Android);
@@ -192,6 +330,8 @@ namespace FamilyRacing.EditorTools
                 Report(report, "Android Gradle export"
                     + (development ? " (development" : " (ordinary")
                     + (visualBenchmark ? ", visual-benchmark" : "")
+                    + (contentStage != null
+                        ? ", full-content " + contentStage : "")
                     + "; APK build runs separately offline)");
             }
             finally
@@ -199,6 +339,13 @@ namespace FamilyRacing.EditorTools
                 EditorUserBuildSettings.exportAsGoogleAndroidProject = oldExport;
                 EditorUserBuildSettings.buildAppBundle = oldBundle;
             }
+            // The manifest lands only after a successful export — the
+            // packaging claim can never outlive a failed build.
+            if (contentStage != null)
+                FamilyRacing.EditorTools.FullContentSetup.WriteManifest(
+                    "Builds/" + flavor,
+                    development ? "Development" : "Ordinary",
+                    contentStage);
         }
 
         private static BuildReport Build(string location, BuildTarget target,

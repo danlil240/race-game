@@ -89,6 +89,8 @@ namespace FamilyRacing.Core.Racing
         public long elapsedTicks;         // race clock: running phase only
         public int lap;
         public int lapsRequired;
+        public bool isOpenRoute;
+        public float routeProgress;
         public int nextCheckpoint;
         // Progress facts for authoritative standings: gates accepted on
         // the current lap plus clamped metres along the segment into the
@@ -145,6 +147,13 @@ namespace FamilyRacing.Core.Racing
         // never serialized to the LAN wire.
         public VehicleSimulationDiagnostics simulation;
 
+        // M5 Task 5: the session-owned gadget world (pickups, patches and
+        // this racer's gadget row) for solo paths — practice, tutorial
+        // free-drive and time trial. Null when the session is coordinator-
+        // owned: the shared world then lives on NetworkRaceState.gadgets
+        // so the LAN wire carries exactly one authoritative copy.
+        public GadgetWorldState gadgets;
+
         // Deep copy matching the rest of the DTO family: the Task-5 wire
         // decode path produces fresh objects, but observation copies must
         // never alias a live or shared session state either.
@@ -163,6 +172,8 @@ namespace FamilyRacing.Core.Racing
                 elapsedTicks = elapsedTicks,
                 lap = lap,
                 lapsRequired = lapsRequired,
+                isOpenRoute = isOpenRoute,
+                routeProgress = routeProgress,
                 nextCheckpoint = nextCheckpoint,
                 acceptedGatesThisLap = acceptedGatesThisLap,
                 segmentProgressMeters = segmentProgressMeters,
@@ -187,7 +198,8 @@ namespace FamilyRacing.Core.Racing
                 simulationBackend = simulationBackend,
                 contentFingerprint = contentFingerprint,
                 lastRecoveryReason = lastRecoveryReason,
-                simulation = simulation != null ? simulation.Copy() : null
+                simulation = simulation != null ? simulation.Copy() : null,
+                gadgets = gadgets != null ? gadgets.Copy() : null
             };
             foreach (var mark in checkpoints)
                 copy.checkpoints.Add(mark != null ? mark.Copy() : null);

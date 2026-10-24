@@ -10,6 +10,7 @@ using FamilyRacing.Core.Racing;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.UIElements;
+using Unity.Profiling;
 
 namespace FamilyRacing
 {
@@ -26,6 +27,12 @@ namespace FamilyRacing
         // Catch-up work per frame is bounded; unsimulated backlog is kept
         // (never dropped) and reported through presentation diagnostics.
         private const int MaxStepsPerFrame = 8;
+        private static readonly ProfilerMarker SimulationMarker = new ProfilerMarker("FamilyRacing.Simulation");
+        private static readonly ProfilerMarker SnapshotMarker = new ProfilerMarker("FamilyRacing.FrameSnapshot");
+        private static readonly ProfilerMarker WorldMarker = new ProfilerMarker("FamilyRacing.WorldPresentation");
+        private static readonly ProfilerMarker HudMarker = new ProfilerMarker("FamilyRacing.Hud");
+        private static readonly ProfilerMarker FontsMarker = new ProfilerMarker("FamilyRacing.FontReadiness");
+        [SerializeField] private string profileStorageNamespace = "";
 
         private FoundationService service;
         private Networking.LanSessionLink lanLink;
@@ -39,6 +46,8 @@ namespace FamilyRacing
         // simulation state — they are listeners on the boundary.
         private RaceEffectsPresenter raceEffects;
         private RaceAudioPresenter raceAudio;
+        private GadgetPresenter gadgetPresenter;
+        private RearViewMirror rearViewMirror;
         private ValidationBridge bridge;
         private FoundationInput driverInput;
         private FoundationShell shell;
@@ -67,13 +76,16 @@ namespace FamilyRacing
         public FoundationInput Input => driverInput;
         public string RunId => runId;
         public bool AgentControlsInput => bridge != null && bridge.ControllerAttached;
-        public string CurrentScreen => service != null ? service.Snapshot().screen : "profiles";
+        public string CurrentScreen => service != null ? service.CurrentScreen : "profiles";
 
         private void Awake()
         {
             var validationDir = ValidationDirectory();
+            var profileRoot = string.IsNullOrEmpty(profileStorageNamespace)
+                ? Application.persistentDataPath
+                : Path.Combine(Application.persistentDataPath, profileStorageNamespace);
             var profilesDir = SelectProfilesDirectory(validationDir,
-                Application.persistentDataPath, Environment.GetCommandLineArgs());
+                profileRoot, Environment.GetCommandLineArgs());
             // In validation mode the bridge owns the capture directory (it
             // requires a new/empty dir); ProfileStore.Save creates the
             // selected profile directory on first write, including a shared
@@ -102,6 +114,12 @@ namespace FamilyRacing
                 var catalog = drivingWorld.Load();
                 loadedCatalog = catalog;
                 if (catalog != null) service.SetDrivingContent(catalog);
+                // M5 Task 4: the gameplay-loop catalog rides the same
+                // injection contract — absent or failed conversion means
+                // solo.start reports contentUnavailable honestly while
+                // practice/LAN stay live.
+                if (catalog != null)
+                    service.SetGameplayCatalog(drivingWorld.Gameplay);
                 // Validated tutorial content enables tutorial.start; its
                 // asset carries the presenter's bundled clip slots.
                 if (drivingWorld.Tutorial != null)
@@ -126,6 +144,17 @@ namespace FamilyRacing
             raceAudio = GetComponent<RaceAudioPresenter>();
             if (raceAudio == null)
                 raceAudio = gameObject.AddComponent<RaceAudioPresenter>();
+            // M5 Task 5: the gadget world presenter mirrors the
+            // authoritative pickups/patches/shields onto pooled views —
+            // no catalog binding needed (primitive placeholders match
+            // the graybox course style; authored effects/cues still ride
+            // the presentation catalog through the event triggers).
+            gadgetPresenter = GetComponent<GadgetPresenter>();
+            if (gadgetPresenter == null)
+                gadgetPresenter = gameObject.AddComponent<GadgetPresenter>();
+            rearViewMirror = GetComponent<RearViewMirror>();
+            if (rearViewMirror == null)
+                rearViewMirror = gameObject.AddComponent<RearViewMirror>();
             raceEffects.Bind(
                 drivingWorld != null ? drivingWorld.PresentationCatalog : null);
             raceAudio.Bind(
@@ -199,8 +228,8 @@ namespace FamilyRacing
             var lanDiscovery = new Networking.LanDiscovery();
             lanLink = new Networking.LanSessionLink(lanTransport, lanDiscovery);
             // Admission binds the pinned gameplay contract, not the
-            // app marketing version: every protocol-2 peer must report
-            // exactly "gameplay-2" plus the catalog compatibility token
+            // app marketing version: every protocol-3 peer must report
+            // exactly "gameplay-4" plus the catalog compatibility token
             // and tuned-content fingerprint before a slot is dealt.
             var lan = new Core.Networking.LanSessionService(
                 lanLink, lanLink, Core.Networking.NetworkSettings.GameplayVersion);
@@ -215,6 +244,16 @@ namespace FamilyRacing
             service.SetLanSession(lan);
             raceBridge = new Networking.NetworkRaceBridge(lanTransport, lan);
             if (loadedCatalog != null) raceBridge.SetContent(loadedCatalog);
+            // M5 Task 5: the authored gadget catalog seeds the host's
+            // authoritative gadget world — absent catalog means
+            // gadget-free races, never fabricated defaults. The same
+            // validated catalog feeds solo session creation so
+            // practice/tutorial free-drive and LAN use one source.
+            if (drivingWorld != null)
+            {
+                raceBridge.SetGadgetContent(drivingWorld.Gadgets);
+                service.SetGadgetCatalog(drivingWorld.Gadgets);
+            }
             // Task 4: the vehicle-simulation seam is owned here — the solo
             // service and the replication bridge both build their worlds
             // through DrivingWorld, which maps the catalog's backend to an
@@ -266,7 +305,15 @@ namespace FamilyRacing
                 // Boundary order per the timing contract: the session
                 // samples held input and consumes pending actions first,
                 // then the observation tick expires leases and publishes.
-                service.StepDriving(drivingWorld != null ? drivingWorld.MotorWorld : null);
+                using (SimulationMarker.Auto())
+                {
+                    service.StepDriving(drivingWorld != null ? drivingWorld.MotorWorld : null);
+                    // The local gameplay modes share this same boundary:
+                    // campaign/quickRace step their four-racer coordinator,
+                    // timeTrial its lone session — same input, same clock,
+                    // same paused freeze as the practice path above.
+                    service.StepSolo(drivingWorld != null ? drivingWorld.MotorWorld : null);
+                }
                 // One local 30 Hz boundary on the replication path: host
                 // consumes validated inputs and steps the authoritative
                 // race (publishing at 15 Hz); a client emits one sample.
@@ -291,76 +338,99 @@ namespace FamilyRacing
                 service.SetNetworkLinkState(
                     raceBridge != null ? raceBridge.LinkState() : null);
                 service.AdvanceTick();
-                // One snapshot per tick boundary: the presentation refresh
-                // mutates service state after the snapshot is taken, so the
-                // refreshed facts are folded back before emission — same
-                // record content without a second deep copy.
-                var tickState = service.Snapshot();
-                RefreshPresentation(tickState);
-                tickState.presentation = presentation.Copy();
-                bridge?.EmitTick(tickState);
+                // Observation snapshots are only consumed by validation.
+                // A regular race renders from the one frame snapshot below;
+                // catch-up ticks must not allocate unused deep copies.
+                if (bridge != null)
+                {
+                    var tickState = service.Snapshot();
+                    RefreshPresentation(tickState);
+                    tickState.presentation = presentation.Copy();
+                    bridge.EmitTick(tickState);
+                }
             }
             presentation.backlogSteps = (int)(accumulator / step);
             if (steps == MaxStepsPerFrame && accumulator >= step)
                 presentation.stepOverloads++;
-            var state = service.Snapshot();
-            if (drivingWorld != null)
+            FoundationState state;
+            using (SnapshotMarker.Auto()) state = service.Snapshot();
+            // Fraction of the current sim tick already elapsed — the
+            // vehicle and shield visuals interpolate between committed
+            // poses by this alpha instead of stepping at the 30 Hz tick rate.
+            var alpha = Mathf.Clamp01(accumulator / step);
+            using (WorldMarker.Auto())
             {
-                // Fraction of the current sim tick already elapsed — the
-                // vehicle visual interpolates between committed poses by
-                // this alpha instead of stepping at the 30 Hz tick rate.
-                var alpha = Mathf.Clamp01(accumulator / step);
-                var netRace = state.networkRace;
-                var lanRace = netRace != null && netRace.racers != null
-                    && netRace.racers.Count > 0;
-                drivingWorld.ApplyFrame(state, alpha);
-                // The LAN roster renders from the host-confirmed race
-                // state; the local racer's pose is the smoothed predicted
-                // pose on a client, and remote racers interpolate on the
-                // client. Neither affects roster/identity facts.
-                MotorState lanLocalPose = null;
-                if (lanRace)
-                    lanLocalPose = ApplyNetworkFrame(netRace, state, alpha);
-                else
+                if (drivingWorld != null)
                 {
-                    lastPoseSources.Clear();
-                    drivingWorld.ApplyRaceFrame(null); // retire racer views
-                }
-                if (drivingCamera != null)
-                {
-                    // Applied after the world visuals so its transform wins;
-                    // the published facts describe the camera the player
-                    // actually sees this frame. During a LAN race the
-                    // camera follows the locally owned racer's rendered
-                    // (predicted/interpolated) pose — never a remote pose.
+                    var netRace = state.networkRace;
+                    var lanRace = netRace != null && netRace.racers != null
+                        && netRace.racers.Count > 0;
+                    // M5 Task 4: campaign/quickRace publish their shared
+                    // four-racer coordinator state under soloRace.race —
+                    // same roster render path as LAN but every pose is
+                    // locally authoritative (no prediction, no transport).
+                    var soloRaceFrame = state.soloRace != null
+                        && state.soloRace.race != null
+                        && state.soloRace.race.racers != null
+                        && state.soloRace.race.racers.Count > 0;
+                    // M5 Task 8: the racer views bind the selected profile's
+                    // durable facts (installed upgrade parts, equipped
+                    // cosmetics) for the seat it owns.
+                    drivingWorld.SetLocalProfile(state.savedProfile);
+                    drivingWorld.ApplyFrame(state, alpha);
+                    // The LAN roster renders from the host-confirmed race
+                    // state; the local racer's pose is the smoothed predicted
+                    // pose on a client, and remote racers interpolate on the
+                    // client. Neither affects roster/identity facts.
+                    MotorState lanLocalPose = null;
                     if (lanRace)
+                        lanLocalPose = ApplyNetworkFrame(netRace, state, alpha);
+                    else if (soloRaceFrame)
+                        lanLocalPose = ApplySoloRaceFrame(state.soloRace, state, alpha);
+                    else
                     {
-                        var overhead = state.draftProfile != null
-                            && state.draftProfile.camera == "overhead";
-                        var reduced = state.draftProfile != null
-                            && state.draftProfile.reducedCameraShake;
-                        drivingCamera.ApplyMotor(lanLocalPose, overhead,
-                            reduced, Time.unscaledDeltaTime,
-                            state.draftProfile != null
-                                ? state.draftProfile.effectsVolume : 0.8f);
+                        lastPoseSources.Clear();
+                        drivingWorld.ApplyRaceFrame(null); // retire racer views
+                    }
+                    if (drivingCamera != null)
+                    {
+                        // Applied after the world visuals so its transform wins;
+                        // the published facts describe the camera the player
+                        // actually sees this frame. During a LAN race the
+                        // camera follows the locally owned racer's rendered
+                        // (predicted/interpolated) pose — never a remote pose.
+                        if (lanRace || soloRaceFrame)
+                        {
+                            var overhead = state.draftProfile != null
+                                && state.draftProfile.camera == "overhead";
+                            var reduced = state.draftProfile != null
+                                && state.draftProfile.reducedCameraShake;
+                            drivingCamera.ApplyMotor(lanLocalPose, overhead,
+                                reduced, Time.unscaledDeltaTime,
+                                state.draftProfile != null
+                                    ? state.draftProfile.effectsVolume : 0.8f);
+                        }
+                        else
+                        {
+                            drivingCamera.ApplyFrame(state);
+                        }
+                        service.SetDrivingCameraFacts(drivingCamera.Facts);
+                        currentCameraFacts = drivingCamera.Facts;
                     }
                     else
                     {
-                        drivingCamera.ApplyFrame(state);
+                        service.SetDrivingCameraFacts(drivingWorld.CameraFacts);
+                        currentCameraFacts = drivingWorld.CameraFacts;
                     }
-                    service.SetDrivingCameraFacts(drivingCamera.Facts);
-                    currentCameraFacts = drivingCamera.Facts;
+                    // Fold the just-published camera facts into this frame's
+                    // snapshot instead of re-snapshotting after SetFacts.
+                    if (state.driving != null)
+                        state.driving.camera = (drivingCamera != null
+                            ? drivingCamera.Facts : drivingWorld.CameraFacts).Copy();
+                    else if (state.soloRace != null && state.soloRace.trial != null)
+                        state.soloRace.trial.camera = (drivingCamera != null
+                            ? drivingCamera.Facts : drivingWorld.CameraFacts).Copy();
                 }
-                else
-                {
-                    service.SetDrivingCameraFacts(drivingWorld.CameraFacts);
-                    currentCameraFacts = drivingWorld.CameraFacts;
-                }
-                // Fold the just-published camera facts into this frame's
-                // snapshot instead of re-snapshotting after SetFacts.
-                if (state.driving != null)
-                    state.driving.camera = (drivingCamera != null
-                        ? drivingCamera.Facts : drivingWorld.CameraFacts).Copy();
             }
             // Task-5 presentation: the effects/audio presenters read the
             // same latest snapshot — after world/camera applied, before
@@ -373,6 +443,11 @@ namespace FamilyRacing
                 raceEffects.ApplyFrame(state, Time.unscaledDeltaTime);
             if (raceAudio != null)
                 raceAudio.ApplyFrame(state, Time.unscaledDeltaTime);
+            // The pooled gadget world views mirror the latest published
+            // state — pickups, foam patches and shield bubbles read the
+            // authoritative slice exactly like the effects presenter.
+            if (gadgetPresenter != null)
+                gadgetPresenter.ApplyFrame(state, Time.unscaledDeltaTime, alpha);
             // Entering the shared network pause neutralizes held local
             // input and requires re-arm, the same cleanup focus loss runs:
             // held steering must not seep through the resume boundary.
@@ -381,7 +456,11 @@ namespace FamilyRacing
             lastNetworkPaused = networkPaused;
             RefreshPresentation(state);
             state.presentation = presentation.Copy();
-            shell?.Refresh(state);
+            using (HudMarker.Auto()) shell?.Refresh(state);
+            if (rearViewMirror != null)
+                rearViewMirror.ApplyFrame(state,
+                    GetComponent<UnityEngine.UIElements.UIDocument>()?.rootVisualElement,
+                    Time.unscaledDeltaTime);
             // Cue announcements and icon demonstrations follow the latest
             // published tutorial state — never the other way around.
             if (tutorialPresenter != null)
@@ -416,7 +495,6 @@ namespace FamilyRacing
             // geometry, ownership) before the boundary snapshot is emitted,
             // or a record can claim e.g. language=he with direction=ltr.
             if (result == null) return null;
-            var boundaryState = service.Snapshot();
             // A LAN recovery press becomes a deduplicated one-shot action
             // on the bridge — the command id is the action identity, and
             // the host's action.queued/consumed/cancelled events are its
@@ -426,7 +504,7 @@ namespace FamilyRacing
             if (result.status == CommandResult.Applied
                 && command.Action == "input.set"
                 && raceBridge != null
-                && boundaryState.screen == FoundationService.ScreenLanRace)
+                && service.CurrentScreen == FoundationService.ScreenLanRace)
             {
                 string recoverValue;
                 if (command.Parameters != null
@@ -434,9 +512,16 @@ namespace FamilyRacing
                     && recoverValue == "true")
                     raceBridge.SubmitAction(command.CommandId);
             }
-            RefreshPresentation(boundaryState);
-            boundaryState.presentation = presentation.Copy();
-            bridge?.EmitCommandBoundary(result, boundaryState);
+            // Physical held input refreshes every half second. Only an
+            // attached observer consumes that boundary copy. UI commands
+            // still refresh presentation immediately (locale/font changes).
+            if (bridge != null || command.Action != "input.set")
+            {
+                var boundaryState = service.Snapshot();
+                RefreshPresentation(boundaryState);
+                boundaryState.presentation = presentation.Copy();
+                bridge?.EmitCommandBoundary(result, boundaryState);
+            }
             return result;
         }
 
@@ -515,6 +600,46 @@ namespace FamilyRacing
             return localPose;
         }
 
+        // Publishes a local four-racer frame (M5 Task 4 campaign /
+        // quickRace) into the world: every pose is locally authoritative
+        // — no prediction, no interpolation, no transport — and the
+        // roster carries exactly the one human seat so cosmetics resolve
+        // like a LAN local racer while AI seats fall to slot mapping.
+        // Returns the human racer's pose for the camera to follow.
+        private MotorState ApplySoloRaceFrame(SoloRaceState solo,
+            FoundationState state, float alpha)
+        {
+            lastPoseSources.Clear();
+            MotorState localPose = null;
+            foreach (var racer in solo.race.racers)
+            {
+                if (racer == null || string.IsNullOrEmpty(racer.participantId))
+                    continue;
+                lastPoseSources[racer.participantId] = "authoritative";
+                if (racer.participantId == solo.participantId
+                    && racer.session != null)
+                    localPose = racer.session.motor;
+            }
+            // The cosmetics seam reads avatar/color off participant rows;
+            // the local human is the only rostered participant.
+            var roster = new List<Core.Networking.ParticipantState>(1);
+            if (state.draftProfile != null)
+            {
+                roster.Add(new Core.Networking.ParticipantState
+                {
+                    participantId = solo.participantId,
+                    slot = 0,
+                    occupied = true,
+                    connected = true,
+                    controlSource = "local",
+                    avatar = state.draftProfile.avatar ?? "",
+                    colorIndex = state.draftProfile.colorIndex
+                });
+            }
+            drivingWorld.ApplyRaceFrame(solo.race, alpha, null, roster);
+            return localPose;
+        }
+
         // The last ApplyNetworkFrame's pose-source per participant — the
         // world writes "authoritative" on every fact; these labels
         // override it where a predicted/interpolated pose drove the view.
@@ -555,7 +680,8 @@ namespace FamilyRacing
             // Font/ATG readiness is recomputed at every refresh boundary,
             // not just on locale changes: a broken binding must surface as a
             // warning even in English because the Hebrew control is visible.
-            presentation.hebrewFontAvailable = FoundationFonts.IsReady(document);
+            using (FontsMarker.Auto())
+                presentation.hebrewFontAvailable = FoundationFonts.IsReady(document);
             presentation.fontWarning = presentation.hebrewFontAvailable
                 ? "" : FoundationFonts.Warning;
             var source = AgentControlsInput
@@ -616,6 +742,14 @@ namespace FamilyRacing
                 return RenderPerformanceCapture.PhaseRacing;
             if (state.driving != null && state.driving.phase == "finished")
                 return RenderPerformanceCapture.PhaseResults;
+            var solo = state.soloRace;
+            if (solo != null)
+            {
+                if (solo.paused) return RenderPerformanceCapture.PhasePaused;
+                if (solo.phase == "countdown") return RenderPerformanceCapture.PhaseCountdown;
+                if (solo.phase == "running") return RenderPerformanceCapture.PhaseRacing;
+                if (solo.phase == "finished") return RenderPerformanceCapture.PhaseResults;
+            }
             var net = state.network;
             if (net != null)
             {
@@ -642,6 +776,15 @@ namespace FamilyRacing
             if (state == null) return "";
             if (state.driving != null && state.driving.vehicleId != null)
                 return state.driving.vehicleId;
+            var solo = state.soloRace;
+            if (solo != null)
+            {
+                if (solo.trial != null) return solo.trial.vehicleId ?? "";
+                if (solo.race != null && solo.race.racers != null)
+                    foreach (var racer in solo.race.racers)
+                        if (racer != null && racer.participantId == solo.participantId)
+                            return racer.vehicleId ?? "";
+            }
             var race = state.networkRace;
             var localId = state.network != null
                 ? state.network.localParticipantId : null;

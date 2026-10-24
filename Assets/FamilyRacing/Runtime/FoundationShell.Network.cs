@@ -1,10 +1,13 @@
 using System;
 using System.Collections.Generic;
+using FamilyRacing.Core.Automation;
 using FamilyRacing.Core.Foundation;
 using FamilyRacing.Core.Networking;
 using FamilyRacing.Core.Racing;
+using Unity.Networking.Transport;
 using UnityEngine;
 using UnityEngine.UIElements;
+using LanSettings = FamilyRacing.Core.Networking.NetworkSettings;
 
 namespace FamilyRacing
 {
@@ -27,6 +30,17 @@ namespace FamilyRacing
         private Label lanActionLabel;
         private Label lanPauseLabel;
 
+        // Manual-join feedback (PCQA-007): shell-side validation state.
+        // The error line and the offending-field highlight update in
+        // place so the typed address/port never resets to a rebuild, and
+        // network.lastError stays reserved for real service verdicts.
+        private TextField lanAddressField;
+        private TextField lanPortField;
+        private Label lanJoinErrorLabel;
+        private string lanJoinErrorKey = "";
+        private string lanJoinErrorCode = "";
+        private string lanJoinErrorField = "";
+
         // Rebuild signature for LAN screens: the rendered roster,
         // configuration, discovery and delivery rows are part of the key
         // so a peer joining, readying, disconnecting or a result delivery
@@ -45,7 +59,8 @@ namespace FamilyRacing
             foreach (var p in net.participants)
                 key += "|" + p.slot + (p.participantId ?? "") + p.occupied
                     + p.connected + p.ready + (p.controlSource ?? "")
-                    + (p.vehicleId ?? "") + p.ownershipEpoch;
+                    + (p.vehicleId ?? "") + (p.avatar ?? "")
+                    + p.ownershipEpoch;
             foreach (var h in net.discovered)
                 key += "|" + (h.address ?? "") + h.port;
             foreach (var r in net.results)
@@ -128,7 +143,7 @@ namespace FamilyRacing
             var row = Row(root);
             var host = AddButton(row, T("lan.host", state), Coral,
                 () => app.Dispatch("lan.host",
-                    PortParam(NetworkSettings.DefaultGameplayPort)),
+                    PortParam(LanSettings.DefaultGameplayPort)),
                 "lan.host");
             ApplyAvailability(host, "lan.host");
 
@@ -166,8 +181,7 @@ namespace FamilyRacing
                     address.name = "lan.discovered." + index + ".address";
                     address.languageDirection = LanguageDirection.LTR;
                     var joinFound = AddButton(card, T("lan.join", state), Seafoam,
-                        () => app.Dispatch("lan.join",
-                            JoinParams(entry.address, entry.port)),
+                        () => JoinDiscoveredHost(state, entry),
                         "lan.discovered." + index + ".join");
                     joinFound.style.minHeight = 48;
                     joinFound.style.fontSize = 20;
@@ -187,25 +201,34 @@ namespace FamilyRacing
             var manual = Row(root);
             manual.name = "lan.manual";
             AddLabel(manual, T("lan.address", state), 20, Deep);
-            var addressField = new TextField { value = "" };
-            addressField.name = "lan.join.address";
-            addressField.languageDirection = LanguageDirection.LTR;
-            addressField.style.minWidth = 220;
-            addressField.style.minHeight = 44;
-            manual.Add(addressField);
+            lanAddressField = new TextField { value = "" };
+            lanAddressField.name = "lan.join.address";
+            lanAddressField.languageDirection = LanguageDirection.LTR;
+            lanAddressField.style.minWidth = 220;
+            lanAddressField.style.minHeight = 44;
+            // Editing either field clears the inline error in place.
+            lanAddressField.RegisterValueChangedCallback(
+                _ => ClearLanJoinFeedback(state));
+            manual.Add(lanAddressField);
             AddLabel(manual, T("lan.port", state), 20, Deep);
-            var portField = new TextField { value = NetworkSettings.DefaultGameplayPort
+            lanPortField = new TextField { value = LanSettings.DefaultGameplayPort
                 .ToString(System.Globalization.CultureInfo.InvariantCulture) };
-            portField.name = "lan.join.port";
-            portField.languageDirection = LanguageDirection.LTR;
-            portField.style.minWidth = 110;
-            portField.style.minHeight = 44;
-            manual.Add(portField);
+            lanPortField.name = "lan.join.port";
+            lanPortField.languageDirection = LanguageDirection.LTR;
+            lanPortField.style.minWidth = 110;
+            lanPortField.style.minHeight = 44;
+            lanPortField.RegisterValueChangedCallback(
+                _ => ClearLanJoinFeedback(state));
+            manual.Add(lanPortField);
             var join = AddButton(manual, T("lan.join", state), Seafoam,
-                () => app.Dispatch("lan.join",
-                    JoinParams(addressField.value, ParsePort(portField.value))),
-                "lan.join");
+                () => TryManualJoin(state), "lan.join");
             ApplyAvailability(join, "lan.join");
+            // The inline error line: always present so a click can paint
+            // it without a rebuild; build-time state keeps it honest
+            // across unrelated signature rebuilds.
+            lanJoinErrorLabel = AddLabel(root, "", 18, Coral);
+            lanJoinErrorLabel.name = "lan.join.error";
+            PaintLanJoinError(state);
 
             var actions = Row(root);
             var leave = AddButton(actions, T("lan.leave", state), Deep,
@@ -221,13 +244,133 @@ namespace FamilyRacing
                 : (discovering ? T("lan.discovering", state) : ""));
         }
 
-        private static int ParsePort(string value)
+        // Manual-join validation (PCQA-007): input problems are answered
+        // by the shell itself — a readable line under the fields plus a
+        // highlight on the offender — without ever dispatching; a
+        // synchronous service rejection surfaces the same honest reason
+        // code the agent channel got. Neither path fakes network.lastError.
+        private void TryManualJoin(FoundationState state)
         {
+            var address = lanAddressField != null && lanAddressField.value != null
+                ? lanAddressField.value.Trim() : "";
+            var portText = lanPortField != null && lanPortField.value != null
+                ? lanPortField.value.Trim() : "";
+            if (address.Length == 0)
+            {
+                FailManualJoin(state, "lan.join.error.address", "address");
+                return;
+            }
+            // The check mirrors the transport's own gate exactly
+            // (LanTransport.StartClient): an IPv4-literal endpoint —
+            // hostnames and IPv6 can never connect on this transport,
+            // so they are input errors here, not late connect failures.
+            NetworkEndpoint endpoint;
+            if (!NetworkEndpoint.TryParse(address,
+                    LanSettings.DefaultGameplayPort, out endpoint)
+                || endpoint.Family != NetworkFamily.Ipv4)
+            {
+                FailManualJoin(state, "lan.join.error.addressBad", "address");
+                return;
+            }
             int port;
-            return int.TryParse(value,
-                System.Globalization.NumberStyles.Integer,
-                System.Globalization.CultureInfo.InvariantCulture, out port)
-                ? port : 0;
+            if (!int.TryParse(portText,
+                    System.Globalization.NumberStyles.Integer,
+                    System.Globalization.CultureInfo.InvariantCulture, out port)
+                || port < 0 || port > 65535)
+            {
+                FailManualJoin(state, "lan.join.error.port", "port");
+                return;
+            }
+            var result = app.Dispatch("lan.join", JoinParams(address, port));
+            if (result == null
+                || result.status == CommandResult.Rejected
+                || result.status == CommandResult.Failed)
+            {
+                ShowJoinOutcome(state, result);
+                return;
+            }
+            ClearLanJoinFeedback(state);
+        }
+
+        // Discovered joins carry a valid address/port, so they always
+        // dispatch — but a synchronous rejection (an incompatible
+        // advertisement, a pending join, a full pending queue) still
+        // paints the inline error instead of silently swallowing the
+        // verdict. Clearing stale manual feedback happens up front, not
+        // instead of surfacing.
+        private void JoinDiscoveredHost(FoundationState state,
+            LanDiscoveredHost entry)
+        {
+            ClearLanJoinFeedback(state);
+            ShowJoinOutcome(state, app.Dispatch("lan.join",
+                JoinParams(entry != null ? entry.address : null,
+                    entry != null ? entry.port : 0)));
+        }
+
+        // Shared synchronous-outcome paint for both join paths:
+        // applied/accepted is a no-op here (the success path owns its
+        // feedback), rejected/failed surfaces the honest reason code
+        // through ReasonText — the raw code survives when no key exists.
+        // No field highlight: the service owns this verdict.
+        private void ShowJoinOutcome(FoundationState state,
+            CommandResult result)
+        {
+            if (result != null && result.status != CommandResult.Rejected
+                && result.status != CommandResult.Failed) return;
+            lanJoinErrorKey = "";
+            lanJoinErrorCode = result != null
+                && !string.IsNullOrEmpty(result.code)
+                ? result.code : "rejected";
+            lanJoinErrorField = "";
+            PaintLanJoinError(state);
+        }
+
+        private void FailManualJoin(FoundationState state, string key,
+            string field)
+        {
+            lanJoinErrorKey = key;
+            lanJoinErrorCode = "";
+            lanJoinErrorField = field;
+            PaintLanJoinError(state);
+        }
+
+        private void ClearLanJoinFeedback(FoundationState state)
+        {
+            if (lanJoinErrorKey.Length == 0 && lanJoinErrorCode.Length == 0
+                && lanJoinErrorField.Length == 0) return;
+            lanJoinErrorKey = lanJoinErrorCode = lanJoinErrorField = "";
+            PaintLanJoinError(state);
+        }
+
+        // In-place paint: the message and highlight land on the live
+        // widgets, so typing never loses pointer capture and the fields
+        // keep their contents. BuildLanBrowser calls the same paint at
+        // build time so a rebuild for an unrelated signature change
+        // re-renders the feedback honestly.
+        private void PaintLanJoinError(FoundationState state)
+        {
+            if (lanJoinErrorLabel != null)
+                lanJoinErrorLabel.text = lanJoinErrorKey.Length > 0
+                    ? T(lanJoinErrorKey, state)
+                    : ReasonText(lanJoinErrorCode, state);
+            MarkJoinField(lanAddressField, lanJoinErrorField == "address");
+            MarkJoinField(lanPortField, lanJoinErrorField == "port");
+        }
+
+        private static void MarkJoinField(TextField field, bool invalid)
+        {
+            if (field == null) return;
+            field.EnableInClassList("lan-invalid", invalid);
+            var border = invalid ? (StyleColor)Coral
+                : new StyleColor(StyleKeyword.Null);
+            field.style.borderTopColor = field.style.borderBottomColor =
+                field.style.borderLeftColor = field.style.borderRightColor =
+                    border;
+            var width = invalid ? (StyleFloat)2f
+                : new StyleFloat(StyleKeyword.Null);
+            field.style.borderTopWidth = field.style.borderBottomWidth =
+                field.style.borderLeftWidth = field.style.borderRightWidth =
+                    width;
         }
 
         private static Dictionary<string, string> PortParam(int port)
@@ -341,11 +484,13 @@ namespace FamilyRacing
                             ? " " + T("lan.you", state) : "";
                         if (p.slot == 0 && isHost)
                             tags += " · " + T("lan.hostTag", state);
+                        // PCQA-008: the primary label is the participant's
+                        // published identity, never the raw UUID — the id
+                        // stays on the tooltip for diagnostics.
                         var name = AddLabel(card,
-                            "\u200E" + (p.participantId ?? "") + tags, 20, Deep);
+                            ParticipantName(p, state) + tags, 20, Deep);
                         name.name = "lan.slot." + p.slot + ".name";
-                        // Participant ids stay LTR inside RTL layouts.
-                        name.languageDirection = LanguageDirection.LTR;
+                        name.tooltip = p.participantId ?? "";
                         var statusText = p.controlSource == "ai"
                             ? T("lan.ai", state)
                             : (!p.connected
@@ -410,6 +555,41 @@ namespace FamilyRacing
             return result;
         }
 
+        // Readable participant identity (PCQA-008): the wire already
+        // carries each participant's profile animal, so the roster names
+        // people through the same profile.animal.* keys the profile
+        // cards use. An empty or unknown avatar falls back to a
+        // localized slot-based Player N instead of leaking the UUID.
+        private string ParticipantName(ParticipantState p,
+            FoundationState state)
+        {
+            if (p != null && !string.IsNullOrEmpty(p.avatar))
+            {
+                try { return T("profile.animal." + p.avatar, state); }
+                catch (KeyNotFoundException) { }
+                catch (ArgumentException) { }
+            }
+            var slot = p != null ? p.slot : -1;
+            return T("lan.player", state) + " "
+                + (slot + 1).ToString(
+                    System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        // Id -> name resolution for surfaces that only carry a
+        // participantId (race standings, result rows, the delivery
+        // ledger): the live roster owns the avatar, so names resolve
+        // through it; a participant the roster no longer lists falls
+        // back to the raw id honestly rather than inventing a name.
+        private string ParticipantNameForId(NetworkSessionState net,
+            string participantId, FoundationState state)
+        {
+            if (net != null && participantId != null)
+                foreach (var p in net.participants)
+                    if (p.occupied && p.participantId == participantId)
+                        return ParticipantName(p, state);
+            return participantId ?? "";
+        }
+
         private string EventName(string eventId, FoundationState state)
         {
             string text;
@@ -437,6 +617,10 @@ namespace FamilyRacing
         private void BuildLanRace(FoundationState state)
         {
             var top = Row(root);
+            // Same over-world exposure as the solo HUD (PCQA-011): the
+            // shared wash keeps the readouts readable on dark geometry.
+            top.name = "lan.hud.readouts";
+            HudStrip(top);
             lanTimeLabel = AddLabel(top, "", 28, Deep);
             lanTimeLabel.name = "lan.hud.time";
             lanStandingsLabel = AddLabel(top, "", 22, Deep);
@@ -445,6 +629,10 @@ namespace FamilyRacing
             lanPhaseLabel.name = "lan.hud.phase";
             lanPauseLabel = AddLabel(top, "", 22, Coral);
             lanPauseLabel.name = "lan.hud.paused";
+            // Held-gadget readout (M5 Task 5) — same shared field the
+            // solo HUD uses; shows the host-published held item.
+            gadgetLabel = AddLabel(top, "", 22, Coral);
+            gadgetLabel.name = "lan.hud.gadget";
 
             lanActionLabel = AddLabel(root, "", 18, Seafoam);
             lanActionLabel.name = "lan.hud.action";
@@ -453,41 +641,53 @@ namespace FamilyRacing
             spacer.style.flexGrow = 1f;
             root.Add(spacer);
 
-            // Physical steering arrows keep left/right meaning in RTL:
-            // the row is locked LTR exactly like the solo HUD.
-            var controls = Row(root);
-            controls.name = "lan.controls";
-            controls.languageDirection = LanguageDirection.LTR;
-            AddHoldButton(controls, "◀", Ocean,
-                held => app.Input.TouchLeft(held), "lan.race.steerLeft");
-            AddHoldButton(controls, "▶", Ocean,
-                held => app.Input.TouchRight(held), "lan.race.steerRight");
-            AddHoldButton(controls, T("input.brake", state), Deep,
-                held => app.Input.TouchBrake(held), "lan.race.brake");
-            AddHoldButton(controls, T("input.drift", state), Seafoam,
-                held => app.Input.TouchDrift(held), "lan.race.drift");
-            AddHoldButton(controls, T("input.boost", state), Coral,
-                held => app.Input.TouchBoost(held), "lan.race.boost");
-            foreach (var held in controls.Children())
-                ApplyAvailability(held, "input.set");
+            if (TouchRaceLayout)
+                BuildRaceTouchControls(state, true);
+            else
+            {
+                // Physical steering arrows keep left/right meaning in RTL:
+                // the row is locked LTR exactly like the solo HUD.
+                var controls = Row(root);
+                controls.name = "lan.controls";
+                controls.languageDirection = LanguageDirection.LTR;
+                AddHoldButton(controls, "◀", Ocean,
+                    held => app.Input.TouchLeft(held), "lan.race.steerLeft");
+                AddHoldButton(controls, "▶", Ocean,
+                    held => app.Input.TouchRight(held), "lan.race.steerRight");
+                AddHoldButton(controls, T("input.brake", state), Deep,
+                    held => app.Input.TouchBrake(held), "lan.race.brake");
+                AddHoldButton(controls, T("input.drift", state), Seafoam,
+                    held => app.Input.TouchDrift(held), "lan.race.drift");
+                AddHoldButton(controls, T("input.boost", state), Coral,
+                    held => app.Input.TouchBoost(held), "lan.race.boost");
+                foreach (var held in controls.Children())
+                    ApplyAvailability(held, "input.set");
 
-            var keys = AddLabel(root, T("hud.keys", state), 15, Deep);
-            keys.name = "lan.hud.keys";
-            keys.style.opacity = 0.75f;
+                var keys = AddLabel(root, T("hud.keys", state), 15, Deep);
+                keys.name = "lan.hud.keys";
+                keys.style.opacity = 0.75f;
+                HudStrip(keys);
 
-            var actions = Row(root);
-            var recover = AddButton(actions, T("input.recovery", state), Deep,
-                () => app.Input.TouchRecover(), "lan.race.recover");
-            var camera = AddButton(actions, T("settings.camera", state), Ocean,
-                () => app.Dispatch("camera.toggle", emptyParams), "lan.race.camera");
-            var pause = AddButton(actions, T("input.pause", state), Coral,
-                () => app.Dispatch("pause.toggle", emptyParams), "lan.race.pause");
-            var leave = AddButton(actions, T("lan.leave", state), Deep,
-                () => app.Dispatch("lan.leave", emptyParams), "lan.race.leave");
-            ApplyAvailability(recover, "input.set");
-            ApplyAvailability(camera, "camera.toggle");
-            ApplyAvailability(pause, "pause.toggle");
-            ApplyAvailability(leave, "lan.leave");
+                var actions = Row(root);
+                var recover = AddButton(actions, T("input.recovery", state), Deep,
+                    () => app.Input.TouchRecover(), "lan.race.recover");
+                // The gadget bit rides the next input frame to the host —
+                // the edge latch lives in the authoritative rules.
+                var gadget = AddButton(actions, T("input.gadget", state), Seafoam,
+                    () => app.Input.TouchGadget(), "lan.race.gadget");
+                var camera = AddButton(actions, T("settings.camera", state), Ocean,
+                    () => app.Dispatch("camera.toggle", emptyParams), "lan.race.camera");
+                var pause = AddButton(actions, T("input.pause", state), Coral,
+                    () => app.Dispatch("pause.toggle", emptyParams), "lan.race.pause");
+                var leave = AddButton(actions, T("lan.leave", state), Deep,
+                    () => app.Dispatch("lan.leave", emptyParams), "lan.race.leave");
+                ApplyAvailability(recover, "input.set");
+                ApplyAvailability(gadget, "input.set");
+                ApplyAvailability(camera, "camera.toggle");
+                ApplyAvailability(pause, "pause.toggle");
+                ApplyAvailability(leave, "lan.leave");
+
+            }
 
             statusLabel = AddLabel(root, "", 18, Deep);
             statusLabel.name = "status.persistence";
@@ -508,12 +708,13 @@ namespace FamilyRacing
                     lanPhaseLabel.text =
                         race.phase == "countdown" && race.countdownTicksRemaining > 0
                             ? ((race.countdownTicksRemaining
-                                    + NetworkSettings.SimulationTicksPerSecond - 1)
-                                / NetworkSettings.SimulationTicksPerSecond).ToString()
+                                    + LanSettings.SimulationTicksPerSecond - 1)
+                                / LanSettings.SimulationTicksPerSecond).ToString()
                             : (race.phase == "finished" ? T("hud.finished", state) : "");
                 if (lanStandingsLabel != null && race.racers != null)
                 {
                     var text = "";
+                    var ids = "";
                     var ordered = race.standings != null && race.standings.Count > 0
                         ? race.standings : null;
                     var shown = 0;
@@ -525,11 +726,18 @@ namespace FamilyRacing
                             var racer = race.racers[slotIndex];
                             if (racer == null) continue;
                             if (shown > 0) text += "  ";
+                            // Roster-resolved animal names, not UUIDs;
+                            // the shown ids ride the tooltip for
+                            // diagnostics.
                             text += ++shown + "."
-                                + (racer.participantId ?? "")
+                                + ParticipantNameForId(net,
+                                    racer.participantId, state)
                                 + (racer.dnf ? " DNF" : "");
+                            if (ids.Length > 0) ids += ", ";
+                            ids += racer.participantId ?? "";
                         }
                     lanStandingsLabel.text = text;
+                    lanStandingsLabel.tooltip = ids;
                 }
             }
             // Shared pause plus who asked for it — a client sees its own
@@ -539,15 +747,28 @@ namespace FamilyRacing
                 var paused = net != null && net.paused;
                 var requests = net != null ? net.pauseRequests.Count : 0;
                 var text = paused ? T("lan.sharedPaused", state) : "";
+                var ids = "";
                 if (requests > 0 && net != null)
+                {
+                    var names = "";
+                    foreach (var id in net.pauseRequests)
+                    {
+                        if (names.Length > 0) names += ", ";
+                        names += ParticipantNameForId(net, id, state);
+                        if (ids.Length > 0) ids += ", ";
+                        ids += id ?? "";
+                    }
                     text += (text.Length > 0 ? " · " : "")
-                        + string.Join(", ", net.pauseRequests) + " "
-                        + T("lan.pausedBy", state);
+                        + names + " " + T("lan.pausedBy", state);
+                }
                 lanPauseLabel.text = text;
+                lanPauseLabel.tooltip = ids;
             }
             // One-shot action acknowledgment: the newest action.* event
             // for the local participant proves the press reached the host
             // (queued), fired (consumed) or was honestly cancelled.
+            if (gadgetLabel != null)
+                gadgetLabel.text = GadgetSlotText(state);
             if (lanActionLabel != null)
             {
                 var localId = net != null ? net.localParticipantId : "";
@@ -590,7 +811,8 @@ namespace FamilyRacing
                         var row = Row(root);
                         row.name = "lan.result." + (shown - 1);
                         var line = "\u200E" + shown + ". "
-                            + (racer.participantId ?? "") + " — "
+                            + ParticipantNameForId(net,
+                                racer.participantId, state) + " — "
                             + VehicleName(racer.vehicleId, state);
                         line += racer.dnf ? " DNF"
                             : (racer.finished
@@ -598,6 +820,7 @@ namespace FamilyRacing
                         var label = AddLabel(row, line, 22, Deep);
                         label.languageDirection = LanguageDirection.LTR;
                         label.name = "lan.result." + (shown - 1) + ".line";
+                        label.tooltip = racer.participantId ?? "";
                     }
             }
 
@@ -614,10 +837,12 @@ namespace FamilyRacing
                         : (delivery.state == "failed" ? T("lan.saveFailed", state)
                         : T("lan.saving", state));
                     var label = AddLabel(row,
-                        "\u200E" + (delivery.participantId ?? "") + ": " + text,
+                        "\u200E" + ParticipantNameForId(net,
+                            delivery.participantId, state) + ": " + text,
                         18, delivery.state == "failed" ? Coral : Deep);
                     label.languageDirection = LanguageDirection.LTR;
                     label.name = "lan.delivery." + i + ".line";
+                    label.tooltip = delivery.participantId ?? "";
                 }
             }
 

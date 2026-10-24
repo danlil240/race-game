@@ -18,16 +18,24 @@ namespace FamilyRacing
 
         private void BuildPractice(FoundationState state)
         {
-            AddLabel(root, T("practice.title", state), 40, Deep);
-            AddLabel(root, T("practice.hint", state), 20, Deep);
-            var picker = Row(root);
+            // The garage rows make this screen taller than the panel;
+            // without a scroller Yoga compresses rows under their
+            // children and the next row picks over a button's lower
+            // half — scroll keeps every row at full touch height.
+            var scroll = new ScrollView();
+            scroll.name = "practice.scroll";
+            scroll.style.flexGrow = 1;
+            root.Add(scroll);
+            AddLabel(scroll, T("practice.title", state), 40, Deep);
+            AddLabel(scroll, T("practice.hint", state), 20, Deep);
+            var picker = Row(scroll);
             var car = AddButton(picker, T("practice.car", state), Coral,
                 () => StartRace("car-01"), "practice.car");
             var moto = AddButton(picker, T("practice.motorcycle", state), Seafoam,
                 () => StartRace("motorcycle-01"), "practice.motorcycle");
             // Optional onboarding entry: the same tutorial.start command
             // an agent uses, one button per vehicle class.
-            var tutorialRow = Row(root);
+            var tutorialRow = Row(scroll);
             AddLabel(tutorialRow, T("practice.tutorial", state), 22, Deep);
             var learnCar = AddButton(tutorialRow, T("practice.car", state), Ocean,
                 () => StartTutorial("car-01"), "tutorial.car");
@@ -35,12 +43,21 @@ namespace FamilyRacing
                 () => StartTutorial("motorcycle-01"), "tutorial.motorcycle");
             ApplyAvailability(learnCar, "tutorial.start");
             ApplyAvailability(learnMoto, "tutorial.start");
+            // The garage (M5 Task 8): per-vehicle upgrade rows with exact
+            // authored level/cost/effect, locked-tier marks and the
+            // equipped-cosmetic strip. Values refresh in place through
+            // UpdateIndicators — a purchase or profile swap must never
+            // need a full screen rebuild to be honest.
+            garagePanel = new VisualElement();
+            garagePanel.name = "garage.panel";
+            garagePanel.style.marginTop = 8;
+            scroll.Add(garagePanel);
             // Same keyboard legend the race HUD carries, shown before the
             // child picks a vehicle so the keys are never a surprise.
-            var keys = AddLabel(root, T("hud.keys", state), 15, Deep);
+            var keys = AddLabel(scroll, T("hud.keys", state), 15, Deep);
             keys.name = "practice.keys";
             keys.style.opacity = 0.75f;
-            var actions = Row(root);
+            var actions = Row(scroll);
             var back = AddButton(actions, T("action.back", state), Deep,
                 () => app.Dispatch("ui.navigate", Screen("sandbox")), "action.back");
             ApplyAvailability(car, "race.start");
@@ -50,6 +67,229 @@ namespace FamilyRacing
             warningLabel.name = "status.fontWarning";
             statusLabel = AddLabel(root, "", 20, Deep);
             statusLabel.name = "status.persistence";
+        }
+
+        // Refills the garage rows ONLY when the facts they render change:
+        // a real click spans frames (PointerDown on frame N, PointerUp on
+        // frame N+k) and a rebuilt button loses pointer capture, so
+        // rebuild-per-refresh would make buy/equip unclickable for real
+        // users. The signature mirrors LanRebuildSignature — every fact
+        // a row displays (coins, unlocks, levels, owned/equipped
+        // cosmetics, command availability) is part of it, so an
+        // unchanged signature provably renders an identical tree and the
+        // live widgets stay put. A purchase, equip, profile swap or
+        // availability flip rebuilds exactly once.
+        private string garageSignature = "";
+
+        private void RefreshGarage(FoundationState state)
+        {
+            if (garagePanel == null) return;
+            var signature = GarageSignature(state);
+            if (signature == garageSignature) return;
+            garageSignature = signature;
+            garagePanel.Clear();
+            var gameplay = app != null && app.Service != null
+                ? app.Service.GameplayContent : null;
+            var profile = state != null ? state.savedProfile : null;
+            var title = AddLabel(garagePanel, T("garage.title", state),
+                30, Deep);
+            title.name = "garage.title";
+            var coins = AddLabel(garagePanel,
+                T("garage.coins", state) + " "
+                    + (profile != null ? profile.coins : 0), 24, Coral);
+            coins.name = "garage.coins";
+            if (gameplay == null || gameplay.Economy == null
+                || gameplay.Driving == null || profile == null)
+                return;
+
+            var vehicleIds = new List<string>(gameplay.Driving.Vehicles.Keys);
+            vehicleIds.Sort(System.StringComparer.Ordinal);
+            var categories = gameplay.Economy.upgradeCategories
+                ?? new List<FamilyRacing.Core.Progression
+                    .UpgradeCategoryDefinition>();
+            foreach (var vehicleId in vehicleIds)
+            {
+                var unlocked = profile.unlockedVehicles != null
+                    && profile.unlockedVehicles.Contains(vehicleId);
+                var row = UpgradeRowFor(profile, vehicleId);
+                var header = Row(garagePanel);
+                header.name = "garage." + vehicleId;
+                var name = AddLabel(header, VehicleName(vehicleId, state),
+                    22, Deep);
+                name.name = "garage." + vehicleId + ".name";
+                var locked = AddLabel(header, T("garage.locked", state),
+                    20, Coral);
+                locked.name = "garage." + vehicleId + ".locked";
+                locked.style.display = unlocked
+                    ? DisplayStyle.None : DisplayStyle.Flex;
+                foreach (var category in categories)
+                {
+                    if (category == null || category.id == null) continue;
+                    var level = row != null
+                        ? System.Math.Max(0, row.LevelFor(category.id))
+                        : 0;
+                    var catRow = Row(garagePanel);
+                    catRow.name = "garage." + vehicleId + "."
+                        + category.id;
+                    var levelLabel = AddLabel(catRow,
+                        T("garage.level", state) + " " + level, 18, Deep);
+                    levelLabel.name = "garage." + vehicleId + "."
+                        + category.id + ".level";
+                    var maxed = level >= category.maxLevel;
+                    var costLabel = AddLabel(catRow, maxed
+                            ? T("garage.max", state)
+                            : T("garage.cost", state) + " "
+                                + category.prices[level], 18, Deep);
+                    costLabel.name = "garage." + vehicleId + "."
+                        + category.id + ".cost";
+                    var effectLabel = AddLabel(catRow, "+"
+                        + ((int)System.Math.Round(
+                            category.levelMultiplierStep * 100f))
+                            .ToString() + "%", 18, Seafoam);
+                    effectLabel.name = "garage." + vehicleId + "."
+                        + category.id + ".effect";
+                    var installed = new VisualElement();
+                    installed.name = "garage." + vehicleId + "."
+                        + category.id + ".installed";
+                    installed.style.width = 10 + level * 14;
+                    installed.style.height = 14;
+                    installed.style.marginLeft = 8;
+                    installed.style.backgroundColor =
+                        level > 0 ? Seafoam : Off;
+                    catRow.Add(installed);
+                    var next = level + 1;
+                    var buy = AddButton(catRow, T("garage.buy", state),
+                        Coral,
+                        () => PurchaseUpgrade(vehicleId, category.id, next),
+                        "garage." + vehicleId + "."
+                            + category.id + ".buy");
+                    buy.SetEnabled(unlocked && !maxed);
+                    ApplyAvailability(buy, "upgrade.purchase");
+                    if (!unlocked || maxed) buy.SetEnabled(false);
+                }
+            }
+
+            // Owned cosmetics strip: one row per owned id with its
+            // equip/unequip button — the same cosmetic.equip command
+            // agents drive.
+            var owned = profile.ownedCosmetics;
+            if (owned == null || owned.Count == 0) return;
+            var cosmeticsTitle = AddLabel(garagePanel,
+                T("garage.cosmetics", state), 22, Deep);
+            cosmeticsTitle.name = "garage.cosmetics";
+            foreach (var cosmeticId in owned)
+            {
+                if (string.IsNullOrEmpty(cosmeticId)) continue;
+                var equipped = profile.equippedCosmetics != null
+                    && profile.equippedCosmetics.Contains(cosmeticId);
+                var row2 = Row(garagePanel);
+                row2.name = "garage.cosmetics." + cosmeticId;
+                var label = AddLabel(row2, cosmeticId, 18, Deep);
+                label.name = "garage.cosmetics." + cosmeticId + ".label";
+                var id = cosmeticId;
+                var toggle = AddButton(row2,
+                    T(equipped ? "garage.unequip" : "garage.equip",
+                        state),
+                    equipped ? Deep : Ocean,
+                    () => EquipCosmetic(id, !equipped),
+                    "garage.cosmetics." + cosmeticId + ".equip");
+                ApplyAvailability(toggle, "cosmetic.equip");
+            }
+            if (playerPresentation) StylePlayerGarage(state);
+        }
+
+        // Every fact RefreshGarage renders: profile presence and coins,
+        // the unlocked/locked tier marks, the per-vehicle upgrade
+        // counters (level, installed marker and next-cost derivation all
+        // read these), the owned+equipped cosmetics the strip binds, and
+        // the two command availabilities that disable the buttons.
+        private string GarageSignature(FoundationState state)
+        {
+            var gameplay = app != null && app.Service != null
+                ? app.Service.GameplayContent : null;
+            var profile = state != null ? state.savedProfile : null;
+            var key = (gameplay != null && gameplay.Economy != null
+                && gameplay.Driving != null ? "c" : "-")
+                + (profile != null ? "p" + profile.coins : "-");
+            if (profile != null)
+            {
+                if (profile.unlockedVehicles != null)
+                {
+                    var unlocked = new List<string>(
+                        profile.unlockedVehicles);
+                    unlocked.Sort(System.StringComparer.Ordinal);
+                    foreach (var id in unlocked)
+                        key += "|u:" + id;
+                }
+                if (profile.vehicleUpgrades != null)
+                    foreach (var row in profile.vehicleUpgrades)
+                        if (row != null)
+                            key += "|g:" + row.vehicleId + "="
+                                + row.acceleration + ","
+                                + row.handling + "," + row.boost;
+                if (profile.ownedCosmetics != null)
+                    foreach (var id in profile.ownedCosmetics)
+                        key += "|o:" + id;
+                if (profile.equippedCosmetics != null)
+                    foreach (var id in profile.equippedCosmetics)
+                        key += "|e:" + id;
+            }
+            return key + "|a:" + ActionAvailability("upgrade.purchase")
+                + "/" + ActionAvailability("cosmetic.equip");
+        }
+
+        // The discovery descriptor's available+reason for one action —
+        // part of the garage signature so a gate flip (rewardUnresolved,
+        // raceActive) rebuilds disabled buttons honestly.
+        private string ActionAvailability(string action)
+        {
+            if (app == null || app.Service == null) return "-";
+            foreach (var descriptor in app.Service.Discover())
+                if (descriptor.action == action)
+                    return descriptor.available + ":"
+                        + (descriptor.reason ?? "");
+            return "-";
+        }
+
+        private void PurchaseUpgrade(string vehicleId, string category,
+            int expectedLevel)
+        {
+            var p = new Dictionary<string, string>();
+            // Deterministic purchase identity per (vehicle, category,
+            // level): a repeated press for the same level replays the
+            // stored receipt idempotently instead of double-charging.
+            p["purchaseId"] = "garage-" + vehicleId + "-" + category
+                + "-l" + expectedLevel;
+            p["vehicleId"] = vehicleId;
+            p["category"] = category;
+            p["expectedLevel"] = expectedLevel.ToString(
+                System.Globalization.CultureInfo.InvariantCulture);
+            app.Dispatch("upgrade.purchase", p);
+        }
+
+        private void EquipCosmetic(string cosmeticId, bool equipped)
+        {
+            var p = new Dictionary<string, string>();
+            // The required slot parameter names the cosmetic's authored
+            // slot prefix — the same CosmeticSlot seam the handler
+            // validates, so the button can never send a mismatched or
+            // missing slot.
+            p["slot"] = FamilyRacing.Core.Profiles.UpgradeService
+                .CosmeticSlot(cosmeticId);
+            p["cosmeticId"] = cosmeticId;
+            p["equipped"] = equipped ? "true" : "false";
+            app.Dispatch("cosmetic.equip", p);
+        }
+
+        private static FamilyRacing.Core.Profiles.VehicleUpgrade
+            UpgradeRowFor(FamilyRacing.Core.Profiles.ProfileSave profile,
+                string vehicleId)
+        {
+            if (profile.vehicleUpgrades != null)
+                foreach (var row in profile.vehicleUpgrades)
+                    if (row != null && row.vehicleId == vehicleId)
+                        return row;
+            return null;
         }
 
         private void StartRace(string vehicleId)
@@ -75,6 +315,14 @@ namespace FamilyRacing
         private void BuildDriving(FoundationState state)
         {
             var top = Row(root);
+            // PCQA-011: the readouts draw dark text straight over live
+            // track geometry — the shared wash keeps them readable on
+            // dark ground while the world stays visible around the strip.
+            top.name = "hud.readouts";
+            HudStrip(top);
+            positionLabel = AddLabel(top, "", 28, Deep);
+            positionLabel.name = "hud.position";
+            positionLabel.style.display = DisplayStyle.None;
             elapsedLabel = AddLabel(top, "", 28, Deep);
             elapsedLabel.name = "hud.elapsed";
             lapLabel = AddLabel(top, "", 28, Deep);
@@ -90,8 +338,22 @@ namespace FamilyRacing
             // answer instead of looking like it did nothing.
             driftLabel = AddLabel(top, "", 22, Seafoam);
             driftLabel.name = "hud.drift";
+            // Held-gadget readout (M5 Task 5): names the item the gadget
+            // button will spend, or the empty-slot marker when a gadget
+            // world exists but the slot is free. Empty text when the
+            // race authors no gadget content at all.
+            gadgetLabel = AddLabel(top, "", 22, Coral);
+            gadgetLabel.name = "hud.gadget";
+            var gadgetIcon = new Label("?") { name = "hud.gadget.icon" };
+            gadgetIcon.style.width = 36;
+            gadgetIcon.style.height = 36;
+            top.Add(gadgetIcon);
 
             var boostRow = Row(root);
+            // Same exposure as the readout strip: the caption is dark
+            // text over the course, so the row gets the shared wash.
+            boostRow.name = "hud.boostRow";
+            HudStrip(boostRow);
             var boostCaption = AddLabel(boostRow, T("input.boost", state), 20, Deep);
             boostCaption.name = "hud.boostLabel";
             var boostTrack = new VisualElement();
@@ -121,7 +383,7 @@ namespace FamilyRacing
             tutorialPanel.style.flexDirection = FlexDirection.Row;
             tutorialPanel.style.justifyContent = Justify.Center;
             tutorialPanel.style.alignItems = Align.Center;
-            tutorialPanel.style.backgroundColor = new Color(0.99f, 0.97f, 0.92f, 0.85f);
+            tutorialPanel.style.backgroundColor = PanelWash;
             tutorialPanel.style.borderTopLeftRadius = tutorialPanel.style.borderTopRightRadius =
                 tutorialPanel.style.borderBottomLeftRadius = tutorialPanel.style.borderBottomRightRadius = 14;
             tutorialPanel.style.marginTop = 6;
@@ -144,50 +406,56 @@ namespace FamilyRacing
             spacer.style.flexGrow = 1f;
             root.Add(spacer);
 
-            // Steering keeps its physical meaning in both locales: the row
-            // is locked LTR so the left steer button stays on the left of
-            // the screen and the right one on the right under Hebrew RTL.
-            var controls = Row(root);
-            controls.name = "hud.controls";
-            controls.languageDirection = LanguageDirection.LTR;
-            AddHoldButton(controls, "◀", Ocean,
-                held => app.Input.TouchLeft(held), "driving.steerLeft");
-            AddHoldButton(controls, "▶", Ocean,
-                held => app.Input.TouchRight(held), "driving.steerRight");
-            AddHoldButton(controls, T("input.brake", state), Deep,
-                held => app.Input.TouchBrake(held), "driving.brake");
-            AddHoldButton(controls, T("input.drift", state), Seafoam,
-                held => app.Input.TouchDrift(held), "driving.drift");
-            AddHoldButton(controls, T("input.boost", state), Coral,
-                held => app.Input.TouchBoost(held), "driving.boost");
-            foreach (var held in controls.Children()) ApplyAvailability(held, "input.set");
+            if (TouchRaceLayout)
+                BuildRaceTouchControls(state, false);
+            else
+            {
+                // Steering keeps its physical meaning in both locales: the row
+                // is locked LTR so the left steer button stays on the left of
+                // the screen and the right one on the right under Hebrew RTL.
+                var controls = Row(root);
+                controls.name = "hud.controls";
+                controls.languageDirection = LanguageDirection.LTR;
+                AddHoldButton(controls, "◀", Ocean,
+                    held => app.Input.TouchLeft(held), "driving.steerLeft");
+                AddHoldButton(controls, "▶", Ocean,
+                    held => app.Input.TouchRight(held), "driving.steerRight");
+                AddHoldButton(controls, T("input.brake", state), Deep,
+                    held => app.Input.TouchBrake(held), "driving.brake");
+                AddHoldButton(controls, T("input.drift", state), Seafoam,
+                    held => app.Input.TouchDrift(held), "driving.drift");
+                AddHoldButton(controls, T("input.boost", state), Coral,
+                    held => app.Input.TouchBoost(held), "driving.boost");
+                foreach (var held in controls.Children()) ApplyAvailability(held, "input.set");
 
-            // Keyboard legend next to the touch controls — small, so it
-            // helps without competing with the big child-facing buttons.
-            var keys = AddLabel(root, T("hud.keys", state), 15, Deep);
-            keys.name = "hud.keys";
-            keys.style.opacity = 0.75f;
+                // Keyboard legend next to the touch controls — small, so it
+                // helps without competing with the big child-facing buttons.
+                var keys = AddLabel(root, T("hud.keys", state), 15, Deep);
+                keys.name = "hud.keys";
+                keys.style.opacity = 0.75f;
+                HudStrip(keys);
 
-            var actions = Row(root);
-            var recover = AddButton(actions, T("input.recovery", state), Deep,
-                () => app.Input.TouchRecover(), "driving.recover");
-            var camera = AddButton(actions, T("settings.camera", state), Ocean,
-                () => app.Dispatch("camera.toggle", emptyParams), "driving.camera");
-            // Gadgets are deferred content: the affordance exists but is
-            // visibly disabled with an honest label/tooltip instead of
-            // promising input the command path would reject.
-            var gadget = AddButton(actions, T("hud.gadget.soon", state), Off,
-                () => { }, "driving.gadget");
-            gadget.SetEnabled(false);
-            gadget.tooltip = T("hud.gadget.unavailable", state);
-            var pause = AddButton(actions, T("input.pause", state), Coral,
-                () => app.Dispatch("pause.toggle", emptyParams), "driving.pause");
-            var exit = AddButton(actions, T("driving.exit", state), Deep,
-                () => app.Dispatch("race.exit", emptyParams), "driving.exit");
-            ApplyAvailability(recover, "input.set");
-            ApplyAvailability(camera, "camera.toggle");
-            ApplyAvailability(pause, "pause.toggle");
-            ApplyAvailability(exit, "race.exit");
+                var actions = Row(root);
+                var recover = AddButton(actions, T("input.recovery", state), Deep,
+                    () => app.Input.TouchRecover(), "driving.recover");
+                var camera = AddButton(actions, T("settings.camera", state), Ocean,
+                    () => app.Dispatch("camera.toggle", emptyParams), "driving.camera");
+                // Gadgets are live (M5 Task 5): the button fires the held
+                // item through the same edge-latched input.set path the
+                // keyboard E key uses — the slot label names it.
+                var gadget = AddButton(actions, T("input.gadget", state), Seafoam,
+                    () => app.Input.TouchGadget(), "driving.gadget");
+                var pause = AddButton(actions, T("input.pause", state), Coral,
+                    () => app.Dispatch("pause.toggle", emptyParams), "driving.pause");
+                var exit = AddButton(actions, T("driving.exit", state), Deep,
+                    () => app.Dispatch("race.exit", emptyParams), "driving.exit");
+                ApplyAvailability(recover, "input.set");
+                ApplyAvailability(camera, "camera.toggle");
+                ApplyAvailability(gadget, "input.set");
+                ApplyAvailability(pause, "pause.toggle");
+                ApplyAvailability(exit, "race.exit");
+
+            }
 
             // Pause and finish overlays cover the screen when shown; both
             // keep the world dimly visible and offer their own actions.
@@ -196,10 +464,12 @@ namespace FamilyRacing
             var pauseRow = Row(pauseOverlay);
             var resume = AddButton(pauseRow, T("hud.resume", state), Seafoam,
                 () => app.Dispatch("pause.toggle", emptyParams), "driving.resume");
-            var pauseRetry = AddButton(pauseRow, T("hud.retry", state), Coral,
-                () => app.Dispatch("race.restart", emptyParams), "driving.pauseRetry");
+            pauseRetryButton = AddButton(pauseRow, T("hud.retry", state),
+                Coral,
+                () => app.Dispatch("race.restart", emptyParams),
+                "driving.pauseRetry");
             ApplyAvailability(resume, "pause.toggle");
-            ApplyAvailability(pauseRetry, "race.restart");
+            ApplyAvailability(pauseRetryButton, "race.restart");
 
             finishOverlay = Overlay("overlay.finish");
             var finished = AddLabel(finishOverlay, T("hud.finished", state), 44, Coral);
@@ -211,15 +481,37 @@ namespace FamilyRacing
             finishVehicleLabel = AddLabel(finishOverlay, "", 26, Deep);
             finishVehicleLabel.name = "hud.finishVehicle";
             var finishRow = Row(finishOverlay);
-            var retry = AddButton(finishRow, T("hud.retry", state), Seafoam,
-                () => app.Dispatch("race.restart", emptyParams), "driving.finishRetry");
+            finishRetryButton = AddButton(finishRow, T("hud.retry", state),
+                Seafoam,
+                () => app.Dispatch("race.restart", emptyParams),
+                "driving.finishRetry");
             var finishExit = AddButton(finishRow, T("driving.exit", state), Deep,
                 () => app.Dispatch("race.exit", emptyParams), "driving.finishExit");
-            ApplyAvailability(retry, "race.restart");
+            ApplyAvailability(finishRetryButton, "race.restart");
             ApplyAvailability(finishExit, "race.exit");
+
+            // M5 Task 10: the local-mode results surface — placement,
+            // honest coin breakdown, retry-save and one-action
+            // replay/continue — replaces the practice finish overlay for
+            // campaign/quickRace/timeTrial sessions.
+            BuildResultsOverlay(state);
 
             statusLabel = AddLabel(root, "", 18, Deep);
             statusLabel.name = "status.persistence";
+            if (IsPlayfulChaos) ApplyCompactRaceHud(state, top, boostRow);
+        }
+
+        // One shared backdrop for HUD strips that float text over the live
+        // course (PCQA-011): the same semi-opaque cream + 14-radius the
+        // tutorial cue panel and the overlays already paint, so dark
+        // readouts keep their contrast over dark track geometry.
+        private void HudStrip(VisualElement element)
+        {
+            element.style.backgroundColor = PanelWash;
+            element.style.borderTopLeftRadius = element.style.borderTopRightRadius =
+                element.style.borderBottomLeftRadius = element.style.borderBottomRightRadius = 14;
+            element.style.paddingTop = element.style.paddingBottom = 2;
+            element.style.paddingLeft = element.style.paddingRight = 10;
         }
 
         // Full-screen semi-opaque overlay, hidden until shown by the
@@ -231,7 +523,7 @@ namespace FamilyRacing
             overlay.style.position = Position.Absolute;
             overlay.style.left = overlay.style.right = 0;
             overlay.style.top = overlay.style.bottom = 0;
-            overlay.style.backgroundColor = new Color(0.99f, 0.97f, 0.92f, 0.85f);
+            overlay.style.backgroundColor = PanelWash;
             overlay.style.alignItems = Align.Center;
             overlay.style.justifyContent = Justify.Center;
             overlay.style.display = DisplayStyle.None;
@@ -242,28 +534,71 @@ namespace FamilyRacing
         private void UpdateDrivingIndicators(FoundationState state)
         {
             if (state.screen != "driving") return;
-            var session = state.driving;
+            var session = PresentedSession(state);
             if (session == null) return;
+            if (positionLabel != null)
+            {
+                var place = 0;
+                var totalRacers = 0;
+                if (state.soloRace != null && state.soloRace.race != null
+                    && state.soloRace.race.racers != null)
+                {
+                    totalRacers = state.soloRace.race.racers.Count;
+                    foreach (var racer in state.soloRace.race.racers)
+                        if (racer != null && racer.participantId == state.soloRace.participantId)
+                        { place = racer.position; break; }
+                }
+                var showPosition = (playerPresentation || IsPlayfulChaos) && place > 0 && totalRacers > 0;
+                positionLabel.style.display = showPosition ? DisplayStyle.Flex : DisplayStyle.None;
+                positionLabel.text = showPosition
+                    ? T("results.place", state) + " " + Ltr(place + "/" + totalRacers)
+                    : "";
+            }
             if (elapsedLabel != null)
                 elapsedLabel.text = T("hud.time", state) + " " +
                     FormatRaceTime(session.elapsedTicks);
             if (lapLabel != null)
-                lapLabel.text = T("hud.lap", state) + " " +
-                    Mathf.Min(session.lap + 1, session.lapsRequired) + "/" +
-                    session.lapsRequired;
+            {
+                // PCQA-010: the tutorial free-drive event authors 99 laps
+                // so lessons are never lap-limited — rendering "Lap 1/99"
+                // reads to a child like a 99-lap requirement. Hide the
+                // counter while lessons run (the tutorial strip already
+                // shows "lesson x/7") and restore the real readout for
+                // the trial phase and every non-tutorial race.
+                var lessonPhase = session.tutorial != null
+                    && session.tutorial.phase
+                        == FamilyRacing.Core.Tutorial.DrivingTutorial.PhaseLessons;
+                lapLabel.style.display = lessonPhase
+                    ? DisplayStyle.None : DisplayStyle.Flex;
+                if (!lessonPhase && session.isOpenRoute)
+                    lapLabel.text = T("hud.routeProgress", state) + " " +
+                        Ltr(Mathf.RoundToInt(session.routeProgress * 100f) + "%");
+                else if (!lessonPhase)
+                    lapLabel.text = T("hud.lap", state) + " " +
+                        Mathf.Min(session.lap + 1, session.lapsRequired) + "/" +
+                        session.lapsRequired;
+            }
             if (gateLabel != null)
             {
-                // nextCheckpoint is the expected gate index; gate 0 is the
-                // start/finish line, so the readable gate number for the
-                // child counts only the non-start gates ahead.
-                var total = session.checkpoints.Count;
-                var nonStart = Mathf.Max(total - 1, 1);
-                var next = session.nextCheckpoint == 0
-                    ? nonStart
-                    : Mathf.Min(session.nextCheckpoint, nonStart);
-                gateLabel.text = session.finished || total == 0
-                    ? ""
-                    : T("hud.gate", state) + " " + next + "/" + nonStart;
+                if (playerPresentation)
+                {
+                    gateLabel.style.display = DisplayStyle.None;
+                    gateLabel.text = "";
+                }
+                else
+                {
+                    // nextCheckpoint is the expected gate index; gate 0 is the
+                    // start/finish line, so the readable gate number for the
+                    // child counts only the non-start gates ahead.
+                    var total = session.checkpoints.Count;
+                    var nonStart = Mathf.Max(total - 1, 1);
+                    var next = session.nextCheckpoint == 0
+                        ? nonStart
+                        : Mathf.Min(session.nextCheckpoint, nonStart);
+                    gateLabel.text = session.finished || total == 0
+                        ? ""
+                        : T("hud.gate", state) + " " + next + "/" + nonStart;
+                }
             }
             if (boostFill != null && session.motor != null)
             {
@@ -281,10 +616,37 @@ namespace FamilyRacing
             }
             if (speedLabel != null && session.motor != null)
                 speedLabel.text = T("hud.speed", state) + " " +
-                    ((int)(session.motor.speed * 3.6f)).ToString();
+                    ((int)(session.motor.speed * 3.6f)).ToString() + " " + T("hud.kmh", state);
             if (driftLabel != null)
                 driftLabel.text = session.motor != null && session.motor.drifting
                     ? T("input.drift", state) + "!" : "";
+            if (gadgetLabel != null)
+            {
+                gadgetLabel.text = GadgetSlotText(state);
+                var held = LocalGadgetRow(state, GadgetWorldFor(state));
+                var kind = held != null && !string.IsNullOrEmpty(held.heldItemId) ? held.heldKind : "";
+                // The trial's larger card uses these localized details while
+                // the shared HUD keeps its existing input affordance.
+                var hint = root.Q<Label>("hud.gadget.hint");
+                if (hint != null) hint.text = string.IsNullOrEmpty(kind) ? T("hud.gadget.find",state)
+                    : T("hud.gadget."+kind,state) + "\n" + T(TouchRaceLayout ? "hud.gadget.tap" : "hud.gadget.use",state);
+                var icon = root.Q<Label>("hud.gadget.icon");
+                if (icon != null)
+                {
+                    var texture = GadgetIcons.TextureFor(kind);
+                    icon.text = texture != null ? "" : "?";
+                    icon.style.backgroundImage = texture != null ? new StyleBackground(texture) : StyleKeyword.None;
+                }
+                var button = root.Q<Button>("driving.gadget");
+                if (hint != null && button != null)
+                {
+                    button.text = TouchRaceLayout ? T("input.gadget", state)
+                        : "E  ·  " + (string.IsNullOrEmpty(kind) ? T("input.gadget",state) : gadgetLabel.text);
+                    var canUse = !string.IsNullOrEmpty(kind) && !state.paused && session.phase == "running";
+                    button.SetEnabled(canUse);
+                    if (playerPresentation) button.style.opacity = canUse ? 1f : 0.45f;
+                }
+            }
             if (tutorialPanel != null)
             {
                 var tutorial = session.tutorial;
@@ -305,7 +667,11 @@ namespace FamilyRacing
             }
             if (finishOverlay != null)
             {
-                var done = session.phase == "finished";
+                // The practice finish card belongs to the legacy driving
+                // session only — a solo-mode finish shows the results
+                // overlay instead, so the two never stack.
+                var done = state.driving != null
+                    && session.phase == "finished";
                 finishOverlay.style.display = done ? DisplayStyle.Flex : DisplayStyle.None;
                 if (done && finishTimeLabel != null)
                     finishTimeLabel.text = T("hud.time", state) + " " +
@@ -315,6 +681,85 @@ namespace FamilyRacing
                 if (done && finishVehicleLabel != null)
                     finishVehicleLabel.text = VehicleName(session.vehicleId, state);
             }
+        }
+
+        // The per-racer session the HUD reads: the legacy practice
+        // `driving` slice, the time trial's lone session, or the local
+        // seat's session inside the four-racer coordinator — whatever the
+        // published state actually carries, never a synthesized one.
+        private static FamilyRacing.Core.Racing.DrivingSessionState
+            PresentedSession(FoundationState state)
+        {
+            if (state == null) return null;
+            if (state.driving != null) return state.driving;
+            var solo = state.soloRace;
+            if (solo == null) return null;
+            if (solo.trial != null) return solo.trial;
+            if (solo.race != null && solo.race.racers != null)
+                foreach (var racer in solo.race.racers)
+                    if (racer != null
+                        && racer.participantId == solo.participantId)
+                        return racer.session;
+            return null;
+        }
+
+        // The held-gadget readout: resolves the local racer's row in
+        // whichever authoritative world this screen presents — the
+        // session-owned solo world (practice/tutorial/time trial), the
+        // local-mode coordinator's shared world (campaign/quickRace) or
+        // the host-published LAN world. "" when no gadget world exists;
+        // the localized empty marker when the slot is free.
+        private string GadgetSlotText(FoundationState state)
+        {
+            var world = GadgetWorldFor(state);
+            if (world == null) return "";
+            var row = LocalGadgetRow(state, world);
+            if (row == null) return T("hud.gadget.empty", state);
+            if (string.IsNullOrEmpty(row.heldItemId))
+                return T("hud.gadget.empty", state);
+            var key = "gadget." + (row.heldKind ?? "");
+            try { return T(key, state); }
+            catch (KeyNotFoundException) { return row.heldItemId; }
+        }
+
+        // The live authoritative gadget world for the presented race —
+        // exactly the slices the state publishes; never a synthesized one.
+        private static FamilyRacing.Core.Racing.GadgetWorldState
+            GadgetWorldFor(FoundationState state)
+        {
+            if (state == null) return null;
+            if (state.driving != null && state.driving.gadgets != null)
+                return state.driving.gadgets;
+            var solo = state.soloRace;
+            if (solo != null)
+            {
+                if (solo.race != null && solo.race.gadgets != null)
+                    return solo.race.gadgets;
+                if (solo.trial != null && solo.trial.gadgets != null)
+                    return solo.trial.gadgets;
+            }
+            var race = state.networkRace;
+            return race != null ? race.gadgets : null;
+        }
+
+        private static FamilyRacing.Core.Racing.GadgetRacerState
+            LocalGadgetRow(FoundationState state,
+                FamilyRacing.Core.Racing.GadgetWorldState world)
+        {
+            if (world == null || world.racers == null) return null;
+            var localId = state != null && state.soloRace != null
+                && !string.IsNullOrEmpty(state.soloRace.participantId)
+                ? state.soloRace.participantId
+                : state != null && state.network != null
+                    ? state.network.localParticipantId : null;
+            if (!string.IsNullOrEmpty(localId))
+            {
+                var found = world.Racer(localId);
+                if (found != null) return found;
+            }
+            // Session-owned worlds carry exactly one row (solo seat);
+            // fall back to it when no participant id resolves.
+            return world.racers.Count == 1 ? world.racers[0] : null;
         }
 
         // Friendly vehicle name for the finish overlay: localized via

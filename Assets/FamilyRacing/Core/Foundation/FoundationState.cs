@@ -9,7 +9,13 @@ namespace FamilyRacing.Core.Foundation
     // Serializable full-state DTO. Every Snapshot() call returns an
     // independent deep copy; callers can freely mutate what they receive.
     // stateSchemaVersion 3 adds the network session slice, 4 the physical
-    // surfaces, and 5 the render-profile/performance presentation slice;
+    // surfaces, 5 the render-profile/performance presentation slice, 6
+    // the local solo-race slice plus the resolved progression surface,
+    // and 7 the ordered multiworld rows on that surface
+    // (`progression.worlds` + `progression.adventureComplete`).
+    // Schema 7 is the M6 observation contract: the solo-race slice, the
+    // network current-race identity, the resolved progression surface
+    // AND the per-world availability/selection rows all belong to it;
     // consumers must negotiate the schema, never silently reinterpret it.
     [Serializable]
     public sealed class FoundationState
@@ -65,6 +71,179 @@ namespace FamilyRacing.Core.Foundation
         // the bridge's own packet/loss facts on THIS endpoint — null
         // until a replication bridge exists, never fabricated.
         public NetworkLinkState networkLink;
+        // Schema-6 local-mode slice (M5 Task 4): the live solo race
+        // session — exactly one of `race` (campaign/quickRace through
+        // the shared four-racer coordinator) or `trial` (timeTrial
+        // through a lone DrivingSession) populated, plus the finalized
+        // immutable result when the run completed. Null outside a
+        // local mode; practice still publishes under `driving` and LAN
+        // under `networkRace`.
+        public SoloRaceState soloRace;
+        // Schema-6 progression surface (M5 Task 10): the resolved
+        // gameplay-loop view — campaign access verdicts in authored
+        // order, the resolved bounty tray, and the unresolved-reward
+        // gate. Always non-null from the first snapshot (menus and
+        // failed-save states included); `available` is false without a
+        // non-legacy gameplay catalog, never a fabricated catalog.
+        public ProgressionState progression;
+    }
+
+    // The resolved campaign/bounty/reward-gate view of the bound
+    // gameplay catalog against the live profile. Rebuilt on every
+    // snapshot from the same CampaignRules/BountyDefinition seams the
+    // commands enforce, so the UI, the stream and the command surface
+    // can never disagree about what is enterable or owed.
+    [Serializable]
+    public sealed class ProgressionState
+    {
+        public bool available;
+        // The bound gameplay catalog's human-readable identity
+        // ("full-content-1|<driving token>"), "none" unbound.
+        public string contentIdentity = "none";
+        public string campaignWorldId = "";
+        public int campaignCompletedEvents;
+        public int campaignStars;
+        public int campaignRequiredEvents;
+        public int campaignRequiredStars;
+        public bool campaignFinalesOpen;
+        public bool campaignWorldComplete;
+        // Every authored event row in authored order — regulars then
+        // class finales — with its durable objective mask and the
+        // honest locked flag/reason.
+        public List<CampaignEventState> campaignEvents =
+            new List<CampaignEventState>();
+        // The profile's active bounty assignments resolved against the
+        // catalog: exactly the rows the bounty board renders.
+        public List<BountyState> bounties =
+            new List<BountyState>();
+        // True while a finalized result's progression transaction has
+        // an uncommitted save — gates new progression starts and
+        // purchases; `rewardUnresolvedRaceId` names the retained race.
+        public bool rewardUnresolved;
+        public string rewardUnresolvedRaceId = "";
+        // Schema-7 (M6 Task 3): every authored world in progression
+        // order with its availability, honest lock reason, regional
+        // counts and finale facts — the ordered multiworld surface the
+        // campaign selector and stream consumers share. `adventureComplete`
+        // is true only when every authored world is complete.
+        public List<WorldState> worlds = new List<WorldState>();
+        public bool adventureComplete;
+
+        public ProgressionState Copy()
+        {
+            var copy = new ProgressionState
+            {
+                available = available,
+                contentIdentity = contentIdentity,
+                campaignWorldId = campaignWorldId,
+                campaignCompletedEvents = campaignCompletedEvents,
+                campaignStars = campaignStars,
+                campaignRequiredEvents = campaignRequiredEvents,
+                campaignRequiredStars = campaignRequiredStars,
+                campaignFinalesOpen = campaignFinalesOpen,
+                campaignWorldComplete = campaignWorldComplete,
+                rewardUnresolved = rewardUnresolved,
+                rewardUnresolvedRaceId = rewardUnresolvedRaceId,
+                adventureComplete = adventureComplete
+            };
+            foreach (var row in campaignEvents)
+                copy.campaignEvents.Add(row != null ? row.Copy() : null);
+            foreach (var row in bounties)
+                copy.bounties.Add(row != null ? row.Copy() : null);
+            foreach (var row in worlds)
+                copy.worlds.Add(row != null ? row.Copy() : null);
+            return copy;
+        }
+    }
+
+    // One authored campaign world's resolved state (schema 7): identity
+    // and display names, the availability verdict `campaign.selectWorld`
+    // would answer for it, the machine-safe lock reason, the regional
+    // completion/star counts against their required thresholds, finale
+    // availability plus completion counts, the completion reward
+    // vehicles and the world-complete fact. `selected` marks the world
+    // the `campaignWorldId`/`campaignEvents` view currently describes.
+    [Serializable]
+    public sealed class WorldState
+    {
+        public string worldId = "";
+        public string nameEn = "";
+        public string nameHe = "";
+        // True when this world is the transient selected world the
+        // campaign event view describes.
+        public bool selected;
+        public bool available;
+        // Stable machine code for a closed world ("" while open) —
+        // the same code campaign.selectWorld rejects with.
+        public string lockedReason = "";
+        public int completedEvents;
+        public int requiredEvents;
+        public int stars;
+        public int requiredStars;
+        public bool finalesOpen;
+        public int completedFinales;
+        public int totalFinales;
+        public bool worldComplete;
+        // The vehicles this world awards on completion (one per finale).
+        public List<string> rewardVehicleIds = new List<string>();
+
+        public WorldState Copy()
+        {
+            var copy = (WorldState)MemberwiseClone();
+            copy.rewardVehicleIds = new List<string>(rewardVehicleIds);
+            return copy;
+        }
+    }
+
+    // One authored campaign event's entry state: identity, the profile's
+    // durable objective mask (FullMask-filtered union) and the honest
+    // locked verdict the command surface would answer.
+    [Serializable]
+    public sealed class CampaignEventState
+    {
+        public string eventId = "";
+        public string courseId = "";
+        public string classId = "";
+        public string eventType = "";
+        public bool finale;
+        public string rivalId = "";
+        public string rewardVehicleId = "";
+        public bool completed;
+        public int objectiveMask;
+        public int stars;
+        public bool locked;
+        // The command-verdict code the lock reports: "" or
+        // "eventLocked" — the same word campaign.start rejects with.
+        public string lockReason = "";
+
+        public CampaignEventState Copy()
+        {
+            return (CampaignEventState)MemberwiseClone();
+        }
+    }
+
+    // One active bounty assignment resolved against its catalog
+    // definition. `resolved` is false when the profile row names a
+    // bounty the bound catalog no longer authors — the row stays
+    // honest rather than dropping silently.
+    [Serializable]
+    public sealed class BountyState
+    {
+        public string assignmentId = "";
+        public string bountyId = "";
+        public string family = "";
+        public string metric = "";
+        public long threshold;
+        public long progress;
+        public int rewardCoins;
+        public string unit = "";
+        public bool completed;
+        public bool resolved;
+
+        public BountyState Copy()
+        {
+            return (BountyState)MemberwiseClone();
+        }
     }
 
     // Runtime-visible presentation facts (geometry, input ownership, locale,
@@ -308,9 +487,14 @@ namespace FamilyRacing.Core.Foundation
         public string tutorial = "notImplemented";
         public string drivingOnboarding = "implemented";
         public string drivingSimulation = "implemented";
-        public string campaign = "notImplemented";
-        public string rewardsUpgradesCosmetics = "notImplemented";
-        public string lan = "notImplemented";
+        // M5 Task 10: the complete local loop — campaign map, quick
+        // race, time trial, results/replay and the garage/bounty
+        // surfaces — is implemented through the command surface.
+        public string campaign = "implemented";
+        public string rewardsUpgradesCosmetics = "implemented";
+        // LAN racing is implemented: lobby, race, results delivery and
+        // rematch all ride the protocol-3 session surface.
+        public string lan = "implemented";
         public string content = "graybox";
     }
 }

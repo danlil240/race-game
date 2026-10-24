@@ -25,7 +25,22 @@ namespace FamilyRacing.Core.Profiles
                 voiceVolume = 1f,
                 coins = 0,
                 unlockedVehicles = new List<string> { "car-01", "motorcycle-01" },
-                appliedResults = new List<AppliedResultReceipt>()
+                appliedResults = new List<AppliedResultReceipt>(),
+                eventProgress = new List<EventProgress>(),
+                worldProgress = new List<WorldProgress>(),
+                finaleProgress = new List<FinaleProgress>(),
+                vehicleUpgrades = new List<VehicleUpgrade>(),
+                ownedCosmetics = new List<string>(),
+                equippedCosmetics = new List<string>(),
+                // Every new profile starts with the three initial
+                // challenge assignments at zero progress under fresh,
+                // unique assignment ids.
+                activeBounties = ProfileProgressSeed.CreateInitialBounties(),
+                bountyRotationCursor = 0,
+                timeTrialRecords = new List<TimeTrialRecord>(),
+                purchaseReceipts = new List<PurchaseReceipt>(),
+                pendingRaceContexts = new List<RaceRewardContext>(),
+                localRaceOrdinal = 0
             };
         }
     }

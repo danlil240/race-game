@@ -17,7 +17,8 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from AgentScenario import MemorySampler, _android_total_pss_bytes
+from AgentScenario import (MemorySampler, _android_total_pss_bytes,
+                           process_start_stamp)
 import PerfSampler
 
 
@@ -116,6 +117,35 @@ class MemorySamplerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaises(AssertionError):
                 MemorySampler(directory)
+
+    @unittest.skipUnless(sys.platform == "win32",
+                         "process start stamps are a Windows path")
+    def test_process_start_stamp_separates_process_generations(self):
+        # The relaunch contract: each process generation's identity is
+        # its creation stamp — two live processes must read distinct
+        # stamps, and a dead pid yields None rather than a fabricated
+        # identity.
+        first = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(30)"])
+        second = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(30)"])
+        try:
+            stamp1 = process_start_stamp(first.pid)
+            stamp2 = process_start_stamp(second.pid)
+            assert stamp1 is not None and stamp2 is not None
+            assert stamp1 != stamp2, \
+                "two live processes must carry distinct start stamps"
+            first.kill()
+            first.wait()
+            # The Popen handle keeps the object resolvable; the stamp
+            # probe still answers honestly or reports the gap as None —
+            # either way it must never raise to the orchestrator.
+            process_start_stamp(first.pid)
+        finally:
+            for process in (first, second):
+                if process.poll() is None:
+                    process.kill()
+                    process.wait()
 
 
 class AndroidPssParserTests(unittest.TestCase):

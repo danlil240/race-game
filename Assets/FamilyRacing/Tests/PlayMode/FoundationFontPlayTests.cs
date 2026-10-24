@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using FamilyRacing.Core.Foundation;
 using FamilyRacing.Core.Profiles;
@@ -60,6 +61,118 @@ namespace FamilyRacing.Tests
             yield return null;
             Assert.That(app.Service.Snapshot().input.steering, Is.GreaterThan(0f));
             app.Input.TouchRight(false);
+        }
+
+        // PCQA-005 regression: the very first rendered screen — no
+        // navigation, no profile creation — must carry the Advanced text
+        // generator and the bound default font on the actual attached
+        // rootVisualElement, and every label the first RebuildTree built
+        // must resolve a non-null font asset. A stale detached root or an
+        // unapplied configuration would pass state flags yet paint blank.
+        [UnityTest]
+        public IEnumerator FirstRenderedScreenResolvesBoundFontWithoutNavigation()
+        {
+            var defaultFont = document.panelSettings.textSettings.defaultFontAsset;
+            var root = document.rootVisualElement;
+            Assert.That(root, Is.Not.Null);
+            Assert.That(root.panel, Is.Not.Null,
+                "The first screen's root must be attached to a live panel.");
+            Assert.That(app.Service.Snapshot().screen, Is.EqualTo("profiles"));
+            Assert.That(root.resolvedStyle.unityTextGenerator,
+                Is.EqualTo(TextGeneratorType.Advanced));
+            Assert.That(root.resolvedStyle.unityFontDefinition.fontAsset,
+                Is.SameAs(defaultFont));
+
+            var labels = root.Query<Label>().ToList();
+            Assert.That(labels.Count, Is.GreaterThan(0),
+                "The first RebuildTree must have produced visible labels.");
+            foreach (var label in labels)
+            {
+                var definition = label.resolvedStyle.unityFontDefinition;
+                Assert.That(definition.fontAsset != null || definition.font != null,
+                    "Label '" + label.name + "' ('" + label.text +
+                    "') resolved no font on the first rendered screen.");
+            }
+            var buttons = root.Query<Button>().ToList();
+            Assert.That(buttons.Count, Is.GreaterThan(0),
+                "The first RebuildTree must have produced visible buttons.");
+            foreach (var button in buttons)
+            {
+                var definition = button.resolvedStyle.unityFontDefinition;
+                Assert.That(definition.fontAsset != null || definition.font != null,
+                    "Button '" + button.name + "' ('" + button.text +
+                    "') resolved no font on the first rendered screen.");
+            }
+            Assert.That(FontsReady(document), Is.True,
+                "Readiness must hold on the very first rendered screen.");
+            yield break;
+        }
+
+        // PCQA-005 regression for the render-path half of the defect: a
+        // dynamic glyph add is only queued — the atlas texture upload lands
+        // when the font pipeline's update queue is flushed. The shell warms
+        // every dynamic font in the chain at bind, so by the first rendered
+        // screen the repertoire must already sit in the glyph table against
+        // a live atlas texture with nothing left pending; otherwise the
+        // first elements bake UVs for a not-yet-uploaded atlas and paint
+        // blank until a rebuild (the player-only cold-launch symptom).
+        // Caveat: in-editor PlayMode runs generation on the main thread
+        // where GenerateText self-flushes, so the empty-queue half is an
+        // invariant, not a fix/no-fix discriminator — the WarmupCalls
+        // signal is what proves the warm-up path actually ran at Bind.
+        [UnityTest]
+        public IEnumerator FirstScreenGlyphsAreInTheAtlasWithNoPendingUpdate()
+        {
+            yield return null;
+            var font = document.panelSettings.textSettings.defaultFontAsset;
+            Assert.That(font.atlasPopulationMode, Is.EqualTo(AtlasPopulationMode.Dynamic));
+            Assert.That(font.atlasTextures, Is.Not.Null.And.Not.Empty,
+                "The warm-up must leave a real atlas texture, not a queued upload.");
+            Assert.That(font.atlasTextures[0], Is.Not.Null);
+            Assert.That(WarmupInvocationCount(), Is.GreaterThan(0),
+                "FoundationFonts.Warmup must have run during Bind on the " +
+                "first screen — this is the fix's observable signal.");
+            var flush = typeof(FoundationApp).Assembly
+                .GetType("FamilyRacing.FoundationFonts")
+                .GetField("FlushMethod", BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.That(flush, Is.Not.Null,
+                "FoundationFonts.FlushMethod field must exist.");
+            Assert.That(flush.GetValue(null), Is.Not.Null,
+                "FontAsset.UpdateFontAssetsInUpdateQueue was renamed in " +
+                "this Unity version — Warmup's flush silently no-ops; " +
+                "update FoundationFonts instead of losing the fix.");
+            // UIElements TextElement covers labels, button text, and every
+            // other text-bearing element the first RebuildTree produced.
+            var elements = document.rootVisualElement
+                .Query<UnityEngine.UIElements.TextElement>().ToList();
+            var text = string.Concat(elements
+                .Where(e => !string.IsNullOrEmpty(e.text))
+                .Select(e => e.text));
+            Assert.That(text, Is.Not.Empty,
+                "The first screen must actually contain rendered strings.");
+            Assert.That(font.HasCharacters(text, out _,
+                    searchFallbacks: true, tryAddCharacter: false), Is.True,
+                "Every first-screen glyph must already live in the font " +
+                "chain — a render-time add lands after UVs are baked.");
+            foreach (var fallback in font.fallbackFontAssetTable)
+            {
+                if (fallback == null) continue;
+                Assert.That(fallback.atlasTextures, Is.Not.Null.And.Not.Empty,
+                    "Fallback '" + fallback.name + "' must also carry a live atlas.");
+            }
+            var pending = typeof(FontAsset).GetField(
+                "k_FontAssets_AtlasTexturesUpdateQueue",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.That(pending, Is.Not.Null,
+                "FontAsset's atlas-update queue field was renamed in this " +
+                "Unity version — update the probe rather than silently skip.");
+            var queue = pending.GetValue(null) as System.Collections.ICollection;
+            Assert.That(queue, Is.Not.Null,
+                "The atlas-update queue must be an initialized collection.");
+            Assert.That(queue.Count, Is.EqualTo(0),
+                "No atlas update may still be pending on the first " +
+                "rendered screen — pending uploads are exactly what " +
+                "leaves cold-launch text permanently blank.");
         }
 
         [UnityTest]
@@ -168,6 +281,33 @@ namespace FamilyRacing.Tests
                         live.style.unityFontDefinition = FontDefinition.FromSDFFont(font);
                 }
             }
+        }
+
+        [Test]
+        public void ReadinessDoesNotRetryAddingGlyphsAfterWarmup()
+        {
+            Assert.That(FontsReady(document), Is.True);
+            var recorder = UnityEngine.Profiling.Recorder.Get("FontAsset.TryAddCharacter");
+            Assert.That(recorder.isValid, Is.True);
+            recorder.enabled = false;
+            recorder.FilterToCurrentThread();
+            recorder.enabled = true;
+            bool ready;
+            try { ready = FontsReady(document); }
+            finally { recorder.enabled = false; recorder.CollectFromAllThreads(); }
+            Assert.That(ready, Is.True);
+            Assert.That(recorder.sampleBlockCount, Is.Zero,
+                "Per-frame readiness must only inspect glyph coverage; Bind already populated the font atlases.");
+        }
+
+        private static int WarmupInvocationCount()
+        {
+            var field = typeof(FoundationApp).Assembly
+                .GetType("FamilyRacing.FoundationFonts")
+                .GetField("WarmupCalls", BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.That(field, Is.Not.Null,
+                "FoundationFonts.WarmupCalls must exist for this probe.");
+            return (int)field.GetValue(null);
         }
 
         private static bool FontsReady(UIDocument doc)

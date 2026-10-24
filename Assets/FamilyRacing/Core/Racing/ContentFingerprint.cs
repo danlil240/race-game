@@ -4,6 +4,7 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using FamilyRacing.Core.Driving;
+using FamilyRacing.Core.Progression;
 
 namespace FamilyRacing.Core.Racing
 {
@@ -28,21 +29,79 @@ namespace FamilyRacing.Core.Racing
             {
                 using (var writer = new BinaryWriter(stream, Encoding.UTF8, true))
                 {
-                    writer.Write(1); // canonical schema epoch
-                    writer.Write((int)catalog.SimulationBackend);
-                    WriteVehicles(writer, catalog.Vehicles);
-                    WriteCourses(writer, catalog.Courses);
-                    WriteEvents(writer, catalog.Events);
+                    writer.Write(2); // canonical schema epoch: route topology and event finish grace
+                    WriteDrivingBody(writer, catalog);
                     writer.Flush();
-                    var hash = SHA256.Create()
-                        .ComputeHash(stream.GetBuffer(), 0, (int)stream.Length);
-                    var hex = new StringBuilder(hash.Length * 2);
-                    foreach (var b in hash)
-                        hex.Append(b.ToString("x2",
-                            System.Globalization.CultureInfo.InvariantCulture));
-                    return hex.ToString();
+                    return Hex(stream);
                 }
             }
+        }
+
+        // The shared driving body — byte-identical to the pre-M5 layout
+        // so legacy driving fingerprints stay bit-stable.
+        private static void WriteDrivingBody(BinaryWriter writer,
+            DrivingContentCatalog catalog)
+        {
+            writer.Write((int)catalog.SimulationBackend);
+            WriteVehicles(writer, catalog.Vehicles);
+            WriteCourses(writer, catalog.Courses);
+            WriteEvents(writer, catalog.Events);
+        }
+
+        // M5 Task 2: canonical fingerprint of a GameplayCatalog. It is a
+        // superset stream: the same driving body plus every new
+        // gameplay-affecting value (event objectives/par/type/finale
+        // flag, authored gadget pickup sites, campaign structure and
+        // gate, bounties, economy, gadgets, AI difficulty presets). Null
+        // sections (the explicit legacy catalog) hash as absent markers
+        // so a legacy catalog still gets a stable, distinguishable token.
+        // M6 Task 1 bumps the epoch to 3: the campaign section is now the
+        // ordered list of every world (membership/order/gates/rewards),
+        // and translated display names — cosmetic text — are no longer
+        // hashed at all.
+        // M6 Task 4 bumps the epoch to 4: authored shortcut lanes are
+        // gameplay content (the shortcut metrics credit their ids), so
+        // each course's zone set now hashes beside its pickup sites.
+        public static string Compute(GameplayCatalog catalog)
+        {
+            if (catalog == null) return "";
+            using (var stream = new MemoryStream(8192))
+            {
+                using (var writer = new BinaryWriter(stream, Encoding.UTF8, true))
+                {
+                    writer.Write(catalog.QuickRaceOnly ? 6 : 5); // explicit routes plus isolated preview capability
+                    if (catalog.Driving == null)
+                    {
+                        writer.Write(false);
+                    }
+                    else
+                    {
+                        writer.Write(true);
+                        WriteDrivingBody(writer, catalog.Driving);
+                        WriteEventGameplay(writer, catalog.Driving.Events);
+                        WritePickupSites(writer, catalog.Driving.Courses);
+                        WriteShortcutZones(writer, catalog.Driving.Courses);
+                    }
+                    WriteCampaigns(writer, catalog.Campaigns);
+                    WriteBounties(writer, catalog.Bounties);
+                    WriteEconomy(writer, catalog.Economy);
+                    WriteGadgets(writer, catalog.Gadgets);
+                    WriteDifficulties(writer, catalog.Difficulties);
+                    writer.Flush();
+                    return Hex(stream);
+                }
+            }
+        }
+
+        private static string Hex(MemoryStream stream)
+        {
+            var hash = SHA256.Create()
+                .ComputeHash(stream.GetBuffer(), 0, (int)stream.Length);
+            var hex = new StringBuilder(hash.Length * 2);
+            foreach (var b in hash)
+                hex.Append(b.ToString("x2",
+                    System.Globalization.CultureInfo.InvariantCulture));
+            return hex.ToString();
         }
 
         private static void WriteVehicles(BinaryWriter writer,
@@ -157,6 +216,7 @@ namespace FamilyRacing.Core.Racing
                 F(writer, course.spawnY);
                 F(writer, course.spawnZ);
                 F(writer, course.spawnHeading);
+                writer.Write(course.isOpenRoute);
                 var gates = course.checkpoints;
                 writer.Write(gates != null ? gates.Count : 0);
                 if (gates != null)
@@ -229,6 +289,7 @@ namespace FamilyRacing.Core.Racing
                 Str(writer, evt.courseId);
                 writer.Write(evt.laps);
                 writer.Write(evt.countdownTicks);
+                writer.Write(evt.finishGraceSeconds);
                 var vehicles = evt.vehicleIds;
                 writer.Write(vehicles != null ? vehicles.Count : 0);
                 if (vehicles != null)
@@ -248,6 +309,281 @@ namespace FamilyRacing.Core.Racing
                 }
                 writer.Write(evt.completionCoins);
             }
+        }
+
+        // --- M5 gameplay sections ----------------------------------------
+
+        // The gameplay fields added to EventDefinition: event type,
+        // vehicle class, par ticks, finale flag and the objective pair.
+        // Written separately from WriteEvents so the pre-M5 driving
+        // fingerprint stays byte-identical.
+        private static void WriteEventGameplay(BinaryWriter writer,
+            IReadOnlyDictionary<string, EventDefinition> events)
+        {
+            var ids = SortedKeys(events);
+            writer.Write(ids.Count);
+            foreach (var id in ids)
+            {
+                var evt = events[id];
+                Str(writer, id);
+                Str(writer, evt.eventType);
+                Str(writer, evt.vehicleClass);
+                writer.Write(evt.parTicks);
+                writer.Write(evt.isFinale);
+                var objectives = evt.objectives;
+                writer.Write(objectives != null ? objectives.Count : 0);
+                if (objectives != null)
+                    foreach (var objective in objectives)
+                    {
+                        var present = objective != null;
+                        writer.Write(present);
+                        if (!present) continue;
+                        Str(writer, objective.id);
+                        Str(writer, objective.kind);
+                        WriteConditions(writer, objective.alternatives);
+                    }
+            }
+        }
+
+        private static void WriteConditions(BinaryWriter writer,
+            List<ObjectiveCondition> conditions)
+        {
+            writer.Write(conditions != null ? conditions.Count : 0);
+            if (conditions == null) return;
+            foreach (var condition in conditions)
+            {
+                var present = condition != null;
+                writer.Write(present);
+                if (!present) continue;
+                Str(writer, condition.metric);
+                Str(writer, condition.comparator);
+                writer.Write(condition.threshold);
+                WriteConditions(writer, condition.alsoRequires);
+            }
+        }
+
+        // Authored gadget pickup sites (M5 Task 5) live on the course
+        // definition but drive only the authoritative gadget rules —
+        // they hash in the epoch-2 gameplay stream, never the epoch-1
+        // driving body. Each course key binds its site set (a site moved
+        // between courses changes the fingerprint) and the sites write
+        // canonically ordered by site id, so serialized list order is
+        // presentation, never content.
+        private static void WritePickupSites(BinaryWriter writer,
+            IReadOnlyDictionary<string, CourseDefinition> courses)
+        {
+            var ids = SortedKeys(courses);
+            writer.Write(ids.Count);
+            foreach (var id in ids)
+            {
+                Str(writer, id);
+                var sites = new List<GadgetPickupSite>();
+                var authored = courses[id].pickupSites;
+                if (authored != null) sites.AddRange(authored);
+                sites.Sort((a, b) => string.CompareOrdinal(
+                    a != null ? a.id : null,
+                    b != null ? b.id : null));
+                writer.Write(sites.Count);
+                foreach (var site in sites)
+                {
+                    var present = site != null;
+                    writer.Write(present);
+                    if (!present) continue;
+                    Str(writer, site.id);
+                    F(writer, site.x);
+                    F(writer, site.y);
+                    F(writer, site.z);
+                    F(writer, site.radiusMeters);
+                    F(writer, site.verticalRangeMeters);
+                }
+            }
+        }
+
+        // Authored optional shortcut lanes (M6 Task 4): like pickup
+        // sites they live on the course definition and hash only in the
+        // gameplay stream — the epoch-1 driving body stays bit-stable.
+        // Zones write canonically ordered by id per course.
+        private static void WriteShortcutZones(BinaryWriter writer,
+            IReadOnlyDictionary<string, CourseDefinition> courses)
+        {
+            var ids = SortedKeys(courses);
+            writer.Write(ids.Count);
+            foreach (var id in ids)
+            {
+                Str(writer, id);
+                var zones = new List<ShortcutZone>();
+                var authored = courses[id].shortcutZones;
+                if (authored != null) zones.AddRange(authored);
+                zones.Sort((a, b) => string.CompareOrdinal(
+                    a != null ? a.id : null,
+                    b != null ? b.id : null));
+                writer.Write(zones.Count);
+                foreach (var zone in zones)
+                {
+                    var present = zone != null;
+                    writer.Write(present);
+                    if (!present) continue;
+                    Str(writer, zone.id);
+                    F(writer, zone.x);
+                    F(writer, zone.y);
+                    F(writer, zone.z);
+                    F(writer, zone.halfWidth);
+                    F(writer, zone.dirX);
+                    F(writer, zone.dirZ);
+                }
+            }
+        }
+
+        // M6 Task 1: every world in authored order. Membership lists
+        // keep their authored order — world progression order and event
+        // order are gameplay content. Display names are deliberately
+        // excluded: they are translated/cosmetic text, and retitling a
+        // world must never split compatibility.
+        private static void WriteCampaigns(BinaryWriter writer,
+            IReadOnlyList<CampaignDefinition> campaigns)
+        {
+            writer.Write(campaigns != null);
+            if (campaigns == null) return;
+            writer.Write(campaigns.Count);
+            foreach (var campaign in campaigns)
+            {
+                var present = campaign != null;
+                writer.Write(present);
+                if (!present) continue;
+                Str(writer, campaign.worldId);
+                writer.Write(campaign.requiredEventCompletions);
+                writer.Write(campaign.requiredRegionalStars);
+                WriteStrings(writer, campaign.courseIds);
+                WriteStrings(writer, campaign.regularEventIds);
+                var finales = campaign.finales;
+                writer.Write(finales != null ? finales.Count : 0);
+                if (finales != null)
+                    foreach (var finale in finales)
+                    {
+                        var finalePresent = finale != null;
+                        writer.Write(finalePresent);
+                        if (!finalePresent) continue;
+                        Str(writer, finale.eventId);
+                        Str(writer, finale.classId);
+                        Str(writer, finale.rivalId);
+                        Str(writer, finale.rewardVehicleId);
+                    }
+            }
+        }
+
+        private static void WriteBounties(BinaryWriter writer,
+            IReadOnlyList<BountyDefinition> bounties)
+        {
+            writer.Write(bounties != null);
+            if (bounties == null) return;
+            writer.Write(bounties.Count);
+            foreach (var bounty in bounties)
+            {
+                var present = bounty != null;
+                writer.Write(present);
+                if (!present) continue;
+                Str(writer, bounty.id);
+                Str(writer, bounty.family);
+                Str(writer, bounty.metric);
+                writer.Write(bounty.threshold);
+                Str(writer, bounty.unit);
+                writer.Write(bounty.rewardCoins);
+                Str(writer, bounty.aggregation);
+                writer.Write(bounty.repeatable);
+                Str(writer, bounty.rivalId);
+            }
+        }
+
+        private static void WriteEconomy(BinaryWriter writer,
+            EconomyDefinition economy)
+        {
+            writer.Write(economy != null);
+            if (economy == null) return;
+            writer.Write(economy.completionCoins);
+            writer.Write(economy.challengeIntroductoryCoins);
+            writer.Write(economy.challengeMasteryCoins);
+            writer.Write(economy.rivalVictoryCoins);
+            var bonus = economy.placementBonusCoins;
+            writer.Write(bonus != null ? bonus.Count : 0);
+            if (bonus != null)
+                foreach (var coins in bonus) writer.Write(coins);
+            var categories = economy.upgradeCategories;
+            writer.Write(categories != null ? categories.Count : 0);
+            if (categories != null)
+                foreach (var category in categories)
+                {
+                    var present = category != null;
+                    writer.Write(present);
+                    if (!present) continue;
+                    Str(writer, category.id);
+                    writer.Write(category.maxLevel);
+                    var prices = category.prices;
+                    writer.Write(prices != null ? prices.Count : 0);
+                    if (prices != null)
+                        foreach (var price in prices) writer.Write(price);
+                    F(writer, category.levelMultiplierStep);
+                    WriteStrings(writer, category.tuningFields);
+                }
+        }
+
+        private static void WriteGadgets(BinaryWriter writer,
+            GadgetDefinitionCatalog gadgets)
+        {
+            writer.Write(gadgets != null);
+            if (gadgets == null) return;
+            writer.Write(gadgets.pickupRespawnTicks);
+            writer.Write(gadgets.heldSlotCapacity);
+            var items = gadgets.gadgets;
+            writer.Write(items != null ? items.Count : 0);
+            if (items != null)
+                foreach (var gadget in items)
+                {
+                    var present = gadget != null;
+                    writer.Write(present);
+                    if (!present) continue;
+                    Str(writer, gadget.id);
+                    Str(writer, gadget.kind);
+                    writer.Write(gadget.durationTicks);
+                    F(writer, gadget.accelerationMultiplier);
+                    F(writer, gadget.speedCapMultiplier);
+                    writer.Write(gadget.charges);
+                    F(writer, gadget.patchRadiusMeters);
+                    writer.Write(gadget.patchLifetimeTicks);
+                    F(writer, gadget.slowMultiplier);
+                    writer.Write(gadget.slowDurationTicks);
+                    writer.Write(gadget.immunityTicks);
+                    F(writer, gadget.projectileSpeedMetersPerSecond);
+                    F(writer, gadget.targetingRangeMeters);
+                    F(writer, gadget.turnRadiansPerSecond);
+                    writer.Write(gadget.armingTicks);
+                }
+        }
+
+        private static void WriteDifficulties(BinaryWriter writer,
+            IReadOnlyList<AiDifficultyDefinition> difficulties)
+        {
+            writer.Write(difficulties != null);
+            if (difficulties == null) return;
+            writer.Write(difficulties.Count);
+            foreach (var difficulty in difficulties)
+            {
+                var present = difficulty != null;
+                writer.Write(present);
+                if (!present) continue;
+                Str(writer, difficulty.id);
+                F(writer, difficulty.brakeMarginScale);
+                F(writer, difficulty.boostUseMinCharge);
+                F(writer, difficulty.gadgetUseWillingness);
+                F(writer, difficulty.shortcutWillingness);
+            }
+        }
+
+        private static void WriteStrings(BinaryWriter writer,
+            List<string> values)
+        {
+            writer.Write(values != null ? values.Count : 0);
+            if (values == null) return;
+            foreach (var value in values) Str(writer, value);
         }
 
         private static void WritePoses(BinaryWriter writer,

@@ -19,6 +19,23 @@ namespace FamilyRacing.Tests
     {
         private const float Pi = (float)Math.PI;
 
+        [TestCase("homing-missile")]
+        [TestCase("mine")]
+        [TestCase("emp-pulse")]
+        public void NewWeaponsWaitForUsefulOpportunityAndReleaseInheritedLatch(string kind)
+        {
+            var racer = RacerAt(0, -10, 0, 12);
+            var context = new AiGadgetContext { heldItemId = kind, kind = kind, heldTicks = 90, heldGeneration = 9 };
+            var ai = new AiDriver();
+            Assert.IsFalse(ai.Sample(racer, WideSquareCourse(), context).Gadget, "do not waste weapon without a rival");
+            context.rivalAhead = context.rivalNearby = context.rivalNearBehind = true;
+            context.pressLatched = true;
+            Assert.IsFalse(ai.Sample(racer, WideSquareCourse(), context).Gadget, "release inherited button first");
+            context.pressLatched = false;
+            Assert.IsTrue(ai.Sample(racer, WideSquareCourse(), context).Gadget, "use when a rival enters the weapon window");
+            Assert.IsFalse(ai.Sample(racer, WideSquareCourse(), context).Gadget, "one use per generation");
+        }
+
         private sealed class FlatWorld : IMotorWorld
         {
             public GroundHit ProbeGround(MotorPose pose, float probeDistance)
@@ -471,6 +488,81 @@ namespace FamilyRacing.Tests
             var braked = cornering.Sample(fast, TightSquareCourse());
             Assert.That(braked.Boost, Is.False,
                 "boost is gated away while braking into a turn");
+        }
+
+        [TestCase(1f)]
+        [TestCase(0.9f)]
+        [TestCase(0.75f)]
+        public void AiSustainsBoostBelowItsStartingCharge(float threshold)
+        {
+            var ai = new AiDriver(0f, new AiDifficultyDefinition
+                { id = "test", boostUseMinCharge = threshold });
+            var racer = RacerAt(0f, -10f, 0f, 15f, threshold - 0.02f);
+            racer.motor.boostActive = true;
+            racer.motor.boostSecondsRemaining = 1f;
+            Assert.That(ai.Sample(racer, WideSquareCourse()).Boost, Is.True,
+                "a safe active burst must not be cancelled by its own charge drain");
+            racer.motor.boostActive = false;
+            Assert.That(ai.Sample(racer, WideSquareCourse()).Boost, Is.False,
+                "the same charge must not start a fresh burst");
+        }
+
+        [Test]
+        public void DefaultAiSustainsAFullMotorBoostOnAStraight()
+        {
+            var course = new CourseDefinition { id = "straight", isOpenRoute = true };
+            course.route.Add(Wp(0f, 0f));
+            course.route.Add(Wp(0f, 1000f));
+            course.route.Add(Wp(0f, 2000f));
+            var ai = new AiDriver();
+            var racer = RacerAt(0f, 10f, 0f, 18f, 1f);
+            var tuning = VehicleTuning.Car01();
+            var activeTicks = 0;
+            for (var tick = 0; tick < 90; tick++)
+            {
+                racer.motor = ArcadeMotor.Step(racer.motor, ai.Sample(racer, course),
+                    tuning, new FlatWorld(), 1f / 30f).state;
+                if (racer.motor.boostActive) activeTicks++;
+            }
+            Assert.That(activeTicks, Is.GreaterThanOrEqualTo(70),
+                "a full meter should deliver nearly the authored 2.5-second burst");
+            Assert.That(racer.motor.z, Is.GreaterThan(80f),
+                "the sustained burst must produce actual progress");
+        }
+
+        [TestCase(false)]
+        [TestCase(true)]
+        public void AiReleasesActiveBoostWhenTheRoadIsUnsafe(bool cornerBrake)
+        {
+            var racer = cornerBrake
+                ? RacerAt(0f, 2f, 0f, 18f, 1f)
+                : RacerAt(0f, -10f, 0.5f, 15f, 1f);
+            racer.motor.boostActive = true;
+            racer.motor.boostSecondsRemaining = 1f;
+            Assert.That(new AiDriver().Sample(racer,
+                cornerBrake ? TightSquareCourse() : WideSquareCourse()).Boost,
+                Is.False, "continuation must still respect braking and steering");
+        }
+
+        [TestCase("arcade", 18f)]
+        [TestCase("physicalAssisted", 12f)]
+        public void HardBrakesLessThanMediumAndEasy(string backend, float speed)
+        {
+            var racer = RacerAt(3f, 2f, 0f, speed);
+            racer.simulationBackend = backend;
+            var course = TightSquareCourse();
+            var easy = new AiDriver(0f, new AiDifficultyDefinition
+                { id = "easy", brakeMarginScale = 1.3f }).Sample(racer, course);
+            var medium = new AiDriver(0f, new AiDifficultyDefinition
+                { id = "medium", brakeMarginScale = 1f }).Sample(racer, course);
+            var hard = new AiDriver(0f, new AiDifficultyDefinition
+                { id = "hard", brakeMarginScale = 0.9f }).Sample(racer, course);
+            Assert.That(easy.Brake, Is.GreaterThan(medium.Brake),
+                "Easy should leave more cornering safety margin");
+            Assert.That(medium.Brake, Is.GreaterThan(hard.Brake),
+                "Hard should carry more speed through the same corner");
+            Assert.That(new AiDriver().Sample(racer, course).Brake,
+                Is.EqualTo(medium.Brake), "default/LAN retains the base margin");
         }
 
         [Test]

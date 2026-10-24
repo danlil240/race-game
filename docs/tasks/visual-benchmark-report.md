@@ -243,7 +243,7 @@ human are `notVerified` — never promoted by desktop evidence.
 | 11 | Four physical participants over home Wi-Fi without internet | `notVerified` | qual runs labeled `transport: loopback`, `aiFilledSeats: 2`, `humanRacers: 2` — AI fill is not inferred as four-human coverage |
 | 12 | Repeated rematches + 30-min thermal evidence on device | `notVerified` | 19-cycle rematch evidence exists on PC only; no thermal instrumentation on this harness |
 | 13 | Capture-overhead A/B (instrumented vs ordinary/capture-off) | `notVerified` | No matched-workload comparison run; menu-only capture-off evidence is not a measurement |
-| 14 | Gen-2 (post-rejoin) client process memory | `notVerified` | `MemorySampler` not re-bound on relaunch; dead-PID tail recorded as ~0 MB `ok` samples (honest tooling gap, above) |
+| 14 | Gen-2 (post-rejoin) client process memory | `notVerified` | qual-6's gen-2 samples were never collected (sampler not re-bound). **Tooling fixed in M5 Task 1** — `GenerationSamplers` gives each generation its own pid/start-stamp/interval/sampler, rejects pid reuse, keeps dead generations `unavailable`, and the verdict fails a live generation with zero valid samples — but the qual-5/6 evidence predates the fix; a fresh qualifying run is required |
 | 15 | Owner acceptance on A7 Lite (art quality, distinct animals/vehicles, route/shortcuts/jump readability, camera comfort, audio helpfulness, feedback clarity) | `notVerified` | Owner review protocol below |
 | 16 | Hebrew text/pronunciation + child onboarding review | `notVerified` | Owner/family review; voice clips additionally credential-gated |
 | 17 | Real lightmap bake (LightingDataAsset) | `notVerified` | GI flags set, no bake performed — required before device qualification (below) |
@@ -272,14 +272,35 @@ stayed frozen mid-corner (speed 18.0, position pinned at
 (-117.6, 77.2)) — an honest DNF — while the stock driver's stall
 detector correctly exhausted its 12-recovery budget.
 
-- **Intermittent:** qual-6's rejoined client executed all 5,351
-  `input.set`s promptly; the failure mode reproduced identically at
-  baseline cadence, exonerating the pacing change.
-- **Suspected mechanism:** command-pipeline/read-path race on the
-  rejoin build path — needs its own investigation task; no M4 code
-  path is implicated.
-- **User impact if real:** a rejoining player may see ~2 min of dead
-  input. Recorded here as the milestone's disclosed open defect.
+**Status: bounded and fixed (M5 Task 1).** Forensics showed the game
+loop never stalled — the host stream advanced throughout while the
+rejoined client's evidence file froze. Two defects carried the stall:
+
+- *Harness (primary):* `Client._drain_peers` gated draining on kernel
+  socket readability while the peer's own pump thread consumed the
+  backlog into `_lines` — draining could skip an entire wait — and its
+  catch-all `(OSError, ValueError, AssertionError)` swallowed
+  non-terminal read/evidence-write failures forever, freezing the
+  observed trace while the stream kept flowing. Drains now read the
+  pump's queued lines (bounded per pass), record non-terminal failures
+  on the peer (`drain_error`), and skip only honestly-terminal peers.
+- *Product:* on credentialed reclaim, `OfferPending` skipped the
+  rejoining participant's pending result rows because
+  `lastOfferedAt` belonged to the dead connection — the fresh
+  connection waited a full redelivery cycle. Reclaim now resets due
+  rows before the offer pass
+  (`ExplicitLeaveTerminatesPendingDeliveryButDisconnectDoesNot`
+  pins pending→persisted redelivery across rejoin).
+
+Regression cover: `NetworkLifecyclePlayTests.
+RejoinedHumanInputAppliesWithinCommandDeadline` bounds a rejoined
+human input to the documented 5 s command deadline on the real UDP
+transport, and `LanDriver.pump` asserts no fire-and-forget command
+goes unanswered past the deadline — a stuck command fails loudly with
+its ids instead of hiding behind resends. Post-fix lifecycle run
+`Logs\ns-m5-task1` (3-player kill/relaunch) passed all 23 checks with
+zero overdue commands. **A recurrence is now attributable evidence,
+not a silent gap;** the ~110–130 s stall itself did not recur.
 
 ## Additional surfaced defect — one-boundary stale `prediction` slice (fixed)
 
@@ -304,20 +325,32 @@ the `lan.leave` and kill/credentialed-rejoin paths on the fixed build
 with no schema violation; EditMode/PlayMode/CoreOffline re-ran green
 (same pre-existing failures only).
 
-## Surfaced lifecycle edge — pending delivery row for a departed participant
+## Surfaced lifecycle edge — pending delivery row for a departed participant (resolved, M5 Task 1)
 
 Both `--no-fault-injection` short runs (`vb-t7-opt-3`, `vb-t7-opt-4`)
 reached race 2's delivery-settle step and timed out after 60 s: the
 host's ledger kept one row `pending` for the participant that had
 executed the scripted explicit `lan.leave` (its `lan.reconnect` was
-honestly `rejected noSession`). In the kill+rejoin runs (qual-5/6,
-opt-5) the participant returns and its rows settle, so the wedge needs
-the *permanently-departed* path. Whether a departed racer's delivery
-row should transition to a terminal `failed:undeliverable` state — or
-whether `pending`-forever is the intended honest state the scenario
-should accept — is a product/design question recorded here, not
-silently absorbed: both runs' verdicts honestly `failed` on it. Not a
-racing-phase performance defect; does not affect the passed gates.
+honestly `rejected noSession`).
+
+**Policy decided and implemented:** explicit leave is a permanent
+departure — the host marks the participant and settles every
+outstanding (non-`persisted`, non-permanent-`failed`) delivery row for
+it as terminal `failed`/`undeliverable`; `undeliverable` joins
+`conflict`/`ineligible:*` in the permanent-failure set so the
+redelivery cadence can never revive it. A transient link drop keeps
+rows `pending` and a credentialed rejoin redelivers them to
+`persisted`; rows for participants who left before a result publishes
+are created `undeliverable` at publish. Immutable result facts,
+reward data and fingerprints are untouched — the test asserts the
+fingerprint before and after every transition. Pinned by
+`NetworkLifecycleTests.
+ExplicitLeaveTerminatesPendingDeliveryButDisconnectDoesNot`; the
+scenario's `settle_results` accepts `undeliverable` only for
+caller-named departed participants (a still-connected or merely
+disconnected participant can never read undeliverable — "not
+connected" is indistinguishable from a transient drop, so the caller
+names who left).
 
 ## Open gates and required evidence (owner / next pass)
 

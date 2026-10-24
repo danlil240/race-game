@@ -80,6 +80,14 @@ namespace FamilyRacing
             QualitySettings.vSyncCount = 0;
             Application.targetFrameRate = tablet
                 ? TabletTargetFrameRate : PcTargetFrameRate;
+            // Unity disables Swappy on GE8320. Avoid its software 30-fps
+            // wait while retaining the authored image quality.
+            if (tablet && Application.platform == RuntimePlatform.Android
+                && SystemInfo.graphicsDeviceName.IndexOf("PowerVR Rogue GE8320",
+                    System.StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                Application.targetFrameRate = PcTargetFrameRate;
+            }
             ActiveProfile = wanted;
             var urp = QualitySettings.renderPipeline
                 as UniversalRenderPipelineAsset;

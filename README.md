@@ -5,7 +5,23 @@ early development. Design and acceptance criteria live in `GAME_PLAN.md`;
 progress is tracked in `IMPLEMENTATION_STATUS.md` and
 `docs/FOUNDATIONS_PLAN.md`.
 
+Production CI, signed release setup and startup GitHub update notifications:
+[production guide](docs/PRODUCTION.md).
+
 ## What exists today
+
+**Playful Chaos preview (19 October 2026).** The dedicated
+`WindowsPlayfulChaos` build adds a direct Race now → four-racer Quick Race
+→ Race again loop, a compact keyboard/touch HUD, a separate responsive-car
+tuning candidate, speed/boost camera feedback with reduced-motion support,
+and the existing Sunny Island visual/audio treatment. It uses isolated
+`PlayfulChaos/Profiles` saves and a validated Quick Race-only catalog with
+no persistent progression rewards. Build it with
+`Tools\Verify.ps1 -Mode WindowsPlayfulChaos` and run
+`Builds\Windows-PlayfulChaos\FamilyRacing.exe`.
+See [preview notes](docs/playtests/2026-10-19-playful-chaos-preview.md).
+This is the first package of the playful-chaos plan; the new harbor course,
+hazard, rival behaviors and human/device acceptance are subsequent work.
 
 **Graybox driving prototype (M2, under review).** On top of the
 foundation below, the repo now ships a command-driven driving trial:
@@ -58,6 +74,26 @@ four class×camera cells, p95 16.7 ms, zero steady-state stalls; see
 `Logs\vb-qual-5`/`Logs\vb-qual-6`). Device and owner-review gates are
 **open**: see `docs\tasks\visual-benchmark-report.md` and
 `docs\VISUAL_BENCHMARK_RUNBOOK.md`.
+
+**Complete gameplay loop machinery (M5, code complete; acceptance
+open).** Profile schema 3 (ordered migrations, lossless copies), the
+shared local race modes (Campaign/Quick Race seat a human + three
+same-class AI through the LAN `NetworkRace` coordinator; Time Trial runs
+a lone normalized clock), host-authoritative gadgets
+(turbo/bubble-shield/foam-trap with pickups and cooldowns), objective
+and bounty evaluation, atomic exactly-once reward/purchase/record
+transactions, upgrade/cosmetic selection rules, the full bilingual loop
+UI and semantic commands (`campaign.*`, `quickRace.*`, `timeTrial.*`,
+`garage.open`, `bounties.open`, `upgrade.purchase`, `cosmetic.equip`,
+`results.*`), state schema 7 (`soloRace`/`progression` slices plus the
+ordered `progression.worlds` multiworld rows and `campaign.selectWorld`)
+and LAN protocol 3 with gameplay-fingerprint admission. Exercised externally by
+`Tools\GameplayLoopScenario.py` — **but the packaged player binds no
+gameplay catalog**: the authored two-course/26-event Sunny Island world
+(Task 9 of the plan) is gated on the M4 tablet evidence and was never
+produced, so progression commands reject `contentUnavailable` and every
+production-content row is honestly `notVerified`. See
+`docs\tasks\gameplay-loop-report.md` and `docs\GAMEPLAY_LOOP_RUNBOOK.md`.
 
 **Foundation shell.** `Assets/FamilyRacing/Core` is a
 Unity-free, C# 9, .NET Standard 2.1-compatible assembly:
@@ -167,6 +203,23 @@ tests are discovered.
 
 ## Remaining gates
 
+- **M5 gameplay-loop closeout (2026-10-15, task 12)**: fresh gate at
+  `03ef5d2` — CoreOffline 803/803, EditMode 875/876 (1 credential-gated
+  voice-clip skip), PlayMode 309/309, Python tooling
+  279/279, verify-tooling 18/18, android-tooling 30/30. External
+  `GameplayLoopScenario` evidence on the development player (loopback +
+  AI fill labeled): smoke `partial` (tutorial incl. gadget lesson +
+  process-restart persistence passed; all progression rows
+  `contentUnavailable`), campaign `partial` (0 authored events —
+  honest), LAN 2- and 4-endpoint `partial` (normalization, attributed
+  gadget, kill/AI-takeover/credentialed rejoin, dedup/retained results,
+  armed failed-save retry, `undeliverable` departure, host loss all
+  passed). **Open**: Task 9 production content (two authored courses +
+  26 events) and the four GameplayLoop build flavors — gated on M4 A7
+  Lite evidence; the A7 Lite matrix, physical-human LAN, ordinary-build
+  performance arm, and owner/Hebrew/child reviews — all `notVerified`
+  in `docs\tasks\gameplay-loop-report.md`. **M5: code complete for the
+  dispatched scope; acceptance open — not marked complete.**
 - **M4 visual-benchmark closeout (2026-10-14, task 7)**: final
   same-source Windows/Android development + ordinary benchmark builds
   produced and hashed; gate re-run (CoreOffline 600/600, EditMode

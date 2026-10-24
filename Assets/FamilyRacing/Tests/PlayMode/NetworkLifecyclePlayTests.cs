@@ -52,6 +52,11 @@ namespace FamilyRacing.Tests
         private static readonly DriverInput Neutral =
             new DriverInput(0f, false, false, false, false, false, false);
         private const float TimeoutSeconds = 12f;
+        // The documented command deadline (COMMANDS.md): a command the
+        // endpoint does not answer inside the peer/request budget is a
+        // stuck command — tests bound it explicitly so a regression
+        // fails loudly instead of hiding behind silent retries.
+        private const float CommandDeadlineSeconds = 5f;
 
         private sealed class Rig : IDisposable
         {
@@ -163,10 +168,19 @@ namespace FamilyRacing.Tests
         private static IEnumerator PumpUntil(Func<bool> done,
             string what, params Rig[] rigs)
         {
+            return PumpUntilDeadline(done, TimeoutSeconds, what, rigs);
+        }
+
+        // Same bounded pump, but the caller owns the deadline — used by
+        // regressions that must prove an effect lands inside the
+        // documented command deadline rather than "eventually".
+        private static IEnumerator PumpUntilDeadline(Func<bool> done,
+            double seconds, string what, params Rig[] rigs)
+        {
             // Deadlines ride the real clock, not Time.unscaledTime —
             // batchmode advances the game clock in bursts, while peer
             // timeouts below are wall-clock on the socket.
-            var deadline = DateTime.UtcNow.AddSeconds(TimeoutSeconds);
+            var deadline = DateTime.UtcNow.AddSeconds(seconds);
             var frames = 0;
             while (DateTime.UtcNow < deadline && !done())
             {
@@ -389,6 +403,46 @@ namespace FamilyRacing.Tests
                 Assert.That(after.session.simulationTick,
                     Is.GreaterThan(tickBefore),
                     "the same session keeps ticking after rejoin");
+            }
+            finally
+            {
+                host.Dispose();
+                client.Dispose();
+            }
+        }
+
+        // Regression for the observed rejoin stall: after a credentialed
+        // rejoin the human's input must reach the authoritative racer
+        // inside the documented command deadline. The assertion bounds
+        // wall-clock at CommandDeadlineSeconds — an input stuck behind a
+        // stale queue, epoch fence or lost frame surfaces as an explicit
+        // timeout failure here, never as silent driver resends.
+        [UnityTest]
+        public IEnumerator RejoinedHumanInputAppliesWithinCommandDeadline()
+        {
+            var host = new Rig("p-host", new StubNetworkAccess());
+            var client = new Rig("p-guest", new StubNetworkAccess());
+            try
+            {
+                yield return StartTwoPlayerRace(host, client);
+                for (var i = 0; i < 10; i++)
+                {
+                    Tick(host, client, Neutral, Neutral, null, null);
+                    if (i % 4 == 0) yield return null;
+                }
+                KillClientLink(host, client, "p-guest");
+                yield return ReconnectClient(host, client, "p-guest", 2);
+
+                var steering = new DriverInput(0.8f, false, false, false,
+                    false, false, false);
+                yield return PumpUntilDeadline(() =>
+                {
+                    Tick(host, client, Neutral, steering, null, null);
+                    var racer = RacerOf(host.Bridge.LatestState, "p-guest");
+                    return racer != null
+                        && racer.session.input.steering > 0.75f;
+                }, CommandDeadlineSeconds,
+                "rejoined human input applied", host, client);
             }
             finally
             {

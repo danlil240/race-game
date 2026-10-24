@@ -95,6 +95,8 @@ namespace FamilyRacing.Core.Racing
                         throw new ArgumentException("Duplicate event id: " + evt.id);
                     if (!courseMap.ContainsKey(evt.courseId))
                         throw new ArgumentException("Event " + evt.id + " references unknown course " + evt.courseId);
+                    if (courseMap[evt.courseId].isOpenRoute && evt.laps != 1)
+                        throw new ArgumentException("Open route events require one traversal: " + evt.id);
                     foreach (var vehicleId in evt.vehicleIds)
                         if (!vehicleMap.ContainsKey(vehicleId))
                             throw new ArgumentException(
@@ -171,6 +173,13 @@ namespace FamilyRacing.Core.Racing
         // of the most recent applied recovery.
         private VehiclePathSample[] lastPath;
         private string lastRecoveryReason = "";
+        // M5 Task 5: the session-owned authoritative gadget world for
+        // solo paths (practice/tutorial free-drive and time trial). A
+        // coordinator-owned session (NetworkRace) passes a null catalog
+        // — the shared world lives on the coordinator so it can never
+        // diverge across the roster.
+        private readonly GadgetDefinitionCatalog gadgetCatalog;
+        private GadgetWorldState gadgetWorld;
 
         // `startPose` lets an authoritative coordinator seat this racer at
         // an authored grid slot instead of the course's solo spawn; solo
@@ -184,11 +193,15 @@ namespace FamilyRacing.Core.Racing
         // Callers that omit them publish "" and the tuning's declared
         // backend — the same effective backend every existing fixture
         // already selected.
+        // `gadgets` seats the session-owned gadget world when the course
+        // authors pickup sites — coordinator-owned sessions pass null and
+        // consume the shared world through PendingModifiers instead.
         public DrivingSession(string raceId, VehicleTuning tuning, CourseDefinition course,
             EventDefinition evt, string contentVersion, string startCommandId,
             MotorPose? startPose = null, string participantId = null,
             string contentFingerprint = null,
-            VehicleSimulationBackend? raceBackend = null)
+            VehicleSimulationBackend? raceBackend = null,
+            GadgetDefinitionCatalog gadgets = null)
         {
             if (string.IsNullOrEmpty(raceId)) throw new ArgumentException("raceId", "raceId");
             if (tuning == null || course == null || evt == null)
@@ -199,6 +212,8 @@ namespace FamilyRacing.Core.Racing
                 throw new ArgumentException("Invalid course: " + courseError);
             if (!evt.Validate(out var eventError))
                 throw new ArgumentException("Invalid event: " + eventError);
+            if (course.isOpenRoute && evt.laps != 1)
+                throw new ArgumentException("Open route events require one traversal.");
             var spawn = startPose ?? new MotorPose
             {
                 x = course.spawnX,
@@ -239,6 +254,21 @@ namespace FamilyRacing.Core.Racing
             progress = CheckpointProgress.Create(course, evt.laps);
             // With no accepted gate the safe respawn is the spawn itself.
             lastSafePose = spawn;
+            // A session-owned gadget world exists only when the catalog
+            // supplies definitions AND the course authors pickup sites —
+            // otherwise the state stays absent (never an empty shell that
+            // would masquerade as an enabled-but-dead feature).
+            gadgetCatalog = gadgets;
+            if (gadgets != null && gadgets.gadgets != null
+                && gadgets.gadgets.Count > 0
+                && course.pickupSites != null
+                && course.pickupSites.Count > 0)
+            {
+                gadgetWorld = GadgetRules.Create(gadgets,
+                    course.pickupSites,
+                    GadgetRules.StableSeed(raceId),
+                    new[] { this.participantId }, raceId);
+            }
             Emit("race.started", startCommandId ?? "", evt.id);
             // A countdown-free event goes straight to running: emit the
             // transition here or consumers waiting on race.running hang.
@@ -251,6 +281,19 @@ namespace FamilyRacing.Core.Racing
         public string Phase { get { return phase; } }
         public long SimulationTick { get { return simulationTick; } }
         public string ParticipantId { get { return participantId; } }
+
+        // The coordinator's per-tick modifier for the next prepared
+        // request (M5 Task 5): the shared gadget world's row for this
+        // racer, set before PrepareStep. A session-owned world falls back
+        // to its own row; null means neutral either way.
+        public MotorModifiers PendingModifiers;
+
+        // The session-owned gadget world for observers (practice,
+        // tutorial, time trial). Null when the coordinator owns the
+        // shared world — racers read their row off NetworkRaceState
+        // instead. The returned object is the live state: callers treat
+        // it read-only.
+        public GadgetWorldState GadgetWorld { get { return gadgetWorld; } }
 
         // Occupancy probe the coordinator installs: answers true when
         // another racer's committed body blocks a candidate respawn
@@ -380,6 +423,12 @@ namespace FamilyRacing.Core.Racing
             // The rule facts the simulation merges from — exactly the
             // pre-step motor state the old inline step consumed.
             request.rulesBefore = motor.Copy();
+            // M5 Task 5: per-tick gadget modifiers ride the batch seam —
+            // the coordinator's shared world when present, else the
+            // session-owned world's row. Neutral when absent.
+            request.modifiers = PendingModifiers != null
+                ? PendingModifiers
+                : GadgetRules.ModifierFor(gadgetWorld, participantId);
             inFlightRequest = request;
             return request;
         }
@@ -503,6 +552,52 @@ namespace FamilyRacing.Core.Racing
                 }
             }
 
+            // M5 Task 5 session-owned gadget step: a solo session runs the
+            // authoritative rules itself (a coordinator-owned session
+            // leaves this world null — the shared world steps once for the
+            // whole roster). The boundary's swept segments, edge latch,
+            // recovery flag and committed pose feed exactly one
+            // deterministic step; pause freezes it because no boundary
+            // reaches CompleteStep at all.
+            if (gadgetWorld != null && request != null)
+            {
+                var input = new GadgetStepInput { tick = simulationTick };
+                var racer = new GadgetRacerInput
+                {
+                    participantId = participantId,
+                    slot = 0,
+                    gadgetHeld = request.input.Gadget,
+                    // A frozen boundary (countdown or a pending reset)
+                    // still ticks clocks but can never collect or hit —
+                    // same rule the coordinator applies to a respawn.
+                    recovering = !request.simulateMotion
+                        || request.reset != null || output.reset != null,
+                    finished = phase == PhaseFinished,
+                    x = motor.x,
+                    y = motor.y,
+                    z = motor.z,
+                    heading = motor.heading
+                };
+                var poses = SegmentPoses(request, result);
+                for (var i = 0; i + 1 < poses.Count; i++)
+                {
+                    var a = poses[i];
+                    var b = poses[i + 1];
+                    racer.segments.Add(new GadgetSegment
+                    {
+                        ax = a.x, ay = a.y, az = a.z,
+                        bx = b.x, by = b.y, bz = b.z
+                    });
+                }
+                input.racers.Add(racer);
+                var gadgetStep = GadgetRules.Step(input, gadgetWorld,
+                    gadgetCatalog);
+                if (gadgetStep.state != null)
+                    gadgetWorld = gadgetStep.state;
+                foreach (var gadgetEvent in gadgetStep.events)
+                    EmitGadget(gadgetEvent);
+            }
+
             output.state = Snapshot();
             output.events = DrainEvents();
             return output;
@@ -551,7 +646,8 @@ namespace FamilyRacing.Core.Racing
             if (request.simulateMotion)
             {
                 var step = ArcadeMotor.Step(request.rulesBefore, input,
-                    tuning, world, StepSeconds, racers);
+                    tuning, world, StepSeconds, racers,
+                    request.modifiers);
                 var before = request.rulesBefore.Pose;
                 result = new VehicleTickResult
                 {
@@ -768,6 +864,22 @@ namespace FamilyRacing.Core.Racing
             return entry;
         }
 
+        // The coordinator samples all AI/gadget inputs from the same
+        // pre-step boundary. Those readers need only these fields, not
+        // a newly copied checkpoint ledger for every racer and tick.
+        internal DrivingSessionState InputSnapshot()
+        {
+            return new DrivingSessionState
+            {
+                motor = motor.Copy(),
+                vehicleId = vehicleId,
+                phase = phase,
+                nextCheckpoint = progress.expectedCheckpoint,
+                simulationBackend = raceBackend == VehicleSimulationBackend.PhysicalAssisted
+                    ? "physicalAssisted" : "arcade"
+            };
+        }
+
         public DrivingSessionState Snapshot()
         {
             var state = new DrivingSessionState
@@ -783,6 +895,7 @@ namespace FamilyRacing.Core.Racing
                 elapsedTicks = elapsedTicks,
                 lap = progress.lap,
                 lapsRequired = evt.laps,
+                isOpenRoute = course.isOpenRoute,
                 nextCheckpoint = progress.expectedCheckpoint,
                 finished = phase == PhaseFinished,
                 finishTicks = finishTicks,
@@ -808,7 +921,8 @@ namespace FamilyRacing.Core.Racing
                     == VehicleSimulationBackend.PhysicalAssisted
                     ? "physicalAssisted" : "arcade",
                 contentFingerprint = contentFingerprint,
-                lastRecoveryReason = lastRecoveryReason
+                lastRecoveryReason = lastRecoveryReason,
+                gadgets = gadgetWorld != null ? gadgetWorld.Copy() : null
             };
             if (lastPath != null)
                 state.substepPath.AddRange(lastPath);
@@ -836,6 +950,20 @@ namespace FamilyRacing.Core.Racing
                     progress.expectedCheckpoint == 0
                         ? gateCount - 1
                         : progress.expectedCheckpoint - 1;
+                if (course.isOpenRoute)
+                {
+                    float total = 0f, completed = 0f;
+                    for (int i = 1; i < gateCount; i++)
+                    {
+                        var a = course.checkpoints[i - 1]; var b = course.checkpoints[i];
+                        float dx = b.x - a.x, dz = b.z - a.z;
+                        float length = (float)Math.Sqrt(dx * dx + dz * dz);
+                        total += length;
+                        if (i < progress.expectedCheckpoint) completed += length;
+                    }
+                    state.routeProgress = progress.finished ? 1f : total > 0f
+                        ? Math.Clamp((completed + state.segmentProgressMeters) / total, 0f, 1f) : 0f;
+                }
             }
             foreach (var entry in pending)
             {
@@ -866,6 +994,19 @@ namespace FamilyRacing.Core.Racing
                 commandId = commandId,
                 detail = detail
             });
+        }
+
+        // A gadget event the session-owned rules produced rides the same
+        // bounded staged stream with the session's participant identity
+        // stamped — solo consumers see no difference from a coordinator
+        // event, and the deterministic rules id survives for dedupe.
+        private void EmitGadget(DrivingEvent ev)
+        {
+            if (ev == null) return;
+            if (string.IsNullOrEmpty(ev.participantId))
+                ev.participantId = ev.kind == GadgetRules.EventRespawn
+                    ? "" : participantId;
+            staged.Add(ev);
         }
     }
 }

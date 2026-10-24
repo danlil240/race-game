@@ -37,8 +37,15 @@ namespace FamilyRacing
         // must not creep.
         private const float RollingResistanceMinSpeed = 0.4f;
 
+        // `modifiers` is the authoritative rule layer's per-tick scaling
+        // (M5 Task 5 gadgets): the acceleration multiplier scales peak
+        // drive force, the cap multiplier scales the tapered cruise/boost
+        // target — both inside the ordinary tire-force budget, so the
+        // effect can never bypass the shared contact model. Null means
+        // neutral.
         public static void ApplySubstepForces(PhysicsVehicleBody vehicle,
-            DriverInput input, float dt, PhysicsCourseWorld world)
+            DriverInput input, float dt, PhysicsCourseWorld world,
+            MotorModifiers modifiers = null)
         {
             var tuning = vehicle.tuning;
             var body = vehicle.body;
@@ -164,7 +171,12 @@ namespace FamilyRacing
             // --- pass 2: tire forces within one combined mu*N budget -------
             var braking = input.Brake > 0f;
             var boost = vehicle.live.boostActive;
-            var cruiseTarget = boost ? tuning.boostSpeed : tuning.cruiseSpeed;
+            var gadgetAccel = modifiers != null
+                ? modifiers.accelerationMultiplier : 1f;
+            var gadgetCap = modifiers != null
+                ? modifiers.speedCapMultiplier : 1f;
+            var cruiseTarget = (boost
+                ? tuning.boostSpeed : tuning.cruiseSpeed) * gadgetCap;
             // Any positive brake suppresses engine/boost drive force.
             var throttle = braking ? 0f : input.Throttle;
             // Drift engagement is a progressive ramp on the persisted
@@ -197,8 +209,8 @@ namespace FamilyRacing
                     // downhill overspeed untouched.
                     var taper = Mathf.Clamp01(
                         (cruiseTarget - longSpeed) / (0.25f * cruiseTarget));
-                    longitudinal += tuning.peakDriveForce * throttle * taper
-                        / groundedDriven;
+                    longitudinal += tuning.peakDriveForce * gadgetAccel
+                        * throttle * taper / groundedDriven;
                 }
                 // Brake demand opposes travel at EVERY grounded wheel —
                 // unscoped by drive (a non-driven front wheel still

@@ -150,8 +150,17 @@ namespace FamilyRacing.Core.Racing
                 gateId = gate.id,
                 lap = state.lap
             });
-            state.expectedCheckpoint = (index + 1) % course.checkpoints.Count;
-            if (index == 0)
+            state.expectedCheckpoint = course.isOpenRoute
+                ? Math.Min(index + 1, course.checkpoints.Count - 1)
+                : (index + 1) % course.checkpoints.Count;
+            if (course.isOpenRoute && index == course.checkpoints.Count - 1)
+            {
+                state.lap = 1;
+                state.finished = true;
+                result.events.Add(new CheckpointEvent { kind = "finish",
+                    checkpointIndex = index, gateId = gate.id, lap = 1 });
+            }
+            else if (!course.isOpenRoute && index == 0)
             {
                 // Crossing the line while expected completes the cycle and
                 // starts the next lap on the line.

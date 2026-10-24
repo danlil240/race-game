@@ -42,7 +42,14 @@ namespace FamilyRacing.Core.Foundation
         public void SetLanSession(LanSessionService session)
         {
             lanSession = session;
-            if (lanSession != null) lanSession.SetContent(drivingContent);
+            if (lanSession != null)
+            {
+                lanSession.SetContent(drivingContent);
+                // The gameplay catalog binds the admission fingerprint
+                // (M5 Task 10): a session attached after the catalog
+                // still admits only exact gameplay-identity peers.
+                lanSession.SetGameplayContent(gameplayCatalog);
+            }
         }
 
         // True while a LAN session is in progress (connecting, lobby,
@@ -260,31 +267,72 @@ namespace FamilyRacing.Core.Foundation
             // reward to the selected profile through the atomic store —
             // exactly once per immutable result, provable by receipt.
             lanSession.SetRewardApplier(ApplyNetworkResult);
+            // M5 Task 4: the allocated race identity binds a durable
+            // reward context before the race clock may start — the
+            // preparer reports an error instead of ever starting
+            // unbound.
+            lanSession.SetRacePreparer(PrepareLanRewardContext);
         }
 
-        // The session service hands each finalized result here. Coins and
-        // the receipt persist together inside one atomic save; the slot
-        // caches and the settings draft are refreshed only after the
-        // write lands, and the draft's reward fields track the live
-        // profile so a pending settings save can never roll coins or
-        // receipts back.
+        // The session service hands each finalized result here. Task 7
+        // resolves the durable reward context the race was bound under
+        // and runs the full atomic transaction — coins, progression
+        // facts, record, receipt and context consumption in one save.
+        // A saveFailed outcome retains the immutable result with its
+        // exact bound context so RetryUnresolvedRewards replays the
+        // identical transaction; the pair also gates every new
+        // progression race. Terminal failures (conflict, overflow,
+        // invalid) can NEVER commit on retry — latching them would wedge
+        // every later progression start, so they never set the gate and
+        // they release any retained pair for the same result identity.
+        // The durable context row stays pending in the profile either
+        // way — the honest forensic record of what was bound.
         private RewardApplyResult ApplyNetworkResult(RaceResult result)
         {
+            if (gameplayCatalog != null && gameplayCatalog.QuickRaceOnly)
+                return RewardApplyResult.Ineligible("contentUnavailable");
             if (savedProfile == null)
                 return RewardApplyResult.Ineligible("noProfile");
+            var context = FindRewardContext(
+                result != null ? result.raceId : null);
             var applied = RaceRewardService.Apply(
-                result, savedProfile.id, savedProfile, store);
-            if (applied.status != RaceRewardService.StatusApplied
-                && applied.status != RaceRewardService.StatusAlreadyApplied)
-                return applied;
-            if (activeSlot >= 0)
-                slots[activeSlot].Profile = CopyProfile(savedProfile);
-            if (draftProfile != null)
+                result, savedProfile.id, savedProfile, store,
+                gameplayCatalog, context);
+            if (applied.status == RaceRewardService.StatusFailed)
             {
-                draftProfile.coins = savedProfile.coins;
-                draftProfile.appliedResults =
-                    CopyReceipts(savedProfile.appliedResults);
+                if (applied.code == "saveFailed")
+                {
+                    unresolvedResult =
+                        result != null ? result.Copy() : null;
+                    unresolvedContext =
+                        context != null ? context.Copy() : null;
+                }
+                else if (unresolvedResult != null && result != null
+                    && unresolvedResult.resultId == result.resultId)
+                {
+                    // A terminal verdict on a retained result ends its
+                    // retry — it can never commit, so the gate frees.
+                    unresolvedResult = null;
+                    unresolvedContext = null;
+                }
+                return applied;
             }
+            // Terminal verdicts (applied, alreadyApplied, ineligible —
+            // including a committed bound DNF) resolve any retained
+            // retry for this result identity.
+            if (unresolvedResult != null && result != null
+                && unresolvedResult.resultId == result.resultId)
+            {
+                unresolvedResult = null;
+                unresolvedContext = null;
+            }
+            // Refresh whenever facts durably committed — awards AND the
+            // committed non-award adjudications (bound DNF) alike. An
+            // ineligible-but-committed verdict must still update the
+            // slot cache, or a profile reselect resurrects the consumed
+            // context and drops the receipt.
+            if (applied.committed)
+                RefreshProgressionCaches();
             return applied;
         }
 

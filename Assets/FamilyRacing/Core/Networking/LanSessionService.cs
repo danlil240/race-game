@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using FamilyRacing.Core.Automation;
 using FamilyRacing.Core.Profiles;
+using FamilyRacing.Core.Progression;
 using FamilyRacing.Core.Racing;
 
 namespace FamilyRacing.Core.Networking
@@ -114,12 +115,46 @@ namespace FamilyRacing.Core.Networking
         // redelivery and retries replay the receipt instead of re-awarding.
         private readonly List<RaceResult> deliveredResults =
             new List<RaceResult>();
+        // Host side: participants who explicitly left the session
+        // (lan.leave/MsgLeave) — permanent departures, distinct from a
+        // transient link drop that still owns a reserved slot. Their
+        // outstanding delivery rows settle as terminal "undeliverable"
+        // instead of retrying a participant that can never come back.
+        // The mark retires the moment a deliberate return lands — a
+        // successful fresh join or credentialed reclaim with the same
+        // participant id — so future results are deliverable again while
+        // the abandoned rows stay terminal.
+        private readonly HashSet<string> departedParticipants =
+            new HashSet<string>(StringComparer.Ordinal);
         // Composition seam: applies a finalized result to the selected
         // profile through the atomic store write. FoundationService wires
         // it at runtime; tests substitute the same service directly.
         private Func<RaceResult, RewardApplyResult> rewardApplier;
+        // Composition seam (M5 Task 4): binds and durably stores the
+        // local reward context for one host-allocated race identity
+        // BEFORE that participant acknowledges start readiness. Returns
+        // an error string on failure — a failed preparation on the host
+        // refuses lan.start; on a client it reports failure and keeps
+        // that participant from starting (it leaves the session).
+        // Invoked with the race identity only: the profile's captured
+        // bounty definitions never leave the local device.
+        private Func<string, string> racePreparer;
+        // Host-side race ordinal: lan.start allocates
+        // "<sessionId>-r<N>" so the identity is fixed before any
+        // participant begins the race — the coordinator consumes the
+        // same identity via the broadcast session state.
+        private int raceOrdinal;
+        private string currentRaceId = "";
+        private string preparedRaceId = "";
 
         private DrivingContentCatalog content;
+        // The bound gameplay catalog (M5 Task 10): when non-legacy it
+        // supplies the admission fingerprint so peers prove identical
+        // rules — objectives, economy, gadgets and difficulty — before
+        // a seat is allocated, not just identical driving data. Null or
+        // legacy catalogs keep driving-fingerprint admission so
+        // unupgraded peers stay interoperable.
+        private GameplayCatalog gameplayContent;
         private string role = RoleNone;
         private string phase = PhaseIdle;
         private double now;
@@ -172,6 +207,14 @@ namespace FamilyRacing.Core.Networking
             content = catalog;
         }
 
+        // The gameplay catalog that owns the admission fingerprint when
+        // bound and non-legacy; null clears the binding back to
+        // driving-fingerprint admission.
+        public void SetGameplayContent(GameplayCatalog catalog)
+        {
+            gameplayContent = catalog;
+        }
+
         // Composition seam for private reconnect-credential persistence —
         // the runtime wires a file-backed, profile-scoped store; tests
         // substitute memory. Credential bytes never leave this seam into
@@ -204,6 +247,19 @@ namespace FamilyRacing.Core.Networking
             Func<RaceResult, RewardApplyResult> applier)
         {
             rewardApplier = applier;
+        }
+
+        // Composition seam (M5 Task 4): the local reward-context bind.
+        // Called with the host-allocated race identity as soon as it is
+        // known — on the host inside lan.start before the race begins,
+        // on a client when the broadcast countdown phase arrives — so a
+        // preparation save failure reports failure and keeps that
+        // participant from starting. Must be idempotent per identity:
+        // reclaim/rejoin and repeated session-state broadcasts can
+        // present the same raceId more than once.
+        public void SetRacePreparer(Func<string, string> preparer)
+        {
+            racePreparer = preparer;
         }
 
         public CommandResult Execute(GameCommand command)
@@ -289,6 +345,10 @@ namespace FamilyRacing.Core.Networking
                 role = role,
                 phase = phase,
                 localParticipantId = role != RoleNone ? localParticipantId : "",
+                // The allocated race identity stays visible through
+                // results so observers correlate deliveries; it clears
+                // when the session returns to lobby or tears down.
+                currentRaceId = currentRaceId,
                 descriptor = descriptor != null ? descriptor.Copy() : null,
                 paused = paused,
                 lastError = lastError
@@ -461,7 +521,7 @@ namespace FamilyRacing.Core.Networking
                     "v", NetworkSettings.LanProtocolVersion.ToString(CultureInfo.InvariantCulture),
                     "gv", gameplayVersion,
                     "cv", ContentVersion(),
-                    "fp", ContentFingerprint(),
+                    "fp", AdmissionFingerprint(),
                     "pid", localParticipantId,
                     "av", localAvatar,
                     "ci", localColorIndex.ToString(CultureInfo.InvariantCulture),
@@ -645,7 +705,7 @@ namespace FamilyRacing.Core.Networking
                 lanProtocol = NetworkSettings.LanProtocolVersion,
                 gameplayVersion = gameplayVersion,
                 contentVersion = ContentVersion(),
-                contentFingerprint = ContentFingerprint()
+                contentFingerprint = AdmissionFingerprint()
             };
             var host = slots[0];
             host.participantId = localParticipantId;
@@ -720,6 +780,24 @@ namespace FamilyRacing.Core.Networking
                     && IsHumanControl(participant.controlSource) && !participant.ready)
                     return Result(command, CommandResult.Rejected, "notReady");
             }
+            // Allocate the race identity up front (Task 4): every
+            // participant binds its local reward context against THIS
+            // identity before acknowledging start readiness — the
+            // coordinator later consumes the same id from the broadcast
+            // session state instead of minting its own.
+            var allocated = sessionId + "-r" + (++raceOrdinal)
+                .ToString(CultureInfo.InvariantCulture);
+            // The host's own preparation must land before the race may
+            // begin: a durable-context save failure keeps every
+            // participant from starting and reports honestly.
+            if (!PrepareForRace(allocated))
+            {
+                raceOrdinal--;
+                lastError = "preparationFailed";
+                return Result(command, CommandResult.Failed,
+                    "preparationFailed");
+            }
+            currentRaceId = allocated;
             // Start freezes the roster: the session stops being joinable
             // and only credentialed rejoins are honored from here on.
             phase = PhaseCountdown;
@@ -781,6 +859,9 @@ namespace FamilyRacing.Core.Networking
             phase = PhaseLobby;
             paused = false;
             pauseRequests.Clear();
+            // The concluded race's allocated identity retires with the
+            // lifecycle — the next lan.start allocates a fresh one.
+            currentRaceId = "";
             // A race-slot reservation dies with the race lifecycle: the
             // rematch back to lobby frees slots held for disconnected
             // players. Their issued credentials stay authenticatable in
@@ -1102,13 +1183,21 @@ namespace FamilyRacing.Core.Networking
                 if (!slot.occupied
                     || EntryFor(retained, slot.participantId) == null)
                     continue;
+                // A participant who explicitly left before the result
+                // published can never receive the automatic offer: the
+                // row records the honest terminal verdict rather than a
+                // forever-pending lie.
+                var departed = departedParticipants.Contains(
+                    slot.participantId);
                 retained.deliveries.Add(new RaceResultDelivery
                 {
                     participantId = slot.participantId,
-                    state = "pending",
+                    state = departed ? "failed" : "pending",
+                    code = departed ? "undeliverable" : "",
                     lastOfferedAt = double.NegativeInfinity
                 });
             }
+            RefreshDeliveryStatus(retained);
             retainedResults.Add(retained);
             // The host's own reward applies through the same atomic write
             // every client uses — no privileged local path.
@@ -1217,12 +1306,14 @@ namespace FamilyRacing.Core.Networking
             }
         }
 
-        // conflict and ineligible:* can never resolve by resending the
-        // same immutable bytes; every other failure (saveFailed, ...)
-        // is treated as transient and keeps retrying.
+        // conflict, undeliverable and ineligible:* can never resolve by
+        // resending the same immutable bytes — conflict/undeliverable
+        // name why resending is hopeless (conflicting retained payload,
+        // participant gone for good); every other failure (saveFailed,
+        // ...) is treated as transient and keeps retrying.
         private static bool PermanentDeliveryFailure(string code)
         {
-            return code == "conflict"
+            return code == "conflict" || code == "undeliverable"
                 || (code != null && code.StartsWith("ineligible:"));
         }
 
@@ -1471,7 +1562,7 @@ namespace FamilyRacing.Core.Networking
                     CultureInfo.InvariantCulture)
                 || gameplay != gameplayVersion
                 || contentVersion != ContentVersion()
-                || fingerprint != ContentFingerprint())
+                || fingerprint != AdmissionFingerprint())
             {
                 SendJoinReject(connectionId, "incompatible", commandId);
                 return;
@@ -1509,6 +1600,11 @@ namespace FamilyRacing.Core.Networking
                     reclaim.connected = true;
                     reclaim.controlSource = ControlRemote;
                     reclaim.ownershipEpoch = epoch;
+                    // A deliberate return revives delivery eligibility for
+                    // FUTURE rows: the departed mark only stamped new
+                    // PublishResult rows, and the old undeliverable rows
+                    // stay terminal history — they are never rewritten.
+                    departedParticipants.Remove(participantId);
                     // The presented credential is retired the moment it is
                     // honored; accept carries the rotated replacement.
                     var rotated = reconnectRegistry.Rotate(participantId);
@@ -1516,7 +1612,17 @@ namespace FamilyRacing.Core.Networking
                         rotated ?? credential);
                     BroadcastSessionState();
                     // A credentialed rejoin resumes unacknowledged result
-                    // delivery on the next offer pass.
+                    // delivery immediately: the offer cadence throttles
+                    // resends to the SAME connection — this connection is
+                    // brand new, so every pending row for the reclaiming
+                    // participant is due now, not one redelivery cycle
+                    // later.
+                    foreach (var retained in retainedResults)
+                    {
+                        var row = DeliveryFor(retained, participantId);
+                        if (row != null && row.state == "pending")
+                            row.lastOfferedAt = double.NegativeInfinity;
+                    }
                     OfferPending(now);
                     return;
                 }
@@ -1557,6 +1663,10 @@ namespace FamilyRacing.Core.Networking
             openConnections.Remove(connectionId);
             connections[connectionId] = participantId;
             connectionIdFor[participantId] = connectionId;
+            // A fresh join reusing a participant id that explicitly left
+            // is a deliberate return: future results must be deliverable
+            // again. Prior undeliverable rows stay terminal.
+            departedParticipants.Remove(participantId);
             SendJoinAccept(connectionId, participant, commandId, credential);
             BroadcastSessionState();
             OfferPending(now);
@@ -1623,6 +1733,22 @@ namespace FamilyRacing.Core.Networking
             connectionIdFor.Remove(participantId);
             var participant = FindParticipant(participantId);
             if (participant == null) return;
+            // Explicit leave is a permanent departure — unlike a link
+            // drop, which keeps the reserved slot reclaimable. Every
+            // outstanding delivery row for the departed participant
+            // settles as a terminal failure; persisted rows and prior
+            // permanent verdicts are immutable history, never rewritten.
+            departedParticipants.Add(participantId);
+            foreach (var result in retainedResults)
+            {
+                var delivery = DeliveryFor(result, participantId);
+                if (delivery == null || delivery.state == "persisted") continue;
+                if (delivery.state == "failed"
+                    && PermanentDeliveryFailure(delivery.code)) continue;
+                delivery.state = "failed";
+                delivery.code = "undeliverable";
+                RefreshDeliveryStatus(result);
+            }
             if (phase == PhaseLobby)
             {
                 // An explicit leave in the lobby ends all credential rights.
@@ -1657,7 +1783,7 @@ namespace FamilyRacing.Core.Networking
                 lanProtocol = NetworkSettings.LanProtocolVersion,
                 gameplayVersion = gameplayVersion,
                 contentVersion = ContentVersion(),
-                contentFingerprint = ContentFingerprint(),
+                contentFingerprint = AdmissionFingerprint(),
                 eventId = Field(fields, "ev"),
                 classId = Field(fields, "cl")
             };
@@ -1680,6 +1806,34 @@ namespace FamilyRacing.Core.Networking
             if (!NetworkProtocol.IntField(fields, "ep", out epoch)) epoch = 1;
             participant.ownershipEpoch = epoch;
             phase = NormalizePhase(Field(fields, "ph"));
+            // Credentialed reclaim into a live race presents the same
+            // allocated identity: binding is idempotent so a prepared
+            // participant is a no-op and a device that never prepared
+            // binds now, before any further racing boundaries. The
+            // accept packet is authoritative — an empty field clears a
+            // stale identity rather than leaving it bound.
+            var acceptedRace = Field(fields, "rcid");
+            currentRaceId = acceptedRace;
+            if (acceptedRace.Length > 0
+                && (phase == PhaseCountdown || phase == PhaseRacing))
+            {
+                if (!PrepareForRace(acceptedRace))
+                {
+                    // Cannot bind the reward context: do not start —
+                    // report the failure and leave the session the same
+                    // observable way a state-offer failure does.
+                    lastError = "preparationFailed";
+                    FailPending("preparationFailed");
+                    link.Send(serverConnection, NetworkProtocol.Encode(
+                        NetworkProtocol.MsgLeave, "pid", localParticipantId));
+                    closeFlushUntil = now
+                        + NetworkSettings.SessionCloseFlushSeconds;
+                    role = RoleNone;
+                    phase = PhaseIdle;
+                    currentRaceId = "";
+                    return;
+                }
+            }
             var op = FindJoinOp(Field(fields, "cid"));
             if (op != null) CompletePending(op, CommandResult.Applied, "");
         }
@@ -1701,11 +1855,38 @@ namespace FamilyRacing.Core.Networking
             if (descriptor == null || Field(fields, "sid") != sessionId) return;
             descriptor.eventId = Field(fields, "ev");
             descriptor.classId = Field(fields, "cl");
+            // The host-allocated race identity arrives with the countdown
+            // phase: the local reward context binds against it BEFORE
+            // the race clock may start — a preparation failure keeps
+            // this participant from starting (Task 4).
+            var offeredRace = Field(fields, "rcid");
+            var offeredPhase = NormalizePhase(Field(fields, "ph"));
+            // The broadcast identity is authoritative in both
+            // directions: an empty field clears the concluded race's id
+            // so lobby/rematch snapshots can never carry a stale one.
+            currentRaceId = offeredRace;
+            if (offeredRace.Length > 0
+                && (offeredPhase == PhaseCountdown || offeredPhase == PhaseRacing)
+                && !PrepareForRace(offeredRace))
+            {
+                lastError = "preparationFailed";
+                FailPending("preparationFailed");
+                link.Send(serverConnection, NetworkProtocol.Encode(
+                    NetworkProtocol.MsgLeave, "pid", localParticipantId));
+                // The datagram gets one flush window, exactly like an
+                // explicit leave — the observable session is already over.
+                closeFlushUntil = now
+                    + NetworkSettings.SessionCloseFlushSeconds;
+                role = RoleNone;
+                phase = PhaseIdle;
+                currentRaceId = "";
+                return;
+            }
             int occupied;
             if (NetworkProtocol.IntField(fields, "occ", out occupied))
                 descriptor.occupancy = occupied;
             descriptor.joinable = Field(fields, "jn") == "1";
-            phase = NormalizePhase(Field(fields, "ph"));
+            phase = offeredPhase;
             paused = Field(fields, "pd") == "1";
             pauseRequests.Clear();
             foreach (var requester in Field(fields, "pr").Split(','))
@@ -1811,6 +1992,12 @@ namespace FamilyRacing.Core.Networking
                 "cl", descriptor != null ? descriptor.classId : "",
                 "ep", participant.ownershipEpoch.ToString(CultureInfo.InvariantCulture),
                 "cred", credential,
+                // A reclaim into countdown/racing must learn the
+                // allocated race identity to bind its reward context
+                // (Task 4) — empty while the lobby has not started.
+                // "rcid" is deliberately distinct from the result-offer
+                // "rid" so no decode path can ever confuse the two.
+                "rcid", currentRaceId,
                 "cid", commandId ?? ""));
         }
 
@@ -1843,7 +2030,13 @@ namespace FamilyRacing.Core.Networking
                 "pd", paused ? "1" : "0",
                 "pr", requesters,
                 "occ", descriptor.occupancy.ToString(CultureInfo.InvariantCulture),
-                "jn", descriptor.joinable ? "1" : "0"
+                "jn", descriptor.joinable ? "1" : "0",
+                // The allocated race identity rides the broadcast so each
+                // local device binds its reward context against the same
+                // id the coordinator will run (Task 4). "rcid" is
+                // deliberately distinct from the result-offer "rid" so no
+                // decode path can ever confuse the two.
+                "rcid", currentRaceId
             };
             for (var i = 0; i < slots.Length; i++)
             {
@@ -1880,6 +2073,26 @@ namespace FamilyRacing.Core.Networking
             descriptor.joinable = role == RoleHost
                 && phase == PhaseLobby
                 && occupied < NetworkSettings.ParticipantCapacity;
+        }
+
+        // The local reward-context bind for one host-allocated race
+        // identity: idempotent per identity, and a missing preparer is
+        // an honest no-op (older compositions simply do not bind — the
+        // race itself is unaffected; Task 7 then finds no context and
+        // rejects progression evaluation rather than guessing).
+        private bool PrepareForRace(string allocatedRaceId)
+        {
+            if (string.IsNullOrEmpty(allocatedRaceId)) return true;
+            if (preparedRaceId == allocatedRaceId) return true;
+            if (racePreparer == null)
+            {
+                preparedRaceId = allocatedRaceId;
+                return true;
+            }
+            var error = racePreparer(allocatedRaceId);
+            if (!string.IsNullOrEmpty(error)) return false;
+            preparedRaceId = allocatedRaceId;
+            return true;
         }
 
         private void ClearReady()
@@ -1931,9 +2144,20 @@ namespace FamilyRacing.Core.Networking
             EventDefinition evt;
             if (!content.Events.TryGetValue(descriptor.eventId, out evt))
             { code = "notConfigured"; return false; }
-            if (!evt.AllowsVehicle(vehicleId)
-                || NetworkProtocol.VehicleClass(vehicleId) != descriptor.classId)
-            { code = "invalidVehicle"; return false; }
+            // The shared mode-eligibility verdict (M5 Task 8): LAN
+            // exposes every implemented vehicle in the configured event
+            // under the configured class — normalized racing never
+            // consults profile unlocks. The lobby's historical codes
+            // stay stable on top of the verdict's reason.
+            var decision = RaceModeRules.Evaluate(RaceMode.Lan, "",
+                descriptor.eventId, descriptor.classId, vehicleId,
+                null, content, null);
+            if (!decision.allowed)
+            {
+                code = decision.code == "unknownVehicle"
+                    ? "unknownVehicle" : "invalidVehicle";
+                return false;
+            }
             return true;
         }
 
@@ -2065,8 +2289,14 @@ namespace FamilyRacing.Core.Networking
             paused = false;
             retainedResults.Clear();
             deliveredResults.Clear();
+            departedParticipants.Clear();
             descriptor = null;
             sessionId = "";
+            // A torn-down session keeps no race identity and no
+            // preparation claim — the next session binds fresh.
+            currentRaceId = "";
+            raceOrdinal = 0;
+            preparedRaceId = "";
             serverConnection = 0;
             role = RoleNone;
             phase = PhaseIdle;
@@ -2083,12 +2313,26 @@ namespace FamilyRacing.Core.Networking
         }
 
         // The canonical tuned-data fingerprint of the local catalog —
-        // the admission token both sides must hold bit-identically. An
-        // absent catalog fingerprints empty, which is still a valid
-        // token: only peers whose content state matches exactly agree.
+        // retained for legacy/unbound admission and for peers that
+        // carry no gameplay identity at all.
         private string ContentFingerprint()
         {
             return content != null ? content.CompatibilityFingerprint : "";
+        }
+
+        // The admission fingerprint both sides must hold bit-identically
+        // before a seat is allocated (M5 Task 10): the gameplay
+        // catalog's fingerprint when one is bound and non-legacy — it
+        // covers the driving body plus objectives, campaign, bounties,
+        // economy, gadgets and difficulties — and the driving
+        // fingerprint otherwise, so legacy content stays compatible
+        // with unupgraded peers and an absent catalog fingerprints
+        // empty (still a valid token).
+        private string AdmissionFingerprint()
+        {
+            return gameplayContent != null && !gameplayContent.IsLegacy
+                ? gameplayContent.CompatibilityFingerprint
+                : ContentFingerprint();
         }
 
         // The whole discovery-advertised compatibility token in one
@@ -2098,7 +2342,7 @@ namespace FamilyRacing.Core.Networking
         private string CompatToken()
         {
             return gameplayVersion + "|" + ContentVersion()
-                + "|" + ContentFingerprint();
+                + "|" + AdmissionFingerprint();
         }
 
         private static bool PausePhase(string phase)

@@ -323,6 +323,49 @@ namespace FamilyRacing.EditorTools
                 {
                     cueId = "finalize", eventKind = "race.finalized",
                     clip = Clip("cue-finish"), volume = 0.9f
+                },
+                // M5 Task 5 gadget cue slots: one per authoritative
+                // gadget event kind. Clips are the committed generated
+                // WAVs (Tools/Generate-RaceAudio.py); an absent clip is
+                // the honest empty slot the audio presenter reports.
+                new RacePresentationCatalogAsset.Cue
+                {
+                    cueId = "gadget-pickup", eventKind = "gadget.pickup",
+                    clip = Clip("cue-gadget-pickup"), volume = 0.8f,
+                    minIntervalSeconds = 0.1f
+                },
+                new RacePresentationCatalogAsset.Cue
+                {
+                    cueId = "gadget-use", eventKind = "gadget.used",
+                    clip = Clip("cue-gadget-use"), volume = 0.85f,
+                    minIntervalSeconds = 0.15f
+                },
+                new RacePresentationCatalogAsset.Cue
+                {
+                    cueId = "gadget-foam-drop",
+                    eventKind = "gadget.foamDropped",
+                    clip = Clip("cue-gadget-foam"), volume = 0.7f,
+                    minIntervalSeconds = 0.2f
+                },
+                new RacePresentationCatalogAsset.Cue
+                {
+                    cueId = "gadget-foam-hit", eventKind = "gadget.foamHit",
+                    clip = Clip("cue-gadget-foam"), volume = 0.85f,
+                    minIntervalSeconds = 0.2f
+                },
+                new RacePresentationCatalogAsset.Cue
+                {
+                    cueId = "gadget-shield",
+                    eventKind = "gadget.shieldBlocked",
+                    clip = Clip("cue-gadget-shield"), volume = 0.85f,
+                    minIntervalSeconds = 0.2f
+                },
+                new RacePresentationCatalogAsset.Cue
+                {
+                    cueId = "gadget-respawn",
+                    eventKind = "gadget.respawn",
+                    clip = Clip("cue-gadget-pickup"), volume = 0.5f,
+                    minIntervalSeconds = 0.4f
                 }
             };
             catalog.loops = new[]
@@ -410,7 +453,15 @@ namespace FamilyRacing.EditorTools
                 Trigger("motor.becameAirborne", "drift-dust", 1),
                 Trigger("checkpoint.crossed", "checkpoint-sparkle", 3),
                 Trigger("race.finished", "finish-burst", 1),
-                Trigger("race.finalized", "finish-burst", 1)
+                Trigger("race.finalized", "finish-burst", 1),
+                // M5 Task 5 gadget bursts: pickups sparkle, foam drops
+                // and hits puff at the racer, a blocked hit flares.
+                Trigger("gadget.pickup", "checkpoint-sparkle", 2),
+                Trigger("gadget.used", "boost-flare", 1),
+                Trigger("gadget.foamDropped", "landing-puff", 1),
+                Trigger("gadget.foamHit", "wall-shunt", 2),
+                Trigger("gadget.shieldBlocked", "checkpoint-sparkle", 2),
+                Trigger("gadget.respawn", "checkpoint-sparkle", 1)
             };
             string error;
             if (!catalog.Validate(out error))

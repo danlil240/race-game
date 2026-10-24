@@ -65,7 +65,7 @@ from pathlib import Path
 
 from AgentScenario import (BOUNDARY_TYPES, MemorySampler,
                            SUPPORTED_STATE_SCHEMAS,
-                           validate_presentation)
+                           process_start_stamp, validate_presentation)
 from DrivingScenario import DrivingClient, MAX_STEPS_PER_FRAME, \
     OUTGOING_CAPACITY
 from NetworkScenario import (LanDriver, _LAN_DRIVERS, drive_join,
@@ -411,6 +411,31 @@ def check_labels(labels, endpoints):
     return failures
 
 
+def check_memory_generations(generations):
+    """Per-generation process-memory accounting: the LIVE generation of
+    every role must hold at least one valid sample — an all-unavailable
+    (or empty) live interval is a measurement gap, not a passing
+    measurement. A dead generation may legitimately read all-unavailable:
+    that is the honest evidence it stayed dead."""
+    failures = []
+    if generations is None:
+        return failures
+    for entry in generations:
+        label = "%s gen%d" % (entry.get("role"),
+                              entry.get("generation") or 0)
+        if (entry.get("okSamples") or 0) \
+                + (entry.get("unavailableSamples") or 0) == 0:
+            failures.append(label + ": memory sampler recorded no "
+                            "samples at all")
+            continue
+        if entry.get("alive") and not (entry.get("okSamples") or 0):
+            failures.append(
+                label + ": live generation produced no valid memory "
+                "samples (%d unavailable)"
+                % (entry.get("unavailableSamples") or 0))
+    return failures
+
+
 def evaluate_verdict(parts):
     """The assembled qualification verdict: every required evidence
     dimension must hold. Any failure string fails the run — a good
@@ -422,6 +447,7 @@ def evaluate_verdict(parts):
     perf = (parts or {}).get("perf") or {}
     failures += check_rendered_samples(perf.get("perEndpoint") or {})
     failures += check_perf_evidence(perf)
+    failures += check_memory_generations(perf.get("memoryGenerations"))
     failures += check_shots((parts or {}).get("shots") or [])
     failures += check_labels((parts or {}).get("labels"), endpoints)
     failures += check_perf_reports((parts or {}).get("perfReports"))
@@ -1704,6 +1730,101 @@ def launch_player(player_command, root, name, profile_dir, perf_dir,
     return process, info, directory
 
 
+class GenerationSamplers:
+    """One memory sampler per process generation.
+
+    Every process generation is its own measurement target: own pid,
+    own process-start identity, own evidence interval (one
+    memory.ndjson per generation directory), own sampler thread. A
+    relaunch MUST come through start() so the new generation gets its
+    own sampler — the old generation's sampler keeps running and
+    records `unavailable` for the dead pid, which is the honest proof
+    the dead generation stayed dead (the in-sampler creation-stamp
+    check additionally catches a recycled pid being sampled as "ok").
+    Reusing a pid number across generations is rejected outright: a
+    recycled number is a different process, never the same measurement
+    target.
+    """
+
+    def __init__(self, interval=1.0, sampler_factory=None,
+                 stamp_of=None):
+        self._interval = interval
+        self._sampler_factory = sampler_factory or MemorySampler
+        self._stamp_of = stamp_of or process_start_stamp
+        self.generations = []
+
+    def start(self, role, generation, pid, evidence_dir):
+        """Open the measurement target for (role, generation)."""
+        for record in self.generations:
+            if record["pid"] == pid:
+                raise AssertionError(
+                    "pid %d reused across generations (%s gen%d -> gen%d): "
+                    "a recycled pid is a different process, never the "
+                    "same measurement target"
+                    % (pid, role, record["generation"], generation))
+        Path(evidence_dir).mkdir(parents=True, exist_ok=True)
+        sampler = self._sampler_factory(
+            evidence_dir, pid=pid, interval=self._interval)
+        sampler.start()
+        record = {
+            "role": role,
+            "generation": generation,
+            "pid": pid,
+            "processStartStamp": self._stamp_of(pid),
+            "memory": str(Path(evidence_dir) / "memory.ndjson"),
+            "alive": True,
+            "sampler": sampler,
+        }
+        self.generations.append(record)
+        return record
+
+    def end_generation(self, role, generation):
+        """Mark a generation dead — its sampler keeps recording
+        unavailable so the evidence interval covers the death."""
+        for record in self.generations:
+            if record["role"] == role \
+                    and record["generation"] == generation:
+                record["alive"] = False
+
+    def stop_all(self):
+        for record in self.generations:
+            sampler = record.get("sampler")
+            if sampler is None:
+                continue
+            try:
+                sampler.stop()
+            except Exception:
+                pass
+
+    def account(self):
+        """Read the per-generation evidence back: ok/unavailable counts
+        per (role, generation) — the verdict input for 'zero valid
+        samples cannot pass'."""
+        summary = []
+        for record in self.generations:
+            entry = {key: value for key, value in record.items()
+                     if key != "sampler"}
+            ok = unavailable = 0
+            path = Path(record["memory"])
+            if path.is_file():
+                for line in path.read_text(
+                        encoding="utf-8-sig").splitlines():
+                    if not line.strip():
+                        continue
+                    try:
+                        status = json.loads(line).get("status")
+                    except ValueError:
+                        continue
+                    if status == "ok":
+                        ok += 1
+                    elif status == "unavailable":
+                        unavailable += 1
+            entry["okSamples"] = ok
+            entry["unavailableSamples"] = unavailable
+            summary.append(entry)
+        return summary
+
+
 def run_scenario(player_command, evidence, minutes, players=2,
                  fault_injection=True, startup_timeout=90,
                  shutdown_timeout=10, trace_mb=1024,
@@ -1740,7 +1861,7 @@ def run_scenario(player_command, evidence, minutes, players=2,
     }
     roster = {}
     names = []
-    samplers = []
+    samplers = GenerationSamplers()
     wall_seconds = wall_seconds or max(
         minutes * 60.0 * WALL_LIMIT_FACTOR, WALL_LIMIT_MIN_SECONDS)
     try:
@@ -1764,9 +1885,12 @@ def run_scenario(player_command, evidence, minutes, players=2,
                 "profileDirectory": str(profile_dir),
                 "perfReportDirectory": str(perf_dir),
                 "pid": process.pid,
+                "processStartStamp": process_start_stamp(process.pid),
             })
             report["players"].append({
                 "role": name, "pid": process.pid,
+                "processStartStamp":
+                    process_start_stamp(process.pid),
                 "runId": info["runId"]})
             client = VBClient(info, evidence_dir)
             roster[name] = {
@@ -1799,6 +1923,11 @@ def run_scenario(player_command, evidence, minutes, players=2,
                         except Exception:
                             pass
                         entry["alive"] = False
+                        # The dead generation keeps its own sampler and
+                        # evidence interval — it now records honest
+                        # "unavailable" for the terminated pid.
+                        samplers.end_generation(name,
+                                                entry["generation"])
                         report["faultInjection"].append(
                             "%s gen-%d terminated by scenario"
                             % (name, entry["generation"]))
@@ -1824,11 +1953,21 @@ def run_scenario(player_command, evidence, minutes, players=2,
                             startup_timeout)
                         evidence_dir = root / (run_name + "-evidence")
                         evidence_dir.mkdir()
+                        # Every process generation is a fresh measurement
+                        # target — explicit start() creates its sampler,
+                        # its memory.ndjson interval, and rejects a
+                        # recycled pid rather than rebinding to it.
+                        gen_perf = root / (run_name + "-perf")
+                        sampler_record = samplers.start(
+                            name, generation, process.pid, gen_perf)
                         write_json(evidence_dir / "launch.json", {
                             "role": name, "generation": generation,
                             "command": info["command"],
                             "validationDirectory": str(directory),
                             "pid": process.pid,
+                            "processStartStamp":
+                                sampler_record["processStartStamp"],
+                            "perfMemoryFile": sampler_record["memory"],
                         })
                         new_client = VBClient(info, evidence_dir)
                         entry.update(process=process, info=info,
@@ -1838,7 +1977,10 @@ def run_scenario(player_command, evidence, minutes, players=2,
                                      generation=generation, alive=True)
                         report["players"].append({
                             "role": name, "generation": generation,
-                            "pid": process.pid, "runId": info["runId"]})
+                            "pid": process.pid,
+                            "processStartStamp":
+                                sampler_record["processStartStamp"],
+                            "runId": info["runId"]})
                         # The new process runs the same build/content —
                         # it must agree with the recorded manifest.
                         new_manifest = endpoint_manifest(
@@ -1860,13 +2002,10 @@ def run_scenario(player_command, evidence, minutes, players=2,
 
         build_labels(peers, report)
         # External process-memory sampling — measured outside the
-        # player once per second for the whole run.
+        # player once per second, one generation sampler per process.
         for name in names:
-            sampler = MemorySampler(
-                root / (name + "-perf"),
-                pid=roster[name]["process"].pid)
-            sampler.start()
-            samplers.append(sampler)
+            samplers.start(name, 1, roster[name]["process"].pid,
+                           root / (name + "-perf"))
 
         run_benchmark(peers, report, minutes, wall_seconds,
                       join_address="127.0.0.1", allow_loopback=True,
@@ -1910,17 +2049,19 @@ def run_scenario(player_command, evidence, minutes, players=2,
             collect_perf_reports(
                 {name: entry["info"]["runId"]},
                 report, entry["perfDir"])
+        # Close the samplers and read each generation's accounting back
+        # from its own evidence file — the verdict sees per-generation
+        # ok/unavailable counts, never an aggregate that could hide a
+        # generation with zero valid samples.
+        samplers.stop_all()
+        report["perf"]["memoryGenerations"] = samplers.account()
         assemble_verdict(live_peers, report)
     except Exception as error:
         report["error"] = "%s: %s" % (type(error).__name__, error)
         report["traceback"] = traceback.format_exc()
     finally:
         _LAN_DRIVERS.clear()
-        for sampler in samplers:
-            try:
-                sampler.stop()
-            except Exception:
-                pass
+        samplers.stop_all()
         for name in names:
             entry = roster.get(name)
             if entry is None:

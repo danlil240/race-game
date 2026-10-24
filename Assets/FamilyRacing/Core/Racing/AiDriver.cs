@@ -5,6 +5,30 @@ using FamilyRacing.Core.Networking;
 
 namespace FamilyRacing.Core.Racing
 {
+    // Gadget facts the coordinator computes for one AI sample (M5 Task
+    // 5): the seat's held item plus the host's spatial facts the
+    // follower needs — a rival near behind for the foam trap, a live
+    // rival patch ahead for the shield, and a low-demand straight for
+    // the turbo. The AI never reads gadget state directly; the
+    // coordinator feeds it exactly what a human player could see.
+    public sealed class AiGadgetContext
+    {
+        public string heldItemId = "";
+        public long heldGeneration;  // unique per grant — arms one press
+        public int heldTicks;
+        public string kind = "";
+        // The rules' press-edge latch for this seat (row.gadgetHeld):
+        // true while the authoritative boundary still sees the button
+        // held — e.g. a human who disconnected mid-press left it set.
+        // A fresh pulse emitted while latched is swallowed by the edge
+        // detector, so the follower must emit a release first.
+        public bool pressLatched;
+        public bool rivalNearBehind;
+        public bool rivalAhead;
+        public bool rivalNearby;
+        public bool patchAhead;
+    }
+
     // Honest fill-in driver for vacant or disconnected race slots: a
     // waypoint follower over the course's authored `route` loop. It emits
     // only the ordinary bounded DriverInput a human produces — steering
@@ -34,6 +58,15 @@ namespace FamilyRacing.Core.Racing
         // out instead of tailgating through every contact — the offset
         // moves the aim point only; physics and rules are unchanged.
         private readonly float laneOffset;
+        // The authored difficulty preset this follower runs under (M5
+        // Task 4): decision parameters only — the cornering safety
+        // margin and the boost-spend threshold. Null selects the
+        // established LAN constants so takeover/default driving keeps
+        // its proven behaviour. Presets never grant speed, teleport, or
+        // rule exceptions; gadgetUseWillingness/shortcutWillingness are
+        // stored for the gadget/shortcut systems that consume them and
+        // change no decision today.
+        private readonly AiDifficultyDefinition difficulty;
         private bool initialized;
         private int routeIndex;
         private int stuckTicks;
@@ -46,21 +79,53 @@ namespace FamilyRacing.Core.Racing
         private int wedgeSkips;
         private int lastNextCheckpoint = -1;
         private bool wasRecovering;
+        // M5 Task 5: the held-item generation this driver already spent
+        // its press pulse on. Emitting a pulse — not a held level —
+        // arms the rules' edge detector exactly once per grant, and the
+        // pressLatched context fact un-marks a generation whose pulse
+        // the rules swallowed before the edge could land.
+        private long gadgetFiredGeneration = -1;
 
         public AiDriver()
-            : this(0f)
+            : this(0f, null)
         {
         }
 
         public AiDriver(float lateralOffsetMeters)
+            : this(lateralOffsetMeters, null)
+        {
+        }
+
+        public AiDriver(float lateralOffsetMeters,
+            AiDifficultyDefinition difficulty)
         {
             laneOffset = float.IsNaN(lateralOffsetMeters)
                 || float.IsInfinity(lateralOffsetMeters)
                 ? 0f
                 : lateralOffsetMeters;
+            this.difficulty = difficulty;
         }
 
-        public DriverInput Sample(DrivingSessionState racer, CourseDefinition course)
+        // Effective cornering safety margin: the authored preset scales
+        // the established constant — a higher margin brakes earlier and
+        // corners slower (easier), a lower one pushes deeper (harder).
+        private float CorneringMargin()
+        {
+            return NetworkSettings.AiCorneringMargin
+                / (difficulty != null ? difficulty.brakeMarginScale : 1f);
+        }
+
+        // Effective boost-spend threshold: the authored charge the
+        // follower waits for; null keeps the established constant.
+        private float BoostMinCharge()
+        {
+            return difficulty != null
+                ? difficulty.boostUseMinCharge
+                : NetworkSettings.AiBoostMinCharge;
+        }
+
+        public DriverInput Sample(DrivingSessionState racer,
+            CourseDefinition course, AiGadgetContext gadgets = null)
         {
             if (racer == null || course == null || racer.motor == null)
                 return default;
@@ -98,14 +163,15 @@ namespace FamilyRacing.Core.Racing
                 {
                     if (motor.recovering && !wasRecovering)
                         wedgeSkips = (wedgeSkips + 1) % route.Count;
-                    routeIndex = (NearestIndex(motor, route) + wedgeSkips)
-                        % route.Count;
+                    routeIndex = RouteIndex(NearestIndex(motor, route) + wedgeSkips, route.Count, course.isOpenRoute);
                     initialized = true;
                 }
                 wasRecovering = motor.recovering;
-                AdvanceIndex(motor, route);
+                AdvanceIndex(motor, route, course.isOpenRoute);
                 var wp = route[routeIndex];
-                var prev = route[(routeIndex - 1 + route.Count) % route.Count];
+                var prev = route[RouteIndex(routeIndex - 1, route.Count, course.isOpenRoute)];
+                // At the first open waypoint use the forward tangent.
+                if (course.isOpenRoute && routeIndex == 0 && route.Count > 1) prev = null;
                 if (wp == null) return default;
                 var sx = prev != null ? wp.x - prev.x : 0f;
                 var sz = prev != null ? wp.z - prev.z : 0f;
@@ -170,13 +236,13 @@ namespace FamilyRacing.Core.Racing
                 && pursuitBrake <= 0f
                 && Math.Abs(steer) >= NetworkSettings.AiDriftSteerThreshold
                 && motor.speed >= NetworkSettings.AiDriftMinSpeed;
-            // Boost is held on straights with a charged meter — the same
-            // hold-to-fire semantics a human uses; the motor's charge and
-            // duration rules bound it. Boosting while braking or leaning
-            // hard is suppressed the way a human would feather off.
+            // The charge threshold starts a burst; it must not cut that
+            // burst short as the meter drains. Keep holding while active
+            // on a safe straight and let the motor bound charge/duration.
+            // Braking or significant steering still releases the boost.
             var boost = brake <= 0f
                 && Math.Abs(steer) <= NetworkSettings.AiBoostMaxSteer
-                && motor.boostCharge >= NetworkSettings.AiBoostMinCharge;
+                && (motor.boostActive || motor.boostCharge >= BoostMinCharge());
 
             // A grounded near-stopped streak requests the ordinary
             // recover one-shot (queued and consumed like any command).
@@ -233,8 +299,7 @@ namespace FamilyRacing.Core.Racing
                         if (route != null && route.Count > 0)
                         {
                             wedgeSkips = (wedgeSkips + 1) % route.Count;
-                            routeIndex = (routeIndex + 1 + wedgeSkips)
-                                % route.Count;
+                            routeIndex = RouteIndex(routeIndex + 1 + wedgeSkips, route.Count, course.isOpenRoute);
                         }
                     }
                     progressAnchorX = motor.x;
@@ -247,7 +312,78 @@ namespace FamilyRacing.Core.Racing
                 progressAnchorX = motor.x;
                 progressAnchorZ = motor.z;
             }
-            return new DriverInput(steer, drift, boost, false, recover,
+            // M5 Task 5 gadget spend: the held bit the rules edge-latch
+            // — the follower presses once the authored willingness has
+            // "settled" the item (a deterministic hold-off: lower
+            // willingness waits longer) AND the kind's use window is
+            // real. Turbo waits for a straight, the trap for a rival
+            // near behind, the shield for a live threat ahead; unknown
+            // kinds fire once settled so the slot never deadlocks.
+            var gadget = false;
+            if (gadgets != null
+                && !string.IsNullOrEmpty(gadgets.heldItemId))
+            {
+                var willingness = difficulty != null
+                    ? Clamp01(difficulty.gadgetUseWillingness)
+                    : NetworkSettings.AiGadgetDefaultWillingness;
+                if (gadgets.pressLatched)
+                {
+                    // The rules still see a held press for this seat —
+                    // a human who disconnected mid-press left the edge
+                    // latch set, or an earlier pulse landed on a
+                    // recovery boundary where the rules read the edge
+                    // but skip the use. Emit a release tick so the
+                    // latch clears before the real press, and un-mark
+                    // the generation so a swallowed pulse retries:
+                    // the seat's slot can never deadlock behind a
+                    // latch-only phantom edge.
+                    if (gadgets.heldGeneration == gadgetFiredGeneration)
+                        gadgetFiredGeneration = -1;
+                }
+                // A zero-willingness seat never spends; everyone else
+                // waits out a deterministic settle delay, then prefers
+                // the kind's real use window — and after a bounded
+                // patience window spends anyway so the held slot can
+                // never deadlock (the rules still decide the effect).
+                else if (willingness > 0f
+                    && gadgets.heldGeneration != gadgetFiredGeneration)
+                {
+                    var settle = (int)((1f - willingness)
+                        * NetworkSettings.AiGadgetSettleTicks);
+                    var window = true;
+                    switch (gadgets.kind)
+                    {
+                        case GadgetKind.Turbo:
+                            // Straights only — the same steering-demand
+                            // gate boost uses, computed by this sample.
+                            window = Math.Abs(steer)
+                                <= NetworkSettings.AiBoostMaxSteer;
+                            break;
+                        case GadgetKind.FoamTrap:
+                        case GadgetKind.Mine:
+                            window = gadgets.rivalNearBehind;
+                            break;
+                        case GadgetKind.HomingMissile:
+                            window = gadgets.rivalAhead;
+                            break;
+                        case GadgetKind.EmpPulse:
+                            window = gadgets.rivalNearby;
+                            break;
+                        case GadgetKind.BubbleShield:
+                            window = gadgets.patchAhead;
+                            break;
+                    }
+                    if (gadgets.heldTicks >= settle
+                        && (window
+                            || gadgets.heldTicks >= settle
+                                + NetworkSettings.AiGadgetPatienceTicks))
+                    {
+                        gadget = true;
+                        gadgetFiredGeneration = gadgets.heldGeneration;
+                    }
+                }
+            }
+            return new DriverInput(steer, drift, boost, gadget, recover,
                 false, false, null, brake);
         }
 
@@ -294,6 +430,11 @@ namespace FamilyRacing.Core.Racing
             var visited = 0;
             while (travelled <= lookahead && visited < route.Count)
             {
+                if (course.isOpenRoute && (i == 0 || i == route.Count - 1))
+                {
+                    if (i == route.Count - 1) break;
+                    i++; continue;
+                }
                 var prev = route[(i - 1 + route.Count) % route.Count];
                 var cur = route[i];
                 var next = route[(i + 1) % route.Count];
@@ -315,7 +456,7 @@ namespace FamilyRacing.Core.Racing
                         {
                             var arc = (inLen + outLen) * 0.5f;
                             var cornerSpeed = yawRate
-                                * NetworkSettings.AiCorneringMargin
+                                * CorneringMargin()
                                 * arc / turn;
                             if (cornerSpeed < target) target = cornerSpeed;
                         }
@@ -344,7 +485,7 @@ namespace FamilyRacing.Core.Racing
             var motor = racer.motor;
             var speed = motor.speed;
             if (!Finite(speed) || speed <= 0.1f) return 0f;
-            var radius = PhysicalTurnRadius(phys, speed);
+            var radius = PhysicalTurnRadius(phys, speed, CorneringMargin());
             if (float.IsInfinity(radius) || radius <= 0.001f) return 0f;
             // Exact Dubins unreachability: the target must sit inside
             // one of the two minimum-radius tangent circles — the discs
@@ -376,7 +517,7 @@ namespace FamilyRacing.Core.Racing
         // part of mu*N, so demanding the full coefficient would promise
         // a radius the tires cannot deliver.
         private static float PhysicalTurnRadius(VehiclePhysicsTuning phys,
-            float speed)
+            float speed, float corneringMargin)
         {
             var authority = VehicleAssistRules.SteeringTarget(
                 1f, speed, phys);
@@ -386,7 +527,7 @@ namespace FamilyRacing.Core.Racing
             var friction = speed > 0.001f
                 ? speed * speed / (phys.frictionCoefficient
                     * VehiclePhysicsTuning.StandardGravity
-                    * NetworkSettings.AiCorneringMargin)
+                    * corneringMargin)
                 : 0f;
             return Math.Max(geometric, friction);
         }
@@ -454,12 +595,16 @@ namespace FamilyRacing.Core.Racing
         // Move the follow index forward past reached waypoints and past
         // waypoints already behind the travel direction (bounded by the
         // passed factor so a far-away overshoot still turns back to it).
-        private void AdvanceIndex(MotorState motor, List<RouteWaypoint> route)
+        private static int RouteIndex(int index, int count, bool open)
+            => open ? Math.Clamp(index, 0, count - 1) : (index % count + count) % count;
+
+        private void AdvanceIndex(MotorState motor, List<RouteWaypoint> route, bool open)
         {
             var fx = (float)Math.Sin(motor.heading);
             var fz = (float)Math.Cos(motor.heading);
             for (var guard = 0; guard < route.Count; guard++)
             {
+                if (open && routeIndex == route.Count - 1) break;
                 var wp = route[routeIndex];
                 if (wp == null) break;
                 var dx = wp.x - motor.x;
@@ -470,7 +615,7 @@ namespace FamilyRacing.Core.Racing
                     : NetworkSettings.AiWaypointReachMeters;
                 if (d2 < reach * reach)
                 {
-                    routeIndex = (routeIndex + 1) % route.Count;
+                    routeIndex = RouteIndex(routeIndex + 1, route.Count, open);
                     continue;
                 }
                 // Overshoot forgiveness: the waypoint sits behind the
@@ -480,7 +625,7 @@ namespace FamilyRacing.Core.Racing
                 var passed = reach * NetworkSettings.AiWaypointPassedFactor;
                 if (dx * fx + dz * fz < 0f && d2 < passed * passed)
                 {
-                    routeIndex = (routeIndex + 1) % route.Count;
+                    routeIndex = RouteIndex(routeIndex + 1, route.Count, open);
                     continue;
                 }
                 break;
@@ -493,6 +638,11 @@ namespace FamilyRacing.Core.Racing
             while (radians > Math.PI) radians -= TwoPi;
             while (radians <= -Math.PI) radians += TwoPi;
             return radians;
+        }
+
+        private static float Clamp01(float value)
+        {
+            return Clamp(value, 0f, 1f);
         }
 
         private static float Clamp(float value, float min, float max)

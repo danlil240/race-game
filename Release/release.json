@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "versionName": "1.0.0",
+  "androidVersionCode": 1,
+  "previousAndroidVersionCode": 0,
+  "applicationId": "com.daniel.familyracing",
+  "companyName": "Family Racing",
+  "productName": "Family Racing",
+  "androidMinSdkVersion": 25,
+  "androidTargetSdkVersion": 36,
+  "signingKeyAlias": "familyracing",
+  "expectedCertificateSha256": "b1cb8bf7e4c5a3640ef08e38d228ebf5c78c3137bc17b55095bffaa481270ead"
+}

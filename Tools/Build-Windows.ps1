@@ -12,12 +12,18 @@
 #                               Builds\Windows-Physics\FamilyRacing.exe
 #                               booting the opt-in PhysicalAssisted race
 #                               scene (validation endpoints compiled in).
+#   -Configuration FamilyRelease FoundationBuild.WindowsFamilyRelease ->
+#                               ordinary Mono player stamped with the
+#                               release identity at
+#                               Builds\Windows-FamilyRelease\FamilyRacing.exe
+#                               (FullContent production gate runs first;
+#                               validation endpoints compiled out).
 #
 # Evidence lands under Logs\windows-build\<flavor>\<run-id>\: the editor
 # -logFile (unity.log), the child process stdout/stderr (unity-process.log),
 # and result.json with the outcome and exe SHA-256.
 param(
-    [ValidateSet('Development', 'Ordinary', 'Physics')]
+    [ValidateSet('Development', 'Ordinary', 'Physics', 'FamilyRelease', 'PlayfulChaos')]
     [string]$Configuration = 'Development',
     [string]$ProjectPath = (Join-Path $PSScriptRoot '..'),
     [string]$EditorRoot = 'C:\Program Files\Unity\Hub\Editor'
@@ -28,6 +34,10 @@ $project = (Resolve-Path -LiteralPath $ProjectPath).Path
 $editorVersion = '6000.3.26f1'
 $editor = Join-Path $EditorRoot "$editorVersion\Editor\Unity.exe"
 $flavors = @{
+    playfulchaos = @{
+        Method = 'FamilyRacing.EditorTools.FoundationBuild.WindowsPlayfulChaos'
+        Exe = 'Builds\Windows-PlayfulChaos\FamilyRacing.exe'
+    }
     development = @{
         Method = 'FamilyRacing.EditorTools.FoundationBuild.Windows'
         Exe = 'Builds\Windows\FamilyRacing.exe'
@@ -39,6 +49,10 @@ $flavors = @{
     physics = @{
         Method = 'FamilyRacing.EditorTools.FoundationBuild.WindowsPhysics'
         Exe = 'Builds\Windows-Physics\FamilyRacing.exe'
+    }
+    familyrelease = @{
+        Method = 'FamilyRacing.EditorTools.FoundationBuild.WindowsFamilyRelease'
+        Exe = 'Builds\Windows-FamilyRelease\FamilyRacing.exe'
     }
 }
 $flavor = $Configuration.ToLowerInvariant()

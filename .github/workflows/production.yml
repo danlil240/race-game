@@ -1,0 +1,168 @@
+name: Production release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+# One dedicated Unity runner must not build two releases simultaneously.
+concurrency:
+  group: family-racing-production
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Validate release tag and Core
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - name: Tag version and main ancestry
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python Tools/ProductionRelease.py preflight --tag $env:RELEASE_TAG
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git merge-base --is-ancestor HEAD origin/main
+          if ($LASTEXITCODE -ne 0) { throw 'Release tags must point to a commit on main.' }
+      - run: dotnet test Tools/CoreTests/FamilyRacing.CoreTests.csproj --configuration Release
+      - run: python -m unittest discover -s Tools -p "Test*.py"
+      - name: Packaging and signing tooling fixtures
+        shell: powershell
+        run: |
+          foreach ($script in @('Test-VerifyTooling.ps1', 'Test-AndroidOffline.ps1', 'Test-FamilyReleaseTooling.ps1', 'Test-FamilyProfileBackup.ps1')) {
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path Tools $script)
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
+  build:
+    name: Verify Unity and build signed packages
+    needs: preflight
+    environment: production
+    runs-on: [self-hosted, Windows, X64, family-racing-production]
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: verification
+          persist-credentials: false
+      - name: Unity verification
+        working-directory: verification
+        run: |
+          foreach ($mode in @('CheckEnvironment', 'CoreOffline', 'EditMode', 'PlayMode')) {
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File Tools/Verify.ps1 -Mode $mode
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            if ($mode -in @('EditMode', 'PlayMode')) {
+              $results = Join-Path Logs ("verify-" + $mode.ToLowerInvariant() + '-results.xml')
+              [xml]$report = Get-Content -LiteralPath $results -Raw
+              $run = $report.'test-run'
+              if ([int]$run.total -le 0 -or [int]$run.failed -ne 0 -or [int]$run.inconclusive -ne 0) { throw "Unity $mode did not produce a passing test run." }
+            }
+          }
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: production-unity-results
+          path: |
+            verification/Logs/verify-*.xml
+            verification/Logs/verify-*.log
+          if-no-files-found: ignore
+      # Unity tests can regenerate tracked assets. Package from a separate clean checkout.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: source
+          persist-credentials: false
+      - name: Package ordinary Windows and signed Android
+        working-directory: source
+        env:
+          FAMILY_RACING_KEYSTORE_BASE64: ${{ secrets.FAMILY_RACING_KEYSTORE_BASE64 }}
+          FAMILY_RACING_KEY_ALIAS: ${{ secrets.FAMILY_RACING_KEY_ALIAS }}
+          FAMILY_RACING_KEYSTORE_PASSWORD: ${{ secrets.FAMILY_RACING_KEYSTORE_PASSWORD }}
+          FAMILY_RACING_KEY_PASSWORD: ${{ secrets.FAMILY_RACING_KEY_PASSWORD }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($name in @('FAMILY_RACING_KEYSTORE_BASE64', 'FAMILY_RACING_KEY_ALIAS', 'FAMILY_RACING_KEYSTORE_PASSWORD', 'FAMILY_RACING_KEY_PASSWORD')) {
+            if ([string]::IsNullOrEmpty([Environment]::GetEnvironmentVariable($name))) { throw "Missing production secret: $name" }
+          }
+          $env:FAMILY_RACING_KEYSTORE = Join-Path $env:RUNNER_TEMP "family-racing-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT.keystore"
+          $output = Join-Path $env:RUNNER_TEMP "family-racing-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          try {
+            [IO.File]::WriteAllBytes($env:FAMILY_RACING_KEYSTORE, [Convert]::FromBase64String($env:FAMILY_RACING_KEYSTORE_BASE64))
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File Tools/Build-FamilyRelease.ps1 -Config Release/release.json -Output $output
+            if ($LASTEXITCODE -ne 0) { throw 'Production packaging failed.' }
+            python Tools/ProductionRelease.py validate --tag $env:RELEASE_TAG --packages $output --commit $env:GITHUB_SHA
+            if ($LASTEXITCODE -ne 0) { throw 'Production package validation failed.' }
+            "PRODUCTION_PACKAGES=$output" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          } finally {
+            if (Test-Path -LiteralPath $env:FAMILY_RACING_KEYSTORE) { Remove-Item -LiteralPath $env:FAMILY_RACING_KEYSTORE -Force }
+          }
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: production-packages
+          path: ${{ env.PRODUCTION_PACKAGES }}
+          if-no-files-found: error
+          retention-days: 30
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: production-build-diagnostics
+          path: |
+            source/Logs/family-release/
+            source/Logs/windows-build/
+            source/Logs/android-offline/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  draft:
+    name: Create reviewable GitHub release
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: production-packages
+          path: packages
+      - name: Verify downloaded packages
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: python Tools/ProductionRelease.py validate --tag $env:RELEASE_TAG --packages packages --commit $env:GITHUB_SHA
+      - name: Draft release with checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          @"
+          Family Racing $env:RELEASE_TAG
+
+          Ordinary Windows x64 and release-signed Android packages, built from $env:GITHUB_SHA.
+          See INSTALL-GUIDE.txt and verify downloads with SHA256SUMS.txt.
+
+          Acceptance remains unqualified. Complete the Release/acceptance-matrix.json evidence review before publishing this draft.
+          Publishing a stable release makes it visible to the game's startup update check.
+          "@ | Set-Content -LiteralPath release-notes.md -Encoding utf8
+          $assets = @(Get-ChildItem -LiteralPath packages -File | ForEach-Object { $_.FullName })
+          gh release create $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --verify-tag --draft --title "Family Racing $env:RELEASE_TAG" --notes-file release-notes.md @assets

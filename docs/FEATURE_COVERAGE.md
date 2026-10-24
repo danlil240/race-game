@@ -4,8 +4,11 @@ Registry mapping the foundation and LAN commands to the actual state
 fields they control and the evidence that actually covers them. Proof column
 reads the frozen lead scenario (`Logs/evidence-lead/result.json`, all 9
 checks passed on the wave-3 Windows build, run-validation-lead) plus the
-Unity suites. The six later-gameplay categories named in `FeatureCoverage`
-are explicitly `notImplemented`; additional QA gaps are listed below.
+Unity suites. `FeatureCoverage` now reports `implemented` for
+`drivingOnboarding`, `drivingSimulation`, `campaign`,
+`rewardsUpgradesCosmetics` and `lan`; only the full-release `tutorial`
+(incl. gadget onboarding) is still `notImplemented`, and `content`
+reports `graybox` while dressed content remains benchmark-only.
 
 ## Command → state-field map
 
@@ -33,6 +36,15 @@ are explicitly `notImplemented`; additional QA gaps are listed below.
 | `lan.results.request` / `lan.results.retrySave` | client result re-offer / local persistence retry | `network.results[]` delivery states | `NetworkResultsPlayTests`, `NetworkRewardTests` |
 | `lan.rematch` | host-only return to lobby keeping retained results | `network.phase` (`results`→`lobby`) | `NetworkResultsPlayTests` |
 | `lan.leave` | clean teardown; the only session exit | `network.role`→`none`, `screen`→`lan-browser` | `NetworkScreensPlayTests` |
+| `campaign.open` / `quickRace.open` / `timeTrial.open` / `garage.open` / `bounties.open` | gated navigation to the loop screens — the only route to them (not `ui.navigate` targets); requires non-legacy gameplay content + a selected profile | `screen`, `progression.*` | `GameplayCommandTests` (open gating, content/profile gates, race/LAN fencing); `GameplayScreensPlayTests` |
+| `campaign.selectWorld` | transient campaign-world pick (M6 Task 3): `unknownWorld`/`worldLocked` reject with no mutation; resets on profile switch; never persisted; `networkActive` inside LAN | `progression.campaignWorldId`, `progression.campaignEvents`, `progression.worlds[]` | `GameplayCommandTests` (schema/dedup/profile-switch/locked-world parity), `GameplayScreensPlayTests` (world cards) |
+| `campaign.start` | starts a campaign event through `SoloRaceSession`; enforces the OWNING world's gate (`worldLocked`) + the traversal gate + vehicle ownership — never the picker selection; binds the durable reward context before the first boundary | `soloRace.*`, `screen` (`driving`), `drivingEvents`, `progression` | `GameplayCommandTests` (`CampaignStartSeatsTheSameSessionAsSoloStart`, finale lock, `CampaignStartResolvesTheOwningWorldNotSelection`), `SoloRacePlayTests` |
+| `quickRace.start` | resolves the authored circuit for the course+class pick and starts the shared four-racer race | `soloRace.*` | `GameplayCommandTests` (`QuickRaceStartResolvesTheAuthoredCircuit`, `QuickRaceStartRejectsDishonestPicks`) |
+| `timeTrial.start` | lone-clock run seating the authored normalized starter (`tuningSource` = `normalized`) | `soloRace.trial`, `soloRace.tuningSource` | `GameplayCommandTests` (`TimeTrialStartSeatsNormalizedStarter`), `SoloRacePlayTests` |
+| `upgrade.purchase` | atomic authored-price upgrade commit (receipt-keyed, idempotent); gated on `rewardUnresolved` | `savedProfile.vehicleUpgrades/coins/purchaseReceipts`, `progression`, `persistenceStatus` | `UpgradeTests`, `GameplayCommandTests`, `UpgradePresentationPlayTests` |
+| `cosmetic.equip` | ownership-checked equip/unequip; `slot` must name the authored cosmetic slot | `savedProfile.ownedCosmetics/equippedCosmetics` | `UpgradeTests`, `GameplayCommandTests` (`CosmeticEquipRequiresItsAuthoredSlot`) |
+| `results.retrySave` | replays the retained result+context through the exactly-once reward seam | `progression.rewardUnresolved*`, `persistenceStatus`, `savedProfile.appliedResults` | `GameplayCommandTests` (`ResultsRetrySaveReplaysTheRetainedContext`) |
+| `results.retry` / `results.continue` | one-action replay under a fresh race identity / retire the finished session to its mode's setup screen | `soloRace`, `screen`, `drivingEvents` | `GameplayCommandTests` (`ResultsCommandsGateOnAFinishedRace`, `ResultsContinueReturnsToCampaignMap`) |
 
 ## Streamed state (every record carries)
 
@@ -55,8 +67,19 @@ lists; null when no race-presentation catalog is bound),
 `networkRace` (host-confirmed race state; null outside a LAN race),
 `prediction` (client-side predicted motor/ack/correction facts; null on
 the host and outside a LAN race) and `remotePresentation` (per-remote
-interpolation diagnostics). Reconnect credentials and transport
-identities never appear in observable state.
+interpolation diagnostics), plus the schema-6 loop slices `soloRace`
+(the local session — `race` for campaign/quickRace through the shared
+four-racer coordinator, `trial` for the lone time trial, the finalized
+immutable `result`, and `tuningSource` naming the human seat's tune
+provenance) and `progression` (the resolved campaign access rows,
+active bounty tray and the `rewardUnresolved` save gate — present on
+every boundary, menus and failed saves included), and the schema-7
+multiworld surface `progression.worlds` (every authored world in order:
+bilingual names, `available`/`lockedReason`, regional completion/star
+totals, finale counts, `rewardVehicleIds`, `worldComplete` and the
+`selected` marker — `campaignWorldId`/`campaignEvents` describe the
+selected world) plus `progression.adventureComplete`. Reconnect credentials
+and transport identities never appear in observable state.
 Boundaries may also arrive as `delta` records
 (`base` = previous boundary sequence, recursive `changed` merge, dot-path
 `removed` list) — an independent reconstructor rebuilds the full state at
@@ -308,6 +331,32 @@ acceptance. It also surfaced and fixed one product bound
 store previously invalidated any capture longer than ~33 min at
 60 fps, shorter than the mandated benchmark).
 
+## Tooling (M6 full-content scenario harness, Task 9 slice A)
+
+`Tools\FullContentScenario.py` is the external full-content
+qualification harness over the schema-7 stream — CLI contract and
+evidence layout in `docs/FULL_CONTENT_RUNBOOK.md` §Scenario evidence.
+Four scopes: `catalog` (inventory reconciliation through
+`campaign.selectWorld`, no driving), `campaign` (per-event evidence
+records for all 78 contract events: identities, command/state trace
+references, completion + objective-bit proofs, rewards, measured
+duration, capture validity, explicit human-only gaps), `modes` (all 12
+course×class Quick Race / Time Trial combinations with normalized
+starter and zero-campaign-credit checks) and `lan` (the shared M5 LAN
+workload on 2–4 attached or launched endpoints). The expected
+inventory is synthesized from the same constants
+`FullContentValidation.cs` enforces — never from observed rows — and
+the reconciler keeps `partial`/`notVerified` honest: missing evidence
+is a named gap; duplicates, unexpected rows, AI-attributed finishes,
+proofs for unearned bits and invalid captures are defects; fixture
+runs can never produce a production `passed`.
+`Tools\TestFullContentScenario.py` locks the mutation suite (32
+tests): removed world/event, duplicated cell, fixture substitution,
+dropped stream records, AI misattribution, omitted objective proof,
+77-of-78 completions, shared rival proofs — each prevented from
+passing. No live production run exists yet (no authored content); see
+the Known QA gaps entry below.
+
 ## Known QA gaps (`notVerified` — do not read as passed)
 
 - Physical input/UI parity is covered by synthetic PlayMode callbacks only
@@ -333,8 +382,24 @@ store previously invalidated any capture longer than ~33 min at
 - Windows IL2CPP module is now installed for the pinned editor
   (`CheckEnvironment` OK) but no IL2CPP build has been produced or qualified
   — preview remains Mono development.
-- Remaining racing gameplay: campaign, rewards/upgrades/cosmetics and
-  richer content stay `notImplemented`, later milestones. The LAN
+- M5 gameplay-loop surface: `campaign`, `rewardsUpgradesCosmetics` and
+  `lan` now report `implemented` — the shared local race modes,
+  gadgets, objectives/bounties, atomic rewards, upgrades/cosmetics and
+  the bilingual loop UI/commands all exist and are suite-covered
+  (`GameplayCommandTests`, `GameplayScreensPlayTests`,
+  `GameplayStreamPlayTests`, the Core progression/objective/bounty/
+  upgrade suites). **Caveat:** the packaged `Foundation.unity` build
+  binds no gameplay catalog (`gameplayCatalog: {fileID: 0}`) because
+  the Task-9 authored Sunny Island world is gated on M4 A7 Lite
+  evidence — `progression.available=false` and the loop commands reject
+  `contentUnavailable`. External evidence:
+  `Tools\GameplayLoopScenario.py` runs `partial` on this build —
+  `Logs\task11-smoke-2` (13 passed incl. tutorial+gadget+restart, 10
+  notVerified), `Logs\task11-campaign` (0 authored events, honest),
+  `Logs\task11-lan-2c`/`task11-lan-4` (LAN matrix passed on reachable
+  rows). Report: `docs\tasks\gameplay-loop-report.md`; runbook:
+  `docs/GAMEPLAY_LOOP_RUNBOOK.md`. M6+ content stays `notImplemented`.
+  The LAN
   slice (`lanScreens`, `lanSession`, `networkRace`, prediction /
   interpolation observation) is qualified by the EditMode/PlayMode
   suites plus `Tools\NetworkScenario.py`, which attaches to 2-4
@@ -350,6 +415,10 @@ store previously invalidated any capture longer than ~33 min at
   see `docs/tasks/network-prototype-report.md`.
   The graybox driving slice (`drivingSimulation`, `drivingOnboarding`)
   is qualified by the DrivingScenario run and PlayMode suites above.
+- M6 full content: the `FullContentScenario` harness exists (section
+  above) but no authored production inventory exists under
+  `Generated/FullContent`, so every scope reports `partial` with named
+  gaps — no live run has been attempted and none is claimed.
 - A real 30-minute solo soak now exists — see the DrivingSoak section
   above (Windows dev player). The multi-player equivalent
   (`Tools\NetworkSoak.py`) is delivered and unit-covered

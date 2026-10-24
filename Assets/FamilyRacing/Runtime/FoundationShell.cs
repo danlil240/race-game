@@ -20,6 +20,10 @@ namespace FamilyRacing
         private static readonly Color Ocean = new Color(0.24f, 0.49f, 0.63f);
         private static readonly Color Deep = new Color(0.16f, 0.24f, 0.30f);
         private static readonly Color Cream = new Color(0.99f, 0.97f, 0.92f);
+        // Semi-opaque cream wash: the one backdrop every floating panel or
+        // HUD strip over the live course shares (tutorial cue panel,
+        // pause/finish overlays, the HUD readout strips — PCQA-011).
+        private static readonly Color PanelWash = new Color(0.99f, 0.97f, 0.92f, 0.85f);
         private static readonly Color Off = new Color(0.75f, 0.72f, 0.66f);
         private static readonly Color[] CardColors = { Coral, Seafoam, Ocean, new Color(0.80f, 0.66f, 0.45f) };
         private static readonly string[] AnimalKeys =
@@ -28,6 +32,8 @@ namespace FamilyRacing
         private FoundationApp app;
         private UIDocument document;
         private VisualElement root;
+        private AssetTrialHud playerHud;
+        private bool playerPresentation;
         private string rebuildKey = "";
         private bool suppressSliderEvents;
         private Label statusLabel;
@@ -37,16 +43,24 @@ namespace FamilyRacing
             new Dictionary<string, VisualElement>();
         private VisualElement pauseOverlay;
         private VisualElement finishOverlay;
+        // The driving-screen restart affordances re-apply availability
+        // when the unresolved-reward gate flips — race.restart joins the
+        // results.* buttons in UpdateResultsOverlay's gate-key refresh.
+        private Button pauseRetryButton;
+        private Button finishRetryButton;
         private Label elapsedLabel;
+        private Label positionLabel;
         private Label phaseLabel;
         private Label speedLabel;
         private Label driftLabel;
+        private Label gadgetLabel;
         private Label lapLabel;
         private Label gateLabel;
         private Label finishTimeLabel;
         private Label finishVehicleLabel;
         private VisualElement boostFill;
         private VisualElement tutorialPanel;
+        private VisualElement garagePanel;
         private Label tutorialIconLabel;
         private Label tutorialCueLabel;
         private Label tutorialProgressLabel;
@@ -59,8 +73,12 @@ namespace FamilyRacing
         public void Bind(FoundationApp owner)
         {
             app = owner;
+            releaseUpdates = GetComponent<ReleaseUpdateChecker>();
+            if (releaseUpdates == null) releaseUpdates = gameObject.AddComponent<ReleaseUpdateChecker>();
             document = GetComponent<UIDocument>();
             root = document.rootVisualElement;
+            playerHud = GetComponent<AssetTrialHud>();
+            playerPresentation = playerHud != null;
             ApplyTextConfiguration(root);
             rebuildKey = "";
         }
@@ -81,6 +99,7 @@ namespace FamilyRacing
             var settings = document != null && document.panelSettings != null
                 ? document.panelSettings.textSettings : null;
             if (settings == null || settings.defaultFontAsset == null) return;
+            FoundationFonts.Warmup(document.panelSettings);
             element.style.unityTextGenerator = TextGeneratorType.Advanced;
             element.style.unityFontDefinition =
                 FontDefinition.FromSDFFont(settings.defaultFontAsset);
@@ -99,15 +118,39 @@ namespace FamilyRacing
                 rebuildKey = "";
             }
             if (state == null) return;
+            if (playerPresentation) EnsurePlayerSetupDefaults(state);
             root.languageDirection = state.language == "he"
                 ? LanguageDirection.RTL : LanguageDirection.LTR;
             var key = state.screen + "|" + state.language + "|" + state.activeSlot;
+            // A late network response must never rebuild racing controls or drop touch capture.
+            if (state.screen == "profiles" || state.screen == "sandbox")
+                key += "|update:" + UpdateNoticeKey;
+            key += "|fun:" + IsPlayfulChaos;
+            if (IsPlayfulChaos)
+            {
+                var touchLayout = UseTouchControls;
+                key += "|touch:" + touchLayout;
+                if (lastTouchLayout.HasValue && lastTouchLayout.Value != touchLayout)
+                    app.Input?.RequireRearm();
+                lastTouchLayout = touchLayout;
+            }
             foreach (var slot in state.slots) key += "|" + slot.status;
             // LAN screens rebuild on roster/discovery/config/delivery
             // changes as well — the signature is cheap and covers only the
             // structure, never per-tick race readouts.
             if (IsLanScreen(state.screen) && state.network != null)
                 key += "|" + LanRebuildSignature(state);
+            // Loop screens repaint on picker/progression changes too —
+            // identical signatures keep live widgets (and their pointer
+            // captures) exactly like the LAN signature does.
+            if (IsLoopScreen(state.screen))
+                key += "|" + LoopSignature(state);
+            // The profiles disclaimer flips on the published catalog
+            // verdict, which the base key does not cover — the same
+            // cheap-signature rule the LAN screens follow.
+            if (state.screen == "profiles")
+                key += "|" + (LoopContentAvailable()
+                    ? "loop:yes" : "loop:no");
             if (key != rebuildKey)
             {
                 rebuildKey = key;
@@ -124,14 +167,31 @@ namespace FamilyRacing
             leds.Clear();
             statusLabel = warningLabel = steeringLabel = null;
             pauseOverlay = finishOverlay = boostFill = null;
-            elapsedLabel = phaseLabel = speedLabel = null;
+            pauseRetryButton = finishRetryButton = null;
+            elapsedLabel = positionLabel = phaseLabel = speedLabel = null;
             driftLabel = null;
+            gadgetLabel = null;
             lapLabel = gateLabel = finishTimeLabel = null;
             finishVehicleLabel = null;
             tutorialPanel = null;
+            garagePanel = null;
+            garageSignature = "";
+            resultsOverlay = null;
+            resultsPlaceLabel = resultsTimeLabel = resultsCoinsLabel = null;
+            resultsBreakdownLabel = resultsRecordLabel = null;
+            resultsRetrySaveButton = null;
+            resultsRetryButton = resultsContinueButton = null;
+            resultsAvailabilityKey = "?";
             tutorialIconLabel = tutorialCueLabel = tutorialProgressLabel = null;
             lanTimeLabel = lanStandingsLabel = lanPhaseLabel = null;
             lanActionLabel = lanPauseLabel = null;
+            lanAddressField = lanPortField = null;
+            lanJoinErrorLabel = null;
+            // Manual-join feedback belongs to the browser: leaving the
+            // screen retires it so a later visit never resurrects a
+            // stale error line.
+            if (state.screen != "lan-browser")
+                lanJoinErrorKey = lanJoinErrorCode = lanJoinErrorField = "";
             saveButton = null;
             musicSlider = effectsSlider = voiceSlider = null;
             chaseButton = overheadButton = shakeButton = langEnButton = langHeButton = null;
@@ -143,10 +203,18 @@ namespace FamilyRacing
                     ? new Color(0, 0, 0, 0) : Sand;
             root.style.paddingTop = root.style.paddingBottom = 16;
             root.style.paddingLeft = root.style.paddingRight = 16;
+            // The screen the tree last rendered owns Settings' return
+            // (PCQA-004): profile creation builds settings over
+            // profiles; the sandbox action builds it over the sandbox.
+            if (IsSettingsOriginScreen(state.screen))
+                settingsReturnScreen = state.screen;
             switch (state.screen)
             {
                 case "settings": BuildSettings(state); break;
-                case "sandbox": BuildSandbox(state); break;
+                case "sandbox":
+                    if (playerPresentation) BuildPlayerHome(state);
+                    else BuildSandbox(state);
+                    break;
                 case "practice": BuildPractice(state); break;
                 case "driving": BuildDriving(state); break;
                 case "lan-browser":
@@ -154,8 +222,21 @@ namespace FamilyRacing
                 case "lan-race":
                 case "lan-results":
                 case "lan-recovery": BuildLanScreen(state); break;
-                default: BuildProfiles(state); break;
+                // M5 Task 10 loop screens — reachable only through the
+                // gated *.open commands, rendered from the published
+                // progression slice.
+                case FoundationService.ScreenCampaign: BuildCampaign(state); break;
+                case FoundationService.ScreenQuickRace: BuildQuickRace(state); break;
+                case FoundationService.ScreenTimeTrial: BuildTimeTrial(state); break;
+                case FoundationService.ScreenGarage: BuildGarageScreen(state); break;
+                case FoundationService.ScreenBounties: BuildBounties(state); break;
+                default:
+                    if (playerPresentation) BuildPlayerProfiles(state);
+                    else BuildProfiles(state);
+                    break;
             }
+            if (playerPresentation) StylePlayerScreen(state);
+            BuildUpdateNotice(state);
         }
 
         private Label AddLabel(VisualElement parent, string text, int size, Color color)
@@ -182,6 +263,7 @@ namespace FamilyRacing
             button.style.marginTop = button.style.marginBottom = 6;
             button.style.marginLeft = button.style.marginRight = 6;
             parent.Add(button);
+            if (playerPresentation) StylePlayerButton(button, bg);
             return button;
         }
 
@@ -251,6 +333,8 @@ namespace FamilyRacing
             {
                 if (descriptor.action != action) continue;
                 element.SetEnabled(descriptor.available);
+                if (playerPresentation)
+                    element.style.opacity = descriptor.available ? 1f : 0.45f;
                 if (!string.IsNullOrEmpty(descriptor.reason))
                     element.tooltip = descriptor.reason;
                 return;
@@ -285,7 +369,12 @@ namespace FamilyRacing
         private void UpdateIndicators(FoundationState state)
         {
             if (warningLabel != null && state.presentation != null)
+            {
                 warningLabel.text = state.presentation.fontWarning;
+                if (playerPresentation)
+                    warningLabel.style.display = !string.IsNullOrEmpty(warningLabel.text)
+                        ? DisplayStyle.Flex : DisplayStyle.None;
+            }
             if (statusLabel != null)
             {
                 var slot = state.activeSlot >= 0 && state.activeSlot < state.slots.Count
@@ -295,9 +384,13 @@ namespace FamilyRacing
                     statusLabel.text = T("status.recovered", state);
                 else if (state.persistenceStatus == "saveFailed")
                     statusLabel.text = T("status.saveFailed", state);
-                else if (state.persistenceStatus == "saved")
+                else if (state.persistenceStatus == "saved"
+                    && (!playerPresentation || state.screen == "settings"))
                     statusLabel.text = T("status.saved", state);
                 else if (statusLabel.text.Length > 0) statusLabel.text = "";
+                if (playerPresentation)
+                    statusLabel.style.display = statusLabel.text.Length > 0
+                        ? DisplayStyle.Flex : DisplayStyle.None;
             }
             if (state.screen == "sandbox" && state.input != null)
             {
@@ -311,6 +404,10 @@ namespace FamilyRacing
                 SetLed("recover", state.input.recover);
             }
             UpdateDrivingIndicators(state);
+            if (garagePanel != null && (state.screen == "practice"
+                || state.screen == FoundationService.ScreenGarage))
+                RefreshGarage(state);
+            UpdateResultsOverlay(state);
             if (state.screen == "lan-race")
                 UpdateLanRaceIndicators(state);
             if (pauseOverlay != null)
@@ -327,7 +424,12 @@ namespace FamilyRacing
                 if (effectsSlider != null) effectsSlider.value = state.draftProfile.effectsVolume;
                 if (voiceSlider != null) voiceSlider.value = state.draftProfile.voiceVolume;
                 suppressSliderEvents = false;
-                if (saveButton != null) saveButton.SetEnabled(state.pendingSettings);
+                if (saveButton != null)
+                {
+                    saveButton.SetEnabled(state.pendingSettings);
+                    if (playerPresentation)
+                        saveButton.style.opacity = state.pendingSettings ? 1f : 0.45f;
+                }
             }
         }
 
@@ -338,10 +440,15 @@ namespace FamilyRacing
                 led.style.backgroundColor = on ? Coral : Off;
         }
 
-        private static void Highlight(Button button, bool active)
+        private void Highlight(Button button, bool active)
         {
-            if (button != null)
-                button.style.backgroundColor = active ? Coral : Ocean;
+            if (button == null) return;
+            if (playerPresentation)
+            {
+                HighlightPlayerToggle(button, active);
+                return;
+            }
+            button.style.backgroundColor = active ? Coral : Ocean;
         }
     }
 }

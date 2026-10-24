@@ -67,7 +67,8 @@ Check "suite not run on invalid NUnit path" ($output -notmatch "RESULT:") "suite
 $fixtureSrc = Join-Path (Split-Path -Parent $VerifyScript) 'Tests\AndroidToolFixture.cs'
 $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 $fixtureExe = Join-Path $temp 'ToolFixture.exe'
-& $compiler /nologo /target:exe "/out:$fixtureExe" $fixtureSrc
+# Unity is a GUI executable; a console fixture hides asynchronous launch/exit bugs.
+& $compiler /nologo /target:winexe /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll "/out:$fixtureExe" $fixtureSrc
 Check "external-process fixture compiles" ($LASTEXITCODE -eq 0) "csc exit=$LASTEXITCODE"
 if ($LASTEXITCODE -eq 0) {
     Copy-Item -LiteralPath $fixtureExe -Destination (Join-Path $editorDir 'Editor\Unity.exe') -Force
@@ -75,10 +76,19 @@ if ($LASTEXITCODE -eq 0) {
     $repoRoot = (Resolve-Path -LiteralPath (Join-Path (Split-Path -Parent $VerifyScript) '..')).Path
     $argumentsFile = Join-Path $repoRoot 'unity-arguments.txt'
     try {
+        Set-Content -LiteralPath (Join-Path $editorDir 'Editor\behavior.txt') -Value 'export-failure'
+        $output = & $pwsh -NoProfile -File $VerifyScript -Mode Setup -EditorRoot $editorRoot 2>&1 | Out-String
+        Check 'GUI Unity failure exit code propagates' ($LASTEXITCODE -eq 29) "exit=$LASTEXITCODE output=$output"
+        Set-Content -LiteralPath (Join-Path $editorDir 'Editor\behavior.txt') -Value 'incomplete-export'
         foreach ($case in @(
             @{ Mode = 'VisualBenchmarkSetup';           Method = 'FamilyRacing.EditorTools.FoundationBuild.VisualBenchmarkSetup' },
             @{ Mode = 'WindowsVisualBenchmark';         Method = 'FamilyRacing.EditorTools.FoundationBuild.WindowsVisualBenchmark' },
-            @{ Mode = 'WindowsVisualBenchmarkOrdinary'; Method = 'FamilyRacing.EditorTools.FoundationBuild.WindowsVisualBenchmarkOrdinary' })) {
+            @{ Mode = 'WindowsVisualBenchmarkOrdinary'; Method = 'FamilyRacing.EditorTools.FoundationBuild.WindowsVisualBenchmarkOrdinary' },
+            @{ Mode = 'FullContentSetup';               Method = 'FamilyRacing.EditorTools.FoundationBuild.FullContentSetup' },
+            @{ Mode = 'WindowsFullContent';             Method = 'FamilyRacing.EditorTools.FoundationBuild.WindowsFullContent' },
+            @{ Mode = 'WindowsFullContentOrdinary';     Method = 'FamilyRacing.EditorTools.FoundationBuild.WindowsFullContentOrdinary' },
+            @{ Mode = 'WindowsFullContentPreview';      Method = 'FamilyRacing.EditorTools.FoundationBuild.WindowsFullContentPreview' },
+            @{ Mode = 'WindowsFamilyRelease';           Method = 'FamilyRacing.EditorTools.FoundationBuild.WindowsFamilyRelease' })) {
             Remove-Item -LiteralPath $argumentsFile -Force -ErrorAction SilentlyContinue
             $output = & $pwsh -NoProfile -File $VerifyScript -Mode $case.Mode -EditorRoot $editorRoot 2>&1 | Out-String
             $code = $LASTEXITCODE
@@ -94,10 +104,13 @@ if ($LASTEXITCODE -eq 0) {
         Remove-Item -LiteralPath $argumentsFile -Force -ErrorAction SilentlyContinue
     }
 
-    # 6. Android benchmark modes reach the offline wrapper: with no editor
-    #    they fail at the prerequisite stage (proving dispatch happened);
-    #    full offline behavior is covered by Test-AndroidOffline.ps1.
-    foreach ($mode in @('AndroidVisualBenchmark', 'AndroidVisualBenchmarkOrdinary')) {
+    # 6. Android benchmark and full-content modes reach the offline
+    #    wrapper: with no editor they fail at the prerequisite stage
+    #    (proving dispatch happened); full offline behavior is covered
+    #    by Test-AndroidOffline.ps1.
+    foreach ($mode in @('AndroidVisualBenchmark', 'AndroidVisualBenchmarkOrdinary',
+        'AndroidFullContent', 'AndroidFullContentOrdinary', 'AndroidFullContentPreview',
+        'AndroidFamilyRelease')) {
         $output = & $pwsh -NoProfile -File $VerifyScript -Mode $mode -EditorRoot (Join-Path $temp 'no-editor') 2>&1 | Out-String
         Check "$mode dispatches to the offline Android wrapper" `
             ($LASTEXITCODE -ne 0 -and $output -notmatch 'Cannot validate argument' -and $output -match 'Pinned Unity editor') `

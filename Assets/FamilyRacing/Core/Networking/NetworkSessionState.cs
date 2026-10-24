@@ -94,6 +94,12 @@ namespace FamilyRacing.Core.Networking
         public string role = LanSessionService.RoleNone;
         public string phase = LanSessionService.PhaseIdle;
         public string localParticipantId = "";
+        // The host-allocated identity of the race being prepared/racing
+        // (M5 Task 4): allocated at lan.start and broadcast inside the
+        // session state so every participant binds its local reward
+        // context against the same identity before the race clock
+        // starts. "" outside countdown/racing/results.
+        public string currentRaceId = "";
         public SessionDescriptor descriptor;
         public List<ParticipantState> participants = new List<ParticipantState>();
         // Shared host-controlled pause plus the participants currently

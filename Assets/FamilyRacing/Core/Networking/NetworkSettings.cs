@@ -6,11 +6,17 @@ namespace FamilyRacing.Core.Networking
     public static class NetworkSettings
     {
         // LAN wire protocol spoken by NetworkProtocol messages. Exact
-        // equality is required to share a session. Protocol 2 is the
+        // equality is required to share a session. Protocol 2 was the
         // physical replication epoch: typed P1 gameplay packets, compact
         // versioned physical state inside snapshots, and fingerprint-bound
         // admission — a protocol-1 peer is fenced before slot allocation.
-        public const int LanProtocolVersion = 2;
+        // Protocol 3 (M5 Task 5) adds the authoritative gadget world to
+        // the snapshot — pickups, patches and per-racer rows — so a
+        // protocol-2 client lacking the gadget contract is fenced before
+        // a seat is dealt rather than silently racing without items.
+        // Protocol 4 adds moving missiles, armed mines, and EMP visuals;
+        // protocol-3 clients cannot validate or render this weapon state.
+        public const int LanProtocolVersion = 4;
 
         // Observation schema emitted by FoundationState once the network
         // slice exists. Profile schema (1 -> 2 in a later task) is a
@@ -20,13 +26,27 @@ namespace FamilyRacing.Core.Networking
         // fingerprint. Schema 5 (M4 Task 2) is additive presentation truth:
         // the applied render profile and a bounded render-performance
         // summary on PresentationState — never frame-sized buffers, and
-        // nothing that crosses the gameplay wire DTO.
-        public const int StateSchemaVersion = 5;
+        // nothing that crosses the gameplay wire DTO. Schema 6 (M5
+        // Task 4) is again additive: the local solo-race slice and the
+        // network session's current-race identity. Schema 7 (M6 Task 3)
+        // is additive once more: the progression surface carries the
+        // ordered world rows (`progression.worlds`) and the
+        // adventure-complete verdict — pure observation, no wire change.
+        public const int StateSchemaVersion = 7;
 
         // Compatibility fingerprint for gameplay rules: peers must report
         // the exact same value before a slot is allocated. Content version
         // comes from the DrivingContentCatalog and is checked separately.
-        public const string GameplayVersion = "gameplay-2";
+        // gameplay-3 (M5 Task 2): the gameplay-rules contract now includes
+        // the first-world GameplayCatalog — objectives, difficulty presets,
+        // economy and gadget definitions — all bound by the catalog
+        // compatibility fingerprint, so M4 gameplay-2 peers can never be
+        // silently admitted under the new rules set.
+        // gameplay-4 (M6 Task 1): the campaign contract is now the ordered
+        // multiworld catalog — every world's membership, order, gates and
+        // rewards are fingerprinted — so a gameplay-3 peer holding a
+        // single-world catalog is fenced before a seat is dealt.
+        public const string GameplayVersion = "gameplay-4";
 
         // Four racers total; AI fills slots without a human (Task 4).
         public const int ParticipantCapacity = 4;
@@ -106,6 +126,21 @@ namespace FamilyRacing.Core.Networking
         // at (slot - centre) * spacing off the route line so four AI
         // racers fan out instead of tailgating.
         public const float AiLaneSpacingMeters = 2f;
+        // M5 Task 5 gadget spend policy: the follower waits this many
+        // held ticks scaled by (1 - willingness) before pressing, so a
+        // fully willing seat fires promptly and a zero-willingness seat
+        // never fires. The default applies when no difficulty preset
+        // authors a willingness (LAN constant).
+        public const float AiGadgetSettleTicks = 90f;
+        public const float AiGadgetDefaultWillingness = 0.6f;
+        // Past the settle delay plus this patience window a held item is
+        // spent even without its preferred window — a held slot can
+        // never deadlock an AI seat. Deterministic (heldTicks only).
+        public const int AiGadgetPatienceTicks = 120;
+        // A rival this close behind makes the foam trap worth spending;
+        // a live rival patch this close ahead arms the shield.
+        public const float AiGadgetRivalBehindMeters = 15f;
+        public const float AiGadgetPatchAheadMeters = 30f;
         //
         // Racer contact: bodies inside this ground-plane radius push
         // apart, capped by DriftBoostRules.NudgeMaxDeltaSpeed per applied
@@ -188,6 +223,17 @@ namespace FamilyRacing.Core.Networking
         public const int EventBatchCapacity = 64;
         // Bounded exactly-once event consumption on the receiving side.
         public const int SeenEventIdCapacity = 512;
+
+        // --- M5 Task 5: authoritative gadgets -------------------------
+        // Authored pickup sites per course, live foam patches in the
+        // shared world, and the per-racer resolved-patch list are all
+        // hard-capped so a four-racer gadget load can never overflow the
+        // snapshot ceiling or grow unboundedly under spam.
+        public const int GadgetPickupCapacity = 32;
+        public const int GadgetPatchCapacity = 16;
+        public const int GadgetProjectileCapacity = 16;
+        public const int GadgetPulseCapacity = 8;
+        public const int GadgetImmunePatchCapacity = 32;
 
         // --- Task 6: client prediction + remote presentation -----------
         // Replay bound for the local predicted motor: pending sent-but-
