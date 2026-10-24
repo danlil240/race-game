@@ -40,6 +40,7 @@ namespace FamilyRacing
         private RaceEffectsPresenter raceEffects;
         private RaceAudioPresenter raceAudio;
         private GadgetPresenter gadgetPresenter;
+        private RearViewMirror rearViewMirror;
         private ValidationBridge bridge;
         private FoundationInput driverInput;
         private FoundationShell shell;
@@ -141,6 +142,9 @@ namespace FamilyRacing
             gadgetPresenter = GetComponent<GadgetPresenter>();
             if (gadgetPresenter == null)
                 gadgetPresenter = gameObject.AddComponent<GadgetPresenter>();
+            rearViewMirror = GetComponent<RearViewMirror>();
+            if (rearViewMirror == null)
+                rearViewMirror = gameObject.AddComponent<RearViewMirror>();
             raceEffects.Bind(
                 drivingWorld != null ? drivingWorld.PresentationCatalog : null);
             raceAudio.Bind(
@@ -434,6 +438,10 @@ namespace FamilyRacing
             RefreshPresentation(state);
             state.presentation = presentation.Copy();
             shell?.Refresh(state);
+            if (rearViewMirror != null)
+                rearViewMirror.ApplyFrame(state,
+                    GetComponent<UnityEngine.UIElements.UIDocument>()?.rootVisualElement,
+                    Time.unscaledDeltaTime);
             // Cue announcements and icon demonstrations follow the latest
             // published tutorial state — never the other way around.
             if (tutorialPresenter != null)
