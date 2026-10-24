@@ -22,7 +22,10 @@ namespace FamilyRacing.EditorTools
         private const string AndroidPluginsDir = "Assets/Plugins/Android";
         private const string AndroidManifestPath = AndroidPluginsDir + "/AndroidManifest.xml";
 
-        // unityLibrary manifest additions. All three are Android "normal"
+        // A custom unityLibrary manifest replaces Unity's default, so retain
+        // its launcher activities as well as the LAN permissions. Unity
+        // disables the unused activity for the configured application entry.
+        // All three permissions are Android "normal"
         // permissions granted at install time — no runtime dialog. INTERNET
         // covers unicast + broadcast UDP; ACCESS_NETWORK_STATE lets join
         // flows distinguish "no network" from "denied";
@@ -34,6 +37,23 @@ namespace FamilyRacing.EditorTools
             "    <uses-permission android:name=\"android.permission.INTERNET\" />\n" +
             "    <uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\" />\n" +
             "    <uses-permission android:name=\"android.permission.CHANGE_WIFI_MULTICAST_STATE\" />\n" +
+            "    <application>\n" +
+            "        <activity android:name=\"com.unity3d.player.UnityPlayerActivity\" android:theme=\"@style/UnityThemeSelector\">\n" +
+            "            <intent-filter>\n" +
+            "                <action android:name=\"android.intent.action.MAIN\" />\n" +
+            "                <category android:name=\"android.intent.category.LAUNCHER\" />\n" +
+            "            </intent-filter>\n" +
+            "            <meta-data android:name=\"unityplayer.UnityActivity\" android:value=\"true\" />\n" +
+            "        </activity>\n" +
+            "        <activity android:name=\"com.unity3d.player.UnityPlayerGameActivity\" android:theme=\"@style/BaseUnityGameActivityTheme\">\n" +
+            "            <intent-filter>\n" +
+            "                <action android:name=\"android.intent.action.MAIN\" />\n" +
+            "                <category android:name=\"android.intent.category.LAUNCHER\" />\n" +
+            "            </intent-filter>\n" +
+            "            <meta-data android:name=\"unityplayer.UnityActivity\" android:value=\"true\" />\n" +
+            "            <meta-data android:name=\"android.app.lib_name\" android:value=\"game\" />\n" +
+            "        </activity>\n" +
+            "    </application>\n" +
             "</manifest>\n";
 
         public static void Create()
