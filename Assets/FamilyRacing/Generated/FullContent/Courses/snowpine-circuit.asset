@@ -1,0 +1,845 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e1737e445efac134bbec13747fa282c1, type: 3}
+  m_Name: snowpine-circuit
+  m_EditorClassIdentifier: FamilyRacing.Runtime::FamilyRacing.TrackDefinitionAsset
+  courseId: snowpine-circuit
+  isOpenRoute: 0
+  nameEn: Snowpine Circuit
+  nameHe: "\u05DE\u05E1\u05DC\u05D5\u05DC \u05D0\u05D5\u05E8\u05E0\u05D9 \u05D4\u05E9\u05DC\u05D2"
+  spawnPosition: {x: 6388.098, y: -0.08577967, z: -219.75558}
+  spawnHeadingDegrees: 95.35121
+  gates:
+  - id: start
+    center: {x: 6400, y: 0.2, z: -221.2328}
+    halfWidth: 8
+    direction: {x: 0.9951796, y: -0.09321721}
+    recoverPosition: {x: 6395.0317, y: 0.12750736, z: -220.68983}
+    recoverHeadingDegrees: 95.35121
+  - id: gate-1
+    center: {x: 6605.005, y: -1.9650635, z: 110.61642}
+    halfWidth: 8
+    direction: {x: -0.4346417, y: 0.90060276}
+    recoverPosition: {x: 6607.0996, y: -1.8769498, z: 106.07647}
+    recoverHeadingDegrees: -25.762514
+  - id: gate-2
+    center: {x: 6400, y: 0.20000042, z: 208.7672}
+    halfWidth: 8
+    direction: {x: -0.9950364, y: -0.09875512}
+    recoverPosition: {x: 6404.9795, y: 0.21886691, z: 209.21558}
+    recoverHeadingDegrees: -95.66792
+  - id: gate-3
+    center: {x: 6206.5464, y: -1.9650631, z: -104.38358}
+    halfWidth: 8
+    direction: {x: 0.6144826, y: -0.7886221}
+    recoverPosition: {x: 6203.513, y: -1.7722753, z: -100.41014}
+    recoverHeadingDegrees: 142.07481
+  spawnSlots:
+  - position: {x: 6388.395, y: -0.08577967, z: -217.37402}
+    headingDegrees: 95.35121
+  - position: {x: 6387.8013, y: -0.08577967, z: -222.13715}
+    headingDegrees: 95.35121
+  - position: {x: 6381.6396, y: -0.2979985, z: -216.21991}
+    headingDegrees: 95.35121
+  - position: {x: 6380.7627, y: -0.2979985, z: -220.93921}
+    headingDegrees: 95.35121
+  aiRoute:
+  - x: 6400
+    z: -221.2328
+    radius: 4
+  - x: 6406.2124
+    z: -221.71817
+    radius: 4
+  - x: 6412.449
+    z: -222.00899
+    radius: 4
+  - x: 6418.703
+    z: -222.10127
+    radius: 4
+  - x: 6424.9653
+    z: -221.99164
+    radius: 4
+  - x: 6431.227
+    z: -221.67732
+    radius: 4
+  - x: 6437.4795
+    z: -221.1562
+    radius: 4
+  - x: 6443.7134
+    z: -220.42683
+    radius: 4
+  - x: 6449.9194
+    z: -219.48846
+    radius: 4
+  - x: 6456.0884
+    z: -218.34108
+    radius: 4
+  - x: 6462.211
+    z: -216.98532
+    radius: 4
+  - x: 6468.278
+    z: -215.4226
+    radius: 4
+  - x: 6474.2803
+    z: -213.655
+    radius: 4
+  - x: 6480.209
+    z: -211.68527
+    radius: 4
+  - x: 6486.0557
+    z: -209.51686
+    radius: 4
+  - x: 6491.8125
+    z: -207.15388
+    radius: 4
+  - x: 6497.4707
+    z: -204.60103
+    radius: 4
+  - x: 6503.024
+    z: -201.86356
+    radius: 4
+  - x: 6508.4644
+    z: -198.9473
+    radius: 4
+  - x: 6513.7866
+    z: -195.8585
+    radius: 4
+  - x: 6518.984
+    z: -192.60391
+    radius: 4
+  - x: 6524.052
+    z: -189.19063
+    radius: 4
+  - x: 6528.9854
+    z: -185.62608
+    radius: 4
+  - x: 6533.781
+    z: -181.91792
+    radius: 4
+  - x: 6538.435
+    z: -178.07405
+    radius: 4
+  - x: 6542.9453
+    z: -174.10248
+    radius: 4
+  - x: 6547.3096
+    z: -170.01129
+    radius: 4
+  - x: 6551.527
+    z: -165.80864
+    radius: 4
+  - x: 6555.5967
+    z: -161.5025
+    radius: 4
+  - x: 6559.519
+    z: -157.10088
+    radius: 4
+  - x: 6563.2944
+    z: -152.61148
+    radius: 4
+  - x: 6566.924
+    z: -148.0419
+    radius: 4
+  - x: 6570.4097
+    z: -143.39941
+    radius: 4
+  - x: 6573.7534
+    z: -138.69096
+    radius: 4
+  - x: 6576.958
+    z: -133.92314
+    radius: 4
+  - x: 6580.027
+    z: -129.10211
+    radius: 4
+  - x: 6582.9624
+    z: -124.233665
+    radius: 4
+  - x: 6585.769
+    z: -119.32303
+    radius: 4
+  - x: 6588.4507
+    z: -114.37502
+    radius: 4
+  - x: 6591.0107
+    z: -109.393936
+    radius: 4
+  - x: 6593.4536
+    z: -104.38359
+    radius: 4
+  - x: 6595.783
+    z: -99.34723
+    radius: 4
+  - x: 6598.0034
+    z: -94.28763
+    radius: 4
+  - x: 6600.118
+    z: -89.20702
+    radius: 4
+  - x: 6602.132
+    z: -84.10726
+    radius: 4
+  - x: 6604.047
+    z: -78.989624
+    radius: 4
+  - x: 6605.8667
+    z: -73.85498
+    radius: 4
+  - x: 6607.5947
+    z: -68.703865
+    radius: 4
+  - x: 6609.233
+    z: -63.536373
+    radius: 4
+  - x: 6610.7837
+    z: -58.352287
+    radius: 4
+  - x: 6612.248
+    z: -53.151154
+    radius: 4
+  - x: 6613.628
+    z: -47.93221
+    radius: 4
+  - x: 6614.923
+    z: -42.694626
+    radius: 4
+  - x: 6616.1333
+    z: -37.437366
+    radius: 4
+  - x: 6617.2593
+    z: -32.159317
+    radius: 4
+  - x: 6618.299
+    z: -26.859436
+    radius: 4
+  - x: 6619.251
+    z: -21.536648
+    radius: 4
+  - x: 6620.1133
+    z: -16.19
+    radius: 4
+  - x: 6620.8833
+    z: -10.818695
+    radius: 4
+  - x: 6621.5576
+    z: -5.4221196
+    radius: 4
+  - x: 6622.1323
+    z: 0.000009074492
+    radius: 4
+  - x: 6622.6035
+    z: 5.4477396
+    radius: 4
+  - x: 6622.967
+    z: 10.920772
+    radius: 4
+  - x: 6623.218
+    z: 16.418337
+    radius: 4
+  - x: 6623.35
+    z: 21.939318
+    radius: 4
+  - x: 6623.36
+    z: 27.482115
+    radius: 4
+  - x: 6623.24
+    z: 33.04464
+    radius: 4
+  - x: 6622.986
+    z: 38.62433
+    radius: 4
+  - x: 6622.5913
+    z: 44.218037
+    radius: 4
+  - x: 6622.051
+    z: 49.822147
+    radius: 4
+  - x: 6621.3584
+    z: 55.432537
+    radius: 4
+  - x: 6620.5083
+    z: 61.04447
+    radius: 4
+  - x: 6619.4956
+    z: 66.65279
+    radius: 4
+  - x: 6618.315
+    z: 72.25181
+    radius: 4
+  - x: 6616.962
+    z: 77.83537
+    radius: 4
+  - x: 6615.4316
+    z: 83.396904
+    radius: 4
+  - x: 6613.72
+    z: 88.929344
+    radius: 4
+  - x: 6611.8247
+    z: 94.425354
+    radius: 4
+  - x: 6609.7417
+    z: 99.87725
+    radius: 4
+  - x: 6607.4688
+    z: 105.27697
+    radius: 4
+  - x: 6605.005
+    z: 110.61642
+    radius: 4
+  - x: 6602.348
+    z: 115.88716
+    radius: 4
+  - x: 6599.4995
+    z: 121.0807
+    radius: 4
+  - x: 6596.458
+    z: 126.18856
+    radius: 4
+  - x: 6593.225
+    z: 131.20213
+    radius: 4
+  - x: 6589.803
+    z: 136.11307
+    radius: 4
+  - x: 6586.194
+    z: 140.913
+    radius: 4
+  - x: 6582.4014
+    z: 145.59375
+    radius: 4
+  - x: 6578.4287
+    z: 150.14755
+    radius: 4
+  - x: 6574.281
+    z: 154.5668
+    radius: 4
+  - x: 6569.9634
+    z: 158.84428
+    radius: 4
+  - x: 6565.482
+    z: 162.97334
+    radius: 4
+  - x: 6560.843
+    z: 166.94763
+    radius: 4
+  - x: 6556.053
+    z: 170.76137
+    radius: 4
+  - x: 6551.12
+    z: 174.40941
+    radius: 4
+  - x: 6546.0522
+    z: 177.88707
+    radius: 4
+  - x: 6540.8574
+    z: 181.19046
+    radius: 4
+  - x: 6535.5444
+    z: 184.31618
+    radius: 4
+  - x: 6530.1216
+    z: 187.26152
+    radius: 4
+  - x: 6524.5986
+    z: 190.02457
+    radius: 4
+  - x: 6518.984
+    z: 192.60391
+    radius: 4
+  - x: 6513.287
+    z: 194.999
+    radius: 4
+  - x: 6507.517
+    z: 197.2098
+    radius: 4
+  - x: 6501.6836
+    z: 199.23701
+    radius: 4
+  - x: 6495.7944
+    z: 201.08199
+    radius: 4
+  - x: 6489.859
+    z: 202.74664
+    radius: 4
+  - x: 6483.8857
+    z: 204.23349
+    radius: 4
+  - x: 6477.883
+    z: 205.5456
+    radius: 4
+  - x: 6471.8574
+    z: 206.68651
+    radius: 4
+  - x: 6465.8174
+    z: 207.66022
+    radius: 4
+  - x: 6459.77
+    z: 208.47118
+    radius: 4
+  - x: 6453.7207
+    z: 209.12405
+    radius: 4
+  - x: 6447.676
+    z: 209.62395
+    radius: 4
+  - x: 6441.641
+    z: 209.97612
+    radius: 4
+  - x: 6435.6206
+    z: 210.186
+    radius: 4
+  - x: 6429.6187
+    z: 210.25911
+    radius: 4
+  - x: 6423.6396
+    z: 210.2011
+    radius: 4
+  - x: 6417.6855
+    z: 210.01746
+    radius: 4
+  - x: 6411.76
+    z: 209.71371
+    radius: 4
+  - x: 6405.8643
+    z: 209.29524
+    radius: 4
+  - x: 6400
+    z: 208.7672
+    radius: 4
+  - x: 6394.1685
+    z: 208.13446
+    radius: 4
+  - x: 6388.3696
+    z: 207.4017
+    radius: 4
+  - x: 6382.6045
+    z: 206.57318
+    radius: 4
+  - x: 6376.872
+    z: 205.65277
+    radius: 4
+  - x: 6371.1724
+    z: 204.64397
+    radius: 4
+  - x: 6365.504
+    z: 203.54979
+    radius: 4
+  - x: 6359.8667
+    z: 202.37279
+    radius: 4
+  - x: 6354.2593
+    z: 201.11499
+    radius: 4
+  - x: 6348.68
+    z: 199.77797
+    radius: 4
+  - x: 6343.1284
+    z: 198.36278
+    radius: 4
+  - x: 6337.6025
+    z: 196.86987
+    radius: 4
+  - x: 6332.1016
+    z: 195.2993
+    radius: 4
+  - x: 6326.6245
+    z: 193.65057
+    radius: 4
+  - x: 6321.171
+    z: 191.92271
+    radius: 4
+  - x: 6315.7397
+    z: 190.1143
+    radius: 4
+  - x: 6310.331
+    z: 188.22351
+    radius: 4
+  - x: 6304.946
+    z: 186.2481
+    radius: 4
+  - x: 6299.5835
+    z: 184.18552
+    radius: 4
+  - x: 6294.2456
+    z: 182.03284
+    radius: 4
+  - x: 6288.934
+    z: 179.78699
+    radius: 4
+  - x: 6283.65
+    z: 177.44464
+    radius: 4
+  - x: 6278.397
+    z: 175.00226
+    radius: 4
+  - x: 6273.1772
+    z: 172.45634
+    radius: 4
+  - x: 6267.9946
+    z: 169.80324
+    radius: 4
+  - x: 6262.854
+    z: 167.03943
+    radius: 4
+  - x: 6257.7593
+    z: 164.16144
+    radius: 4
+  - x: 6252.716
+    z: 161.16592
+    radius: 4
+  - x: 6247.7295
+    z: 158.04976
+    radius: 4
+  - x: 6242.807
+    z: 154.8101
+    radius: 4
+  - x: 6237.9546
+    z: 151.44441
+    radius: 4
+  - x: 6233.179
+    z: 147.95055
+    radius: 4
+  - x: 6228.489
+    z: 144.3267
+    radius: 4
+  - x: 6223.8906
+    z: 140.57166
+    radius: 4
+  - x: 6219.393
+    z: 136.6846
+    radius: 4
+  - x: 6215.005
+    z: 132.6653
+    radius: 4
+  - x: 6210.734
+    z: 128.51396
+    radius: 4
+  - x: 6206.589
+    z: 124.23164
+    radius: 4
+  - x: 6202.578
+    z: 119.81977
+    radius: 4
+  - x: 6198.711
+    z: 115.28037
+    radius: 4
+  - x: 6194.995
+    z: 110.61638
+    radius: 4
+  - x: 6191.4395
+    z: 105.83104
+    radius: 4
+  - x: 6188.0513
+    z: 100.92824
+    radius: 4
+  - x: 6184.839
+    z: 95.912704
+    radius: 4
+  - x: 6181.809
+    z: 90.78949
+    radius: 4
+  - x: 6178.9697
+    z: 85.564186
+    radius: 4
+  - x: 6176.326
+    z: 80.24318
+    radius: 4
+  - x: 6173.8853
+    z: 74.83307
+    radius: 4
+  - x: 6171.652
+    z: 69.34095
+    radius: 4
+  - x: 6169.631
+    z: 63.774265
+    radius: 4
+  - x: 6167.8257
+    z: 58.14103
+    radius: 4
+  - x: 6166.24
+    z: 52.449303
+    radius: 4
+  - x: 6164.877
+    z: 46.70734
+    radius: 4
+  - x: 6163.738
+    z: 40.92389
+    radius: 4
+  - x: 6162.8237
+    z: 35.107494
+    radius: 4
+  - x: 6162.1353
+    z: 29.26675
+    radius: 4
+  - x: 6161.6714
+    z: 23.410555
+    radius: 4
+  - x: 6161.4316
+    z: 17.547413
+    radius: 4
+  - x: 6161.4136
+    z: 11.685701
+    radius: 4
+  - x: 6161.615
+    z: 5.8339176
+    radius: 4
+  - x: 6162.032
+    z: -0.0000026520918
+    radius: 4
+  - x: 6162.661
+    z: -5.808427
+    radius: 4
+  - x: 6163.4976
+    z: -11.583754
+    radius: 4
+  - x: 6164.536
+    z: -17.3191
+    radius: 4
+  - x: 6165.771
+    z: -23.00801
+    radius: 4
+  - x: 6167.196
+    z: -28.6442
+    radius: 4
+  - x: 6168.8047
+    z: -34.222195
+    radius: 4
+  - x: 6170.5903
+    z: -39.736946
+    radius: 4
+  - x: 6172.546
+    z: -45.184055
+    radius: 4
+  - x: 6174.6636
+    z: -50.559387
+    radius: 4
+  - x: 6176.936
+    z: -55.859673
+    radius: 4
+  - x: 6179.3555
+    z: -61.082203
+    radius: 4
+  - x: 6181.9146
+    z: -66.224556
+    radius: 4
+  - x: 6184.606
+    z: -71.28514
+    radius: 4
+  - x: 6187.4214
+    z: -76.26291
+    radius: 4
+  - x: 6190.3545
+    z: -81.15703
+    radius: 4
+  - x: 6193.398
+    z: -85.96743
+    radius: 4
+  - x: 6196.545
+    z: -90.694496
+    radius: 4
+  - x: 6199.7896
+    z: -95.33873
+    radius: 4
+  - x: 6203.125
+    z: -99.901306
+    radius: 4
+  - x: 6206.5464
+    z: -104.38358
+    radius: 4
+  - x: 6210.049
+    z: -108.78729
+    radius: 4
+  - x: 6213.627
+    z: -113.114105
+    radius: 4
+  - x: 6217.2773
+    z: -117.36613
+    radius: 4
+  - x: 6220.9966
+    z: -121.545555
+    radius: 4
+  - x: 6224.7812
+    z: -125.65437
+    radius: 4
+  - x: 6228.629
+    z: -129.6948
+    radius: 4
+  - x: 6232.5386
+    z: -133.66896
+    radius: 4
+  - x: 6236.508
+    z: -137.57866
+    radius: 4
+  - x: 6240.536
+    z: -141.42569
+    radius: 4
+  - x: 6244.6235
+    z: -145.21169
+    radius: 4
+  - x: 6248.77
+    z: -148.93768
+    radius: 4
+  - x: 6252.9756
+    z: -152.60468
+    radius: 4
+  - x: 6257.242
+    z: -156.21326
+    radius: 4
+  - x: 6261.57
+    z: -159.76341
+    radius: 4
+  - x: 6265.9614
+    z: -163.25487
+    radius: 4
+  - x: 6270.4175
+    z: -166.6869
+    radius: 4
+  - x: 6274.941
+    z: -170.05812
+    radius: 4
+  - x: 6279.533
+    z: -173.36684
+    radius: 4
+  - x: 6284.197
+    z: -176.61072
+    radius: 4
+  - x: 6288.934
+    z: -179.78705
+    radius: 4
+  - x: 6293.7466
+    z: -182.8924
+    radius: 4
+  - x: 6298.636
+    z: -185.92303
+    radius: 4
+  - x: 6303.6055
+    z: -188.87471
+    radius: 4
+  - x: 6308.655
+    z: -191.74258
+    radius: 4
+  - x: 6313.7866
+    z: -194.52156
+    radius: 4
+  - x: 6319.0005
+    z: -197.20613
+    radius: 4
+  - x: 6324.2983
+    z: -199.79027
+    radius: 4
+  - x: 6329.6787
+    z: -202.2678
+    radius: 4
+  - x: 6335.142
+    z: -204.6323
+    radius: 4
+  - x: 6340.6875
+    z: -206.87695
+    radius: 4
+  - x: 6346.3125
+    z: -208.99501
+    radius: 4
+  - x: 6352.0156
+    z: -210.97952
+    radius: 4
+  - x: 6357.7944
+    z: -212.82353
+    radius: 4
+  - x: 6363.645
+    z: -214.52
+    radius: 4
+  - x: 6369.5635
+    z: -216.06218
+    radius: 4
+  - x: 6375.546
+    z: -217.44334
+    radius: 4
+  - x: 6381.587
+    z: -218.65701
+    radius: 4
+  - x: 6387.68
+    z: -219.69699
+    radius: 4
+  - x: 6393.8203
+    z: -220.55742
+    radius: 4
+  recoveryBounds:
+  - min: {x: 6143.414, y: -20.413624, z: -240.10124}
+    max: {x: 6641.3594, y: 20.813625, z: 274.2409}
+  safePoses:
+  - position: {x: 6392.0576, y: 0.036074203, z: -220.31042}
+    headingDegrees: 95.35121
+  - position: {x: 6608.291, y: -1.8698583, z: 103.3235}
+    headingDegrees: -25.762514
+  - position: {x: 6407.97, y: 0.1822834, z: 209.44473}
+    headingDegrees: -95.66792
+  - position: {x: 6201.733, y: -1.7024783, z: -97.99687}
+    headingDegrees: 142.07481
+  pickupSites:
+  - id: snowpine-circuit-pickup-0-0
+    center: {x: 6473.3833, y: 2.2762258, z: -210.79216}
+    radiusMeters: 1.65
+    verticalRangeMeters: 2.5
+  - id: snowpine-circuit-pickup-0-1
+    center: {x: 6474.2803, y: 2.2762258, z: -213.655}
+    radiusMeters: 1.65
+    verticalRangeMeters: 2.5
+  - id: snowpine-circuit-pickup-0-2
+    center: {x: 6475.1772, y: 2.2762258, z: -216.51784}
+    radiusMeters: 1.65
+    verticalRangeMeters: 2.5
+  - id: snowpine-circuit-pickup-1-0
+    center: {x: 6567.891, y: -1.7696699, z: 156.67516}
+    radiusMeters: 1.65
+    verticalRangeMeters: 2.5
+  - id: snowpine-circuit-pickup-1-1
+    center: {x: 6569.9634, y: -1.7696699, z: 158.84428}
+    radiusMeters: 1.65
+    verticalRangeMeters: 2.5
+  - id: snowpine-circuit-pickup-1-2
+    center: {x: 6572.0356, y: -1.7696699, z: 161.01341}
+    radiusMeters: 1.65
+    verticalRangeMeters: 2.5
+  - id: snowpine-circuit-pickup-2-0
+    center: {x: 6343.89, y: 0.91966987, z: 195.4611}
+    radiusMeters: 1.65
+    verticalRangeMeters: 2.5
+  - id: snowpine-circuit-pickup-2-1
+    center: {x: 6343.1284, y: 0.91966987, z: 198.36278}
+    radiusMeters: 1.65
+    verticalRangeMeters: 2.5
+  - id: snowpine-circuit-pickup-2-2
+    center: {x: 6342.3667, y: 0.91966987, z: 201.26445}
+    radiusMeters: 1.65
+    verticalRangeMeters: 2.5
+  - id: snowpine-circuit-pickup-3-0
+    center: {x: 6246.6455, y: -2.8303306, z: -142.99544}
+    radiusMeters: 1.65
+    verticalRangeMeters: 2.5
+  - id: snowpine-circuit-pickup-3-1
+    center: {x: 6244.6235, y: -2.8303306, z: -145.21169}
+    radiusMeters: 1.65
+    verticalRangeMeters: 2.5
+  - id: snowpine-circuit-pickup-3-2
+    center: {x: 6242.6016, y: -2.8303306, z: -147.42793}
+    radiusMeters: 1.65
+    verticalRangeMeters: 2.5
+  shortcutLanes:
+  - id: snowpine-circuit-shortcut-1
+    center: {x: 6585.124, y: 1.4708377, z: -90.04429}
+    halfWidth: 4.5
+    direction: {x: 0.41996732, y: 0.90732163}
+  - id: snowpine-circuit-shortcut-2
+    center: {x: 6208.8604, y: 1.5326087, z: 84.820175}
+    halfWidth: 4.5
+    direction: {x: -0.5151157, y: -0.8571057}

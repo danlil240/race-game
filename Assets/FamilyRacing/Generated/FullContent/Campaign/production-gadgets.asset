@@ -1,0 +1,107 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c1b2c3d4e5f64789a0b1c2d3e4f50c0c, type: 3}
+  m_Name: production-gadgets
+  m_EditorClassIdentifier: FamilyRacing.Runtime::FamilyRacing.GadgetCatalogAsset
+  pickupRespawnTicks: 300
+  heldSlotCapacity: 1
+  gadgets:
+  - gadgetId: turbo-01
+    kind: turbo
+    durationTicks: 150
+    accelerationMultiplier: 1.75
+    speedCapMultiplier: 1.5
+    charges: 0
+    patchRadiusMeters: 0
+    patchLifetimeTicks: 0
+    slowMultiplier: 1
+    slowDurationTicks: 0
+    immunityTicks: 0
+    projectileSpeedMetersPerSecond: 45
+    targetingRangeMeters: 70
+    turnRadiansPerSecond: 3
+    armingTicks: 18
+  - gadgetId: bubble-shield-01
+    kind: bubble-shield
+    durationTicks: 0
+    accelerationMultiplier: 1
+    speedCapMultiplier: 1
+    charges: 1
+    patchRadiusMeters: 0
+    patchLifetimeTicks: 0
+    slowMultiplier: 1
+    slowDurationTicks: 0
+    immunityTicks: 0
+    projectileSpeedMetersPerSecond: 45
+    targetingRangeMeters: 70
+    turnRadiansPerSecond: 3
+    armingTicks: 18
+  - gadgetId: foam-trap-01
+    kind: foam-trap
+    durationTicks: 0
+    accelerationMultiplier: 1
+    speedCapMultiplier: 1
+    charges: 0
+    patchRadiusMeters: 3
+    patchLifetimeTicks: 180
+    slowMultiplier: 0.7
+    slowDurationTicks: 45
+    immunityTicks: 60
+    projectileSpeedMetersPerSecond: 45
+    targetingRangeMeters: 70
+    turnRadiansPerSecond: 3
+    armingTicks: 18
+  - gadgetId: homing-missile-01
+    kind: homing-missile
+    durationTicks: 0
+    accelerationMultiplier: 1
+    speedCapMultiplier: 1
+    charges: 0
+    patchRadiusMeters: 1.5
+    patchLifetimeTicks: 90
+    slowMultiplier: 0.4
+    slowDurationTicks: 27
+    immunityTicks: 45
+    projectileSpeedMetersPerSecond: 45
+    targetingRangeMeters: 70
+    turnRadiansPerSecond: 3
+    armingTicks: 18
+  - gadgetId: mine-01
+    kind: mine
+    durationTicks: 0
+    accelerationMultiplier: 1
+    speedCapMultiplier: 1
+    charges: 0
+    patchRadiusMeters: 2.5
+    patchLifetimeTicks: 360
+    slowMultiplier: 0.35
+    slowDurationTicks: 36
+    immunityTicks: 45
+    projectileSpeedMetersPerSecond: 45
+    targetingRangeMeters: 70
+    turnRadiansPerSecond: 3
+    armingTicks: 18
+  - gadgetId: emp-pulse-01
+    kind: emp-pulse
+    durationTicks: 0
+    accelerationMultiplier: 1
+    speedCapMultiplier: 1
+    charges: 0
+    patchRadiusMeters: 12
+    patchLifetimeTicks: 15
+    slowMultiplier: 0.6
+    slowDurationTicks: 45
+    immunityTicks: 45
+    projectileSpeedMetersPerSecond: 45
+    targetingRangeMeters: 70
+    turnRadiansPerSecond: 3
+    armingTicks: 18

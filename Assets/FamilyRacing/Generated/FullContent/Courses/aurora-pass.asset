@@ -1,0 +1,845 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e1737e445efac134bbec13747fa282c1, type: 3}
+  m_Name: aurora-pass
+  m_EditorClassIdentifier: FamilyRacing.Runtime::FamilyRacing.TrackDefinitionAsset
+  courseId: aurora-pass
+  isOpenRoute: 0
+  nameEn: Aurora Pass
+  nameHe: "\u05DE\u05E2\u05D1\u05E8 \u05D4\u05D6\u05D5\u05D4\u05E8"
+  spawnPosition: {x: 7988.052, y: 0.014849335, z: -293.80304}
+  spawnHeadingDegrees: 93.67381
+  gates:
+  - id: start
+    center: {x: 8000, y: 0.2, z: -294.86865}
+    halfWidth: 8
+    direction: {x: 0.9977015, y: -0.064060524}
+    recoverPosition: {x: 7995.017, y: 0.16946647, z: -294.4694}
+    recoverHeadingDegrees: 93.67381
+  - id: gate-1
+    center: {x: 8238.842, y: -1.9650635, z: 124.230034}
+    halfWidth: 8
+    direction: {x: -0.4184386, y: 0.90824455}
+    recoverPosition: {x: 8240.891, y: -1.8778905, z: 119.66907}
+    recoverHeadingDegrees: -24.736063
+  - id: gate-2
+    center: {x: 8000, y: 0.20000042, z: 294.86865}
+    halfWidth: 8
+    direction: {x: -0.9979098, y: 0.06407568}
+    recoverPosition: {x: 8004.984, y: 0.23803733, z: 294.4693}
+    recoverHeadingDegrees: -86.32609
+  - id: gate-3
+    center: {x: 7761.158, y: -1.9650631, z: -124.229996}
+    halfWidth: 8
+    direction: {x: 0.41836625, y: -0.9080875}
+    recoverPosition: {x: 7759.11, y: -1.7894413, z: -119.66987}
+    recoverHeadingDegrees: 155.26395
+  spawnSlots:
+  - position: {x: 7988.2812, y: 0.014849335, z: -291.41403}
+    headingDegrees: 93.67381
+  - position: {x: 7987.8223, y: 0.014849335, z: -296.19205}
+    headingDegrees: 93.67381
+  - position: {x: 7981.408, y: -0.13942029, z: -290.58588}
+    headingDegrees: 93.67381
+  - position: {x: 7980.8, y: -0.13942029, z: -295.3471}
+    headingDegrees: 93.67381
+  aiRoute:
+  - x: 8000
+    z: -294.86865
+    radius: 4
+  - x: 8008.583
+    z: -295.2836
+    radius: 4
+  - x: 8017.1855
+    z: -295.42603
+    radius: 4
+  - x: 8025.7964
+    z: -295.29416
+    radius: 4
+  - x: 8034.4033
+    z: -294.88693
+    radius: 4
+  - x: 8042.993
+    z: -294.2039
+    radius: 4
+  - x: 8051.5547
+    z: -293.24524
+    radius: 4
+  - x: 8060.0747
+    z: -292.0118
+    radius: 4
+  - x: 8068.541
+    z: -290.50513
+    radius: 4
+  - x: 8076.9424
+    z: -288.72726
+    radius: 4
+  - x: 8085.2656
+    z: -286.68103
+    radius: 4
+  - x: 8093.5
+    z: -284.36972
+    radius: 4
+  - x: 8101.6333
+    z: -281.7974
+    radius: 4
+  - x: 8109.655
+    z: -278.96854
+    radius: 4
+  - x: 8117.553
+    z: -275.88837
+    radius: 4
+  - x: 8125.318
+    z: -272.5625
+    radius: 4
+  - x: 8132.9395
+    z: -268.9971
+    radius: 4
+  - x: 8140.4077
+    z: -265.19897
+    radius: 4
+  - x: 8147.714
+    z: -261.17508
+    radius: 4
+  - x: 8154.8486
+    z: -256.93314
+    radius: 4
+  - x: 8161.8047
+    z: -252.48102
+    radius: 4
+  - x: 8168.574
+    z: -247.82706
+    radius: 4
+  - x: 8175.1504
+    z: -242.97986
+    radius: 4
+  - x: 8181.5264
+    z: -237.94835
+    radius: 4
+  - x: 8187.6973
+    z: -232.74165
+    radius: 4
+  - x: 8193.658
+    z: -227.36911
+    radius: 4
+  - x: 8199.403
+    z: -221.84021
+    radius: 4
+  - x: 8204.931
+    z: -216.16452
+    radius: 4
+  - x: 8210.235
+    z: -210.35173
+    radius: 4
+  - x: 8215.317
+    z: -204.41154
+    radius: 4
+  - x: 8220.173
+    z: -198.35355
+    radius: 4
+  - x: 8224.801
+    z: -192.18747
+    radius: 4
+  - x: 8229.202
+    z: -185.92274
+    radius: 4
+  - x: 8233.375
+    z: -179.56883
+    radius: 4
+  - x: 8237.322
+    z: -173.13487
+    radius: 4
+  - x: 8241.044
+    z: -166.62988
+    radius: 4
+  - x: 8244.541
+    z: -160.06265
+    radius: 4
+  - x: 8247.817
+    z: -153.4416
+    radius: 4
+  - x: 8250.875
+    z: -146.77492
+    radius: 4
+  - x: 8253.718
+    z: -140.07045
+    radius: 4
+  - x: 8256.348
+    z: -133.33565
+    radius: 4
+  - x: 8258.7705
+    z: -126.577614
+    radius: 4
+  - x: 8260.99
+    z: -119.803024
+    radius: 4
+  - x: 8263.012
+    z: -113.01809
+    radius: 4
+  - x: 8264.839
+    z: -106.22874
+    radius: 4
+  - x: 8266.478
+    z: -99.44027
+    radius: 4
+  - x: 8267.934
+    z: -92.6576
+    radius: 4
+  - x: 8269.211
+    z: -85.88525
+    radius: 4
+  - x: 8270.316
+    z: -79.1272
+    radius: 4
+  - x: 8271.256
+    z: -72.386955
+    radius: 4
+  - x: 8272.033
+    z: -65.66765
+    radius: 4
+  - x: 8272.655
+    z: -58.971848
+    radius: 4
+  - x: 8273.128
+    z: -52.301823
+    radius: 4
+  - x: 8273.455
+    z: -45.659313
+    radius: 4
+  - x: 8273.643
+    z: -39.045647
+    radius: 4
+  - x: 8273.695
+    z: -32.46185
+    radius: 4
+  - x: 8273.618
+    z: -25.908503
+    radius: 4
+  - x: 8273.416
+    z: -19.385853
+    radius: 4
+  - x: 8273.092
+    z: -12.893838
+    radius: 4
+  - x: 8272.651
+    z: -6.43207
+    radius: 4
+  - x: 8272.096
+    z: 0.000010715032
+    radius: 4
+  - x: 8271.43
+    z: 6.403282
+    radius: 4
+  - x: 8270.655
+    z: 12.77882
+    radius: 4
+  - x: 8269.775
+    z: 19.127775
+    radius: 4
+  - x: 8268.792
+    z: 25.451517
+    radius: 4
+  - x: 8267.706
+    z: 31.751472
+    radius: 4
+  - x: 8266.519
+    z: 38.02912
+    radius: 4
+  - x: 8265.2295
+    z: 44.28601
+    radius: 4
+  - x: 8263.841
+    z: 50.523552
+    radius: 4
+  - x: 8262.352
+    z: 56.743217
+    radius: 4
+  - x: 8260.76
+    z: 62.94637
+    radius: 4
+  - x: 8259.066
+    z: 69.134155
+    radius: 4
+  - x: 8257.269
+    z: 75.30766
+    radius: 4
+  - x: 8255.364
+    z: 81.46776
+    radius: 4
+  - x: 8253.352
+    z: 87.61507
+    radius: 4
+  - x: 8251.2295
+    z: 93.74999
+    radius: 4
+  - x: 8248.992
+    z: 99.87257
+    radius: 4
+  - x: 8246.639
+    z: 105.98259
+    radius: 4
+  - x: 8244.165
+    z: 112.07954
+    radius: 4
+  - x: 8241.567
+    z: 118.16241
+    radius: 4
+  - x: 8238.842
+    z: 124.230034
+    radius: 4
+  - x: 8235.984
+    z: 130.28064
+    radius: 4
+  - x: 8232.991
+    z: 136.31212
+    radius: 4
+  - x: 8229.858
+    z: 142.322
+    radius: 4
+  - x: 8226.581
+    z: 148.3073
+    radius: 4
+  - x: 8223.156
+    z: 154.26471
+    radius: 4
+  - x: 8219.579
+    z: 160.19038
+    radius: 4
+  - x: 8215.845
+    z: 166.08
+    radius: 4
+  - x: 8211.95
+    z: 171.92899
+    radius: 4
+  - x: 8207.893
+    z: 177.73222
+    radius: 4
+  - x: 8203.667
+    z: 183.4841
+    radius: 4
+  - x: 8199.271
+    z: 189.17885
+    radius: 4
+  - x: 8194.702
+    z: 194.81009
+    radius: 4
+  - x: 8189.9575
+    z: 200.37114
+    radius: 4
+  - x: 8185.0347
+    z: 205.85507
+    radius: 4
+  - x: 8179.9326
+    z: 211.25449
+    radius: 4
+  - x: 8174.649
+    z: 216.56186
+    radius: 4
+  - x: 8169.1836
+    z: 221.76926
+    radius: 4
+  - x: 8163.5366
+    z: 226.86853
+    radius: 4
+  - x: 8157.7075
+    z: 231.85147
+    radius: 4
+  - x: 8151.6973
+    z: 236.70956
+    radius: 4
+  - x: 8145.508
+    z: 241.43428
+    radius: 4
+  - x: 8139.1406
+    z: 246.01688
+    radius: 4
+  - x: 8132.598
+    z: 250.44862
+    radius: 4
+  - x: 8125.884
+    z: 254.72089
+    radius: 4
+  - x: 8119.0015
+    z: 258.82492
+    radius: 4
+  - x: 8111.9556
+    z: 262.75208
+    radius: 4
+  - x: 8104.751
+    z: 266.49393
+    radius: 4
+  - x: 8097.3936
+    z: 270.04208
+    radius: 4
+  - x: 8089.889
+    z: 273.38837
+    radius: 4
+  - x: 8082.245
+    z: 276.525
+    radius: 4
+  - x: 8074.4683
+    z: 279.44427
+    radius: 4
+  - x: 8066.5674
+    z: 282.13895
+    radius: 4
+  - x: 8058.5503
+    z: 284.60205
+    radius: 4
+  - x: 8050.4263
+    z: 286.8271
+    radius: 4
+  - x: 8042.2046
+    z: 288.80786
+    radius: 4
+  - x: 8033.896
+    z: 290.5388
+    radius: 4
+  - x: 8025.5103
+    z: 292.0147
+    radius: 4
+  - x: 8017.058
+    z: 293.23096
+    radius: 4
+  - x: 8008.551
+    z: 294.18347
+    radius: 4
+  - x: 8000
+    z: 294.86865
+    radius: 4
+  - x: 7991.417
+    z: 295.28363
+    radius: 4
+  - x: 7982.8145
+    z: 295.42603
+    radius: 4
+  - x: 7974.2036
+    z: 295.29416
+    radius: 4
+  - x: 7965.5967
+    z: 294.88693
+    radius: 4
+  - x: 7957.007
+    z: 294.20386
+    radius: 4
+  - x: 7948.4453
+    z: 293.2452
+    radius: 4
+  - x: 7939.9253
+    z: 292.0118
+    radius: 4
+  - x: 7931.459
+    z: 290.5051
+    radius: 4
+  - x: 7923.0576
+    z: 288.72726
+    radius: 4
+  - x: 7914.7344
+    z: 286.68103
+    radius: 4
+  - x: 7906.5
+    z: 284.36972
+    radius: 4
+  - x: 7898.3667
+    z: 281.7974
+    radius: 4
+  - x: 7890.345
+    z: 278.96854
+    radius: 4
+  - x: 7882.447
+    z: 275.88837
+    radius: 4
+  - x: 7874.682
+    z: 272.5625
+    radius: 4
+  - x: 7867.0605
+    z: 268.9971
+    radius: 4
+  - x: 7859.5923
+    z: 265.1989
+    radius: 4
+  - x: 7852.286
+    z: 261.17508
+    radius: 4
+  - x: 7845.1514
+    z: 256.9331
+    radius: 4
+  - x: 7838.1953
+    z: 252.48099
+    radius: 4
+  - x: 7831.426
+    z: 247.82706
+    radius: 4
+  - x: 7824.8496
+    z: 242.97984
+    radius: 4
+  - x: 7818.4736
+    z: 237.94835
+    radius: 4
+  - x: 7812.3027
+    z: 232.74164
+    radius: 4
+  - x: 7806.3423
+    z: 227.36908
+    radius: 4
+  - x: 7800.5967
+    z: 221.84021
+    radius: 4
+  - x: 7795.07
+    z: 216.1645
+    radius: 4
+  - x: 7789.764
+    z: 210.35173
+    radius: 4
+  - x: 7784.683
+    z: 204.41151
+    radius: 4
+  - x: 7779.8276
+    z: 198.35352
+    radius: 4
+  - x: 7775.199
+    z: 192.18747
+    radius: 4
+  - x: 7770.7983
+    z: 185.92273
+    radius: 4
+  - x: 7766.6245
+    z: 179.5688
+    radius: 4
+  - x: 7762.6777
+    z: 173.13486
+    radius: 4
+  - x: 7758.9565
+    z: 166.62991
+    radius: 4
+  - x: 7755.459
+    z: 160.0626
+    radius: 4
+  - x: 7752.1826
+    z: 153.44159
+    radius: 4
+  - x: 7749.125
+    z: 146.77495
+    radius: 4
+  - x: 7746.2827
+    z: 140.07039
+    radius: 4
+  - x: 7743.652
+    z: 133.33563
+    radius: 4
+  - x: 7741.229
+    z: 126.57762
+    radius: 4
+  - x: 7739.0093
+    z: 119.80293
+    radius: 4
+  - x: 7736.9883
+    z: 113.018074
+    radius: 4
+  - x: 7735.161
+    z: 106.22873
+    radius: 4
+  - x: 7733.5225
+    z: 99.44018
+    radius: 4
+  - x: 7732.067
+    z: 92.65757
+    radius: 4
+  - x: 7730.789
+    z: 85.885254
+    radius: 4
+  - x: 7729.6836
+    z: 79.12722
+    radius: 4
+  - x: 7728.7446
+    z: 72.3869
+    radius: 4
+  - x: 7727.967
+    z: 65.66762
+    radius: 4
+  - x: 7727.3447
+    z: 58.971886
+    radius: 4
+  - x: 7726.8726
+    z: 52.301765
+    radius: 4
+  - x: 7726.5454
+    z: 45.659286
+    radius: 4
+  - x: 7726.3574
+    z: 39.04568
+    radius: 4
+  - x: 7726.3047
+    z: 32.461796
+    radius: 4
+  - x: 7726.382
+    z: 25.90848
+    radius: 4
+  - x: 7726.584
+    z: 19.38586
+    radius: 4
+  - x: 7726.9077
+    z: 12.893757
+    radius: 4
+  - x: 7727.349
+    z: 6.432048
+    radius: 4
+  - x: 7727.9043
+    z: -0.0000029231621
+    radius: 4
+  - x: 7728.5703
+    z: -6.4033613
+    radius: 4
+  - x: 7729.344
+    z: -12.778841
+    radius: 4
+  - x: 7730.224
+    z: -19.127766
+    radius: 4
+  - x: 7731.208
+    z: -25.451595
+    radius: 4
+  - x: 7732.2944
+    z: -31.751518
+    radius: 4
+  - x: 7733.482
+    z: -38.029144
+    radius: 4
+  - x: 7734.77
+    z: -44.285973
+    radius: 4
+  - x: 7736.159
+    z: -50.5236
+    radius: 4
+  - x: 7737.649
+    z: -56.743237
+    radius: 4
+  - x: 7739.2397
+    z: -62.94633
+    radius: 4
+  - x: 7740.934
+    z: -69.1342
+    radius: 4
+  - x: 7742.732
+    z: -75.307686
+    radius: 4
+  - x: 7744.6357
+    z: -81.46776
+    radius: 4
+  - x: 7746.648
+    z: -87.61515
+    radius: 4
+  - x: 7748.771
+    z: -93.750015
+    radius: 4
+  - x: 7751.008
+    z: -99.87256
+    radius: 4
+  - x: 7753.3613
+    z: -105.982666
+    radius: 4
+  - x: 7755.835
+    z: -112.07956
+    radius: 4
+  - x: 7758.4326
+    z: -118.16244
+    radius: 4
+  - x: 7761.158
+    z: -124.229996
+    radius: 4
+  - x: 7764.0156
+    z: -130.28067
+    radius: 4
+  - x: 7767.0083
+    z: -136.31213
+    radius: 4
+  - x: 7770.1416
+    z: -142.32199
+    radius: 4
+  - x: 7773.4185
+    z: -148.30739
+    radius: 4
+  - x: 7776.8438
+    z: -154.26474
+    radius: 4
+  - x: 7780.4214
+    z: -160.19035
+    radius: 4
+  - x: 7784.1553
+    z: -166.08008
+    radius: 4
+  - x: 7788.0493
+    z: -171.92903
+    radius: 4
+  - x: 7792.1074
+    z: -177.7322
+    radius: 4
+  - x: 7796.3325
+    z: -183.48418
+    radius: 4
+  - x: 7800.7285
+    z: -189.17888
+    radius: 4
+  - x: 7805.2974
+    z: -194.81007
+    radius: 4
+  - x: 7810.0425
+    z: -200.37122
+    radius: 4
+  - x: 7814.9653
+    z: -205.85512
+    radius: 4
+  - x: 7820.0674
+    z: -211.2545
+    radius: 4
+  - x: 7825.351
+    z: -216.56192
+    radius: 4
+  - x: 7830.8164
+    z: -221.76927
+    radius: 4
+  - x: 7836.4634
+    z: -226.86855
+    radius: 4
+  - x: 7842.2925
+    z: -231.85149
+    radius: 4
+  - x: 7848.3027
+    z: -236.70964
+    radius: 4
+  - x: 7854.492
+    z: -241.4343
+    radius: 4
+  - x: 7860.8594
+    z: -246.01686
+    radius: 4
+  - x: 7867.402
+    z: -250.4487
+    radius: 4
+  - x: 7874.116
+    z: -254.72093
+    radius: 4
+  - x: 7880.998
+    z: -258.82492
+    radius: 4
+  - x: 7888.0444
+    z: -262.75214
+    radius: 4
+  - x: 7895.249
+    z: -266.49393
+    radius: 4
+  - x: 7902.6064
+    z: -270.04205
+    radius: 4
+  - x: 7910.111
+    z: -273.38843
+    radius: 4
+  - x: 7917.755
+    z: -276.52502
+    radius: 4
+  - x: 7925.5317
+    z: -279.44427
+    radius: 4
+  - x: 7933.4326
+    z: -282.13895
+    radius: 4
+  - x: 7941.4497
+    z: -284.60208
+    radius: 4
+  - x: 7949.5737
+    z: -286.8271
+    radius: 4
+  - x: 7957.7954
+    z: -288.8079
+    radius: 4
+  - x: 7966.104
+    z: -290.53882
+    radius: 4
+  - x: 7974.4897
+    z: -292.01474
+    radius: 4
+  - x: 7982.942
+    z: -293.23093
+    radius: 4
+  - x: 7991.449
+    z: -294.18347
+    radius: 4
+  recoveryBounds:
+  - min: {x: 7708.3047, y: -20.413624, z: -313.42603}
+    max: {x: 8291.695, y: 20.813625, z: 328.16925}
+  safePoses:
+  - position: {x: 7992.0273, y: 0.103146344, z: -294.2298}
+    headingDegrees: 93.67381
+  - position: {x: 8242.097, y: -1.8723302, z: 116.92243}
+    headingDegrees: -24.736063
+  - position: {x: 8007.974, y: 0.21285948, z: 294.22968}
+    headingDegrees: -86.32609
+  - position: {x: 7757.904, y: -1.7308273, z: -116.92377}
+    headingDegrees: 155.26395
+  pickupSites:
+  - id: aurora-pass-pickup-0-0
+    center: {x: 8100.682, y: 2.2762258, z: -278.9522}
+    radiusMeters: 1.65
+    verticalRangeMeters: 2.5
+  - id: aurora-pass-pickup-0-1
+    center: {x: 8101.6333, y: 2.2762258, z: -281.7974}
+    radiusMeters: 1.65
+    verticalRangeMeters: 2.5
+  - id: aurora-pass-pickup-0-2
+    center: {x: 8102.5845, y: 2.2762258, z: -284.64258}
+    radiusMeters: 1.65
+    verticalRangeMeters: 2.5
+  - id: aurora-pass-pickup-1-0
+    center: {x: 8201.2705, y: -1.7696699, z: 181.67926}
+    radiusMeters: 1.65
+    verticalRangeMeters: 2.5
+  - id: aurora-pass-pickup-1-1
+    center: {x: 8203.667, y: -1.7696699, z: 183.4841}
+    radiusMeters: 1.65
+    verticalRangeMeters: 2.5
+  - id: aurora-pass-pickup-1-2
+    center: {x: 8206.063, y: -1.7696699, z: 185.28894}
+    radiusMeters: 1.65
+    verticalRangeMeters: 2.5
+  - id: aurora-pass-pickup-2-0
+    center: {x: 7915.498, y: 0.91966987, z: 283.77982}
+    radiusMeters: 1.65
+    verticalRangeMeters: 2.5
+  - id: aurora-pass-pickup-2-1
+    center: {x: 7914.7344, y: 0.91966987, z: 286.68103}
+    radiusMeters: 1.65
+    verticalRangeMeters: 2.5
+  - id: aurora-pass-pickup-2-2
+    center: {x: 7913.9707, y: 0.91966987, z: 289.58224}
+    radiusMeters: 1.65
+    verticalRangeMeters: 2.5
+  - id: aurora-pass-pickup-3-0
+    center: {x: 7798.729, y: -2.8303306, z: -181.67935}
+    radiusMeters: 1.65
+    verticalRangeMeters: 2.5
+  - id: aurora-pass-pickup-3-1
+    center: {x: 7796.3325, y: -2.8303306, z: -183.48418}
+    radiusMeters: 1.65
+    verticalRangeMeters: 2.5
+  - id: aurora-pass-pickup-3-2
+    center: {x: 7793.936, y: -2.8303306, z: -185.289}
+    radiusMeters: 1.65
+    verticalRangeMeters: 2.5
+  shortcutLanes:
+  - id: aurora-pass-shortcut-1
+    center: {x: 8235.459, y: 1.4829347, z: -119.19214}
+    halfWidth: 4.5
+    direction: {x: 0.34136283, y: 0.9398018}
+  - id: aurora-pass-shortcut-2
+    center: {x: 7764.5425, y: 1.5700006, z: 119.188385}
+    halfWidth: 4.5
+    direction: {x: -0.34147313, y: -0.93988436}

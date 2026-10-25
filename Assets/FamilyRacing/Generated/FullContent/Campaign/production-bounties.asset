@@ -1,0 +1,123 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c1b2c3d4e5f64789a0b1c2d3e4f50a0a, type: 3}
+  m_Name: production-bounties
+  m_EditorClassIdentifier: FamilyRacing.Runtime::FamilyRacing.BountyCatalogAsset
+  bounties:
+  - bountyId: finish-three
+    family: finish
+    metric: humanFinishes
+    threshold: 3
+    unit: count
+    rewardCoins: 15
+    aggregation: sum
+    repeatable: 1
+    rivalId: 
+  - bountyId: boost-four
+    family: boost
+    metric: humanBoostActivations
+    threshold: 4
+    unit: count
+    rewardCoins: 15
+    aggregation: sum
+    repeatable: 1
+    rivalId: 
+  - bountyId: shortcut-three
+    family: shortcut
+    metric: acceptedShortcuts
+    threshold: 3
+    unit: count
+    rewardCoins: 20
+    aggregation: sum
+    repeatable: 1
+    rivalId: 
+  - bountyId: clean-twenty
+    family: clean-driving
+    metric: cleanStreakSeconds
+    threshold: 20
+    unit: seconds
+    rewardCoins: 20
+    aggregation: max
+    repeatable: 1
+    rivalId: 
+  - bountyId: drift-twelve
+    family: drift
+    metric: driftSeconds
+    threshold: 12
+    unit: seconds
+    rewardCoins: 15
+    aggregation: sum
+    repeatable: 1
+    rivalId: 
+  - bountyId: shortcut-six
+    family: shortcut
+    metric: acceptedShortcuts
+    threshold: 6
+    unit: count
+    rewardCoins: 20
+    aggregation: sum
+    repeatable: 1
+    rivalId: 
+  - bountyId: bounty-sunny-island-car-rival
+    family: rival
+    metric: humanFinishes
+    threshold: 1
+    unit: count
+    rewardCoins: 30
+    aggregation: sum
+    repeatable: 0
+    rivalId: sunny-island-car-rival
+  - bountyId: bounty-sunny-island-motorcycle-rival
+    family: rival
+    metric: humanFinishes
+    threshold: 1
+    unit: count
+    rewardCoins: 30
+    aggregation: sum
+    repeatable: 0
+    rivalId: sunny-island-motorcycle-rival
+  - bountyId: bounty-redrock-canyon-car-rival
+    family: rival
+    metric: humanFinishes
+    threshold: 1
+    unit: count
+    rewardCoins: 30
+    aggregation: sum
+    repeatable: 0
+    rivalId: redrock-canyon-car-rival
+  - bountyId: bounty-redrock-canyon-motorcycle-rival
+    family: rival
+    metric: humanFinishes
+    threshold: 1
+    unit: count
+    rewardCoins: 30
+    aggregation: sum
+    repeatable: 0
+    rivalId: redrock-canyon-motorcycle-rival
+  - bountyId: bounty-snowy-peaks-car-rival
+    family: rival
+    metric: humanFinishes
+    threshold: 1
+    unit: count
+    rewardCoins: 30
+    aggregation: sum
+    repeatable: 0
+    rivalId: snowy-peaks-car-rival
+  - bountyId: bounty-snowy-peaks-motorcycle-rival
+    family: rival
+    metric: humanFinishes
+    threshold: 1
+    unit: count
+    rewardCoins: 30
+    aggregation: sum
+    repeatable: 0
+    rivalId: snowy-peaks-motorcycle-rival

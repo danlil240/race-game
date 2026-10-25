@@ -1,0 +1,56 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c1b2c3d4e5f64789a0b1c2d3e4f50909, type: 3}
+  m_Name: redrock-canyon
+  m_EditorClassIdentifier: FamilyRacing.Runtime::FamilyRacing.CampaignDefinitionAsset
+  worldId: redrock-canyon
+  nameEn: Redrock Canyon
+  nameHe: "\u05E7\u05E0\u05D9\u05D5\u05DF \u05D4\u05E1\u05DC\u05E2 \u05D4\u05D0\u05D3\u05D5\u05DD"
+  requiredEventCompletions: 24
+  requiredRegionalStars: 30
+  courseIds:
+  - canyon-dash
+  - mesa-skyway
+  regularEventIds:
+  - canyon-dash-car-circuit
+  - canyon-dash-car-boost
+  - canyon-dash-car-stunt
+  - canyon-dash-car-time
+  - canyon-dash-car-gadget
+  - canyon-dash-car-clean
+  - canyon-dash-motorcycle-circuit
+  - canyon-dash-motorcycle-boost
+  - canyon-dash-motorcycle-stunt
+  - canyon-dash-motorcycle-time
+  - canyon-dash-motorcycle-gadget
+  - canyon-dash-motorcycle-clean
+  - mesa-skyway-car-circuit
+  - mesa-skyway-car-boost
+  - mesa-skyway-car-stunt
+  - mesa-skyway-car-time
+  - mesa-skyway-car-gadget
+  - mesa-skyway-car-clean
+  - mesa-skyway-motorcycle-circuit
+  - mesa-skyway-motorcycle-boost
+  - mesa-skyway-motorcycle-stunt
+  - mesa-skyway-motorcycle-time
+  - mesa-skyway-motorcycle-gadget
+  - mesa-skyway-motorcycle-clean
+  finales:
+  - eventId: redrock-canyon-car-finale
+    classId: car
+    rivalId: redrock-canyon-car-rival
+    rewardVehicleId: car-03
+  - eventId: redrock-canyon-motorcycle-finale
+    classId: motorcycle
+    rivalId: redrock-canyon-motorcycle-rival
+    rewardVehicleId: motorcycle-03

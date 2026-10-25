@@ -1,0 +1,49 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 726a8f92293971f41af73f35bb4a2b04, type: 3}
+  m_Name: motorcycle-04
+  m_EditorClassIdentifier: FamilyRacing.Runtime::FamilyRacing.VehicleDefinitionAsset
+  vehicleId: motorcycle-04
+  maxSpeed: 23.6
+  acceleration: 8.35
+  steeringRate: 3.4
+  steeringReferenceSpeed: 5
+  grip: 5.6
+  driftMinSpeed: 5
+  driftSteeringFactor: 1.35
+  driftLateralAcceleration: 5
+  driftChargePerSecond: 0.35
+  boostMaxSpeed: 31.6
+  boostAcceleration: 15.8
+  boostDurationSeconds: 2.2
+  boostDrainPerSecond: 0.45
+  boostMinCharge: 0.1
+  boostChargeSeconds: 5.5
+  cleanLandingCredit: 0.25
+  landingMinAirSeconds: 0.25
+  landingMinDrop: 0.4
+  driftSteeringThreshold: 0.15
+  gravity: 24
+  terminalFallSpeed: 34
+  groundProbe: 0.8
+  rideHeight: 0.6
+  halfWidth: 0.5
+  halfLength: 1.1
+  height: 1.4
+  wallSpeedRetention: 0.1
+  simulationBackend: 0
+  physicsTuning: {fileID: 0}
+  silhouette: motorcycle
+  leanDegrees: 24
+  bodyScale: {x: 0.9, y: 1.4, z: 2.2}
+  bodyColor: {r: 0.95, g: 0.5643, b: 0.285, a: 1}
+  visual: {fileID: 11400000, guid: 858ef7d33f8697d47a347d28bdf88b2d, type: 2}

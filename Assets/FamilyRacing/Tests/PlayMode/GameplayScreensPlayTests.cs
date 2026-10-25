@@ -1318,12 +1318,13 @@ namespace FamilyRacing.Tests
             world.ApplyFrame(snapshot);
             RenderSoloRace(snapshot);
             Physics.SyncTransforms();
+            // The context bind committed at start. Arm the failure before
+            // driving: the human can finish last, finalizing the result in
+            // the same tick Pursue observes its finish.
+            toggling.failing = true;
             snapshot = Pursue(snapshot, 6000);
             Assert.That(HumanFinished(snapshot), Is.True,
                 "the scripted driver must finish the lap");
-            // The context bind committed at start; only the result
-            // transaction is allowed to fail.
-            toggling.failing = true;
             var guard = 0;
             while ((snapshot.soloRace == null
                     || snapshot.soloRace.result == null)

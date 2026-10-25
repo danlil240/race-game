@@ -1,0 +1,169 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e1737e445efac134bbec13747fa282c1, type: 3}
+  m_Name: graybox-01
+  m_EditorClassIdentifier: FamilyRacing.Runtime::FamilyRacing.TrackDefinitionAsset
+  courseId: graybox-01
+  isOpenRoute: 0
+  nameEn: 
+  nameHe: 
+  spawnPosition: {x: 0, y: 0, z: -60}
+  spawnHeadingDegrees: 0
+  gates:
+  - id: start
+    center: {x: 0, y: 0, z: -60}
+    halfWidth: 12
+    direction: {x: 0, y: 1}
+    recoverPosition: {x: 0, y: 0, z: -63}
+    recoverHeadingDegrees: 0
+  - id: gate-1
+    center: {x: 0, y: 0, z: 25}
+    halfWidth: 12
+    direction: {x: 0, y: 1}
+    recoverPosition: {x: 0, y: 0, z: 22}
+    recoverHeadingDegrees: 0
+  - id: gate-2
+    center: {x: 55, y: 0, z: 55}
+    halfWidth: 12
+    direction: {x: 1, y: 0}
+    recoverPosition: {x: 52, y: 0, z: 55}
+    recoverHeadingDegrees: 90
+  - id: gate-3
+    center: {x: 95, y: 0, z: 0}
+    halfWidth: 12
+    direction: {x: 0, y: -1}
+    recoverPosition: {x: 95, y: 0, z: 3}
+    recoverHeadingDegrees: 180
+  - id: gate-4
+    center: {x: 50, y: 0, z: -55}
+    halfWidth: 12
+    direction: {x: -1, y: 0}
+    recoverPosition: {x: 53, y: 0, z: -55}
+    recoverHeadingDegrees: -90
+  spawnSlots:
+  - position: {x: -5, y: 0, z: -57}
+    headingDegrees: 0
+  - position: {x: 5, y: 0, z: -57}
+    headingDegrees: 0
+  - position: {x: -5, y: 0, z: -62}
+    headingDegrees: 0
+  - position: {x: 5, y: 0, z: -62}
+    headingDegrees: 0
+  aiRoute:
+  - x: 0
+    z: -30
+    radius: 0
+  - x: 0
+    z: 10
+    radius: 0
+  - x: 0
+    z: 30
+    radius: 0
+  - x: -30
+    z: 24
+    radius: 0
+  - x: -54
+    z: 14
+    radius: 0
+  - x: -60
+    z: 30
+    radius: 0
+  - x: -60
+    z: 46
+    radius: 0
+  - x: -40
+    z: 58
+    radius: 0
+  - x: -10
+    z: 62
+    radius: 0
+  - x: 20
+    z: 62
+    radius: 0
+  - x: 48
+    z: 60
+    radius: 0
+  - x: 62
+    z: 55
+    radius: 0
+  - x: 82
+    z: 42
+    radius: 0
+  - x: 95
+    z: 18
+    radius: 0
+  - x: 95
+    z: -14
+    radius: 0
+  - x: 99
+    z: -34
+    radius: 0
+  - x: 92
+    z: -48
+    radius: 0
+  - x: 68
+    z: -60
+    radius: 0
+  - x: 38
+    z: -56
+    radius: 0
+  - x: 10
+    z: -62
+    radius: 0
+  - x: 0
+    z: -66
+    radius: 0
+  - x: 0
+    z: -48
+    radius: 0
+  recoveryBounds:
+  - min: {x: -125, y: -2, z: -85}
+    max: {x: 125, y: 30, z: 85}
+  safePoses:
+  - position: {x: 4.5, y: 0, z: -63}
+    headingDegrees: 0
+  - position: {x: -4.5, y: 0, z: -63}
+    headingDegrees: 0
+  - position: {x: 5, y: 0, z: 22}
+    headingDegrees: 0
+  - position: {x: 52, y: 0, z: 50.5}
+    headingDegrees: 90
+  - position: {x: 90.5, y: 0, z: -5}
+    headingDegrees: 180
+  - position: {x: 55, y: 0, z: -52}
+    headingDegrees: -90
+  pickupSites:
+  - id: pickup-south
+    center: {x: 0, y: 0, z: -20}
+    radiusMeters: 2
+    verticalRangeMeters: 2.5
+  - id: pickup-northwest
+    center: {x: 0, y: 0, z: 45}
+    radiusMeters: 2
+    verticalRangeMeters: 2.5
+  - id: pickup-northeast
+    center: {x: 78, y: 0, z: 55}
+    radiusMeters: 2
+    verticalRangeMeters: 2.5
+  - id: pickup-east
+    center: {x: 95, y: 0, z: -28}
+    radiusMeters: 2
+    verticalRangeMeters: 2.5
+  - id: pickup-southeast
+    center: {x: 32, y: 0, z: -55}
+    radiusMeters: 2
+    verticalRangeMeters: 2.5
+  - id: pickup-ramp
+    center: {x: -60, y: 0, z: 42}
+    radiusMeters: 2
+    verticalRangeMeters: 2.5
+  shortcutLanes: []
