@@ -419,6 +419,11 @@ class LanDriver:
 
     def __init__(self, peer, remote=False):
         self.peer = peer
+        self.route = LAN_ROUTE
+        self.route_length = LAN_ROUTE_LENGTH
+        self.route_arc = LAN_ROUTE_ARC
+        self.gates = LAN_GATES
+        self.gate_dirs = LAN_GATE_DIRS
         # A remote endpoint steers on state the wire already aged a few
         # sim ticks (15 Hz snapshots plus input transit), and every held
         # input keeps rotating the car for its whole duration — a strong
@@ -455,6 +460,26 @@ class LanDriver:
         # the value under test before the assertion window closes.
         self.suspended = False
 
+    def set_route(self, course):
+        """Bind authored geometry to this driver only; never change LAN globals."""
+        self.route = course["points"]
+        self.gates = course["gates"]
+        self.gate_dirs = course["directions"]
+        self.route_length = sum(math.dist(self.route[i - 1], point)
+                                for i, point in enumerate(self.route))
+        # Projection traverses the closing segment first (last -> first).
+        # Arc values must use that same origin, including vertex zero.
+        self.route_arc = []
+        arc = 0.0
+        for i, point in enumerate(self.route):
+            arc += math.dist(self.route[i - 1], point)
+            self.route_arc.append(arc)
+        self._projection = lambda motor: LanDriver._projection(motor, self.route)
+        self._point_along = lambda arc: LanDriver._point_along(
+            arc, self.route, self.route_length)
+        self._corner_deflection = lambda index: LanDriver._corner_deflection(
+            index, self.route)
+
     def _racer(self):
         """This endpoint's own racer while a LAN race is live, else None."""
         state = self.peer.state
@@ -471,14 +496,15 @@ class LanDriver:
         return None
 
     @staticmethod
-    def _projection(motor):
+    def _projection(motor, route=None):
         """Closest point on the route loop: (arclen, seg_index, t)."""
+        route = LAN_ROUTE if route is None else route
         best = None
-        count = len(LAN_ROUTE)
+        count = len(route)
         arc = 0.0
         for index in range(count):
-            ax, az = LAN_ROUTE[index - 1]
-            bx, bz = LAN_ROUTE[index]
+            ax, az = route[index - 1]
+            bx, bz = route[index]
             ex, ez = bx - ax, bz - az
             seg2 = ex * ex + ez * ez
             t = 0.0 if seg2 == 0 else max(0.0, min(1.0,
@@ -491,29 +517,31 @@ class LanDriver:
         return best[1], best[2]
 
     @staticmethod
-    def _point_along(arclen):
+    def _point_along(arclen, route=None, total=None):
         """The route point `arclen` metres along the loop."""
-        total = LAN_ROUTE_LENGTH
+        route = LAN_ROUTE if route is None else route
+        total = LAN_ROUTE_LENGTH if total is None else total
         arclen = arclen % total
-        count = len(LAN_ROUTE)
+        count = len(route)
         arc = 0.0
         for index in range(count):
-            ax, az = LAN_ROUTE[index - 1]
-            bx, bz = LAN_ROUTE[index]
+            ax, az = route[index - 1]
+            bx, bz = route[index]
             seglen = math.hypot(bx - ax, bz - az)
             if arclen <= arc + seglen and seglen > 0:
                 t = (arclen - arc) / seglen
                 return ax + (bx - ax) * t, az + (bz - az) * t
             arc += seglen
-        return LAN_ROUTE[-1]
+        return route[-1]
 
     @staticmethod
-    def _corner_deflection(vertex_index):
+    def _corner_deflection(vertex_index, route=None):
         """Heading change (radians) at route vertex `vertex_index`."""
-        count = len(LAN_ROUTE)
-        px, pz = LAN_ROUTE[vertex_index - 1]
-        vx, vz = LAN_ROUTE[vertex_index]
-        nx, nz = LAN_ROUTE[(vertex_index + 1) % count]
+        route = LAN_ROUTE if route is None else route
+        count = len(route)
+        px, pz = route[vertex_index - 1]
+        vx, vz = route[vertex_index]
+        nx, nz = route[(vertex_index + 1) % count]
         return abs(wrap_angle(
             math.atan2(nx - vx, nz - vz)
             - math.atan2(vx - px, vz - pz)))
@@ -528,7 +556,7 @@ class LanDriver:
         the lookahead window, clamp the aim to just past that vertex so
         the car genuinely reaches the corner before steering beyond it;
         on shallow corners keep the full pursuit distance."""
-        vertex_arc = LAN_ROUTE_ARC[seg_index]
+        vertex_arc = self.route_arc[seg_index]
         gap = vertex_arc - arc            # metres of route to the corner
         if 0 <= gap < self.lookahead \
                 and self._corner_deflection(seg_index) > 0.7:
@@ -613,14 +641,14 @@ class LanDriver:
             self.unwrapped = 0.0
         else:
             da = arc - self.prev_arc
-            half = LAN_ROUTE_LENGTH * 0.5
+            half = self.route_length * 0.5
             while da > half:
-                da -= LAN_ROUTE_LENGTH
+                da -= self.route_length
             while da <= -half:
-                da += LAN_ROUTE_LENGTH
+                da += self.route_length
             self.unwrapped += da
         self.prev_arc = arc
-        progress = (session.get("lap") or 0) * LAN_ROUTE_LENGTH \
+        progress = (session.get("lap") or 0) * self.route_length \
             + self.unwrapped
         if self.best_progress is None or progress > self.best_progress:
             self.best_progress = progress
@@ -643,8 +671,8 @@ class LanDriver:
         # a little more.
         allowed = LAN_STALL_TICKS + self.catchup_credit
         gate_index = session.get("nextCheckpoint")
-        if isinstance(gate_index, int) and 0 <= gate_index < len(LAN_GATES):
-            gx, gz = LAN_GATES[gate_index]
+        if isinstance(gate_index, int) and 0 <= gate_index < len(self.gates):
+            gx, gz = self.gates[gate_index]
             if math.hypot(gx - motor["x"], gz - motor["z"]) \
                     <= LAN_GATE_APPROACH:
                 allowed += 60
@@ -691,8 +719,8 @@ class LanDriver:
         # clamped sharp corner the offset lane is narrower than the
         # route corridor — a fan aimed beside the route is what beaches
         # on the inside barrier, so tight corners drive the centreline.
-        ax, az = LAN_ROUTE[seg_index - 1]
-        bx, bz = LAN_ROUTE[seg_index]
+        ax, az = self.route[seg_index - 1]
+        bx, bz = self.route[seg_index]
         sx, sz = bx - ax, bz - az
         length = math.hypot(sx, sz)
         lane = ((racer.get("slot") or 0) - 1.5) * 2.0
@@ -711,11 +739,11 @@ class LanDriver:
         # turns into a wall the car orbits without ever crossing —
         # flipping exactly past the plane makes every yo-yo a real
         # crossing attempt instead.
-        if isinstance(gate_index, int) and 0 <= gate_index < len(LAN_GATES):
-            gx, gz = LAN_GATES[gate_index]
+        if isinstance(gate_index, int) and 0 <= gate_index < len(self.gates):
+            gx, gz = self.gates[gate_index]
             rx, rz = motor["x"] - gx, motor["z"] - gz
             if math.hypot(rx, rz) <= LAN_GATE_APPROACH:
-                dx, dz = LAN_GATE_DIRS[gate_index]
+                dx, dz = self.gate_dirs[gate_index]
                 along = rx * dx + rz * dz
                 if along <= 0.5:
                     tx, tz = gx + dx * 10.0, gz + dz * 10.0

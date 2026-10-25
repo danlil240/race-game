@@ -23,11 +23,12 @@ the rival-victory reward proof (`coverage.rivals.<rivalId>`). Fixture
 for review but can never flip a row to `passed`, and completion of an
 event alone never proves its objective bits.
 
-**Current state (this commit):** no production content is authored
-under `Generated/FullContent` yet — every row is honestly
-`notVerified` and the production gate fails the incomplete
-inventory by design. Rows flip only through Tasks 5–9 evidence,
-never by editing this file alone.
+**Current state (2026-10-25):** production course, roster and campaign assets
+are authored under `Generated/FullContent` by `ProductionSceneAuthoring`.
+The 28 final campaign recordings are absent. Eight vehicle variants use
+the existing car/motorcycle rigs. Physical traversal, performance, final
+voice review and family acceptance remain unqualified, so rows below stay
+`notVerified`. Structural tests and authoring do not replace those records.
 
 ## Worlds
 

@@ -1,0 +1,22 @@
+{
+  "description": "Production campaign spoken prompts. Azure Speech authoring only; bundle WAVs for offline playback.",
+  "outputFormat": "riff-24khz-16bit-mono-pcm",
+  "voices": {"en": "en-US-AnaNeural", "he": "he-IL-HilaNeural"},
+  "locales": {"en": "en-US", "he": "he-IL"},
+  "cues": {
+    "world.intro.sunny-island": {"en": "Welcome to Sunny Island! Race around the harbor and the lighthouse.", "he": "ברוכים הבאים לאי השמש! התחרו סביב הנמל והמגדלור."},
+    "world.intro.redrock-canyon": {"en": "Welcome to Redrock Canyon! Watch the bends and try the high road.", "he": "ברוכים הבאים לקניון הסלע האדום! שימו לב לפניות ונסו את הדרך הגבוהה."},
+    "world.intro.snowy-peaks": {"en": "Welcome to Snowy Peaks! Follow the snowy trail towards the northern lights.", "he": "ברוכים הבאים לפסגות המושלגות! עקבו אחר השביל המושלג אל הזוהר הצפוני."},
+    "rival.intro.sunny-island-car-rival": {"en": "The island car champion is ready! Win this final race to earn a new car.", "he": "אלוף המכוניות של האי מוכן! נצחו במרוץ הגמר כדי לזכות במכונית חדשה."},
+    "rival.intro.sunny-island-motorcycle-rival": {"en": "The island motorcycle champion is ready! Win this final race to earn a new motorcycle.", "he": "אלוף האופנועים של האי מוכן! נצחו במרוץ הגמר כדי לזכות באופנוע חדש."},
+    "rival.intro.redrock-canyon-car-rival": {"en": "Meet the canyon car champion! Take the turns carefully and race for a new car.", "he": "הכירו את אלוף המכוניות של הקניון! פנו בזהירות והתחרו על מכונית חדשה."},
+    "rival.intro.redrock-canyon-motorcycle-rival": {"en": "Meet the canyon motorcycle champion! Take the turns carefully and race for a new motorcycle.", "he": "הכירו את אלוף האופנועים של הקניון! פנו בזהירות והתחרו על אופנוע חדש."},
+    "rival.intro.snowy-peaks-car-rival": {"en": "The mountain car champion awaits! Win the final challenge to earn your last car.", "he": "אלוף המכוניות של ההרים מחכה! נצחו באתגר הגמר כדי לזכות במכונית האחרונה."},
+    "rival.intro.snowy-peaks-motorcycle-rival": {"en": "The mountain motorcycle champion awaits! Win the final challenge to earn your last motorcycle.", "he": "אלוף האופנועים של ההרים מחכה! נצחו באתגר הגמר כדי לזכות באופנוע האחרון."},
+    "objective.completion": {"en": "Finish the race to earn your completion star!", "he": "סיימו את המרוץ כדי לזכות בכוכב ההשלמה!"},
+    "objective.introductory": {"en": "Try the event goal shown on screen to earn another star!", "he": "נסו להשיג את יעד האירוע שמופיע על המסך כדי לזכות בכוכב נוסף!"},
+    "objective.mastery": {"en": "Ready for a bigger challenge? Reach the mastery goal for all three stars!", "he": "מוכנים לאתגר גדול יותר? השיגו את יעד המומחיות כדי לזכות בכל שלושת הכוכבים!"},
+    "world.unlocked": {"en": "Great racing! A new world is now open on your adventure map!", "he": "כל הכבוד! עולם חדש נפתח עכשיו במפת ההרפתקה שלכם!"},
+    "adventure.complete": {"en": "You did it! You finished every world and completed the whole adventure!", "he": "עשיתם את זה! סיימתם את כל העולמות והשלמתם את ההרפתקה כולה!"}
+  }
+}

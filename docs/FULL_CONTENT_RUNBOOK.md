@@ -5,10 +5,24 @@ three worlds (`sunny-island`, `redrock-canyon`, `snowy-peaks`), six
 courses, eight vehicle models, 72 regular events plus six rival
 finales, bilingual display names and final bilingual voice prompts.
 
-This document covers the gates and flavors that exist today plus the
-Task 9 slice-A scenario harness. The authored production inventory is
-still absent (Tasks 5–8), so every scenario scope reports `partial`
-with named gaps rather than `passed`.
+The production authoring entry point is now
+`FamilyRacing.EditorTools.ProductionSceneAuthoring.Create`. It authors six
+collider-backed courses with real shortcuts, eight tuned visual variants,
+the 78-event ordered campaign, and the dedicated `FullContent/FamilyRacing.unity`
+scene. The variants reuse the existing car and motorcycle source rigs.
+The 28 final campaign voice recordings remain absent by owner decision.
+Authoring and structural tests do not qualify device performance or family
+acceptance; the production gate continues to reject missing recordings.
+
+`ProductionSceneAuthoring.BuildValidationWindows` builds a development-only
+campaign player under `Builds/Windows-Campaign-Validation`. Its manifest is
+explicitly `partial`; it is never uploaded as a stable release. All complete
+Windows/Android build paths validate and build the dedicated production scene.
+
+The scenario driver accepts `--routes` with the generated
+`Assets/FamilyRacing/Generated/FullContent/courses.json` route manifest for
+genuine authored-course pursuit. This enables driving verification, not
+automatic proof of every skill objective or human acceptance row.
 
 ## Inventory contract
 

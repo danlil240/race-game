@@ -334,6 +334,20 @@ class SoloDriver(LanDriver):
     practice `driving` slice. Emits the same bounded input.set holds a
     human would — the pursuer steers whatever session the seat owns."""
 
+    def pump(self):
+        courses = getattr(self.peer, "solo_routes", None)
+        if courses is not None:
+            racer = self._racer()
+            if racer is not None:
+                session = racer.get("session") or {}
+                course_id = session.get("courseId")
+                assert course_id in courses, (
+                    "No authored driving route for live course " + repr(course_id))
+                if getattr(self, "course_id", None) != course_id:
+                    self.set_route(courses[course_id])
+                    self.course_id = course_id
+        super().pump()
+
     def _racer(self):
         state = self.peer.state
         if not isinstance(state, dict):

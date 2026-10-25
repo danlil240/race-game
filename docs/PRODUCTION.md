@@ -14,6 +14,12 @@ The package manifest remains `acceptanceStatus=unqualified`. Automated packaging
 
 ## One-time GitHub and runner setup
 
+As of 2026-10-25, the existing permanent keystore's public fingerprint was
+verified against `Release/release.json` and all four production environment
+signing secrets below were configured. No secret values are stored in this
+repository. The dedicated Actions runner is still absent; manual local
+qualification/builds are possible with the installed Unity toolchain.
+
 1. Merge these source/workflow changes into `main`. The production workflow only accepts tags on main's history.
 2. In [repository environments](https://github.com/danlil240/race-game/settings/environments), use `production`, restricted to tag pattern `v*`. Add required reviewers there if the release owner wants a build approval gate.
 3. Register a **dedicated Windows x64 Actions runner** for this repository, labeled `family-racing-production`. Use a separate machine/account from a personal checkout; do not run untrusted pull requests on it. Keep the Actions runner current for the pinned actions' Node runtime. Repository runner setup: Settings → Actions → Runners → New self-hosted runner.

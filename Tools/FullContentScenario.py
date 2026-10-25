@@ -58,15 +58,15 @@ and unproven objectives report notVerified — never fabricated
 coverage. --fixture labels every artifact fixture:true; fixture
 evidence can never produce a production "passed" verdict.
 
-Slice-A note: solo driving rides the shared graybox pursuit follower
-(GameplayLoopScenario.SoloDriver over NetworkScenario's LAN_ROUTE);
-authored per-course route/checkpoint observations replace it in
-slice B once the production courses exist. Local processes and AI
-seats are substitutes where used and are labeled as such.
+Solo driving uses the editor-exported authored route and checkpoint
+geometry (--routes, defaults to the generated courses.json). Geometry
+only guides normal input.set holds; runtime observations alone prove
+completion. Local processes and AI seats are labeled substitutes.
 """
 
 import argparse
 import json
+import math
 import sys
 import traceback
 from pathlib import Path
@@ -131,6 +131,80 @@ HUMAN_ONLY_GAPS = [
     "child/family playtest pacing (6-10 h target) is a human-only "
     "study this scenario cannot substitute",
 ]
+
+
+DEFAULT_ROUTES = (Path(__file__).resolve().parents[1]
+                  / "Assets/FamilyRacing/Generated/FullContent/courses.json")
+
+
+def load_course_routes(path):
+    """Read the editor's source geometry export, never completion evidence."""
+    with Path(path).open(encoding="utf-8-sig") as source:
+        manifest = json.load(source)
+    if not isinstance(manifest, dict) or manifest.get("schemaVersion") != 1 \
+            or manifest.get("contentIdentity") != PRODUCTION_CONTENT_IDENTITY:
+        raise ValueError("Route manifest must be schema 1 / full-content-1")
+    rows = manifest.get("courses")
+    if not isinstance(rows, list):
+        raise ValueError("Route manifest has no courses array")
+    expected = {cid for ids in WORLD_COURSES.values() for cid in ids}
+    routes = {}
+
+    def point(value, second="z"):
+        if not isinstance(value, dict):
+            raise ValueError("Route point must be an object")
+        pair = value.get("x"), value.get(second)
+        if any(type(v) not in (float, int) or not math.isfinite(v) for v in pair):
+            raise ValueError("Route coordinates must be finite numbers")
+        return tuple(float(v) for v in pair)
+
+    for row in rows:
+        if not isinstance(row, dict):
+            raise ValueError("Route course must be an object")
+        cid = row.get("courseId")
+        if cid not in expected or cid in routes:
+            raise ValueError("Unexpected or duplicate route course " + repr(cid))
+        raw_points, raw_gates = row.get("aiRoute"), row.get("gates")
+        if not isinstance(raw_points, list) or len(raw_points) < 3 \
+                or not isinstance(raw_gates, list) or not raw_gates:
+            raise ValueError("Course needs a route and checkpoint gates: " + cid)
+        points = [point(p) for p in raw_points]
+        if len(set(points)) < 3 or any(math.dist(points[i - 1], p) < 0.001
+                                       for i, p in enumerate(points)):
+            raise ValueError("Degenerate route segments: " + cid)
+        gates, directions = [], []
+        for gate in raw_gates:
+            if not isinstance(gate, dict):
+                raise ValueError("Checkpoint gate must be an object: " + cid)
+            gates.append(point(gate.get("center")))
+            direction = point(gate.get("direction"), "y")
+            length = math.hypot(*direction)
+            if length < 0.001:
+                raise ValueError("Checkpoint direction is zero: " + cid)
+            directions.append(tuple(v / length for v in direction))
+        routes[cid] = {"points": points, "gates": gates,
+                       "directions": directions}
+    if set(routes) != expected:
+        raise ValueError("Route manifest missing courses: "
+                         + ", ".join(sorted(expected - set(routes))))
+    return routes
+
+
+def prepare_course_routes(client, report, fixture, evidence_root, path=None):
+    if fixture:
+        return
+    source = Path(path or DEFAULT_ROUTES).resolve()
+    routes = load_course_routes(source)
+    content = ((client.state.get("progression") or {})
+               .get("contentIdentity") or "").split("|")[0]
+    if content != PRODUCTION_CONTENT_IDENTITY:
+        raise ValueError("Live content identity does not match route manifest: " + content)
+    client.solo_routes = routes
+    # Preserve the exact geometry and source hash used by this evidence run.
+    raw = source.read_bytes()
+    (Path(evidence_root) / "course-routes.json").write_bytes(raw)
+    report["drivingRoutes"] = {"source": str(source), "sha256": file_hash(source),
+                               "courses": sorted(routes), "fixture": False}
 
 
 # ---------------------------------------------------------------------------
@@ -965,7 +1039,7 @@ def drive_campaign_event(client, record, checks, notes):
 
 
 def run_campaign_scope(client, checks, report, fixture,
-                       evidence_root):
+                       evidence_root, routes_path=None):
     inv = expected_inventory()
     records = [new_event_record(row, fixture=fixture)
                for row in inv["regular"] + inv["finales"]]
@@ -977,9 +1051,9 @@ def run_campaign_scope(client, checks, report, fixture,
     for record in records:
         stamp_identities(record, identities, content)
     notes = report["notes"]
-    notes.append("driving rides the shared graybox pursuit follower "
-                 "(SoloDriver over LAN_ROUTE); authored per-course "
-                 "route/checkpoint observations are slice-B scope")
+    notes.append("solo driving uses %s through normal input.set holds" % (
+        "the declared graybox fixture route" if fixture
+        else "editor-exported authored routes and checkpoints"))
     notes.append("local process and AI seats are substitutes — "
                  "labeled fixture/substitute, never physical-device "
                  "proof")
@@ -993,6 +1067,7 @@ def run_campaign_scope(client, checks, report, fixture,
         publish_coverage(report, checks, evidence_root, records,
                          coverage)
         return
+    prepare_course_routes(client, report, fixture, evidence_root, routes_path)
     identity = content.split("|")[0]
     if identity != PRODUCTION_CONTENT_IDENTITY:
         checks.failed(
@@ -1107,7 +1182,8 @@ def run_campaign_scope(client, checks, report, fixture,
 # Modes scope — all 12 course x class Quick Race / Time Trial combos
 # ---------------------------------------------------------------------------
 
-def run_modes_scope(client, checks, report, fixture, evidence_root):
+def run_modes_scope(client, checks, report, fixture, evidence_root,
+                    routes_path=None):
     inv = expected_inventory()
     combos = [(course, class_id)
               for world in inv["worlds"]
@@ -1127,6 +1203,7 @@ def run_modes_scope(client, checks, report, fixture, evidence_root):
         write_json(Path(evidence_root) / "modes.json", {"rows": rows})
         report["modes"] = rows
         return
+    prepare_course_routes(client, report, fixture, evidence_root, routes_path)
     ledger_before = {row["eventId"]: dict(row)
                      for row in campaign_rows(client.state)}
     vehicles = (client.state.get("savedProfile") or {}) \
@@ -1285,7 +1362,7 @@ def _finish_status(report, checks):
 
 
 def run_attached(connection_paths, evidence, scope, fixture,
-                 host_address=None):
+                 host_address=None, routes_path=None):
     root = Path(evidence).absolute()
     root.mkdir(parents=True, exist_ok=False)
     report = scenario_report(scope, fixture)
@@ -1339,7 +1416,7 @@ def run_attached(connection_paths, evidence, scope, fixture,
                                   root)
             elif scope == "campaign":
                 run_campaign_scope(client, checks, report, fixture,
-                                   root)
+                                   root, routes_path=routes_path)
                 checks.not_verified(
                     "restart.progress",
                     "--connections mode owns no process; the restart "
@@ -1348,7 +1425,8 @@ def run_attached(connection_paths, evidence, scope, fixture,
                     "restart.generations",
                     "--connections mode owns no process")
             elif scope == "modes":
-                run_modes_scope(client, checks, report, fixture, root)
+                run_modes_scope(client, checks, report, fixture, root,
+                                routes_path=routes_path)
             record_content_identity(client, report)
             finish_client(client, client.info["_directory"], report,
                           "solo", "loop")
@@ -1376,7 +1454,7 @@ def run_attached(connection_paths, evidence, scope, fixture,
 
 def run_launch(player_command, evidence, scope, players, fixture,
                fault_injection=True, startup_timeout=90,
-               shutdown_timeout=10):
+               shutdown_timeout=10, routes_path=None):
     root = Path(evidence).absolute()
     root.mkdir(parents=True, exist_ok=False)
     report = scenario_report(scope, fixture)
@@ -1506,7 +1584,8 @@ def run_launch(player_command, evidence, scope, players, fixture,
                 finish_client(client, directory, report, "solo",
                               "loop")
             elif scope == "modes":
-                run_modes_scope(client, checks, report, fixture, root)
+                run_modes_scope(client, checks, report, fixture, root,
+                                routes_path=routes_path)
                 record_content_identity(client, report)
                 finish_client(client, directory, report, "solo",
                               "loop")
@@ -1515,7 +1594,7 @@ def run_launch(player_command, evidence, scope, players, fixture,
                 # generation 2 proves durable progress survived a real
                 # process restart.
                 run_campaign_scope(client, checks, report, fixture,
-                                   root)
+                                   root, routes_path=routes_path)
                 expected = profile_snapshot(client) or {}
                 record_content_identity(client, report)
                 finish_client(client, directory, report, "solo",
@@ -1625,6 +1704,9 @@ def main():
     parser.add_argument("--host-address", default=None,
                         help="--connections: explicit host LAN address "
                              "when broadcast discovery cannot reach it")
+    parser.add_argument("--routes", type=Path, default=None,
+                        help="editor-exported schema-1 course geometry JSON; "
+                             "required for production campaign/modes")
     parser.add_argument("--startup-timeout", type=float, default=90)
     parser.add_argument("--shutdown-timeout", type=float, default=10)
     args = parser.parse_args()
@@ -1641,14 +1723,16 @@ def main():
                 "descriptor"
         report = run_attached(args.connections, args.evidence,
                               args.scope, args.fixture,
-                              host_address=args.host_address)
+                              host_address=args.host_address,
+                              routes_path=args.routes)
     else:
         report = run_launch([str(args.launch)], args.evidence,
                             args.scope, args.players, args.fixture,
                             fault_injection=
                             not args.no_fault_injection,
                             startup_timeout=args.startup_timeout,
-                            shutdown_timeout=args.shutdown_timeout)
+                            shutdown_timeout=args.shutdown_timeout,
+                            routes_path=args.routes)
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0 if report["status"] == "passed" else 1
 
