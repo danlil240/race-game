@@ -24,22 +24,26 @@
 - Missing voice, signing, or physical evidence must remain a named blocker.
 
 ### Task 1: Author six world courses
-- [ ] Add ProductionCourseAuthoring.cs with Create(), PrefabPath and TrackPath(int index).
-- [ ] Author distinct coastal, canyon and snow courses, with two routes per world, collision, four spawns, recovery, pickups and two genuine optional shortcuts each.
-- [ ] Add adapter coverage for production IDs, topology, route geometry and idempotent authoring. Run tests through Unity.
+- [x] Add ProductionCourseAuthoring.cs with Create(), PrefabPath and TrackPath(int index).
+- [x] Author distinct coastal, canyon and snow courses, with two routes per world, collision, four spawns, recovery, pickups and two genuine optional shortcuts each.
+- [x] Add adapter coverage for production IDs, topology, route geometry and idempotent authoring. Run tests through Unity.
 
 ### Task 2: Author campaign and roster
-- [ ] Add ProductionCampaignAuthoring.cs exposing Create() and CatalogPath. Consume tracks from ProductionCourseAuthoring.TrackPath.
-- [ ] Author eight tuned vehicles/models, 72 regular events and six finales, ordered worlds, rivals/liveries, economy/bounties and difficulties.
-- [ ] Verify generic conversion, full inventory and progression/objective reachability with meaningful tests.
+- [x] Add ProductionCampaignAuthoring.cs exposing Create() and CatalogPath. Consume tracks from ProductionCourseAuthoring.TrackPath.
+- [x] Author eight tuned vehicles/models, 72 regular events and six finales, ordered worlds, rivals/liveries, economy/bounties and difficulties.
+- [x] Verify generic conversion, full inventory and progression/objective reachability with meaningful tests.
 
 ### Task 3: Integrate scene and voice
-- [ ] Add production scene authoring and bind course geometry, all catalog assets and release identity into the shipping scene.
-- [ ] Supply genuine English/Hebrew prompt audio if installed providers/credentials permit; otherwise record the exact missing resource.
-- [ ] Verify content gate and EditMode/PlayMode and fix actual failures.
+- [x] Add production scene authoring and bind course geometry, all catalog assets and release identity into the shipping scene.
+- [x] Supply genuine English/Hebrew prompt audio if installed providers/credentials permit; otherwise record the exact missing resource.
+- [x] Verify content gate and EditMode/PlayMode and fix actual failures.
 
 ### Task 4: Qualify and release
-- [ ] Verify existing permanent certificate without exposing credentials; preserve key custody/backup requirement.
+- [x] Verify existing permanent certificate without exposing credentials; preserve key custody/backup requirement.
 - [ ] Build ordinary production Windows and release-signed Android; create hashes and manifest from a clean commit.
 - [ ] Test on the connected SM-T220 without deleting existing saves or uninstalling an incompatible app.
 - [ ] Run evidence reconciliation; publish stable only when required evidence is complete. Report any remaining human-only requirements precisely.
+
+## Execution checkpoint
+
+Implementation is pushed in draft PR #2. See docs/tasks/2026-10-25-stable-release-readiness.md for actual verification and remaining qualification. Daniel explicitly deferred voice generation. Stable packaging/publication remains blocked; the human/physical acceptance requirements have not been marked passed. A separately labeled development ZIP and a verified real two-lap race are available locally.
