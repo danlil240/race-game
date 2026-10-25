@@ -1,0 +1,119 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 87387d9871a442639c1e8ceb394d0800, type: 3}
+  m_Name: tutorial-def-01
+  m_EditorClassIdentifier: FamilyRacing.Runtime::FamilyRacing.TutorialDefinitionAsset
+  tutorialId: tutorial-01
+  freeDriveEventId: tutorial-01
+  trialEventId: intro-01
+  lessons:
+  - lessonId: steering
+    rule: steerTicks
+    eventKind: 
+    requiredCount: 1
+    requiredSteerTicks: 45
+    minSteering: 0.3
+    requiredBrakeTicks: 20
+    minBrake: 0.5
+    cue:
+      textKey: tutorial.cue.steering
+      icon: "\u25C0\u25B6"
+      english: {fileID: 0}
+      hebrew: {fileID: 0}
+  - lessonId: brake
+    rule: brakeTicks
+    eventKind: 
+    requiredCount: 1
+    requiredSteerTicks: 30
+    minSteering: 0.25
+    requiredBrakeTicks: 25
+    minBrake: 0.5
+    cue:
+      textKey: tutorial.cue.brake
+      icon: "\u25BC"
+      english: {fileID: 0}
+      hebrew: {fileID: 0}
+  - lessonId: drift
+    rule: event
+    eventKind: motor.driftStart
+    requiredCount: 1
+    requiredSteerTicks: 30
+    minSteering: 0.25
+    requiredBrakeTicks: 20
+    minBrake: 0.5
+    cue:
+      textKey: tutorial.cue.drift
+      icon: "\u223F"
+      english: {fileID: 0}
+      hebrew: {fileID: 0}
+  - lessonId: boost
+    rule: event
+    eventKind: motor.boostStart
+    requiredCount: 1
+    requiredSteerTicks: 30
+    minSteering: 0.25
+    requiredBrakeTicks: 20
+    minBrake: 0.5
+    cue:
+      textKey: tutorial.cue.boost
+      icon: "\xBB"
+      english: {fileID: 0}
+      hebrew: {fileID: 0}
+  - lessonId: jump
+    rule: event
+    eventKind: motor.landed
+    requiredCount: 1
+    requiredSteerTicks: 30
+    minSteering: 0.25
+    requiredBrakeTicks: 20
+    minBrake: 0.5
+    cue:
+      textKey: tutorial.cue.jump
+      icon: "\u2303"
+      english: {fileID: 0}
+      hebrew: {fileID: 0}
+  - lessonId: recovery
+    rule: event
+    eventKind: race.recovered
+    requiredCount: 1
+    requiredSteerTicks: 30
+    minSteering: 0.25
+    requiredBrakeTicks: 20
+    minBrake: 0.5
+    cue:
+      textKey: tutorial.cue.recovery
+      icon: "\u21BB"
+      english: {fileID: 0}
+      hebrew: {fileID: 0}
+  - lessonId: gadget
+    rule: event
+    eventKind: gadget.used
+    requiredCount: 1
+    requiredSteerTicks: 30
+    minSteering: 0.25
+    requiredBrakeTicks: 20
+    minBrake: 0.5
+    cue:
+      textKey: tutorial.cue.gadget
+      icon: "\u25C6"
+      english: {fileID: 0}
+      hebrew: {fileID: 0}
+  trialCue:
+    textKey: tutorial.cue.trial
+    icon: "\u2605"
+    english: {fileID: 0}
+    hebrew: {fileID: 0}
+  finishedCue:
+    textKey: tutorial.done
+    icon: "\u2605"
+    english: {fileID: 0}
+    hebrew: {fileID: 0}

@@ -1,0 +1,56 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c1b2c3d4e5f64789a0b1c2d3e4f50909, type: 3}
+  m_Name: sunny-island
+  m_EditorClassIdentifier: FamilyRacing.Runtime::FamilyRacing.CampaignDefinitionAsset
+  worldId: sunny-island
+  nameEn: Sunny Island
+  nameHe: "\u05D0\u05D9 \u05D4\u05E9\u05DE\u05E9"
+  requiredEventCompletions: 24
+  requiredRegionalStars: 30
+  courseIds:
+  - harbor-hop
+  - lighthouse-loop
+  regularEventIds:
+  - harbor-hop-car-circuit
+  - harbor-hop-car-boost
+  - harbor-hop-car-stunt
+  - harbor-hop-car-time
+  - harbor-hop-car-gadget
+  - harbor-hop-car-clean
+  - harbor-hop-motorcycle-circuit
+  - harbor-hop-motorcycle-boost
+  - harbor-hop-motorcycle-stunt
+  - harbor-hop-motorcycle-time
+  - harbor-hop-motorcycle-gadget
+  - harbor-hop-motorcycle-clean
+  - lighthouse-loop-car-circuit
+  - lighthouse-loop-car-boost
+  - lighthouse-loop-car-stunt
+  - lighthouse-loop-car-time
+  - lighthouse-loop-car-gadget
+  - lighthouse-loop-car-clean
+  - lighthouse-loop-motorcycle-circuit
+  - lighthouse-loop-motorcycle-boost
+  - lighthouse-loop-motorcycle-stunt
+  - lighthouse-loop-motorcycle-time
+  - lighthouse-loop-motorcycle-gadget
+  - lighthouse-loop-motorcycle-clean
+  finales:
+  - eventId: sunny-island-car-finale
+    classId: car
+    rivalId: sunny-island-car-rival
+    rewardVehicleId: car-02
+  - eventId: sunny-island-motorcycle-finale
+    classId: motorcycle
+    rivalId: sunny-island-motorcycle-rival
+    rewardVehicleId: motorcycle-02

@@ -1,0 +1,54 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 48965197638dc104ba595782dcdf10f0, type: 3}
+  m_Name: canyon-dash-car-clean
+  m_EditorClassIdentifier: FamilyRacing.Runtime::FamilyRacing.EventDefinitionAsset
+  eventId: canyon-dash-car-clean
+  track: {fileID: 11400000, guid: dde4c7813d8b10d4ea6fad8dc560ac57, type: 2}
+  laps: 2
+  countdownTicks: 90
+  finishGraceSeconds: 60
+  vehicleIds:
+  - car-01
+  - car-02
+  - car-03
+  - car-04
+  completionCoins: 20
+  offCourseSeconds: 1.5
+  minCourseY: -5
+  stuckSpeed: 0.75
+  stuckSeconds: 3
+  beachedSeconds: 8
+  overturnedSeconds: 2
+  outsideBoundsSeconds: 1.5
+  eventType: clean-driving
+  vehicleClass: car
+  parTicks: 0
+  isFinale: 0
+  objectives:
+  - objectiveId: canyon-dash-car-clean-intro
+    kind: introductory
+    alternatives:
+    - metric: cleanStreakSeconds
+      comparator: atLeast
+      threshold: 8
+      alsoRequires: []
+  - objectiveId: canyon-dash-car-clean-mastery
+    kind: mastery
+    alternatives:
+    - metric: cleanStreakSeconds
+      comparator: atLeast
+      threshold: 20
+      alsoRequires:
+      - metric: recoveries
+        comparator: atMost
+        threshold: 0

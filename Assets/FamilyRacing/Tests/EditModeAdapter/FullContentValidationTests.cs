@@ -1039,30 +1039,57 @@ namespace FamilyRacing.Tests
             Assert.That(voice.Resolve("unknown-cue", "en"), Is.Null);
         }
 
+        private static void WithoutAuthoredProduction(Action assertion)
+        {
+            var root = FullContentSetup.ContentDir;
+            var hidden = root + "-gate-test-" + Guid.NewGuid().ToString("N");
+            var exists = UnityEditor.AssetDatabase.IsValidFolder(root);
+            if (exists)
+            {
+                UnityEditor.SceneManagement.EditorSceneManager.NewScene(
+                    UnityEditor.SceneManagement.NewSceneSetup.EmptyScene);
+                var error = UnityEditor.AssetDatabase.MoveAsset(root, hidden);
+                Assert.That(error, Is.Empty, "Cannot isolate production inventory");
+            }
+            try { assertion(); }
+            finally
+            {
+                if (exists)
+                    Assert.That(UnityEditor.AssetDatabase.MoveAsset(hidden, root), Is.Empty,
+                        "Must restore authored production inventory");
+            }
+        }
+
         // ---- packaging gates ----------------------------------------------
 
-        // The repository currently authors no production content under
-        // Generated/FullContent, so the production setup must fail
-        // honestly today and start passing only when Tasks 5–8 fill the
-        // inventory in.
+        // Missing-content tests isolate the authored inventory temporarily.
+        // Their result must not depend on how much production content exists.
         [Test]
         public void ProductionSetupRejectsIncompleteInventory()
         {
-            var ex = Assert.Throws<InvalidDataException>(
-                () => FullContentSetup.Create());
-            Assert.That(ex.Message, Does.Contain("production"),
-                "the production gate must name its validation level");
+            WithoutAuthoredProduction(() =>
+            {
+                var ex = Assert.Throws<InvalidDataException>(
+                    () => FullContentSetup.Create());
+                Assert.That(ex.Message, Does.Contain("production"),
+                    "the production gate must name its validation level");
+
+            });
         }
 
         [Test]
         public void PreviewSetupRejectsUnauthoredContent()
         {
-            // Preview binds only authored content; with none authored it
-            // fails instead of silently producing an empty player.
-            var ex = Assert.Throws<InvalidDataException>(
-                () => FullContentSetup.CreatePreview());
-            Assert.That(ex.Message, Does.Contain("preview"),
-                "the preview gate names its stage");
+            WithoutAuthoredProduction(() =>
+            {
+                // Preview binds only authored content; with none authored it
+                // fails instead of silently producing an empty player.
+                var ex = Assert.Throws<InvalidDataException>(
+                    () => FullContentSetup.CreatePreview());
+                Assert.That(ex.Message, Does.Contain("preview"),
+                    "the preview gate names its stage");
+
+            });
         }
 
         [Test]
@@ -1129,30 +1156,38 @@ namespace FamilyRacing.Tests
         [Test]
         public void FinalFlavorsRejectIncompleteContent()
         {
-            foreach (var entry in new Action[]
+            WithoutAuthoredProduction(() =>
             {
-                FoundationBuild.FullContentSetup,
-                FoundationBuild.WindowsFullContent,
-                FoundationBuild.WindowsFullContentOrdinary,
-                FoundationBuild.ExportAndroidFullContent,
-                FoundationBuild.ExportAndroidFullContentOrdinary
-            })
-                Assert.Throws<InvalidDataException>(() => entry(),
-                    entry.Method.Name + " must run the production "
-                    + "validation gate before any packaging");
+                foreach (var entry in new Action[]
+                {
+                    FoundationBuild.FullContentSetup,
+                    FoundationBuild.WindowsFullContent,
+                    FoundationBuild.WindowsFullContentOrdinary,
+                    FoundationBuild.ExportAndroidFullContent,
+                    FoundationBuild.ExportAndroidFullContentOrdinary
+                })
+                    Assert.Throws<InvalidDataException>(() => entry(),
+                        entry.Method.Name + " must run the production "
+                        + "validation gate before any packaging");
+
+            });
         }
 
         [Test]
         public void PreviewFlavorsRejectUnauthoredContent()
         {
-            foreach (var entry in new Action[]
+            WithoutAuthoredProduction(() =>
             {
-                FoundationBuild.WindowsFullContentPreview,
-                FoundationBuild.ExportAndroidFullContentPreview
-            })
-                Assert.Throws<InvalidDataException>(() => entry(),
-                    entry.Method.Name + " must run the preview gate "
-                    + "before any packaging");
+                foreach (var entry in new Action[]
+                {
+                    FoundationBuild.WindowsFullContentPreview,
+                    FoundationBuild.ExportAndroidFullContentPreview
+                })
+                    Assert.Throws<InvalidDataException>(() => entry(),
+                        entry.Method.Name + " must run the preview gate "
+                        + "before any packaging");
+
+            });
         }
     }
 }

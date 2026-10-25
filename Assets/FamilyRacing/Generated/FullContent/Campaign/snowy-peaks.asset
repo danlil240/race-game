@@ -1,0 +1,56 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c1b2c3d4e5f64789a0b1c2d3e4f50909, type: 3}
+  m_Name: snowy-peaks
+  m_EditorClassIdentifier: FamilyRacing.Runtime::FamilyRacing.CampaignDefinitionAsset
+  worldId: snowy-peaks
+  nameEn: Snowy Peaks
+  nameHe: "\u05E4\u05E1\u05D2\u05D5\u05EA \u05DE\u05D5\u05E9\u05DC\u05D2\u05D5\u05EA"
+  requiredEventCompletions: 24
+  requiredRegionalStars: 30
+  courseIds:
+  - snowpine-circuit
+  - aurora-pass
+  regularEventIds:
+  - snowpine-circuit-car-circuit
+  - snowpine-circuit-car-boost
+  - snowpine-circuit-car-stunt
+  - snowpine-circuit-car-time
+  - snowpine-circuit-car-gadget
+  - snowpine-circuit-car-clean
+  - snowpine-circuit-motorcycle-circuit
+  - snowpine-circuit-motorcycle-boost
+  - snowpine-circuit-motorcycle-stunt
+  - snowpine-circuit-motorcycle-time
+  - snowpine-circuit-motorcycle-gadget
+  - snowpine-circuit-motorcycle-clean
+  - aurora-pass-car-circuit
+  - aurora-pass-car-boost
+  - aurora-pass-car-stunt
+  - aurora-pass-car-time
+  - aurora-pass-car-gadget
+  - aurora-pass-car-clean
+  - aurora-pass-motorcycle-circuit
+  - aurora-pass-motorcycle-boost
+  - aurora-pass-motorcycle-stunt
+  - aurora-pass-motorcycle-time
+  - aurora-pass-motorcycle-gadget
+  - aurora-pass-motorcycle-clean
+  finales:
+  - eventId: snowy-peaks-car-finale
+    classId: car
+    rivalId: snowy-peaks-car-rival
+    rewardVehicleId: car-04
+  - eventId: snowy-peaks-motorcycle-finale
+    classId: motorcycle
+    rivalId: snowy-peaks-motorcycle-rival
+    rewardVehicleId: motorcycle-04

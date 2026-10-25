@@ -1,0 +1,845 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e1737e445efac134bbec13747fa282c1, type: 3}
+  m_Name: harbor-hop
+  m_EditorClassIdentifier: FamilyRacing.Runtime::FamilyRacing.TrackDefinitionAsset
+  courseId: harbor-hop
+  isOpenRoute: 0
+  nameEn: Harbor Hop
+  nameHe: "\u05E7\u05E4\u05D9\u05E6\u05EA \u05D4\u05E0\u05DE\u05DC"
+  spawnPosition: {x: -11.815306, y: 0.13912512, z: -172.9163}
+  spawnHeadingDegrees: 98.37025
+  gates:
+  - id: start
+    center: {x: 0, y: 0.2, z: -175}
+    halfWidth: 8
+    direction: {x: 0.98928034, y: -0.14555919}
+    recoverPosition: {x: -4.937238, y: 0.22133647, z: -174.21245}
+    recoverHeadingDegrees: 98.37025
+  - id: gate-1
+    center: {x: 169.74098, y: -0.49282032, z: 87.50001}
+    halfWidth: 8
+    direction: {x: -0.38873684, y: 0.92134875}
+    recoverPosition: {x: 171.60918, y: -0.40944612, z: 82.86226}
+    recoverHeadingDegrees: -22.875927
+  - id: gate-2
+    center: {x: -0.000017134864, y: 0.20000014, z: 175}
+    halfWidth: 8
+    direction: {x: -0.9893383, y: -0.1455678}
+    recoverPosition: {x: 4.955073, y: 0.25784558, z: 175.66827}
+    recoverHeadingDegrees: -98.37025
+  - id: gate-3
+    center: {x: -169.74098, y: -0.4928202, z: -87.499985}
+    halfWidth: 8
+    direction: {x: 0.6764749, y: -0.73642045}
+    recoverPosition: {x: -173.07018, y: -0.37104487, z: -83.76981}
+    recoverHeadingDegrees: 137.42946
+  spawnSlots:
+  - position: {x: -11.35584, y: 0.13912512, z: -170.5607}
+    headingDegrees: 98.37025
+  - position: {x: -12.274772, y: 0.13912512, z: -175.27191}
+    headingDegrees: 98.37025
+  - position: {x: -18.14235, y: 0.05728088, z: -169.07915}
+    headingDegrees: 98.37025
+  - position: {x: -19.16465, y: 0.05728088, z: -173.76903}
+    headingDegrees: 98.37025
+  aiRoute:
+  - x: 0
+    z: -175
+    radius: 4
+  - x: 5.1528225
+    z: -175.69495
+    radius: 4
+  - x: 10.346106
+    z: -176.26378
+    radius: 4
+  - x: 15.57543
+    z: -176.70052
+    radius: 4
+  - x: 20.835785
+    z: -176.99933
+    radius: 4
+  - x: 26.1216
+    z: -177.15468
+    radius: 4
+  - x: 31.42675
+    z: -177.16133
+    radius: 4
+  - x: 36.74461
+    z: -177.01445
+    radius: 4
+  - x: 42.068092
+    z: -176.70964
+    radius: 4
+  - x: 47.389656
+    z: -176.24295
+    radius: 4
+  - x: 52.701412
+    z: -175.61102
+    radius: 4
+  - x: 57.995136
+    z: -174.81097
+    radius: 4
+  - x: 63.262333
+    z: -173.84058
+    radius: 4
+  - x: 68.49432
+    z: -172.69821
+    radius: 4
+  - x: 73.68227
+    z: -171.3829
+    radius: 4
+  - x: 78.81726
+    z: -169.89436
+    radius: 4
+  - x: 83.8904
+    z: -168.23297
+    radius: 4
+  - x: 88.89286
+    z: -166.39977
+    radius: 4
+  - x: 93.8159
+    z: -164.3965
+    radius: 4
+  - x: 98.65103
+    z: -162.22552
+    radius: 4
+  - x: 103.39
+    z: -159.88994
+    radius: 4
+  - x: 108.02488
+    z: -157.39339
+    radius: 4
+  - x: 112.54818
+    z: -154.74017
+    radius: 4
+  - x: 116.952774
+    z: -151.93512
+    radius: 4
+  - x: 121.23211
+    z: -148.98364
+    radius: 4
+  - x: 125.38015
+    z: -145.89159
+    radius: 4
+  - x: 129.39145
+    z: -142.6653
+    radius: 4
+  - x: 133.2612
+    z: -139.31145
+    radius: 4
+  - x: 136.98523
+    z: -135.83705
+    radius: 4
+  - x: 140.56006
+    z: -132.24947
+    radius: 4
+  - x: 143.98293
+    z: -128.55618
+    radius: 4
+  - x: 147.25175
+    z: -124.7649
+    radius: 4
+  - x: 150.36519
+    z: -120.88341
+    radius: 4
+  - x: 153.32259
+    z: -116.91952
+    radius: 4
+  - x: 156.12398
+    z: -112.88098
+    radius: 4
+  - x: 158.7701
+    z: -108.775505
+    radius: 4
+  - x: 161.26233
+    z: -104.610664
+    radius: 4
+  - x: 163.60269
+    z: -100.39376
+    radius: 4
+  - x: 165.79373
+    z: -96.131874
+    radius: 4
+  - x: 167.83864
+    z: -91.83181
+    radius: 4
+  - x: 169.74098
+    z: -87.49999
+    radius: 4
+  - x: 171.50487
+    z: -83.14245
+    radius: 4
+  - x: 173.13472
+    z: -78.76478
+    radius: 4
+  - x: 174.63533
+    z: -74.37211
+    radius: 4
+  - x: 176.0117
+    z: -69.969154
+    radius: 4
+  - x: 177.26907
+    z: -65.56005
+    radius: 4
+  - x: 178.41281
+    z: -61.14843
+    radius: 4
+  - x: 179.44827
+    z: -56.73746
+    radius: 4
+  - x: 180.38087
+    z: -52.329723
+    radius: 4
+  - x: 181.21593
+    z: -47.927322
+    radius: 4
+  - x: 181.95857
+    z: -43.531837
+    radius: 4
+  - x: 182.61382
+    z: -39.144363
+    radius: 4
+  - x: 183.18631
+    z: -34.765575
+    radius: 4
+  - x: 183.6804
+    z: -30.39567
+    radius: 4
+  - x: 184.10011
+    z: -26.034443
+    radius: 4
+  - x: 184.44899
+    z: -21.68139
+    radius: 4
+  - x: 184.73007
+    z: -17.335629
+    radius: 4
+  - x: 184.94597
+    z: -12.996037
+    radius: 4
+  - x: 185.0987
+    z: -8.661263
+    radius: 4
+  - x: 185.18976
+    z: -4.3297777
+    radius: 4
+  - x: 185.22
+    z: 0.0000072287708
+    radius: 4
+  - x: 185.18976
+    z: 4.329792
+    radius: 4
+  - x: 185.0987
+    z: 8.661278
+    radius: 4
+  - x: 184.94597
+    z: 12.996052
+    radius: 4
+  - x: 184.73007
+    z: 17.335644
+    radius: 4
+  - x: 184.44899
+    z: 21.681404
+    radius: 4
+  - x: 184.10011
+    z: 26.034454
+    radius: 4
+  - x: 183.6804
+    z: 30.395683
+    radius: 4
+  - x: 183.1863
+    z: 34.76559
+    radius: 4
+  - x: 182.61382
+    z: 39.14438
+    radius: 4
+  - x: 181.95859
+    z: 43.531857
+    radius: 4
+  - x: 181.21593
+    z: 47.927338
+    radius: 4
+  - x: 180.38087
+    z: 52.32974
+    radius: 4
+  - x: 179.44827
+    z: 56.73747
+    radius: 4
+  - x: 178.41281
+    z: 61.148445
+    radius: 4
+  - x: 177.26909
+    z: 65.56007
+    radius: 4
+  - x: 176.0117
+    z: 69.96917
+    radius: 4
+  - x: 174.63531
+    z: 74.37212
+    radius: 4
+  - x: 173.13472
+    z: 78.76479
+    radius: 4
+  - x: 171.50487
+    z: 83.14244
+    radius: 4
+  - x: 169.74098
+    z: 87.50001
+    radius: 4
+  - x: 167.83862
+    z: 91.83184
+    radius: 4
+  - x: 165.79373
+    z: 96.13188
+    radius: 4
+  - x: 163.60268
+    z: 100.393776
+    radius: 4
+  - x: 161.26233
+    z: 104.61065
+    radius: 4
+  - x: 158.77008
+    z: 108.77551
+    radius: 4
+  - x: 156.12396
+    z: 112.881004
+    radius: 4
+  - x: 153.32259
+    z: 116.91952
+    radius: 4
+  - x: 150.3652
+    z: 120.88344
+    radius: 4
+  - x: 147.25175
+    z: 124.76494
+    radius: 4
+  - x: 143.98293
+    z: 128.55618
+    radius: 4
+  - x: 140.56004
+    z: 132.24948
+    radius: 4
+  - x: 136.98518
+    z: 135.83708
+    radius: 4
+  - x: 133.2612
+    z: 139.31145
+    radius: 4
+  - x: 129.39143
+    z: 142.66531
+    radius: 4
+  - x: 125.38015
+    z: 145.89159
+    radius: 4
+  - x: 121.23209
+    z: 148.98366
+    radius: 4
+  - x: 116.95275
+    z: 151.93515
+    radius: 4
+  - x: 112.54818
+    z: 154.74017
+    radius: 4
+  - x: 108.02488
+    z: 157.3934
+    radius: 4
+  - x: 103.390015
+    z: 159.88994
+    radius: 4
+  - x: 98.651024
+    z: 162.22554
+    radius: 4
+  - x: 93.81587
+    z: 164.39651
+    radius: 4
+  - x: 88.89286
+    z: 166.39977
+    radius: 4
+  - x: 83.89039
+    z: 168.23297
+    radius: 4
+  - x: 78.81722
+    z: 169.89438
+    radius: 4
+  - x: 73.68226
+    z: 171.38292
+    radius: 4
+  - x: 68.49429
+    z: 172.69821
+    radius: 4
+  - x: 63.26229
+    z: 173.84058
+    radius: 4
+  - x: 57.99512
+    z: 174.81097
+    radius: 4
+  - x: 52.70138
+    z: 175.61102
+    radius: 4
+  - x: 47.38966
+    z: 176.24297
+    radius: 4
+  - x: 42.068073
+    z: 176.70964
+    radius: 4
+  - x: 36.744576
+    z: 177.01443
+    radius: 4
+  - x: 31.426744
+    z: 177.16133
+    radius: 4
+  - x: 26.121572
+    z: 177.15466
+    radius: 4
+  - x: 20.83579
+    z: 176.99933
+    radius: 4
+  - x: 15.5754175
+    z: 176.70053
+    radius: 4
+  - x: 10.346076
+    z: 176.2638
+    radius: 4
+  - x: 5.152823
+    z: 175.69495
+    radius: 4
+  - x: -0.000017134864
+    z: 175
+    radius: 4
+  - x: -5.1085763
+    z: 174.18512
+    radius: 4
+  - x: -10.169596
+    z: 173.25655
+    radius: 4
+  - x: -15.18056
+    z: 172.22054
+    radius: 4
+  - x: -20.139414
+    z: 171.08333
+    radius: 4
+  - x: -25.044682
+    z: 169.85103
+    radius: 4
+  - x: -29.89559
+    z: 168.52959
+    radius: 4
+  - x: -34.691715
+    z: 167.12477
+    radius: 4
+  - x: -39.43331
+    z: 165.64201
+    radius: 4
+  - x: -44.12096
+    z: 164.08649
+    radius: 4
+  - x: -48.75566
+    z: 162.46301
+    radius: 4
+  - x: -53.33891
+    z: 160.77592
+    radius: 4
+  - x: -57.872326
+    z: 159.02922
+    radius: 4
+  - x: -62.357983
+    z: 157.22632
+    radius: 4
+  - x: -66.798004
+    z: 155.37024
+    radius: 4
+  - x: -71.19465
+    z: 153.46347
+    radius: 4
+  - x: -75.55038
+    z: 151.50793
+    radius: 4
+  - x: -79.86753
+    z: 149.50507
+    radius: 4
+  - x: -84.148384
+    z: 147.4558
+    radius: 4
+  - x: -88.39522
+    z: 145.36043
+    radius: 4
+  - x: -92.61003
+    z: 143.21893
+    radius: 4
+  - x: -96.79455
+    z: 141.03065
+    radius: 4
+  - x: -100.950356
+    z: 138.79451
+    radius: 4
+  - x: -105.078476
+    z: 136.50903
+    radius: 4
+  - x: -109.17973
+    z: 134.17229
+    radius: 4
+  - x: -113.254364
+    z: 131.78204
+    radius: 4
+  - x: -117.30215
+    z: 129.33577
+    radius: 4
+  - x: -121.32246
+    z: 126.830635
+    radius: 4
+  - x: -125.31398
+    z: 124.26363
+    radius: 4
+  - x: -129.27493
+    z: 121.63156
+    radius: 4
+  - x: -133.20296
+    z: 118.931175
+    radius: 4
+  - x: -137.095
+    z: 116.15919
+    radius: 4
+  - x: -140.9476
+    z: 113.31229
+    radius: 4
+  - x: -144.75658
+    z: 110.387276
+    radius: 4
+  - x: -148.51724
+    z: 107.38114
+    radius: 4
+  - x: -152.22441
+    z: 104.291
+    radius: 4
+  - x: -155.87238
+    z: 101.11415
+    radius: 4
+  - x: -159.4548
+    z: 97.84843
+    radius: 4
+  - x: -162.96512
+    z: 94.49178
+    radius: 4
+  - x: -166.39635
+    z: 91.042625
+    radius: 4
+  - x: -169.74098
+    z: 87.499985
+    radius: 4
+  - x: -172.99144
+    z: 83.86312
+    radius: 4
+  - x: -176.13988
+    z: 80.13186
+    radius: 4
+  - x: -179.17813
+    z: 76.30674
+    radius: 4
+  - x: -182.09811
+    z: 72.388664
+    radius: 4
+  - x: -184.89174
+    z: 68.3791
+    radius: 4
+  - x: -187.55074
+    z: 64.280304
+    radius: 4
+  - x: -190.0672
+    z: 60.09493
+    radius: 4
+  - x: -192.43326
+    z: 55.826233
+    radius: 4
+  - x: -194.64143
+    z: 51.478016
+    radius: 4
+  - x: -196.68436
+    z: 47.05482
+    radius: 4
+  - x: -198.55519
+    z: 42.56152
+    radius: 4
+  - x: -200.24756
+    z: 38.003468
+    radius: 4
+  - x: -201.75552
+    z: 33.386745
+    radius: 4
+  - x: -203.07372
+    z: 28.717615
+    radius: 4
+  - x: -204.19742
+    z: 24.002718
+    radius: 4
+  - x: -205.12251
+    z: 19.249302
+    radius: 4
+  - x: -205.84563
+    z: 14.464648
+    radius: 4
+  - x: -206.36409
+    z: 9.656267
+    radius: 4
+  - x: -206.67593
+    z: 4.832113
+    radius: 4
+  - x: -206.78
+    z: -0.000002201631
+    radius: 4
+  - x: -206.67592
+    z: -4.8322053
+    radius: 4
+  - x: -206.36407
+    z: -9.65636
+    radius: 4
+  - x: -205.84563
+    z: -14.464652
+    radius: 4
+  - x: -205.12251
+    z: -19.249395
+    radius: 4
+  - x: -204.1974
+    z: -24.002806
+    radius: 4
+  - x: -203.07372
+    z: -28.717617
+    radius: 4
+  - x: -201.75552
+    z: -33.38675
+    radius: 4
+  - x: -200.24754
+    z: -38.003555
+    radius: 4
+  - x: -198.55519
+    z: -42.561523
+    radius: 4
+  - x: -196.68433
+    z: -47.05482
+    radius: 4
+  - x: -194.64139
+    z: -51.478096
+    radius: 4
+  - x: -192.43326
+    z: -55.826237
+    radius: 4
+  - x: -190.0672
+    z: -60.09493
+    radius: 4
+  - x: -187.5507
+    z: -64.28039
+    radius: 4
+  - x: -184.89166
+    z: -68.37917
+    radius: 4
+  - x: -182.09811
+    z: -72.38867
+    radius: 4
+  - x: -179.17807
+    z: -76.306816
+    radius: 4
+  - x: -176.13982
+    z: -80.13193
+    radius: 4
+  - x: -172.99144
+    z: -83.86313
+    radius: 4
+  - x: -169.74098
+    z: -87.499985
+    radius: 4
+  - x: -166.39629
+    z: -91.04271
+    radius: 4
+  - x: -162.9651
+    z: -94.49178
+    radius: 4
+  - x: -159.4548
+    z: -97.84843
+    radius: 4
+  - x: -155.8723
+    z: -101.11421
+    radius: 4
+  - x: -152.2244
+    z: -104.291
+    radius: 4
+  - x: -148.51724
+    z: -107.38115
+    radius: 4
+  - x: -144.7565
+    z: -110.38733
+    radius: 4
+  - x: -140.94756
+    z: -113.31231
+    radius: 4
+  - x: -137.095
+    z: -116.15919
+    radius: 4
+  - x: -133.20288
+    z: -118.93122
+    radius: 4
+  - x: -129.2749
+    z: -121.63159
+    radius: 4
+  - x: -125.313965
+    z: -124.26364
+    radius: 4
+  - x: -121.322395
+    z: -126.83069
+    radius: 4
+  - x: -117.3021
+    z: -129.3358
+    radius: 4
+  - x: -113.254326
+    z: -131.78207
+    radius: 4
+  - x: -109.17965
+    z: -134.17235
+    radius: 4
+  - x: -105.07843
+    z: -136.50906
+    radius: 4
+  - x: -100.95031
+    z: -138.79454
+    radius: 4
+  - x: -96.79455
+    z: -141.03065
+    radius: 4
+  - x: -92.609955
+    z: -143.21898
+    radius: 4
+  - x: -88.39518
+    z: -145.36047
+    radius: 4
+  - x: -84.14838
+    z: -147.4558
+    radius: 4
+  - x: -79.86745
+    z: -149.50511
+    radius: 4
+  - x: -75.55033
+    z: -151.50795
+    radius: 4
+  - x: -71.19465
+    z: -153.46347
+    radius: 4
+  - x: -66.79792
+    z: -155.37029
+    radius: 4
+  - x: -62.357933
+    z: -157.22633
+    radius: 4
+  - x: -57.872322
+    z: -159.02922
+    radius: 4
+  - x: -53.338814
+    z: -160.77596
+    radius: 4
+  - x: -48.75562
+    z: -162.46304
+    radius: 4
+  - x: -44.120914
+    z: -164.08652
+    radius: 4
+  - x: -39.433308
+    z: -165.64201
+    radius: 4
+  - x: -34.69167
+    z: -167.12479
+    radius: 4
+  - x: -29.895542
+    z: -168.5296
+    radius: 4
+  - x: -25.044676
+    z: -169.85103
+    radius: 4
+  - x: -20.139318
+    z: -171.08334
+    radius: 4
+  - x: -15.18051
+    z: -172.22057
+    radius: 4
+  - x: -10.169592
+    z: -173.25655
+    radius: 4
+  - x: -5.108479
+    z: -174.18513
+    radius: 4
+  recoveryBounds:
+  - min: {x: -224.78, y: -18.29636, z: -195.16064}
+    max: {x: 203.21997, y: 20.24718, z: 243.15445}
+  safePoses:
+  - position: {x: -7.8884616, y: 0.1860873, z: -173.67508}
+    headingDegrees: 98.37025
+  - position: {x: 172.65593, y: -0.40622926, z: 80.0508}
+    headingDegrees: -22.875927
+  - position: {x: 7.936603, y: 0.2446113, z: 175.99986}
+    headingDegrees: -98.37025
+  - position: {x: -175.00479, y: -0.34496862, z: -81.47707}
+    headingDegrees: 137.42946
+  pickupSites:
+  - id: harbor-hop-pickup-0-0
+    center: {x: 62.6705, y: 0.8643923, z: -170.89954}
+    radiusMeters: 1.65
+    verticalRangeMeters: 2.5
+  - id: harbor-hop-pickup-0-1
+    center: {x: 63.262333, y: 0.8643923, z: -173.84058}
+    radiusMeters: 1.65
+    verticalRangeMeters: 2.5
+  - id: harbor-hop-pickup-0-2
+    center: {x: 63.854164, y: 0.8643923, z: -176.78162}
+    radiusMeters: 1.65
+    verticalRangeMeters: 2.5
+  - id: harbor-hop-pickup-1-0
+    center: {x: 141.74646, y: -0.43029436, z: 126.556625}
+    radiusMeters: 1.65
+    verticalRangeMeters: 2.5
+  - id: harbor-hop-pickup-1-1
+    center: {x: 143.98293, y: -0.43029436, z: 128.55618}
+    radiusMeters: 1.65
+    verticalRangeMeters: 2.5
+  - id: harbor-hop-pickup-1-2
+    center: {x: 146.21939, y: -0.43029436, z: 130.55574}
+    radiusMeters: 1.65
+    verticalRangeMeters: 2.5
+  - id: harbor-hop-pickup-2-0
+    center: {x: -47.741646, y: 0.43029436, z: 159.63959}
+    radiusMeters: 1.65
+    verticalRangeMeters: 2.5
+  - id: harbor-hop-pickup-2-1
+    center: {x: -48.75566, y: 0.43029436, z: 162.46301}
+    radiusMeters: 1.65
+    verticalRangeMeters: 2.5
+  - id: harbor-hop-pickup-2-2
+    center: {x: -49.769676, y: 0.43029436, z: 165.28644}
+    radiusMeters: 1.65
+    verticalRangeMeters: 2.5
+  - id: harbor-hop-pickup-3-0
+    center: {x: -131.48285, y: -0.76970583, z: -116.47328}
+    radiusMeters: 1.65
+    verticalRangeMeters: 2.5
+  - id: harbor-hop-pickup-3-1
+    center: {x: -133.20288, y: -0.76970583, z: -118.93122}
+    radiusMeters: 1.65
+    verticalRangeMeters: 2.5
+  - id: harbor-hop-pickup-3-2
+    center: {x: -134.92291, y: -0.76970583, z: -121.38916}
+    radiusMeters: 1.65
+    verticalRangeMeters: 2.5
+  shortcutLanes:
+  - id: harbor-hop-shortcut-1
+    center: {x: 156.81924, y: 0.6075997, z: -76.3411}
+    halfWidth: 4.5
+    direction: {x: 0.3928881, y: 0.91955435}
+  - id: harbor-hop-shortcut-2
+    center: {x: -163.33498, y: 0.62735355, z: 66.65275}
+    halfWidth: 4.5
+    direction: {x: -0.5752101, y: -0.81800336}

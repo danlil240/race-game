@@ -148,11 +148,11 @@ namespace FamilyRacing.EditorTools
 
         public static void WindowsFullContent()
         {
-            FamilyRacing.EditorTools.FullContentSetup.Create();
+            var scenes = ProductionSceneAuthoring.PrepareBuild();
             FoundationProjectSetup.Create();
             NetworkPrototypeSetup.VerifyBuildConfiguration(BuildTarget.StandaloneWindows64);
             var report = Build("Builds/Windows-FullContent/FamilyRacing.exe",
-                BuildTarget.StandaloneWindows64, BuildOptions.Development);
+                BuildTarget.StandaloneWindows64, BuildOptions.Development, scenes);
             Report(report, "Windows Mono full-content development build");
             FamilyRacing.EditorTools.FullContentSetup.WriteManifest(
                 "Builds/Windows-FullContent", "Development", "complete");
@@ -162,11 +162,11 @@ namespace FamilyRacing.EditorTools
         // development flag — validation endpoints are compiled out.
         public static void WindowsFullContentOrdinary()
         {
-            FamilyRacing.EditorTools.FullContentSetup.Create();
+            var scenes = ProductionSceneAuthoring.PrepareBuild();
             FoundationProjectSetup.Create();
             NetworkPrototypeSetup.VerifyBuildConfiguration(BuildTarget.StandaloneWindows64);
             var report = Build("Builds/Windows-FullContent-Ordinary/FamilyRacing.exe",
-                BuildTarget.StandaloneWindows64, BuildOptions.None);
+                BuildTarget.StandaloneWindows64, BuildOptions.None, scenes);
             Report(report, "Windows Mono full-content ordinary build (no validation)");
             FamilyRacing.EditorTools.FullContentSetup.WriteManifest(
                 "Builds/Windows-FullContent-Ordinary", "Ordinary", "complete");
@@ -246,13 +246,13 @@ namespace FamilyRacing.EditorTools
         // the temporary Android export flags flipped.
         public static void WindowsFamilyRelease()
         {
-            FamilyRacing.EditorTools.FullContentSetup.Create();
+            var scenes = ProductionSceneAuthoring.PrepareBuild();
             FoundationProjectSetup.Create();
             FamilyReleaseSettings.Apply(
                 FamilyReleaseSettings.ResolveConfigPath());
             NetworkPrototypeSetup.VerifyBuildConfiguration(BuildTarget.StandaloneWindows64);
             var report = Build("Builds/Windows-FamilyRelease/FamilyRacing.exe",
-                BuildTarget.StandaloneWindows64, BuildOptions.None);
+                BuildTarget.StandaloneWindows64, BuildOptions.None, scenes);
             Report(report, "Windows Mono family release build (no validation)");
             FamilyRacing.EditorTools.FullContentSetup.WriteManifest(
                 "Builds/Windows-FamilyRelease", "Ordinary", "complete");
@@ -284,8 +284,9 @@ namespace FamilyRacing.EditorTools
                 // Full-content flavors run their content gate before any
                 // other packaging step so a catalog defect can never
                 // reach packaging.
+                string[] productionScenes = null;
                 if (contentStage == "complete")
-                    FamilyRacing.EditorTools.FullContentSetup.Create();
+                    productionScenes = ProductionSceneAuthoring.PrepareBuild();
                 else if (contentStage == "partial")
                     FamilyRacing.EditorTools.FullContentSetup.CreatePreview();
                 else if (contentStage != null)
@@ -326,7 +327,7 @@ namespace FamilyRacing.EditorTools
                 var report = Build(exportPath, BuildTarget.Android,
                     (development ? BuildOptions.Development : BuildOptions.None)
                         | BuildOptions.AcceptExternalModificationsToPlayer,
-                    visualBenchmark ? BenchmarkScenes() : null);
+                    visualBenchmark ? BenchmarkScenes() : productionScenes);
                 Report(report, "Android Gradle export"
                     + (development ? " (development" : " (ordinary")
                     + (visualBenchmark ? ", visual-benchmark" : "")
