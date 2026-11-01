@@ -195,7 +195,7 @@ def run(args):
             else:
                 assert session and session.get("finished"), session
                 report["raceSeconds"] = session["finishTicks"] / 30
-            assert 300 <= report["raceSeconds"] <= 480, "Race duration outside 5–8 minute target: " + str(report["raceSeconds"])
+            assert 90 <= report["raceSeconds"] <= 270, "Race duration outside 2–4 minute target: " + str(report["raceSeconds"])
         screenshot(client, "finished" if not args.smoke_seconds else "smoke", str(run_dir))
         report["status"] = "passed"
     except Exception as error:
