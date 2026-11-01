@@ -16,6 +16,15 @@ namespace FamilyRacing.Core.Driving
     {
         public float accelerationMultiplier = 1f;
         public float speedCapMultiplier = 1f;
+        // Spin-out (foam/missile/mine hits): a forced yaw rate in radians
+        // per second. While non-zero the driver loses steering and drive,
+        // the body keeps its world velocity and slides while it rotates,
+        // and grip is reduced so the slide reads as a real loss of
+        // control. The rules author whole turns, so the vehicle always
+        // ends the spin facing the way it was going.
+        public float spinRadiansPerSecond;
+
+        public bool Spinning { get { return spinRadiansPerSecond != 0f; } }
 
         public static MotorModifiers Neutral()
         {
@@ -25,7 +34,8 @@ namespace FamilyRacing.Core.Driving
         public bool IsNeutral()
         {
             return accelerationMultiplier == 1f
-                && speedCapMultiplier == 1f;
+                && speedCapMultiplier == 1f
+                && spinRadiansPerSecond == 0f;
         }
 
         public MotorModifiers Copy()
@@ -33,7 +43,8 @@ namespace FamilyRacing.Core.Driving
             return new MotorModifiers
             {
                 accelerationMultiplier = accelerationMultiplier,
-                speedCapMultiplier = speedCapMultiplier
+                speedCapMultiplier = speedCapMultiplier,
+                spinRadiansPerSecond = spinRadiansPerSecond
             };
         }
     }

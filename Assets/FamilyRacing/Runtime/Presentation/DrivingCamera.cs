@@ -138,6 +138,11 @@ namespace FamilyRacing
                     ? state.draftProfile.effectsVolume : 0.8f);
         }
 
+        // Extra lens widening requested by the arcade effects presenter
+        // (turbo pickups, boost pads), in degrees. Eased in and out there.
+        public float GadgetFovKick { get; set; }
+        private float travelFramingUntil;
+
         // Task 6 seam: frame any committed motor pose — the LAN race
         // screen follows the locally owned racer's *predicted* (visually
         // blended) pose, not a raw snapshot pose, so corrections ease in
@@ -176,7 +181,7 @@ namespace FamilyRacing
                 // A fixed horizon and a small lens change convey acceleration.
                 // Reduced motion disables the lens animation entirely.
                 var extraFov = overhead ? 0f : Mathf.Clamp01(motor.speed / 26f) * 5f
-                    + (motor.boostActive ? 3f : 0f);
+                    + (motor.boostActive ? 5f : 0f) + Mathf.Clamp(GadgetFovKick, 0f, 14f);
                 cam.fieldOfView = reduced ? savedFieldOfView
                     : Mathf.Lerp(cam.fieldOfView, savedFieldOfView + extraFov, blend);
             }
@@ -323,6 +328,19 @@ namespace FamilyRacing
         {
             var forward = new Vector3(
                 Mathf.Sin(motor.heading), 0f, Mathf.Cos(motor.heading));
+            // During a spin-out (or any slide where the car points well
+            // away from where it is going) follow the direction of travel,
+            // so the camera watches the car spin instead of orbiting it.
+            // A short hold keeps the travel framing through the whole spin
+            // rather than flipping each quarter turn.
+            var right = new Vector3(forward.z, 0f, -forward.x);
+            var travel = forward * motor.speed + right * motor.lateralSpeed;
+            var now = Time.unscaledTime;
+            if (travel.sqrMagnitude > 16f
+                && (motor.speed < 0f || Mathf.Abs(motor.lateralSpeed) > Mathf.Abs(motor.speed) * 0.9f))
+                travelFramingUntil = now + 0.45f;
+            if (now < travelFramingUntil && travel.sqrMagnitude > 4f)
+                forward = travel.normalized;
             return target - forward * chaseBack + Vector3.up * chaseUp;
         }
 

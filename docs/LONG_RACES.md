@@ -4,11 +4,18 @@ Windows player: `Builds/Windows-LongRaces-Ordinary/FamilyRacing.exe`.
 The matching developer player is `Builds/Windows-LongRaces/FamilyRacing.exe`.
 Select a racer, then **Quick Race**, **Campaign**, or **Time Trial**.
 
-The coastal road is a large irregular 7 km circuit with two-lap races (14 km
-total). Pine Lake is a 14 km journey; Canyon Expedition is a 15 km journey.
-Journeys finish at a separate destination after all checkpoints and never send
-racers back to the start. Their HUD shows journey percentage. Course cards show
-the route type, distance and approximate 5–8 minute duration.
+Races are short and punchy: the coastal road is a 4 km one-lap circuit, Pine
+Lake is a 4 km journey and Canyon Expedition a 4.4 km journey, so a race takes
+roughly two to four minutes (it used to be 14–15 km and could run past a
+quarter of an hour). Journeys use the opening stretch of their original layout
+rather than a squashed copy, so bends keep their gentle radii. Journeys finish
+at a separate destination after all checkpoints and never send racers back to
+the start. Their HUD shows journey percentage. Course cards show the route
+type, distance and approximate 2–4 minute duration.
+
+Glowing chevron boost pads sit just past every intermediate checkpoint,
+alternating sides of the road. Driving over one gives a 1.6 s turbo kick with
+speed lines and a lens punch. Pickups respawn after about three seconds.
 
 The car reaches 135 km/h, or 185 km/h with held boost. The motorcycle reaches
 145 km/h, or 195 km/h with boost. Acceleration, grip and steering are tuned for
@@ -27,7 +34,7 @@ stays active along the entire selected route. Other courses are deactivated.
 
 Profiles, coins, purchased upgrades and existing campaign event identities are
 preserved. New course IDs isolate long-route time records from the old short
-circuits. Long events give remaining racers four minutes after the first finish;
+circuits. Long events give remaining racers 45 seconds after the first finish;
 older content retains its one-minute grace period. Both old circuit build folders
 remain available. The new content identity is `grand-tour-1`.
 

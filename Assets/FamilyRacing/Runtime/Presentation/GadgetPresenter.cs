@@ -166,7 +166,7 @@ namespace FamilyRacing
         // local coordinator's shared world for campaign/quickRace, or the
         // host-published world on LAN. Null when the race authors no
         // gadget content — every view retires honestly.
-        private static GadgetWorldState WorldFor(FoundationState state)
+        internal static GadgetWorldState WorldFor(FoundationState state)
         {
             if (state == null) return null;
             if (state.driving != null && state.driving.gadgets != null)

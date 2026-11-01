@@ -134,19 +134,33 @@ namespace FamilyRacing.Tests
         }
 
         [Test]
-        public void MissileLocksOnlyAheadAndTurnsWithoutRetargeting()
+        public void MissileLocksAheadAndReacquiresAfterLosingLock()
         {
             var w = Step(World("homing-missile"), Racer("owner", 0, 0, 0, true),
                 Racer("rear", 2, 0, -4), Racer("front", 1, 10, 30)).state;
-            Assert.AreEqual("front", w.projectiles[0].targetParticipantId);
+            Assert.AreEqual("front", w.projectiles[0].targetParticipantId, "never locks behind the shooter");
             Assert.Greater(w.projectiles[0].heading, 0);
-            Assert.LessOrEqual(w.projectiles[0].heading, .10001f, "bounded steering");
+            Assert.LessOrEqual(w.projectiles[0].heading, .10001f, "bounded steering outside terminal range");
             var rival = Racer("front", 1, 10, 30); rival.recovering = true;
             w = Step(w, Racer("owner", 0, 0, 0), rival, Racer("rear", 2, 0, 20)).state;
+            Assert.AreEqual("rear", w.projectiles[0].targetParticipantId,
+                "a lost lock hunts the nearest rival in front of the missile");
+        }
+
+        [Test]
+        public void MissileLaunchedBlindFindsARivalAndHits()
+        {
+            var w = Step(World("homing-missile"), Racer("owner", 0, 0, 0, true)).state;
             Assert.AreEqual("", w.projectiles[0].targetParticipantId);
-            var heading = w.projectiles[0].heading;
-            w = Step(w, Racer("owner", 0, 0, 0), Racer("front", 1, 10, 30)).state;
-            Assert.AreEqual(heading, w.projectiles[0].heading);
+            w.projectiles[0].speed = 75f; w.projectiles[0].turnRate = 8f;
+            var hit = false;
+            for (var i = 0; i < 60 && !hit; i++)
+            {
+                w = Step(w, Racer("owner", 0, 0, 0), Racer("front", 1, 12, 45)).state;
+                hit = w.Racer("front").foamSlowTicksRemaining > 0;
+            }
+            Assert.IsTrue(hit, "an off-axis rival ahead is hunted down");
+            Assert.Greater(w.Racer("front").spinTicksRemaining, 0, "a missile hit spins the victim");
         }
 
         [Test]
@@ -155,7 +169,9 @@ namespace FamilyRacing.Tests
             var w = World("homing-missile");
             w = Step(w, Racer("owner", 0, 0, 0, true)).state;
             var p = w.projectiles[0]; p.x = 0; p.z = 0; p.heading = 0; p.speed = 300;
-            var rival = Racer("front", 1, 10, 5);
+            // The reported end pose sits outside terminal range so the
+            // steering stays bounded; the swept segment is what must hit.
+            var rival = Racer("front", 1, 20, 5);
             rival.segments[0] = new GadgetSegment { ax = -10, az = 5, bx = 10, bz = 5 };
             w = Step(w, Racer("owner", 0, 30, 30), rival).state;
             Assert.AreEqual(0, w.projectiles.Count);

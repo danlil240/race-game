@@ -17,7 +17,13 @@ namespace FamilyRacing.EditorTools
         public static readonly string[] Ids = { "coastal-grand-tour-v1", "pine-lake-journey-v1", "canyon-expedition-v1" };
         public static readonly string[] Names = { "Coastal Grand Tour", "Pine Lake Journey", "Canyon Expedition" };
         public static readonly string[] HebrewNames = { "מסע החוף הגדול", "מסע אגם האורנים", "הרפתקת הקניון" };
-        public static readonly float[] Lengths = { 7000f, 14000f, 15000f };
+        // Short, punchy routes: one 4 km coastal lap and two ~4 km
+        // journeys, so a whole race is a few minutes, not a quarter hour.
+        // Journeys use only their opening control points (instead of
+        // squashing the full 6.5 km layout) so bends keep the gentle
+        // radii the 135 km/h tuning was built for.
+        public static readonly float[] Lengths = { 4000f, 4000f, 4400f };
+        private static readonly int[] ControlCounts = { 12, 6, 6 };
         public const float RoadHalf = 9f, RailOffset = 14f;
         public static string TrackPath(int place) => Dir + "/" + Ids[place] + ".asset";
         private static readonly Vector2[][] Controls = {
@@ -28,7 +34,7 @@ namespace FamilyRacing.EditorTools
 
         public static Vector3[] Sample(int place)
         {
-            bool open = place != 0; var controls = Controls[place]; var dense = new List<Vector3>();
+            bool open = place != 0; var controls = Controls[place].Take(ControlCounts[place]).ToArray(); var dense = new List<Vector3>();
             int segments = open ? controls.Length - 1 : controls.Length;
             for (int i = 0; i < segments; i++)
             {

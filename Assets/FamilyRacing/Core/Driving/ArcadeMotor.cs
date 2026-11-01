@@ -35,6 +35,36 @@ namespace FamilyRacing.Core.Driving
             var state = previous.Copy();
             var dt = deltaSeconds;
 
+            // --- spin-out (gadget hit) ------------------------------------
+            // A spinning body ignores the driver: no steering, no drive, no
+            // drift. The heading rotates at the forced rate while the world
+            // velocity is preserved and re-expressed in the new heading
+            // frame, so the car slides along its path while it turns.
+            var spinRate = modifiers != null ? modifiers.spinRadiansPerSecond : 0f;
+            var spinning = spinRate != 0f && !float.IsNaN(spinRate)
+                && !float.IsInfinity(spinRate);
+            if (spinning)
+            {
+                var hx = (float)Math.Sin(state.heading);
+                var hz = (float)Math.Cos(state.heading);
+                var wx = hx * state.speed + hz * state.lateralSpeed;
+                var wz = hz * state.speed - hx * state.lateralSpeed;
+                state.heading = WrapAngle(state.heading + spinRate * dt);
+                hx = (float)Math.Sin(state.heading);
+                hz = (float)Math.Cos(state.heading);
+                state.speed = wx * hx + wz * hz;
+                state.lateralSpeed = wx * hz - wz * hx;
+                if (state.drifting)
+                {
+                    state.drifting = false;
+                    state.driftSign = 0;
+                    result.events.Add(new MotorEvent("driftEnd"));
+                }
+                input = new DriverInput(0f, false, false, input.Gadget,
+                    input.Recover, input.ChangeCamera, input.Pause, 0f,
+                    input.Brake);
+            }
+
             // --- steering + drift ----------------------------------------
             var steer = input.Steering;
             var authority = Clamp01(Math.Abs(state.speed) / tuning.steeringReferenceSpeed);
@@ -145,7 +175,10 @@ namespace FamilyRacing.Core.Driving
             }
             else
             {
-                state.lateralSpeed = state.lateralSpeed * Math.Max(0f, 1f - tuning.grip * dt);
+                // Spinning tyres hold far less: the slide keeps most of
+                // its momentum instead of snapping straight.
+                var grip = spinning ? tuning.grip * 0.22f : tuning.grip;
+                state.lateralSpeed = state.lateralSpeed * Math.Max(0f, 1f - grip * dt);
                 if (Math.Abs(state.lateralSpeed) < 0.001f) state.lateralSpeed = 0f;
             }
             if (rough) state.lateralSpeed *= Math.Max(0f, 1f - 7f * dt);

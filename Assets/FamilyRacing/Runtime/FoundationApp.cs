@@ -47,6 +47,7 @@ namespace FamilyRacing
         private RaceEffectsPresenter raceEffects;
         private RaceAudioPresenter raceAudio;
         private GadgetPresenter gadgetPresenter;
+        private ArcadeJuicePresenter arcadeJuice;
         private RearViewMirror rearViewMirror;
         private ValidationBridge bridge;
         private FoundationInput driverInput;
@@ -152,6 +153,11 @@ namespace FamilyRacing
             gadgetPresenter = GetComponent<GadgetPresenter>();
             if (gadgetPresenter == null)
                 gadgetPresenter = gameObject.AddComponent<GadgetPresenter>();
+            // Procedural arcade feedback: boost pads, speed lines, gadget
+            // bursts and the PC post stack. Render-only, like the others.
+            arcadeJuice = GetComponent<ArcadeJuicePresenter>();
+            if (arcadeJuice == null)
+                arcadeJuice = gameObject.AddComponent<ArcadeJuicePresenter>();
             rearViewMirror = GetComponent<RearViewMirror>();
             if (rearViewMirror == null)
                 rearViewMirror = gameObject.AddComponent<RearViewMirror>();
@@ -448,6 +454,8 @@ namespace FamilyRacing
             // authoritative slice exactly like the effects presenter.
             if (gadgetPresenter != null)
                 gadgetPresenter.ApplyFrame(state, Time.unscaledDeltaTime, alpha);
+            if (arcadeJuice != null)
+                arcadeJuice.ApplyFrame(state, Time.unscaledDeltaTime);
             // Entering the shared network pause neutralizes held local
             // input and requires re-arm, the same cleanup focus loss runs:
             // held steering must not seep through the resume boundary.

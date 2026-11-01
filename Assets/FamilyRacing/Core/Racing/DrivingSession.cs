@@ -179,6 +179,7 @@ namespace FamilyRacing.Core.Racing
         // — the shared world lives on the coordinator so it can never
         // diverge across the roster.
         private readonly GadgetDefinitionCatalog gadgetCatalog;
+        private readonly List<GadgetBoostPad> boostPads;
         private GadgetWorldState gadgetWorld;
 
         // `startPose` lets an authoritative coordinator seat this racer at
@@ -269,6 +270,7 @@ namespace FamilyRacing.Core.Racing
                     GadgetRules.StableSeed(raceId),
                     new[] { this.participantId }, raceId);
             }
+            boostPads = BoostPads.Derive(course);
             Emit("race.started", startCommandId ?? "", evt.id);
             // A countdown-free event goes straight to running: emit the
             // transition here or consumers waiting on race.running hang.
@@ -561,7 +563,7 @@ namespace FamilyRacing.Core.Racing
             // reaches CompleteStep at all.
             if (gadgetWorld != null && request != null)
             {
-                var input = new GadgetStepInput { tick = simulationTick };
+                var input = new GadgetStepInput { tick = simulationTick, boostPads = boostPads };
                 var racer = new GadgetRacerInput
                 {
                     participantId = participantId,

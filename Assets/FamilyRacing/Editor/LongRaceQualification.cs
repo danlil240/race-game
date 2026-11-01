@@ -46,7 +46,7 @@ namespace FamilyRacing.EditorTools
                     foreach(var preset in presets)
                     {
                         var tuning=LongRaceAuthoring.Required<VehicleDefinitionAsset>(LongRaceAuthoring.Output+"/"+id+".asset").ToTuning(out error);
-                        var evt=new EventDefinition{id="qualification",courseId=course.id,laps=place==0?2:1,countdownTicks=0,
+                        var evt=new EventDefinition{id="qualification",courseId=course.id,laps=1,countdownTicks=0,
                             vehicleIds=new List<string>{id},recovery=new RecoverySettings{minCourseY=-40}};
                         var session=new DrivingSession("qualify",tuning,course,evt,"grand-tour-1","start");var ai=new AiDriver(0f,preset);
                         var state=session.Snapshot();float speed=0;int recoveries=0,boostTicks=0,burst=0,longestBurst=0;

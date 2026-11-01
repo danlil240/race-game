@@ -90,12 +90,13 @@ namespace FamilyRacing.EditorTools
             {
                 var source=eventSlots.GetArrayElementAtIndex(i).objectReferenceValue as EventDefinitionAsset;if(source==null)continue;
                 var evt=Object.Instantiate(source);int place=Array.IndexOf(AssetTrialCircuits.Ids,source.track.courseId);if(place<0)place=0;
-                evt.track=Required<TrackDefinitionAsset>(LongRaceRoads.TrackPath(place));evt.laps=place==0?2:1;
-                evt.minCourseY=-40;evt.finishGraceSeconds=240;evt.parTicks=evt.eventType==GameplayEventType.Time?12600:0;
+                evt.track=Required<TrackDefinitionAsset>(LongRaceRoads.TrackPath(place));evt.laps=1;
+                // Short races: a 45 s finish grace and a 2.5 minute par.
+                evt.minCourseY=-40;evt.finishGraceSeconds=45;evt.parTicks=evt.eventType==GameplayEventType.Time?4500:0;
                 if(evt.objectives!=null)foreach(var objective in evt.objectives)
                     foreach(var condition in objective.alternatives)
                         if(condition.metric==FamilyRacing.Core.Progression.ObjectiveMetric.FinishWithinTicks)
-                            condition.threshold=objective.kind=="mastery"?12600:18000;
+                            condition.threshold=objective.kind=="mastery"?4500:6750;
                 evt=LongRaceRoads.Save(evt,Output+"/Campaign/"+evt.eventId+".asset");eventSlots.GetArrayElementAtIndex(i).objectReferenceValue=evt;
             }
             var sourceCatalog=world.FindProperty("gameplayCatalog").objectReferenceValue as GameplayCatalogAsset;

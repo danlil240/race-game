@@ -404,15 +404,13 @@ namespace FamilyRacing.Tests
         }
 
         [Test]
-        public void FoamSlowComposesWithActiveTurbo()
+        public void FoamSpinsTheRacerOutAndCancelsTurbo()
         {
             var catalog = Catalog();
             var world = World(catalog, null);
-            // Turbo'd victim drives over a rival's patch: the authored
-            // 0.70 scales BOTH channels of the turbo envelope — the
-            // spec's "no stacking" bars repeat foam hits (immunity),
-            // not foam+turbo co-application. Pinned: accel 1.25x0.70,
-            // cap 1.10x0.70.
+            // A turbo'd victim drives over a rival's patch: foam is
+            // slippery, so the racer loses the turbo and spins a full
+            // 360 while the authored slow applies.
             Grant(world, "p1", "turbo-01");
             var turbo = Step(world, catalog,
                 Racer("p1", 1, 30f, 30f, gadget: true)).state;
@@ -424,14 +422,80 @@ namespace FamilyRacing.Tests
                 Racer("p1", 1, 50f, 50f, segments: new[]
                     { Seg(48f, 50f, 52f, 50f) })).state;
             var row = Row(hit, "p1");
-            Assert.Greater(row.turboTicksRemaining, 0,
-                "the turbo envelope is still live under the slow");
+            Assert.AreEqual(0, row.turboTicksRemaining, "no boosting out of a spin");
             Assert.AreEqual(45, row.foamSlowTicksRemaining);
+            Assert.AreEqual(GadgetRules.FoamSpinTicks, row.spinTicksRemaining);
             var mods = GadgetRules.ModifierFor(hit, "p1");
-            Assert.AreEqual(1.25f * 0.70f, mods.accelerationMultiplier,
-                1e-6f, "foam scales the turbo acceleration envelope");
-            Assert.AreEqual(1.10f * 0.70f, mods.speedCapMultiplier,
-                1e-6f, "foam scales the turbo cap envelope");
+            Assert.AreEqual(0.70f, mods.accelerationMultiplier, 1e-6f);
+            Assert.AreEqual(0.70f, mods.speedCapMultiplier, 1e-6f);
+            var total = System.Math.Abs(mods.spinRadiansPerSecond)
+                * GadgetRules.FoamSpinTicks / 30f;
+            Assert.AreEqual(System.Math.PI * 2.0, total, 1e-3, "exactly one full turn");
+        }
+
+        [Test]
+        public void BoostPadKicksTurboOncePerPass()
+        {
+            var catalog = Catalog();
+            var world = World(catalog, null);
+            var pads = new List<GadgetBoostPad>
+            {
+                new GadgetBoostPad { id = "pad-a", x = 50f, y = 0f, z = 50f }
+            };
+            GadgetStepResult Pass(GadgetWorldState w) => GadgetRules.Step(new GadgetStepInput
+            {
+                tick = w.tick + 1, boostPads = pads,
+                racers = new List<GadgetRacerInput> { Racer("p1", 1, 50f, 50f, segments: new[]
+                    { Seg(48f, 50f, 52f, 50f) }) }
+            }, w, catalog);
+            var first = Pass(world);
+            var row = Row(first.state, "p1");
+            Assert.AreEqual(BoostPads.TurboTicks, row.turboTicksRemaining);
+            Assert.IsTrue(first.events.Exists(e => e.kind == GadgetRules.EventBoostPad));
+            var second = Pass(first.state);
+            Assert.IsFalse(second.events.Exists(e => e.kind == GadgetRules.EventBoostPad),
+                "straddling the pad does not chain kicks");
+            var mods = GadgetRules.ModifierFor(second.state, "p1");
+            Assert.AreEqual(BoostPads.AccelerationMultiplier, mods.accelerationMultiplier, 1e-6f);
+        }
+
+        [Test]
+        public void SpinModifierRotatesAWholeTurnWhileTheCarSlides()
+        {
+            var tuning = VehicleTuning.Car01();
+            var state = new MotorState { x = 0f, z = 0f, grounded = true, speed = 16f };
+            var spin = new MotorModifiers
+            {
+                spinRadiansPerSecond = (float)(Math.PI * 2.0) * 30f / GadgetRules.FoamSpinTicks
+            };
+            var w = new FlatWorld();
+            var maxTurn = 0f;
+            for (var i = 0; i < GadgetRules.FoamSpinTicks; i++)
+            {
+                // Full steering lock is ignored while spinning.
+                state = ArcadeMotor.Step(state, new DriverInput(1f, false, true, false, false,
+                    false, false), tuning, w, 1f / 30f, null, spin).state;
+                maxTurn = Math.Max(maxTurn, Math.Abs(state.heading));
+            }
+            Assert.Greater(maxTurn, 2.5f, "the car really turned around");
+            Assert.AreEqual(0f, state.heading, 0.05f, "and ends facing forward");
+            Assert.Greater(state.z, 6f, "momentum carried it along the road");
+            Assert.Less(Math.Abs(state.x), 3f, "steering input had no effect");
+            Assert.Less(state.speed, 16f, "the slide scrubbed speed");
+            Assert.IsFalse(state.boostActive, "no boosting during a spin");
+        }
+
+        [Test]
+        public void BoostPadsSitPastIntermediateGates()
+        {
+            var course = new CourseDefinition { isOpenRoute = true };
+            for (var i = 0; i < 4; i++)
+                course.checkpoints.Add(new CheckpointGate
+                { id = "g" + i, x = 0f, z = i * 100f, halfWidth = 12f, dirX = 0f, dirZ = 1f });
+            var pads = BoostPads.Derive(course);
+            Assert.AreEqual(2, pads.Count, "start and finish get no pad");
+            Assert.AreEqual(100f + BoostPads.DistancePastGateMeters, pads[0].z, 1e-4f);
+            Assert.AreNotEqual(pads[0].x, pads[1].x, "pads alternate sides");
         }
 
         [Test]
