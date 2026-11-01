@@ -256,6 +256,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 56b9a8ad2f559804f8c4c7f207c13293, type: 3}
   m_Name: 
   m_EditorClassIdentifier: FamilyRacing.Runtime::FamilyRacing.FoundationApp
+  profileStorageNamespace: 
 --- !u!4 &1246834027
 Transform:
   m_ObjectHideFlags: 0
@@ -298,6 +299,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: FamilyRacing.Runtime::FamilyRacing.DrivingCamera
   chaseBack: 10.5
+  speedFeedbackEnabled: 0
   chaseUp: 4
   overheadUp: 30
   overheadBack: 7

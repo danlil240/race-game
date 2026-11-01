@@ -14,9 +14,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: FamilyRacing.Runtime::FamilyRacing.EventDefinitionAsset
   eventId: trial-sunny-car-circuit
   track: {fileID: 11400000, guid: d796bdd2840a91d4db9510d93218048e, type: 2}
-  laps: 2
+  laps: 1
   countdownTicks: 90
-  finishGraceSeconds: 240
+  finishGraceSeconds: 45
   vehicleIds:
   - car-01
   completionCoins: 20
