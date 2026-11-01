@@ -1,0 +1,399 @@
+{
+  "purpose": "Grand Tour CC0 look pass: Poly Haven PBR ground sets and decimated scans",
+  "license": "CC0-1.0",
+  "costUsd": 0,
+  "sources": [
+    "https://polyhaven.com/a/asphalt_02",
+    "https://polyhaven.com/a/gravel_road",
+    "https://polyhaven.com/a/coast_sand_rocks_02",
+    "https://polyhaven.com/a/forrest_ground_01",
+    "https://polyhaven.com/a/red_laterite_soil_stones",
+    "https://polyhaven.com/a/cliff_side",
+    "https://polyhaven.com/a/rock_09",
+    "https://polyhaven.com/a/rock_07",
+    "https://polyhaven.com/a/rock_moss_set_01",
+    "https://polyhaven.com/a/namaqualand_boulder_04",
+    "https://polyhaven.com/a/namaqualand_boulder_05",
+    "https://polyhaven.com/a/fern_02",
+    "https://polyhaven.com/a/shrub_sorrel_01",
+    "https://polyhaven.com/a/wild_rooibos_bush",
+    "https://polyhaven.com/a/crystalline_iceplant"
+  ],
+  "assets": [
+    {
+      "id": "asphalt_02",
+      "kind": "texture",
+      "name": "Asphalt 02",
+      "authors": [
+        "Rob Tuytel"
+      ],
+      "page": "https://polyhaven.com/a/asphalt_02",
+      "license": "CC0-1.0"
+    },
+    {
+      "id": "gravel_road",
+      "kind": "texture",
+      "name": "Gravel Road",
+      "authors": [
+        "Amal Kumar"
+      ],
+      "page": "https://polyhaven.com/a/gravel_road",
+      "license": "CC0-1.0"
+    },
+    {
+      "id": "coast_sand_rocks_02",
+      "kind": "texture",
+      "name": "Coast Sand Rocks 02",
+      "authors": [
+        "Rob Tuytel"
+      ],
+      "page": "https://polyhaven.com/a/coast_sand_rocks_02",
+      "license": "CC0-1.0"
+    },
+    {
+      "id": "forrest_ground_01",
+      "kind": "texture",
+      "name": "Forest Ground 01",
+      "authors": [
+        "Rob Tuytel"
+      ],
+      "page": "https://polyhaven.com/a/forrest_ground_01",
+      "license": "CC0-1.0"
+    },
+    {
+      "id": "red_laterite_soil_stones",
+      "kind": "texture",
+      "name": "Red Laterite Soil Stones",
+      "authors": [
+        "Amal Kumar"
+      ],
+      "page": "https://polyhaven.com/a/red_laterite_soil_stones",
+      "license": "CC0-1.0"
+    },
+    {
+      "id": "cliff_side",
+      "kind": "texture",
+      "name": "Cliff Side",
+      "authors": [
+        "Dario Barresi",
+        "James Ray Cock",
+        "Jenelle van Heerden"
+      ],
+      "page": "https://polyhaven.com/a/cliff_side",
+      "license": "CC0-1.0"
+    },
+    {
+      "id": "rock_09",
+      "kind": "model",
+      "name": "Rock 09",
+      "authors": [
+        "Jenelle van Heerden"
+      ],
+      "page": "https://polyhaven.com/a/rock_09",
+      "license": "CC0-1.0"
+    },
+    {
+      "id": "rock_07",
+      "kind": "model",
+      "name": "Rock 07",
+      "authors": [
+        "Jenelle van Heerden"
+      ],
+      "page": "https://polyhaven.com/a/rock_07",
+      "license": "CC0-1.0"
+    },
+    {
+      "id": "rock_moss_set_01",
+      "kind": "model",
+      "name": "Rock Moss Set 01",
+      "authors": [
+        "Kless Gyzen"
+      ],
+      "page": "https://polyhaven.com/a/rock_moss_set_01",
+      "license": "CC0-1.0"
+    },
+    {
+      "id": "namaqualand_boulder_04",
+      "kind": "model",
+      "name": "Namaqualand Boulder 04",
+      "authors": [
+        "Jenelle van Heerden"
+      ],
+      "page": "https://polyhaven.com/a/namaqualand_boulder_04",
+      "license": "CC0-1.0"
+    },
+    {
+      "id": "namaqualand_boulder_05",
+      "kind": "model",
+      "name": "Namaqualand Boulder 05",
+      "authors": [
+        "Dario Barresi",
+        "Jenelle van Heerden"
+      ],
+      "page": "https://polyhaven.com/a/namaqualand_boulder_05",
+      "license": "CC0-1.0"
+    },
+    {
+      "id": "fern_02",
+      "kind": "model",
+      "name": "Fern 02",
+      "authors": [
+        "Rico Cilliers",
+        "Rob Tuytel"
+      ],
+      "page": "https://polyhaven.com/a/fern_02",
+      "license": "CC0-1.0"
+    },
+    {
+      "id": "shrub_sorrel_01",
+      "kind": "model",
+      "name": "Shrub Sorrel 01",
+      "authors": [
+        "Rico Cilliers"
+      ],
+      "page": "https://polyhaven.com/a/shrub_sorrel_01",
+      "license": "CC0-1.0"
+    },
+    {
+      "id": "wild_rooibos_bush",
+      "kind": "model",
+      "name": "Wild Rooibos Bush",
+      "authors": [
+        "James Ray Cock",
+        "Jenelle van Heerden"
+      ],
+      "page": "https://polyhaven.com/a/wild_rooibos_bush",
+      "license": "CC0-1.0"
+    },
+    {
+      "id": "crystalline_iceplant",
+      "kind": "model",
+      "name": "Crystalline Iceplant",
+      "authors": [
+        "James Ray Cock",
+        "Jenelle van Heerden"
+      ],
+      "page": "https://polyhaven.com/a/crystalline_iceplant",
+      "license": "CC0-1.0"
+    }
+  ],
+  "notes": "Models: Poly Haven 1k glTF, decimated with pymeshlab and saved as OBJ; plant albedo merged with the alpha map into *_diffa_1k.png. Ground sets: roughness packed as 1k URP smoothness masks (*_mask_1k.png).",
+  "files": [
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/asphalt_02/asphalt_02_diff_2k.jpg",
+      "sha256": "28f5ba8690553f192c0e5e1a5ff40f34765b4b93f4cc7059b1a3e9c795b6c28c"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/asphalt_02/asphalt_02_mask_1k.png",
+      "sha256": "6eb4b9307b537ce3232f9993299d16aa06f3e22ca5dfd64fd8151baa957ab33b"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/asphalt_02/asphalt_02_nor_gl_2k.jpg",
+      "sha256": "ffe49db71a0fd34c1e259625df66a302a237597d6ef655307987ec4e45bc6f21"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/gravel_road/gravel_road_diff_1k.jpg",
+      "sha256": "bccbb077a825bdd0eb6f607939578a6ee549822824278fb3a828f6eed3d05d45"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/gravel_road/gravel_road_mask_1k.png",
+      "sha256": "df7f033a8aeda7ef5c5155a800c77c216d29f2f4b3f7ca62902176ef72317d87"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/gravel_road/gravel_road_nor_gl_1k.jpg",
+      "sha256": "0920996cab9f2d62a2eb73a3589804527aa0273c4ca61b9f526ce4cba37edebc"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/coast_sand_rocks_02/coast_sand_rocks_02_diff_2k.jpg",
+      "sha256": "98a8850f24cba18e4c99e46c56f5675f910809ee7f75df3e8587ec9e27088ed6"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/coast_sand_rocks_02/coast_sand_rocks_02_mask_1k.png",
+      "sha256": "e269ec0d5d4b375ccbaffa41aa8121a6d0389fe6ed4ee561f3ff79092dda3f6c"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/coast_sand_rocks_02/coast_sand_rocks_02_nor_gl_2k.jpg",
+      "sha256": "e75cd105d218aae5bf669630635e6753a78f6325bc799be3d0ee8b974853a84d"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/forrest_ground_01/forrest_ground_01_diff_2k.jpg",
+      "sha256": "e4d557ff61a0b42712a58e8a2e91c6010738977d4e172b7af47abd7d406ae735"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/forrest_ground_01/forrest_ground_01_mask_1k.png",
+      "sha256": "eb0ad99ff24de608901fdd1d1eb44a67b3caa6c1479a5babc43e5648d26ac90b"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/forrest_ground_01/forrest_ground_01_nor_gl_2k.jpg",
+      "sha256": "aa23fa930c6303490f842f7c016c19d838263e8e4538d42508a9332e3fd76b69"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/red_laterite_soil_stones/red_laterite_soil_stones_diff_2k.jpg",
+      "sha256": "db3568338ecdf4467ca74f88178a60ebdb5a98f9b644db73b411913e7044fef6"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/red_laterite_soil_stones/red_laterite_soil_stones_mask_1k.png",
+      "sha256": "1eaf3a4cd5ad5f3ac5c0072b245c5f2f61a6ae8e8399f5f75f43d632635f9aa3"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/red_laterite_soil_stones/red_laterite_soil_stones_nor_gl_2k.jpg",
+      "sha256": "1b2e238e375c31719169428b318916a8c9ba72b5202d2f36eac46b3d861319b6"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/cliff_side/cliff_side_diff_1k.jpg",
+      "sha256": "5c6858541108fc34e5726ecf4d8d942d6301155c489e7341619260f2909570c5"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/cliff_side/cliff_side_mask_1k.png",
+      "sha256": "aab1d1df3e39032f08ca04b67a5766e7cfd176565f9d99ab2511f7e2c4fdb1ee"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/cliff_side/cliff_side_nor_gl_1k.jpg",
+      "sha256": "28583860810a7d6d8ffddeaaff463408fc580338fd5a92c67b058207e75375a3"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/rock_09/rock_09.obj",
+      "sha256": "7adc59255497fa99588e043b1a3c4848fdba2667df74894c6c4c610bd2759475"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/rock_09/rock_09.obj.mtl",
+      "sha256": "8aeb44f1d4e7f5dc5bd7e1f15330d0e4d5f450c3670edd9c82d5e520bd488af6"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/rock_09/rock_09_diff_1k.jpg",
+      "sha256": "afb7ae5ae82238d304aba589391ac6bc87f7cf1dbfe50980c21f762cfdd87efd"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/rock_09/rock_09_nor_gl_1k.jpg",
+      "sha256": "2195b5c7da3a23af2a5f93dbb20f38bc069028509b106397bc8d2aee0bc55729"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/rock_07/rock_07.obj",
+      "sha256": "2deee990f6bc8a2a377a0792edf591386febabe5280acf89afd9711dafc574cc"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/rock_07/rock_07.obj.mtl",
+      "sha256": "a84a9e15b978f9dc815218d9ff734fe0320dc0bb8c5761869fb13e5993bae3eb"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/rock_07/rock_07_diff_1k.jpg",
+      "sha256": "8ff1965aa1664cc4abcc0131c44ee2b97ab14d6e131d7a51429ff261eeb101c8"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/rock_07/rock_07_nor_gl_1k.jpg",
+      "sha256": "57cb2210951aeb376164fce5f7c65f03e5599def04873b56cad0f173c275d78d"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/rock_moss_set_01/rock_moss_set_01.obj",
+      "sha256": "e59009b41c7a2265642b6a7dd4a58a6e512e37a4ec0a08bf57528f03ddb3309c"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/rock_moss_set_01/rock_moss_set_01.obj.mtl",
+      "sha256": "cadd087ceab26c301e5296a04d8e59312faa2a74f8a2a9cd3e44f6433a286c96"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/rock_moss_set_01/rock_moss_set_01_diff_1k.jpg",
+      "sha256": "40cea65d8aa4ee73a93b04af19963834d061eee9779c3fc2c1cba76eef812ccc"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/rock_moss_set_01/rock_moss_set_01_nor_gl_1k.jpg",
+      "sha256": "eb4aad3f207f1dc5b624d74ae240372171626a66912bd71adf7bd3e518181d6e"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/namaqualand_boulder_04/namaqualand_boulder_04.obj",
+      "sha256": "29cfd0eff7f217a714026add5aa078f726620073a4df97bdc3597d010cbbb8de"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/namaqualand_boulder_04/namaqualand_boulder_04.obj.mtl",
+      "sha256": "eb441d4d0991693fee154ccf2017136bf8e57bbe35623119a7bd35112ea80d3d"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/namaqualand_boulder_04/namaqualand_boulder_04_diff_1k.jpg",
+      "sha256": "1673e031ebcf5015206fec10bec676e55b049705b01fcef6bb2b2fb79e8de54c"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/namaqualand_boulder_04/namaqualand_boulder_04_nor_gl_1k.jpg",
+      "sha256": "a7042070d6e369c80d818b7e787b977bf84c1f78b0c83e3ecf690ac2fa17d291"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/namaqualand_boulder_05/namaqualand_boulder_05.obj",
+      "sha256": "f345ec499f99f65c943336994882bfdc01d71084b9cfa746a0ca1c081da284e4"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/namaqualand_boulder_05/namaqualand_boulder_05.obj.mtl",
+      "sha256": "640b0380cb259831d02ca982afb610c600e187eee8efd335e6ef4a60ac31a495"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/namaqualand_boulder_05/namaqualand_boulder_05_diff_1k.jpg",
+      "sha256": "58d1fba55e16a56fe2d6e016ac75bcddfbc3bb2273ca8c9127f1de497c54db2a"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/namaqualand_boulder_05/namaqualand_boulder_05_nor_gl_1k.jpg",
+      "sha256": "027359a8a79febee925cc29af3106cc12bdeed5bc91cb26f1d88f589c77f448d"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/fern_02/fern_02.obj",
+      "sha256": "7c611bee24dbf2a3ce34c14009969cb30b6c18c8134e4d36c80599a5ef78f169"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/fern_02/fern_02.obj.mtl",
+      "sha256": "62060a698cdd0d6092a53758717b73852f24ff4626b9b0e1dde79ca7951e0154"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/fern_02/fern_02_diffa_1k.png",
+      "sha256": "077638c74ae88184f8eba1dfc8608904eafd3272aa4d2e587f05109bd5b9c943"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/fern_02/fern_02_nor_gl_1k.jpg",
+      "sha256": "45bce132c6e96a0864bc89ab5da51361ab3f4afa83a6669ae499ab5ca811f621"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/shrub_sorrel_01/shrub_sorrel_01.obj",
+      "sha256": "18b80d6c56a3ee4592d0793c878028db0a4522f15c02a26b2b2423efd728372f"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/shrub_sorrel_01/shrub_sorrel_01.obj.mtl",
+      "sha256": "bdf122174ec53852dc430d72cea71de75b37c5d110ea68e30a950085e95f9d60"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/shrub_sorrel_01/shrub_sorrel_01_diffa_1k.png",
+      "sha256": "331794a5d94b707ba1c3fdadde476e5876f6d2fb8bd63673b2b8a1661254420a"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/shrub_sorrel_01/shrub_sorrel_01_nor_gl_1k.jpg",
+      "sha256": "0bb2e2aba7831a4e642ad6b1985ad82b0a574930ec6982f9a1a66ad8b41a94b3"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/wild_rooibos_bush/wild_rooibos_bush.obj",
+      "sha256": "13bc5540a55e13098333d9ca331305742344cc88460ac74111c637df83ce5db8"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/wild_rooibos_bush/wild_rooibos_bush.obj.mtl",
+      "sha256": "43c29b94c9a9731cb0ddd9960d66393605f4135c72d070e9762e89744357c0bd"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/wild_rooibos_bush/wild_rooibos_bush_diffa_1k.png",
+      "sha256": "44f4c1b81f19b1a7daa9fc877a4f2d7b9581242c20c508e752ca33164ee253d3"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/wild_rooibos_bush/wild_rooibos_bush_nor_gl_1k.jpg",
+      "sha256": "ffd557b4cb732d24988d41741398df150567f3ac9d1433f11b88d60158c953d4"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/crystalline_iceplant/crystalline_iceplant.obj",
+      "sha256": "50b22928789b3de8bdbb9e36b67e1264fdd29e8ca836852956b441384568a268"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/crystalline_iceplant/crystalline_iceplant.obj.mtl",
+      "sha256": "bde74785b5425da4fb9d8095a5c76aabd7ba90ff92cc4c39e76526ad8e45fdce"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/crystalline_iceplant/crystalline_iceplant_diffa_1k.png",
+      "sha256": "6ade198528918c53855640847c3b54c23ba39abfef8dc65ebfa971b4fe612b28"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/crystalline_iceplant/crystalline_iceplant_nor_gl_1k.jpg",
+      "sha256": "860252c828abd312600ab0daff531dfa4573b1a3ee6293bdbc5b53093f082cec"
+    }
+  ]
+}

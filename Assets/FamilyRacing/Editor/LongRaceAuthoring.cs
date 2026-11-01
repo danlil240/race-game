@@ -57,16 +57,17 @@ namespace FamilyRacing.EditorTools
             {
                 if(light.type!=LightType.Directional)continue;
                 light.color=new Color(1,.94f,.83f);light.intensity=1.12f;light.shadows=LightShadows.Soft;
-                light.shadowStrength=.72f;light.shadowBias=.035f;light.transform.rotation=Quaternion.Euler(38,-38,0);
+                light.shadowStrength=.8f;light.shadowBias=.035f;light.transform.rotation=Quaternion.Euler(38,-38,0);
             }
-            RenderSettings.ambientMode=AmbientMode.Trilight;RenderSettings.ambientSkyColor=new Color(.46f,.58f,.67f);
-            RenderSettings.ambientEquatorColor=new Color(.42f,.45f,.4f);RenderSettings.ambientGroundColor=new Color(.24f,.27f,.23f);
-            RenderSettings.fog=true;RenderSettings.fogMode=FogMode.Linear;
-            RenderSettings.fogColor=new Color(.66f,.77f,.79f);RenderSettings.fogStartDistance=290;RenderSettings.fogEndDistance=1000;
+            // Ambient and fog follow the sky; LongRaceVisibility swaps them per course at runtime.
+            RenderSettings.ambientMode=AmbientMode.Trilight;RenderSettings.fog=true;RenderSettings.fogMode=FogMode.Linear;
             RenderSettings.skybox=LongRaceRoads.Mat("GrandTourSky","FFFFFF","FamilyRacing/Grand Tour Sky");
+            LongRaceRoads.ApplyAtmosphere(0,RenderSettings.skybox);
             var pc=Object.Instantiate(Required<UniversalRenderPipelineAsset>(VisualBenchmarkSetup.PcPipelinePath));
-            pc.name="GrandTourPC";pc.msaaSampleCount=4;pc.shadowDistance=140;
+            pc.name="GrandTourPC";pc.msaaSampleCount=4;pc.shadowDistance=240;pc.shadowCascadeCount=4;
             var pcSettings=new SerializedObject(pc);pcSettings.FindProperty("m_SoftShadowsSupported").boolValue=true;
+            pcSettings.FindProperty("m_MainLightShadowmapResolution").intValue=4096;
+            var softQuality=pcSettings.FindProperty("m_SoftShadowQuality");if(softQuality!=null)softQuality.intValue=3;
             pcSettings.ApplyModifiedPropertiesWithoutUndo();
             pc=LongRaceRoads.Save(pc,Output+"/GrandTourPC.asset");
             foreach(var profile in scene.GetRootGameObjects().SelectMany(g=>g.GetComponentsInChildren<RenderProfileController>(true)))

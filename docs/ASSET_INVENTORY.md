@@ -187,3 +187,27 @@ Reconciliation notes:
 - Tutorial voice clips (existing open gate from earlier milestones) —
   requires licensed synthetic voices per `GAME_PLAN.md` §3; unchanged
   by this task.
+
+## CC0 Grand Tour art (Poly Haven)
+
+Free downloads (US$0) from Poly Haven, all licensed CC0 1.0 (public domain, commercial use allowed, no attribution required). Stored under `Assets/FamilyRacing/Art/CC0/PolyHaven/<id>/`; per-file SHA-256 and source pages in `Assets/FamilyRacing/Art/CC0/sources.json`. Page for each asset: `https://polyhaven.com/a/<id>`. Licence: https://polyhaven.com/license.
+
+Processing: ground sets use 2k albedo and GL normal maps (gravel_road and cliff_side at 1k) with roughness packed into 1k URP smoothness masks (`*_mask_1k.png`). Models come from the 1k glTF, decimated with pymeshlab to 1.4k-4.3k triangles and saved as OBJ; plant albedo is merged with the published alpha map into `*_diffa_1k.png`. Pines and grass tufts are generated in code (`LongRaceScenery`), not downloaded.
+
+| Poly Haven id | Kind | Used for | Authors |
+|---|---|---|---|
+| asphalt_02 | texture | road surface | Rob Tuytel |
+| gravel_road | texture | canyon verge | Amal Kumar |
+| coast_sand_rocks_02 | texture | coast ground and verge | Rob Tuytel |
+| forrest_ground_01 | texture | pine forest ground and verge | Rob Tuytel |
+| red_laterite_soil_stones | texture | canyon ground | Amal Kumar |
+| cliff_side | texture | canyon mesas | Dario Barresi, James Ray Cock, Jenelle van Heerden |
+| rock_09 | model | coast/forest boulders | Jenelle van Heerden |
+| rock_07 | model | coast boulders | Jenelle van Heerden |
+| rock_moss_set_01 | model | forest rocks | Kless Gyzen |
+| namaqualand_boulder_04 | model | canyon boulders | Jenelle van Heerden |
+| namaqualand_boulder_05 | model | canyon boulders and outcrops | Dario Barresi, Jenelle van Heerden |
+| fern_02 | model | forest verge plants | Rico Cilliers, Rob Tuytel |
+| shrub_sorrel_01 | model | coast verge shrubs | Rico Cilliers |
+| wild_rooibos_bush | model | canyon shrubs | James Ray Cock, Jenelle van Heerden |
+| crystalline_iceplant | model | coast ground cover | James Ray Cock, Jenelle van Heerden |
