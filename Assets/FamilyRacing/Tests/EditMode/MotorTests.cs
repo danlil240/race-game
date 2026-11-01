@@ -25,6 +25,8 @@ namespace FamilyRacing.Tests
             internal float RampToeZ = float.NaN;
             internal float RampCrestZ;
             internal float RampSlope = 0.25f;
+            // Marks the ramp surface as a launch ramp (keeps climb speed).
+            internal bool LaunchRamp;
             // When true the ground probe reports a miss — the sustained
             // contact-outage case (distinct from alternating jitter).
             internal bool ProbeMiss;
@@ -57,7 +59,9 @@ namespace FamilyRacing.Tests
                     normalY = 1f,
                     normalZ = 0f,
                     distance = pose.y - surface,
-                    surfaceId = "ground"
+                    surfaceId = "ground",
+                    launchRamp = LaunchRamp && !float.IsNaN(RampToeZ)
+                        && pose.z > RampToeZ && pose.z < RampCrestZ
                 };
             }
 
@@ -441,6 +445,37 @@ namespace FamilyRacing.Tests
             Assert.That(state.grounded, Is.True);
             Assert.That(state.z, Is.GreaterThan(world.RampCrestZ),
                 "the car must land beyond the crest, z=" + state.z);
+        }
+
+        [Test]
+        public void LaunchRampThrowsTheCarHigherAndFurther()
+        {
+            float Flight(bool launch, out float liftAtTakeoff)
+            {
+                var world = new FlatWorld
+                { RampToeZ = 10f, RampCrestZ = 24f, RampSlope = 0.15f, LaunchRamp = launch };
+                var tuning = VehicleTuning.Car01();
+                var state = Spawn();
+                liftAtTakeoff = 0f;
+                var takeoff = float.NaN;
+                for (var i = 0; i < 900; i++)
+                {
+                    var result = ArcadeMotor.Step(state, Neutral(), tuning, world, Dt);
+                    state = result.state;
+                    foreach (var ev in result.events)
+                    {
+                        if (ev.kind == "becameAirborne") { takeoff = state.z; liftAtTakeoff = state.verticalSpeed; }
+                        if (ev.kind == "landed") return state.z - takeoff;
+                    }
+                }
+                return 0f;
+            }
+            var plainDistance = Flight(false, out var plainLift);
+            var launchDistance = Flight(true, out var launchLift);
+            Assert.That(plainLift, Is.LessThanOrEqualTo(0f), "a plain crest only drops the car");
+            Assert.That(launchLift, Is.GreaterThan(1f), "the launch lip throws the car upward");
+            Assert.That(launchDistance, Is.GreaterThan(plainDistance * 1.2f),
+                "launch=" + launchDistance + " plain=" + plainDistance);
         }
 
         [Test]

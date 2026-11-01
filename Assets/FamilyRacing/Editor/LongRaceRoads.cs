@@ -173,6 +173,13 @@ namespace FamilyRacing.EditorTools
             }
             int startIndex = open ? 8 : 0, finishIndex = open ? p.Length - 9 : 0;
             Arch(root, p, startIndex, open, false); if (open) Arch(root, p, finishIndex, true, true);
+            var gates = GateIndexes(p, open, startIndex, finishIndex);
+            // A jump ramp sits on every other intermediate gate, in the
+            // same lane as that gate's boost pad (BoostPads.Derive puts the
+            // pad 14 m past the gate on the right for even gates), so a
+            // racer who takes the pad hits the ramp with turbo.
+            var ramps = Node(root, "JumpRamps");
+            for (int n = 2; n < gates.Count - (open ? 1 : 0); n += 2) JumpRamp(ramps, p, open, gates[n], n);
             AuthorTrack(p, place, startIndex, finishIndex);
         }
         private static Texture2D GroundTexture(int place)
@@ -267,12 +274,7 @@ namespace FamilyRacing.EditorTools
             var spawn=Pose(p,start,open,15);track.spawnPosition=spawn.position;track.spawnHeadingDegrees=spawn.headingDegrees;
             track.spawnSlots=Enumerable.Range(0,4).Select(i=>Pose(p,start,open,15+i/2*7,i%2==0?-2.5f:2.5f)).ToArray();
             track.aiRoute=p.Select(point=>new TrackDefinitionAsset.RoutePoint{x=point.x,z=point.z,radius=4.5f}).ToArray();
-            var indexes=new List<int>{start};
-            // Roads have continuous barriers; 320 m gate intervals preserve
-            // ordered progress while keeping four-racer snapshots under the
-            // established 32 KB LAN packet ceiling, including pickup state.
-            for(int i=start+40;i<(open?finish:p.Length);i+=40)indexes.Add(i);
-            if(open&&indexes.Last()!=finish)indexes.Add(finish);
+            var indexes=GateIndexes(p,open,start,finish);
             track.gates=indexes.Select((i,n)=>{var t=Tangent(p,i,open);var safe=Pose(p,i,open,5);return new TrackDefinitionAsset.Gate {
                 id=n==0?"start":open&&i==finish?"finish":"gate-"+n,center=p[i],halfWidth=12.5f,
                 direction=new Vector2(t.x,t.z),recoverPosition=safe.position,recoverHeadingDegrees=safe.headingDegrees};}).ToArray();
@@ -284,6 +286,79 @@ namespace FamilyRacing.EditorTools
             track=Save(track,TrackPath(place));
             File.WriteAllText(Dir+"/"+Ids[place]+".json",JsonUtility.ToJson(track,true));
             Debug.Log("LONG_ROUTE "+Ids[place]+" points="+p.Length+" gates="+track.gates.Length+" targetMeters="+Lengths[place]);
+        }
+        private static List<int> GateIndexes(Vector3[] p,bool open,int start,int finish)
+        {
+            var indexes=new List<int>{start};
+            // Roads have continuous barriers; 320 m gate intervals preserve
+            // ordered progress while keeping four-racer snapshots under the
+            // established 32 KB LAN packet ceiling, including pickup state.
+            for(int i=start+40;i<(open?finish:p.Length);i+=40)indexes.Add(i);
+            if(open&&indexes.Last()!=finish)indexes.Add(finish);
+            return indexes;
+        }
+        // Point and right vector a given distance along the road from index i.
+        private static (Vector3 point,Vector3 right) Along(Vector3[] p,bool open,int i,float meters)
+        {
+            float steps=meters/8f;int k=Mathf.FloorToInt(steps);float f=steps-k;
+            int a=open?Mathf.Min(i+k,p.Length-1):(i+k)%p.Length;int b=open?Mathf.Min(a+1,p.Length-1):(a+1)%p.Length;
+            var right=Vector3.Lerp(Right(Tangent(p,a,open)),Right(Tangent(p,b,open)),f).normalized;
+            return (Vector3.Lerp(p[a],p[b],f),right);
+        }
+        public const float RampStart = 24f, RampLength = 18f, RampHeight = 2.6f, RampInner = 1.6f, RampOuter = 7.6f;
+        // Kicker profile: flat toe, steepest at the lip (slope 2H/L = 0.29),
+        // gentle enough for the motor's step-climb to follow every tick.
+        public static float RampLift(float s) => RampHeight * (s / RampLength) * (s / RampLength);
+        private static void JumpRamp(Transform root,Vector3[] p,bool open,int gate,int n)
+        {
+            var deck=new List<Vector3>();var deckUv=new List<Vector2>();var deckTris=new List<int>();
+            var skirt=new List<Vector3>();var skirtTris=new List<int>();
+            int rows=Mathf.RoundToInt(RampLength);
+            for(int row=0;row<=rows;row++)
+            {
+                float s=row*RampLength/rows;var (c,r)=Along(p,open,gate,RampStart+s);
+                var baseY=Vector3.up*.05f;var lift=Vector3.up*(.05f+RampLift(s));
+                deck.Add(c+r*RampInner+lift);deck.Add(c+r*RampOuter+lift);
+                deckUv.Add(new Vector2(0,s/3f));deckUv.Add(new Vector2(1,s/3f));
+                skirt.Add(c+r*RampInner+baseY);skirt.Add(c+r*RampInner+lift);
+                skirt.Add(c+r*RampOuter+baseY);skirt.Add(c+r*RampOuter+lift);
+                if(row<rows)
+                {
+                    int d=row*2;deckTris.AddRange(new[]{d,d+2,d+1,d+1,d+2,d+3});
+                    int k=row*4;
+                    skirtTris.AddRange(new[]{k,k+4,k+1,k+1,k+4,k+5});       // inner face
+                    skirtTris.AddRange(new[]{k+2,k+3,k+6,k+3,k+7,k+6});     // outer face
+                }
+            }
+            int last=rows*4;skirtTris.AddRange(new[]{last,last+2,last+1,last+1,last+2,last+3}); // back face
+            string key=root.parent.name+"_JumpRamp"+n;
+            MeshObject(root,key+"Deck",deck,deckTris,deckUv,RampDeckMaterial(),true);
+            var surface=root.Find(key+"Deck").gameObject.AddComponent<DrivingSurface>();
+            surface.offRoad=false;surface.launchRamp=true;
+            MeshObject(root,key+"Skirt",skirt,skirtTris,null,Mat("RampSkirt","2E4A5A"),false);
+            // Orange flags either side of the toe so the ramp reads from far away.
+            var (toe,tr)=Along(p,open,gate,RampStart-2f);
+            foreach(float lane in new[]{RampInner-.4f,RampOuter+.4f})
+            {
+                Box(root,"RampFlagPole",toe+tr*lane+Vector3.up*1.3f,new Vector3(.1f,2.6f,.1f),Mat("TourPost","52666B"));
+                var flag=Box(root,"RampFlag",toe+tr*lane+Vector3.up*2.3f+tr*(lane<4?-.45f:.45f),new Vector3(.9f,.55f,.04f),Mat("RampFlagOrange","FF7A1A"));
+                flag.transform.rotation=Quaternion.LookRotation(tr);
+            }
+        }
+        private static Material RampDeckMaterial()
+        {
+            var mat=Mat("RampDeck","FFFFFF");
+            var path=Dir+"/RampStripes.asset";
+            var tex=new Texture2D(64,64,TextureFormat.RGB24,true){name="RampStripes",wrapMode=TextureWrapMode.Repeat};
+            ColorUtility.TryParseHtmlString("#FF8A1F",out var orange);ColorUtility.TryParseHtmlString("#FFF1CF",out var cream);
+            for(int y=0;y<64;y++)for(int x=0;x<64;x++)
+            {
+                // Chevrons pointing up the ramp.
+                float v=(y+Mathf.Abs(x-31.5f)*.9f)%32f;tex.SetPixel(x,y,v<16f?orange:cream);
+            }
+            tex.Apply();tex=Save(tex,path);mat.SetTexture("_BaseMap",tex);
+            if(mat.HasProperty("_Smoothness"))mat.SetFloat("_Smoothness",.3f);
+            return mat;
         }
         private static void Arch(Transform root,Vector3[] p,int i,bool open,bool finish)
         {

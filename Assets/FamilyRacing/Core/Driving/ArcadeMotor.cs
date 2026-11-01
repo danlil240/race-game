@@ -332,8 +332,15 @@ namespace FamilyRacing.Core.Driving
             {
                 if (ground.hit && state.y - ground.y <= tuning.groundProbe)
                 {
+                    // Launch ramps remember how fast the surface lifted the
+                    // car, so leaving the lip throws it into the air instead
+                    // of just dropping off the edge. Every other surface
+                    // keeps the old flat ground follow.
+                    // Measured from the step's starting height: a
+                    // step-climb lift earlier in the step is not a launch.
+                    state.verticalSpeed = ground.launchRamp && previous.grounded
+                        ? Math.Min(14f, Math.Max(0f, (ground.y - previous.y) / dt)) : 0f;
                     state.y = ground.y;
-                    state.verticalSpeed = 0f;
                     state.airSeconds = 0f;
                     state.lastContact = contacted ? "wall" : "ground";
                 }

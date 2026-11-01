@@ -17,6 +17,9 @@ namespace FamilyRacing.Core.Driving
         // False by default preserves older worlds. Rough ground is an
         // explicit surface classification supplied by the collision adapter.
         public bool offRoad;
+        // A jump ramp: the motor keeps the climb rate as upward speed so
+        // the car launches off the lip.
+        public bool launchRamp;
     }
 
     // Result of a swept body-volume query. `fraction` is the portion of the

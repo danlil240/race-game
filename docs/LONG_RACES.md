@@ -15,7 +15,9 @@ type, distance and approximate 2–4 minute duration.
 
 Glowing chevron boost pads sit just past every intermediate checkpoint,
 alternating sides of the road. Driving over one gives a 1.6 s turbo kick with
-speed lines and a lens punch. Pickups respawn after about three seconds.
+speed lines and a lens punch. On every other checkpoint a striped jump ramp
+follows the right-hand pad, so taking the pad launches the car off the lip.
+Pickups respawn after about three seconds.
 
 The car reaches 135 km/h, or 185 km/h with held boost. The motorcycle reaches
 145 km/h, or 195 km/h with boost. Acceleration, grip and steering are tuned for

@@ -46,7 +46,8 @@ namespace FamilyRacing
                     normalZ = hit.normal.z,
                     distance = hit.distance - ProbeOriginLift,
                     surfaceId = hit.collider != null ? hit.collider.name : "",
-                    offRoad = hit.collider != null && hit.collider.TryGetComponent<DrivingSurface>(out var surface) && surface.offRoad
+                    offRoad = hit.collider != null && hit.collider.TryGetComponent<DrivingSurface>(out var surface) && surface.offRoad,
+                    launchRamp = hit.collider != null && hit.collider.TryGetComponent<DrivingSurface>(out var ramp) && ramp.launchRamp
                 };
             }
             return new GroundHit { hit = false };
