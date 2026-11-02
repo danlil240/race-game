@@ -17,7 +17,8 @@
     "https://polyhaven.com/a/fern_02",
     "https://polyhaven.com/a/shrub_sorrel_01",
     "https://polyhaven.com/a/wild_rooibos_bush",
-    "https://polyhaven.com/a/crystalline_iceplant"
+    "https://polyhaven.com/a/crystalline_iceplant",
+    "https://polyhaven.com/a/fir_tree_01"
   ],
   "assets": [
     {
@@ -175,9 +176,20 @@
       ],
       "page": "https://polyhaven.com/a/crystalline_iceplant",
       "license": "CC0-1.0"
+    },
+    {
+      "id": "fir_tree_01",
+      "kind": "model textures",
+      "name": "Fir Tree 01",
+      "authors": [
+        "Rico Cilliers",
+        "Rob Tuytel"
+      ],
+      "page": "https://polyhaven.com/a/fir_tree_01",
+      "license": "CC0-1.0"
     }
   ],
-  "notes": "Models: Poly Haven 1k glTF, decimated with pymeshlab and saved as OBJ; plant albedo merged with the alpha map into *_diffa_1k.png. Ground sets: roughness packed as 1k URP smoothness masks (*_mask_1k.png).",
+  "notes": "Models: Poly Haven 1k glTF, decimated with pymeshlab and saved as OBJ; plant albedo merged with the alpha map into *_diffa_1k.png. Ground sets: roughness packed as 1k URP smoothness masks (*_mask_1k.png). Trees: fir_tree_01's 1k bark maps are used as published (fir_bark/); its twig cut-outs (twig_diff + twig_alpha) are stamped along a stem into two dense branch sprites (fir_branch/fir_branch_diffa_1k.png) by Tools/CC0FirAtlas.py; the branch normal map is flat. The scan itself (7.8M triangles) is not shipped: LongRaceScenery builds card conifers from these textures.",
   "files": [
     {
       "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/asphalt_02/asphalt_02_diff_2k.jpg",
@@ -394,6 +406,22 @@
     {
       "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/crystalline_iceplant/crystalline_iceplant_nor_gl_1k.jpg",
       "sha256": "860252c828abd312600ab0daff531dfa4573b1a3ee6293bdbc5b53093f082cec"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/fir_branch/fir_branch_diffa_1k.png",
+      "sha256": "ec46cc87743b8dbf422674f6cd7d40375ae140035e906999b49b615f002eed38"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/fir_branch/fir_branch_nor_gl_1k.jpg",
+      "sha256": "e09f00232e4b5c4df1f661c34a6f0c9d8c76972a08749d414076fec2d93d1b79"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/fir_bark/fir_bark_diff_1k.jpg",
+      "sha256": "a5d25150ba1bee10008c039f98aa3c73b4477a404d6715c511ca9b5b0f4a9077"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/fir_bark/fir_bark_nor_gl_1k.jpg",
+      "sha256": "6a570ab53ab2249ecdfa93e7d3b9a8a2cb1a8ad391400e5a64c708914779b2c3"
     }
   ]
 }

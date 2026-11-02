@@ -315,6 +315,67 @@ namespace FamilyRacing.EditorTools
         }
 
         public static void DetailCar(GameObject root, GameObject chassis)
+            => Detail(root, chassis, "Kart", (c, body) => c.b > c.r * 1.12f && c.b > c.g * 1.06f, true);
+
+        // Kenney's open-wheel "race" body: repaint its dominant body colour, keep
+        // the rig's tyres and steering wheel, and leave the cockpit as modelled.
+        public static void DetailOpenWheelCar(GameObject root, GameObject chassis)
+        {
+            Detail(root, chassis, "OpenWheel", (c, body) =>
+                Mathf.Abs(c.r - body.r) + Mathf.Abs(c.g - body.g) + Mathf.Abs(c.b - body.b) < .12f, false);
+            // The cockpit is the model's pale headrest ring: seat the rider in it
+            // and put the steering wheel just ahead, at the cowl's height.
+            var tex = new Texture2D(2, 2);
+            ImageConversion.LoadImage(tex, File.ReadAllBytes(AssetTrialAuthoring.Root + "/Kenney/colormap.png"));
+            Bounds? cockpit = null;
+            foreach (var filter in chassis.GetComponentsInChildren<MeshFilter>())
+            {
+                if (!filter.GetComponent<Renderer>().enabled || filter.name == "PaintAccent") continue;
+                var mesh = filter.sharedMesh; var uv = mesh.uv; var v = mesh.vertices; var triangles = mesh.triangles;
+                for (int i = 0; i < triangles.Length; i += 3)
+                {
+                    var c = tex.GetPixelBilinear((uv[triangles[i]].x + uv[triangles[i+1]].x + uv[triangles[i+2]].x) / 3,
+                        (uv[triangles[i]].y + uv[triangles[i+1]].y + uv[triangles[i+2]].y) / 3);
+                    if (Mathf.Min(c.r, Mathf.Min(c.g, c.b)) < .8f) continue;
+                    for (int k = 0; k < 3; k++)
+                    {
+                        var point = root.transform.InverseTransformPoint(filter.transform.TransformPoint(v[triangles[i+k]]));
+                        if (cockpit == null) cockpit = new Bounds(point, Vector3.zero);
+                        else { var b = cockpit.Value; b.Encapsulate(point); cockpit = b; }
+                    }
+                }
+            }
+            Object.DestroyImmediate(tex);
+            if (cockpit == null) throw new InvalidOperationException("open-wheel body has no pale cockpit ring");
+            var ring = cockpit.Value;
+            Debug.Log("OPEN_WHEEL_COCKPIT center=" + ring.center + " size=" + ring.size);
+            root.GetComponentsInChildren<Transform>().Single(t => t.name == "SeatMount").localPosition =
+                new Vector3(0, ring.min.y + .05f, ring.center.z - .05f);
+            root.GetComponentsInChildren<Transform>().Single(t => t.name == "DashWheel").localPosition =
+                new Vector3(0, ring.max.y + .08f, ring.max.z + .22f);
+        }
+
+        // Most common saturated texel colour across the chassis triangles.
+        private static Color BodyColour(GameObject chassis, Texture2D tex)
+        {
+            var counts = new Dictionary<Color32, int>();
+            foreach (var filter in chassis.GetComponentsInChildren<MeshFilter>())
+            {
+                if (!filter.GetComponent<Renderer>().enabled) continue;
+                var uv = filter.sharedMesh.uv; var triangles = filter.sharedMesh.triangles;
+                for (int i = 0; i < triangles.Length; i += 3)
+                {
+                    Color c = tex.GetPixelBilinear((uv[triangles[i]].x + uv[triangles[i+1]].x + uv[triangles[i+2]].x) / 3,
+                        (uv[triangles[i]].y + uv[triangles[i+1]].y + uv[triangles[i+2]].y) / 3);
+                    if (c.maxColorComponent - Mathf.Min(c.r, Mathf.Min(c.g, c.b)) < .25f) continue;
+                    Color32 key = new Color(Mathf.Round(c.r * 16) / 16, Mathf.Round(c.g * 16) / 16, Mathf.Round(c.b * 16) / 16);
+                    counts[key] = counts.TryGetValue(key, out var n) ? n + 1 : 1;
+                }
+            }
+            return counts.Count == 0 ? Color.clear : (Color)counts.OrderByDescending(kv => kv.Value).First().Key;
+        }
+
+        private static void Detail(GameObject root, GameObject chassis, string prefix, Func<Color, Color, bool> isPaint, bool rally)
         {
             var ink = Mat("Ink", "202F38");
             var rubber = Mat("TireRubber", "252D33", .04f);
@@ -326,6 +387,7 @@ namespace FamilyRacing.EditorTools
             // triangles so profile colors also work on the imported chassis.
             var tex = new Texture2D(2, 2);
             ImageConversion.LoadImage(tex, File.ReadAllBytes(AssetTrialAuthoring.Root + "/Kenney/colormap.png"));
+            var body = BodyColour(chassis, tex);
             foreach (var filter in chassis.GetComponentsInChildren<MeshFilter>())
             {
                 if (!filter.GetComponent<Renderer>().enabled) continue;
@@ -337,12 +399,12 @@ namespace FamilyRacing.EditorTools
                 {
                     var p = (uv[triangles[i]] + uv[triangles[i+1]] + uv[triangles[i+2]]) / 3;
                     var c = tex.GetPixelBilinear(p.x, p.y);
-                    var list = c.b > c.r * 1.12f && c.b > c.g * 1.06f ? paint : original;
+                    var list = isPaint(c, body) ? paint : original;
                     list.AddRange(new[] { triangles[i], triangles[i+1], triangles[i+2] });
                 }
                 mesh.subMeshCount = 2;
                 mesh.SetTriangles(original, 0); mesh.SetTriangles(paint, 1);
-                mesh = Save(mesh, Dir + "/KartChassis.asset");
+                mesh = Save(mesh, Dir + "/" + prefix + "Chassis.asset");
                 filter.sharedMesh = mesh;
                 var r = filter.GetComponent<MeshRenderer>();
                 // Keep this renderer out of the whole-renderer Accent tint convention.
@@ -350,7 +412,7 @@ namespace FamilyRacing.EditorTools
                 var painted = Object.Instantiate(mesh);
                 painted.subMeshCount = 1; painted.SetTriangles(paint, 0);
                 var child = Node(filter.transform, "PaintAccent", Vector3.zero);
-                child.gameObject.AddComponent<MeshFilter>().sharedMesh = Save(painted, Dir + "/KartPaint.asset");
+                child.gameObject.AddComponent<MeshFilter>().sharedMesh = Save(painted, Dir + "/" + prefix + "Paint.asset");
                 child.gameObject.AddComponent<MeshRenderer>().sharedMaterial = accent;
                 mesh.subMeshCount = 1; mesh.SetTriangles(original, 0); EditorUtility.SetDirty(mesh);
                 r.sharedMaterials = new[] { r.sharedMaterial };
@@ -383,24 +445,27 @@ namespace FamilyRacing.EditorTools
                 }
             }
             var detail = Node(root.transform, "RallyDetails", Vector3.zero);
-            Part(detail, "BucketSeat", ink, new Vector3(0, .78f, -.59f), new Vector3(.68f, .40f, .39f));
-            Part(detail, "SeatBack", ink, new Vector3(0, 1.0f, -.74f), new Vector3(.62f, .64f, .19f));
-            foreach (int side in new[] { -1, 1 })
+            if (rally)
             {
-                Bar(detail, "RollHoop", metal, new Vector3(side * .42f, .58f, -.80f), new Vector3(side * .42f, 1.34f, -.84f), .065f);
-                Part(detail, "LampHousing", ink, new Vector3(side * .48f, .51f, 1.41f), new Vector3(.27f, .26f, .16f));
-                Part(detail, "Headlamp", Mat("Headlamp", "FFF1B9", .65f), new Vector3(side * .48f, .51f, 1.49f), new Vector3(.19f, .18f, .05f));
-                Part(detail, "RearLamp", Mat("TailLamp", "E54D43", .5f), new Vector3(side * .48f, .48f, -1.58f), new Vector3(.22f, .10f, .05f));
-                Bar(detail, "Exhaust", metal, new Vector3(side * .59f, .35f, -.81f), new Vector3(side * .59f, .35f, -1.56f), .11f);
-                Part(detail, "ExhaustInset", ink, new Vector3(side * .59f, .35f, -1.62f), new Vector3(.075f, .075f, .018f));
-                Part(detail, "RacingStripe", cream, new Vector3(side * .12f, .584f, .92f), new Vector3(.08f, .018f, .64f), PrimitiveType.Cube);
+                Part(detail, "BucketSeat", ink, new Vector3(0, .78f, -.59f), new Vector3(.68f, .40f, .39f));
+                Part(detail, "SeatBack", ink, new Vector3(0, 1.0f, -.74f), new Vector3(.62f, .64f, .19f));
+                foreach (int side in new[] { -1, 1 })
+                {
+                    Bar(detail, "RollHoop", metal, new Vector3(side * .42f, .58f, -.80f), new Vector3(side * .42f, 1.34f, -.84f), .065f);
+                    Part(detail, "LampHousing", ink, new Vector3(side * .48f, .51f, 1.41f), new Vector3(.27f, .26f, .16f));
+                    Part(detail, "Headlamp", Mat("Headlamp", "FFF1B9", .65f), new Vector3(side * .48f, .51f, 1.49f), new Vector3(.19f, .18f, .05f));
+                    Part(detail, "RearLamp", Mat("TailLamp", "E54D43", .5f), new Vector3(side * .48f, .48f, -1.58f), new Vector3(.22f, .10f, .05f));
+                    Bar(detail, "Exhaust", metal, new Vector3(side * .59f, .35f, -.81f), new Vector3(side * .59f, .35f, -1.56f), .11f);
+                    Part(detail, "ExhaustInset", ink, new Vector3(side * .59f, .35f, -1.62f), new Vector3(.075f, .075f, .018f));
+                    Part(detail, "RacingStripe", cream, new Vector3(side * .12f, .584f, .92f), new Vector3(.08f, .018f, .64f), PrimitiveType.Cube);
+                }
+                Bar(detail, "RollHoop", metal, new Vector3(-.42f, 1.34f, -.84f), new Vector3(.42f, 1.34f, -.84f), .065f);
+                Part(detail, "FrontSplitter", ink, new Vector3(0, .22f, 1.57f), new Vector3(1.44f, .08f, .16f), PrimitiveType.Cube);
+                Part(detail, "RearDiffuser", ink, new Vector3(0, .22f, -1.62f), new Vector3(1.27f, .08f, .19f), PrimitiveType.Cube);
+                Part(detail, "HoodRoundel", cream, new Vector3(0, .61f, .92f), new Vector3(.34f, .018f, .34f));
+                Bar(detail, "RaceNumber7", ink, new Vector3(-.075f, .624f, 1.0f), new Vector3(.075f, .624f, 1.0f), .025f);
+                Bar(detail, "RaceNumber7", ink, new Vector3(.075f, .624f, 1.0f), new Vector3(-.025f, .624f, .83f), .025f);
             }
-            Bar(detail, "RollHoop", metal, new Vector3(-.42f, 1.34f, -.84f), new Vector3(.42f, 1.34f, -.84f), .065f);
-            Part(detail, "FrontSplitter", ink, new Vector3(0, .22f, 1.57f), new Vector3(1.44f, .08f, .16f), PrimitiveType.Cube);
-            Part(detail, "RearDiffuser", ink, new Vector3(0, .22f, -1.62f), new Vector3(1.27f, .08f, .19f), PrimitiveType.Cube);
-            Part(detail, "HoodRoundel", cream, new Vector3(0, .61f, .92f), new Vector3(.34f, .018f, .34f));
-            Bar(detail, "RaceNumber7", ink, new Vector3(-.075f, .624f, 1.0f), new Vector3(.075f, .624f, 1.0f), .025f);
-            Bar(detail, "RaceNumber7", ink, new Vector3(.075f, .624f, 1.0f), new Vector3(-.025f, .624f, .83f), .025f);
             var steering = root.GetComponentsInChildren<Transform>().Single(t => t.name == "DashWheel");
             steering.GetComponent<Renderer>().enabled = false;
             steering.localScale = Vector3.one;

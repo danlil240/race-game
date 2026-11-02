@@ -28,6 +28,7 @@ namespace FamilyRacing.EditorTools
         {
             Directory.CreateDirectory(Output);Directory.CreateDirectory(Output+"/Campaign");AssetDatabase.Refresh();
             LongRaceRoads.Build();
+            AssetTrialAuthoring.GrandTourCarVisual();
             var scene=EditorSceneManager.OpenScene(AssetTrialAuthoring.ScenePath);
             if(!EditorSceneManager.SaveScene(scene,ScenePath,false))throw new IOException("Cannot save Grand Tour scene");
             var world=scene.GetRootGameObjects().SelectMany(g=>g.GetComponentsInChildren<DrivingWorld>(true)).Single();
@@ -47,6 +48,7 @@ namespace FamilyRacing.EditorTools
                 vehicle.acceleration=bike?12.5f:11.5f;vehicle.boostAcceleration=20f;
                 vehicle.steeringRate=bike?1.9f:1.65f;vehicle.grip=bike?6.5f:5.5f;
                 vehicle.boostDurationSeconds=3.4f;vehicle.boostDrainPerSecond=.29f;
+                if(!bike)vehicle.visual=Required<VehicleVisualDefinitionAsset>(AssetTrialAuthoring.GrandTourVisualPath);
                 vehicle=LongRaceRoads.Save(vehicle,Output+"/"+vehicle.vehicleId+".asset");
                 vehicles.GetArrayElementAtIndex(i).objectReferenceValue=vehicle;
             }

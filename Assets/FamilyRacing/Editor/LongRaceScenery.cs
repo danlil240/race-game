@@ -61,32 +61,73 @@ namespace FamilyRacing.EditorTools
             var built=make();built.name=name;built.RecalculateBounds();
             var saved=LongRaceRoads.Save(built,LongRaceRoads.Dir+"/"+name+".asset");Cache[name]=saved;return saved;
         }
-        // Faceted pine: hexagonal trunk and four jittered cone tiers (~90 triangles).
-        private static Mesh Pine()=>Cached("TourPine",()=>
+        // Card conifer authored 1 m tall: bark trunk, whorls of crossed cards carrying the
+        // CC0 fir branch atlas, and a dark core that fills the crown between the cards.
+        // The umbrella form is the coast's stone pine: long bare stem, flat spreading crown.
+        private static Mesh Conifer(int variant,bool umbrella)=>Cached((umbrella?"TourStonePine":"TourFir")+variant,()=>
         {
-            var v=new System.Collections.Generic.List<Vector3>();var bark=new System.Collections.Generic.List<int>();var needles=new System.Collections.Generic.List<int>();
-            void Tri(System.Collections.Generic.List<int> list,Vector3 a,Vector3 b,Vector3 c){list.Add(v.Count);v.Add(a);list.Add(v.Count);v.Add(b);list.Add(v.Count);v.Add(c);}
-            for(int k=0;k<6;k++)
+            var v=new System.Collections.Generic.List<Vector3>();var nor=new System.Collections.Generic.List<Vector3>();var uv=new System.Collections.Generic.List<Vector2>();
+            var bark=new System.Collections.Generic.List<int>();var needles=new System.Collections.Generic.List<int>();var core=new System.Collections.Generic.List<int>();
+            float N(int k)=>Noise(k+variant*131,umbrella?17:9);
+            var lean=umbrella?new Vector3(N(1)-.5f,0,N(2)-.5f)*.12f:Vector3.zero;
+            Vector3 Axis(float y)=>lean*y*y+Vector3.up*y;
+            // Seven-sided trunk, bark tiled about every 1/6 of the height.
+            float trunkTop=umbrella?.86f:.94f,r0=umbrella?.026f:.021f;
+            for(int ring=0;ring<=4;ring++)for(int k=0;k<=7;k++)
             {
-                float a0=k*Mathf.PI/3,a1=(k+1)*Mathf.PI/3;
-                Vector3 b0=new Vector3(Mathf.Cos(a0),0,Mathf.Sin(a0))*.035f,b1=new Vector3(Mathf.Cos(a1),0,Mathf.Sin(a1))*.035f;
-                Vector3 t0=b0*.7f+Vector3.up*.32f,t1=b1*.7f+Vector3.up*.32f;
-                Tri(bark,b0,t0,b1);Tri(bark,b1,t0,t1);
+                float y=trunkTop*ring/4f,a=k*Mathf.PI*2/7,r=Mathf.Lerp(r0,.004f,y/trunkTop)*(ring==0?1.35f:1);
+                var o=new Vector3(Mathf.Cos(a),0,Mathf.Sin(a));v.Add(Axis(y)+o*r);nor.Add(o);uv.Add(new Vector2(k/7f*1.5f,y*6));
+                if(ring<4&&k<7){int n=ring*8+k;bark.AddRange(new[]{n,n+8,n+1,n+1,n+8,n+9});}
             }
-            for(int tier=0;tier<4;tier++)
+            void Quad(System.Collections.Generic.List<int> list,Vector3 a0,Vector3 a1,Vector3 b0,Vector3 b1,Vector2 u,Vector3 centre)
             {
-                float bottom=.16f+tier*.19f,top=bottom+.42f-tier*.04f,radius=.27f-tier*.05f;const int sides=9;
-                var apex=Vector3.up*top+new Vector3(Noise(tier,3)-.5f,0,Noise(tier,4)-.5f)*.02f;
-                for(int k=0;k<sides;k++)
+                int n=v.Count;
+                foreach(var q in new[]{a0,a1,b0,b1}){v.Add(q);var d=q-centre;d.y*=.6f;nor.Add((d.normalized+Vector3.up*.35f).normalized);}
+                uv.Add(new Vector2(u.x,0));uv.Add(new Vector2(u.y,0));uv.Add(new Vector2(u.x,1));uv.Add(new Vector2(u.y,1));
+                list.AddRange(new[]{n,n+2,n+1,n+1,n+2,n+3});
+            }
+            float bottom=umbrella?.56f:.1f;int whorls=umbrella?8:18,per=umbrella?7:6;
+            var crownCentre=Axis(umbrella?.8f:.42f);
+            for(int w=0;w<whorls;w++)
+            {
+                float t=w/(whorls-1f),y=Mathf.Lerp(bottom,.98f,t);
+                float radius=umbrella?.06f+.36f*Mathf.Sin(Mathf.PI*Mathf.Lerp(.2f,1f,t))*(1-.45f*t):.02f+.27f*Mathf.Pow(1-t,.85f);
+                for(int b=0;b<per;b++)
                 {
-                    float a0=k*Mathf.PI*2/sides,a1=(k+1)*Mathf.PI*2/sides;
-                    float r0=radius*(.86f+.28f*Noise(k+tier*sides,7)),r1=radius*(.86f+.28f*Noise((k+1)%sides+tier*sides,7));
-                    var p0=new Vector3(Mathf.Cos(a0)*r0,bottom+.03f*Noise(k,tier),Mathf.Sin(a0)*r0);
-                    var p1=new Vector3(Mathf.Cos(a1)*r1,bottom+.03f*Noise((k+1)%sides,tier),Mathf.Sin(a1)*r1);
-                    Tri(needles,p0,apex,p1);Tri(needles,p1,Vector3.up*(bottom+.06f),p0);
+                    float a=w*2.4f+b*Mathf.PI*2/per+(N(w*per+b)-.5f)*.7f;
+                    var d=new Vector3(Mathf.Cos(a),0,Mathf.Sin(a));float len=radius*(.95f+.3f*N(w*per+b+300));
+                    // Fir boughs droop toward the tips low down and lift near the leader.
+                    float rise=umbrella?.18f:Mathf.Lerp(-.32f,.35f,t);
+                    var root=Axis(y)+d*.01f;var tip=root+(d+Vector3.up*rise).normalized*len;
+                    var along=(tip-root).normalized;var flat=Vector3.Cross(Vector3.up,d).normalized;
+                    var u=(w+b)%2==0?new Vector2(0,.5f):new Vector2(.5f,1);
+                    foreach(float tilt in new[]{12f,78f})
+                    {
+                        var side=Quaternion.AngleAxis(tilt*(b%2==0?1:-1),along)*flat*len*(umbrella?.27f:.32f);
+                        Quad(needles,root-side*.55f,root+side*.55f,tip-side,tip+side,u,crownCentre);
+                    }
                 }
             }
-            var mesh=new Mesh();mesh.SetVertices(v);mesh.subMeshCount=2;mesh.SetTriangles(bark,0);mesh.SetTriangles(needles,1);mesh.RecalculateNormals();return mesh;
+            // Leader: two crossed upright cards.
+            for(int k=0;k<2;k++)
+            {
+                var side=(k==0?Vector3.right:Vector3.forward)*.045f;var root=Axis(umbrella?.9f:.86f);var top=Axis(1.04f);
+                Quad(needles,root-side,root+side,top-side*.6f,top+side*.6f,new Vector2(0,.5f),crownCentre);
+            }
+            // Core: dark, slightly smaller crown shell (octagonal), seen only through gaps.
+            const int sides=8;int coreStart=v.Count;int rings=umbrella?4:6;
+            for(int ring=0;ring<rings;ring++)for(int k=0;k<sides;k++)
+            {
+                float t=ring/(rings-1f),y=umbrella?Mathf.Lerp(.64f,.93f,t):Mathf.Lerp(.16f,.92f,t);
+                float r=umbrella?.27f*Mathf.Sin(Mathf.PI*Mathf.Lerp(.15f,.95f,t)):.11f*Mathf.Pow(1-t,.9f)+.006f;
+                float a=k*Mathf.PI*2/sides;var o=new Vector3(Mathf.Cos(a),0,Mathf.Sin(a))*r*(.9f+.2f*N(ring*sides+k+700));
+                v.Add(Axis(y)+o);nor.Add((o.normalized+Vector3.up*.3f).normalized);uv.Add(Vector2.zero);
+                if(ring<rings-1){int n=coreStart+ring*sides+k,m=coreStart+ring*sides+(k+1)%sides;core.AddRange(new[]{n,n+sides,m,m,n+sides,m+sides});}
+            }
+            int apex=v.Count;v.Add(Axis(umbrella?.95f:.97f));nor.Add(Vector3.up);uv.Add(Vector2.zero);
+            for(int k=0;k<sides;k++)core.AddRange(new[]{coreStart+(rings-1)*sides+k,apex,coreStart+(rings-1)*sides+(k+1)%sides});
+            var mesh=new Mesh();mesh.SetVertices(v);mesh.SetNormals(nor);mesh.SetUVs(0,uv);mesh.subMeshCount=3;
+            mesh.SetTriangles(bark,0);mesh.SetTriangles(needles,1);mesh.SetTriangles(core,2);mesh.RecalculateTangents();return mesh;
         });
         // Tuft of bent blades; normals point up so it shades like the ground it grows from.
         private static Mesh Tuft()=>Cached("TourGrassTuft",()=>
@@ -113,11 +154,42 @@ namespace FamilyRacing.EditorTools
             var mat=TwoSided("TourGrass"+place+(n>.5f?"b":"a"),place==0?(n>.5f?"9DA35F":"B6B074"):place==1?(n>.5f?"55773D":"6E8A47"):(n>.5f?"B59A5C":"C9AE6E"));
             Proc(chunk,"GrassTuft",Tuft(),new[]{mat},p-Vector3.up*.05f,.8f+n*.8f,n*360,1.6f);
         }
-        private static void PineTree(Transform chunk,Vector3 p,float height,float n)
+        private static void Tree(Transform chunk,Vector3 p,float height,float n,bool umbrella=false)
         {
-            var bark=LongRaceRoads.Mat("PineBarkTour","5B4434");
-            var needles=LongRaceRoads.Mat(n>.66f?"PineNeedlesLight":n>.33f?"PineNeedles":"PineNeedlesDark",n>.66f?"4E7A4C":n>.33f?"36613F":"284C36");
-            Proc(chunk,"Pine",Pine(),new[]{bark,needles},p-Vector3.up*.3f,height,n*720,.9f+.3f*Noise((int)(n*997),5));
+            var bark=LongRaceRoads.Pbr("TourFirBark","fir_bark","C9BBAA",.12f);
+            // Three needle tints so a stand of firs does not read as one copy.
+            var needles=LongRaceRoads.Pbr(umbrella?"TourStonePineNeedles":n>.66f?"TourFirNeedlesLight":n>.33f?"TourFirNeedles":"TourFirNeedlesDark","fir_branch",
+                umbrella?"C4CC9A":n>.66f?"B9C79E":n>.33f?"98AA86":"7D9276",.12f);
+            var core=LongRaceRoads.Mat(umbrella?"TourStonePineCore":"TourFirCore",umbrella?"2E3F25":"1E3022");
+            int variant=Mathf.FloorToInt(Noise((int)(n*997),23)*3)%3;
+            Proc(chunk,umbrella?"StonePine":"Fir",Conifer(variant,umbrella),new[]{bark,needles,core},p-Vector3.up*.25f,height,n*720,
+                (umbrella?1.05f:.9f)+.25f*Noise((int)(n*997),5));
+        }
+        // Low rolling hill under the forest-floor PBR set, with a stand of trees on it.
+        private static void Hill(Transform chunk,Vector3 center,int place,int seed,float height)
+        {
+            var v=new System.Collections.Generic.List<Vector3>();var tris=new System.Collections.Generic.List<int>();var uv=new System.Collections.Generic.List<Vector2>();
+            const int rings=10,sectors=24;
+            float Lift(float r)=>height*Mathf.Pow(Mathf.Max(0,Mathf.Cos(r*Mathf.PI*.5f)),1.4f);
+            for(int ring=0;ring<=rings;ring++)for(int k=0;k<sectors;k++)
+            {
+                float r=ring/(float)rings,a=k*Mathf.PI*2/sectors;
+                float wobble=1+.18f*(Noise(k+seed,31)-.5f)+.1f*Mathf.Sin(a*3+seed);
+                float h=Lift(r)*(1+.12f*(Noise(ring*sectors+k+seed,37)-.5f));
+                var world=center+new Vector3(Mathf.Cos(a)*210*r*wobble,h-2,Mathf.Sin(a)*220*r*wobble);
+                v.Add(chunk.InverseTransformPoint(world));uv.Add(new Vector2(world.x,world.z)/9f);
+                if(ring<rings){int n=ring*sectors+k,m=ring*sectors+(k+1)%sectors;tris.AddRange(new[]{n,m,n+sectors,m,m+sectors,n+sectors});}
+            }
+            var mat=LongRaceRoads.Pbr("DistantHillGround"+place,"forrest_ground_01",place==0?"C9C7A2":"A8AF92",.1f);
+            LongRaceRoads.MeshObject(chunk,chunk.parent.parent.name+"_TerrainHill"+seed,v,tris,uv,mat,false);
+            int count=place==1?70:22;
+            for(int k=0;k<count;k++)
+            {
+                float r=Mathf.Sqrt(Noise(k+seed,41))*.8f,a=Noise(k+seed,43)*Mathf.PI*2;
+                if(place==0&&r<.35f)continue;
+                var p=center+new Vector3(Mathf.Cos(a)*210*r,Lift(r)-4.5f,Mathf.Sin(a)*220*r);
+                Tree(chunk,p,place==1?16+Noise(k+seed,47)*12:9+Noise(k+seed,47)*5,Noise(k+seed,49),place==0);
+            }
         }
         public static void DressChunk(Transform chunk,Vector3[] p,bool open,int start,int end,int place)
         {
@@ -130,11 +202,7 @@ namespace FamilyRacing.EditorTools
                     float clearance=float.MaxValue;
                     for(int j=0;j<p.Length;j+=8)clearance=Mathf.Min(clearance,Vector2.Distance(new Vector2(center.x,center.z),new Vector2(p[j].x,p[j].z)));
                     if(clearance<235)continue;
-                    var hill=GameObject.CreatePrimitive(PrimitiveType.Sphere);hill.name="DistantWoodedHill";
-                    hill.transform.SetParent(chunk,false);hill.transform.position=center-Vector3.up*13;
-                    hill.transform.localScale=new Vector3(420,place==0?110:175,440);
-                    hill.GetComponent<Renderer>().sharedMaterial=LongRaceRoads.Mat("DistantHill"+place,place==0?"8D9B69":"637F5B");
-                    Object.DestroyImmediate(hill.GetComponent<Collider>());
+                    Hill(chunk,center,place,start*2+side,place==0?42:72);
                 }
             }
             for(int i=start;i<end;i+=4)
@@ -152,19 +220,24 @@ namespace FamilyRacing.EditorTools
                         bool clearing=(i/150)%4==1;
                         if(!clearing||i%12==0)
                         {
-                            Model(chunk,"Quaternius",i%8==0?"CommonTree_1":"CommonTree_3",G(24+n*17),9+n*8,n*360);
-                            Model(chunk,"Quaternius","CommonTree_1",G(63+n*33),12+n*11,n*190);
-                            Model(chunk,"Quaternius","CommonTree_3",G(43+n*10),13+n*9,n*80);
-                            Model(chunk,"Quaternius","CommonTree_1",G(117+n*25),16+n*12,n*280);
-                            PineTree(chunk,G(20+m*9,1),9+m*7,m);
-                            PineTree(chunk,G(34+q*14,2),13+q*8,q);
-                            PineTree(chunk,G(52+m*22,3),15+n*9,n);
-                            PineTree(chunk,G(88+q*45,1),18+m*10,(m+q)*.5f);
+                            // Dense conifer stand: a ragged edge row, then taller firs behind.
+                            Tree(chunk,G(21+m*6,1),10+m*6,m);
+                            Tree(chunk,G(28+q*9,3),14+q*7,q);
+                            Tree(chunk,G(37+n*10),17+n*8,n);
+                            Tree(chunk,G(49+m*14,2),19+q*8,(m+n)*.5f);
+                            Tree(chunk,G(64+q*18,1),20+m*9,(q+n)*.5f);
+                            Tree(chunk,G(84+n*22,3),22+q*8,(m+q)*.5f);
+                            Tree(chunk,G(112+m*30,2),24+n*8,1-n);
+                            if(i%8==0)Tree(chunk,G(18.5f+q*3,2),2.2f+m*2.5f,q);
                         }
-                        else PineTree(chunk,G(30+m*25,2),12+q*8,q);
+                        else
+                        {
+                            Tree(chunk,G(30+m*25,2),12+q*8,q);
+                            Tree(chunk,G(19+q*3,1),2.5f+m*2,m);
+                        }
                         Ph(chunk,"fern_02",G(17+m*4),.8f+q*.5f,m*360);
                         if(i%8==0)Ph(chunk,"fern_02",G(22+q*6,2),.9f+n*.5f,q*360);
-                        if(i%8==4)Model(chunk,"Quaternius","Bush_Common_Flowers",G(18+n*5),1.4f+n,90*n);
+                        if(i%8==4)Ph(chunk,"shrub_sorrel_01",G(18+n*5),.9f+n*.6f,90*n);
                         if(i%20==0)Ph(chunk,"rock_moss_set_01",G(25+n*14),1.4f+m*1.6f,i*19);
                         else if(i%12==0)Ph(chunk,"rock_09",G(21+q*8),.9f+n*1.1f,i*31);
                     }
@@ -180,13 +253,13 @@ namespace FamilyRacing.EditorTools
                     }
                     else
                     {
-                        if(side==1&&i%8==0)Model(chunk,"Quaternius",i%16==0?"CommonTree_1":"CommonTree_3",G(27+n*28),8+n*5,n*180);
-                        if(side==-1&&i%16==8)Model(chunk,"Quaternius","CommonTree_3",G(30+q*14),7+q*4,q*180);
+                        if(side==1&&i%8==0)Tree(chunk,G(27+n*28),9+n*5,n,true);
+                        if(side==-1&&i%16==8)Tree(chunk,G(30+q*14),8+q*4,q,true);
                         if(i%8==0)Ph(chunk,i%16==0?"rock_09":"rock_07",G(24+n*26),1.2f+n*3.2f,n*360);
                         if(side==-1&&i%16==4)Ph(chunk,"rock_07",G(36+m*30,2),3+m*4,m*360);
                         if(i%8==4)Ph(chunk,"shrub_sorrel_01",G(18+m*8,1),.7f+q*.6f,m*360);
                         if(i%12==0)Ph(chunk,"crystalline_iceplant",G(17+q*5,2),.35f+n*.25f,q*360);
-                        if(i%12==0)Model(chunk,"Quaternius","Bush_Common_Flowers",G(19),1.2f+n,n*360);
+                        if(i%12==0)Ph(chunk,"wild_rooibos_bush",G(19),.9f+n*.6f,n*360);
                         if(i>30&&i<125&&i%8==0&&side==1)
                         {
                             Model(chunk,"KenneySuburban",i%16==0?"building-type-a":"building-type-d",G(42+n*18),7+n*3,Mathf.Atan2(t.x,t.z)*Mathf.Rad2Deg-90);
@@ -215,7 +288,7 @@ namespace FamilyRacing.EditorTools
             if(place==2&&start>p.Length-75)
             {
                 var point=p[start];var right=LongRaceRoads.Right(LongRaceRoads.Tangent(p,start,open));
-                for(int j=0;j<4;j++)Model(chunk,"Quaternius","CommonTree_3",LongRaceRoads.Ground(p,open,start,27+j*9,place)+Vector3.forward*j*7,10+j,30*j);
+                for(int j=0;j<4;j++)Tree(chunk,LongRaceRoads.Ground(p,open,start,27+j*9,place)+Vector3.forward*j*7,10+j,.25f*j,true);
             }
         }
         private static void TurnSign(Transform chunk,Vector3[] points,int i,bool open)

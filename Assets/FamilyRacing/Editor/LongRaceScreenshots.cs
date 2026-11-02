@@ -15,6 +15,7 @@ namespace FamilyRacing.EditorTools
     public static class LongRaceScreenshots
     {
         private static readonly int[][] Shots = { new[] { 65, 210, 380 }, new[] { 100, 260, 420 }, new[] { 100, 300, 470 } };
+        private const int CarShot = 150;
         [MenuItem("Family Racing/Grand Tour/Capture Screenshots")]
         public static void Capture()
         {
@@ -43,11 +44,23 @@ namespace FamilyRacing.EditorTools
                     if (atmospheres.Length > place) LongRaceRoads.ApplyAtmosphere(place, sky);
                     var p = LongRaceRoads.Sample(place); bool open = place > 0;
                     int ramp = (open ? 8 : 0) + 80 + 3;
-                    foreach (int index in Shots[place].Append(ramp))
+                    var shots = Shots[place].Append(ramp);
+                    if (place == 0) shots = shots.Append(CarShot);
+                    foreach (int index in shots)
                     {
                         var t = LongRaceRoads.Tangent(p, index, open); var r = LongRaceRoads.Right(t);
                         string name;
-                        if (index == ramp)
+                        GameObject car = null;
+                        if (index == CarShot)
+                        {   // Grand Tour racer body on the road, front three-quarter view.
+                            car = Object.Instantiate(LongRaceAuthoring.Required<GameObject>(AssetTrialAuthoring.Output + "/GrandTourRacer.prefab"));
+                            car.transform.SetPositionAndRotation(p[index] + r * 2.5f + Vector3.up * .07f, Quaternion.LookRotation(t));
+                            foreach (var paint in car.GetComponentsInChildren<Renderer>().Where(x => x.name == "PaintAccent"))
+                                paint.sharedMaterial = new Material(paint.sharedMaterial) { color = new Color(.9f, .32f, .2f) };
+                            camera.transform.position = p[index] + t * 4.6f + r * 5.4f + Vector3.up * 1.7f;
+                            camera.transform.LookAt(p[index] + r * 2.5f + Vector3.up * .6f); name = "car";
+                        }
+                        else if (index == ramp)
                         {   // From the verge, looking across at the kicker's outer skirt and flags.
                             camera.transform.position = p[index] - t * 14 + r * 13 + Vector3.up * 3.2f;
                             camera.transform.LookAt(p[index + 2] + r * 4.6f + Vector3.up * 1.2f); name = "ramp";
@@ -66,6 +79,7 @@ namespace FamilyRacing.EditorTools
                         var file = Path.Combine(dir, LongRaceRoads.Ids[place] + "-" + name + ".png");
                         File.WriteAllBytes(file, tex.EncodeToPNG()); Object.DestroyImmediate(tex);
                         Debug.Log("GRAND_TOUR_SCREENSHOT " + file);
+                        if (car != null) Object.DestroyImmediate(car);
                     }
                 }
             }
