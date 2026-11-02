@@ -392,6 +392,24 @@ namespace FamilyRacing.EditorTools
             var surface=root.Find(key+"Deck").gameObject.AddComponent<DrivingSurface>();
             surface.offRoad=false;surface.launchRamp=true;
             MeshObject(root,key+"Skirt",skirt,skirtTris,null,Mat("RampSkirt","2E4A5A"),false);
+            // Invisible box walls along both side edges. A car that meets the
+            // raised deck side-on gets an ordinary wall hit and slides along
+            // it instead of wedging into the deck mesh. Walls stop just under
+            // the deck so a car driving on top never touches them; the low toe
+            // stays open because step-climb already handles it.
+            for(int row=0;row<rows;row++)
+            {
+                float s0=row*RampLength/rows,s1=(row+1)*RampLength/rows;
+                float top=.05f+RampLift(s0)-.1f;if(top<.5f)continue;
+                var (c0,r0)=Along(p,open,gate,RampStart+s0);var (c1,r1)=Along(p,open,gate,RampStart+s1);
+                foreach(var (edge,outward) in new[]{(RampInner,-1f),(RampOuter,1f)})
+                {
+                    var a=c0+r0*(edge+outward*.2f);var b=c1+r1*(edge+outward*.2f);
+                    var wall=Box(root,"RampSideWall",(a+b)*.5f+Vector3.up*(top*.5f),new Vector3(.4f,top,Vector3.Distance(a,b)+.05f),Mat("RampSkirt","2E4A5A"),true);
+                    wall.transform.rotation=Quaternion.LookRotation(b-a);
+                    Object.DestroyImmediate(wall.GetComponent<Renderer>());
+                }
+            }
             // Orange flags either side of the toe so the ramp reads from far away.
             var (toe,tr)=Along(p,open,gate,RampStart-2f);
             foreach(float lane in new[]{RampInner-.4f,RampOuter+.4f})
