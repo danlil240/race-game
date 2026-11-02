@@ -323,6 +323,24 @@ namespace FamilyRacing
             var physical = motor.physics != null;
             if (!physical) DriveArcadeWheels(motor, steering);
             DriveRider(motor, steering, physical);
+            ApplyTrickPose(motor);
+        }
+
+        // Ramp tricks: odd tricks are a barrel roll, even ones a flat
+        // spin, both turning about the middle of the body so the wheels
+        // come back down where they left.
+        private void ApplyTrickPose(MotorState motor)
+        {
+            var t = motor.trickSeconds > 0f
+                ? 1f - motor.trickSeconds / DriftBoostRules.TrickSeconds : 0f;
+            var turn = Mathf.SmoothStep(0f, 360f, Mathf.Clamp01(t));
+            var rotation = motor.trickSeconds <= 0f ? Quaternion.identity
+                : motor.trickCount % 2 == 1
+                    ? Quaternion.Euler(0f, 0f, -turn)
+                    : Quaternion.Euler(0f, turn, 0f);
+            var pivot = new Vector3(0f, 0.6f, 0f);
+            visualRoot.transform.localRotation = rotation;
+            visualRoot.transform.localPosition = pivot - rotation * pivot;
         }
 
         private void DriveArcadeWheels(MotorState motor, float steering)

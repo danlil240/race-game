@@ -60,6 +60,10 @@ namespace FamilyRacing.Core.Driving
                     state.driftSign = 0;
                     result.events.Add(new MotorEvent("driftEnd"));
                 }
+                // A hit cancels a charging mini-turbo and any running kick.
+                state.driftSeconds = 0f;
+                state.miniTurboSeconds = 0f;
+                state.miniTurboTier = 0;
                 input = new DriverInput(0f, false, false, input.Gadget,
                     input.Recover, input.ChangeCamera, input.Pause, 0f,
                     input.Brake);
@@ -80,6 +84,35 @@ namespace FamilyRacing.Core.Driving
                 state.drifting = false;
                 state.driftSign = 0;
                 result.events.Add(new MotorEvent("driftEnd"));
+                // Releasing a long drift fires its mini-turbo — only on
+                // the ground, so a drift that ends by leaving a ramp
+                // keeps nothing.
+                var tier = state.grounded && !state.recovering
+                    ? DriftBoostRules.MiniTurboTier(state.driftSeconds) : 0;
+                if (tier > 0)
+                {
+                    state.miniTurboTier = tier;
+                    state.miniTurboSeconds = Math.Max(state.miniTurboSeconds,
+                        DriftBoostRules.MiniTurboDuration(tier));
+                    result.events.Add(new MotorEvent("miniTurbo", tier));
+                }
+                state.driftSeconds = 0f;
+            }
+            if (state.drifting) state.driftSeconds += dt;
+
+            // --- ramp tricks: a drift press edge in the air starts a roll
+            var trickPress = input.Drift && !state.driftInputHeld;
+            state.driftInputHeld = input.Drift;
+            if (state.trickSeconds > 0f)
+                state.trickSeconds = Math.Max(0f, state.trickSeconds - dt);
+            if (trickPress && !state.grounded && !state.recovering
+                && state.airSeconds >= DriftBoostRules.TrickMinAirSeconds
+                && state.trickSeconds <= 0f
+                && state.trickCount < DriftBoostRules.TrickMaxPerJump)
+            {
+                state.trickCount++;
+                state.trickSeconds = DriftBoostRules.TrickSeconds;
+                result.events.Add(new MotorEvent("trick", state.trickCount));
             }
             var rate = tuning.steeringRate * authority
                 * (state.drifting ? tuning.driftSteeringFactor : 1f);
@@ -128,6 +161,13 @@ namespace FamilyRacing.Core.Driving
                 ? modifiers.accelerationMultiplier : 1f;
             var gadgetCap = modifiers != null
                 ? modifiers.speedCapMultiplier : 1f;
+            if (state.miniTurboSeconds > 0f)
+            {
+                gadgetAccel *= DriftBoostRules.MiniTurboAcceleration;
+                gadgetCap *= DriftBoostRules.MiniTurboSpeedCap;
+                state.miniTurboSeconds = Math.Max(0f, state.miniTurboSeconds - dt);
+                if (state.miniTurboSeconds <= 0f) state.miniTurboTier = 0;
+            }
             var speedLimit = (state.boostActive
                 ? tuning.boostMaxSpeed : tuning.maxSpeed) * gadgetCap;
             var accel = (state.boostActive
@@ -375,6 +415,20 @@ namespace FamilyRacing.Core.Driving
                         result.events.Add(
                             new MotorEvent("cleanLanding", tuning.cleanLandingCredit));
                     }
+                    // Finished tricks pay out on touchdown; a roll still
+                    // spinning when the wheels hit counts as a botch.
+                    var landed = state.trickCount - (state.trickSeconds > 0.08f ? 1 : 0);
+                    if (landed > 0 && !episodeWallContact)
+                    {
+                        state.miniTurboTier = Math.Max(state.miniTurboTier, 2);
+                        state.miniTurboSeconds = Math.Max(state.miniTurboSeconds,
+                            DriftBoostRules.TrickTurboDuration(landed));
+                        state.boostCharge = Clamp01(state.boostCharge
+                            + DriftBoostRules.TrickBoostCredit * landed);
+                        result.events.Add(new MotorEvent("trickLanded", landed));
+                    }
+                    state.trickCount = 0;
+                    state.trickSeconds = 0f;
                     state.y = ground.y;
                     state.grounded = true;
                     state.verticalSpeed = 0f;

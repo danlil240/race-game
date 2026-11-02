@@ -402,6 +402,13 @@ namespace FamilyRacing
             musicSource.volume =
                 BusVolume(RacePresentationCatalogAsset.VolumeMusic, state)
                 * Mathf.Clamp01(cue.volume);
+            // Final stretch: the music lifts a little faster and louder.
+            var local = RacePresentationUtil.LocalRacer(state);
+            var lift = local != null
+                && RacePresentationUtil.FinalStretch(local.session);
+            musicSource.pitch = Mathf.MoveTowards(musicSource.pitch,
+                lift ? 1.12f : 1f, Time.unscaledDeltaTime * 0.25f);
+            if (lift) musicSource.volume = Mathf.Min(1f, musicSource.volume * 1.2f);
             if (framePaused)
             {
                 if (musicSource.isPlaying) musicSource.Pause();
@@ -617,7 +624,8 @@ namespace FamilyRacing
                     default: return "";
                 }
             }
-            var race = state.networkRace;
+            var race = state.soloRace != null && state.soloRace.race != null
+                ? state.soloRace.race : state.networkRace;
             if (race != null)
             {
                 switch (race.phase)
@@ -687,6 +695,40 @@ namespace FamilyRacing
                 }
             }
             return list;
+        }
+
+        // The four-racer race on screen (offline modes first, else LAN)
+        // and the local racer's row in it; null when neither exists.
+        public static NetworkRaceState PresentedRace(FoundationState state)
+        {
+            if (state == null) return null;
+            if (state.soloRace != null && state.soloRace.race != null)
+                return state.soloRace.race;
+            return state.networkRace;
+        }
+
+        public static NetworkRacerState LocalRacer(FoundationState state)
+        {
+            var race = PresentedRace(state);
+            if (race == null || race.racers == null) return null;
+            var localId = state.soloRace != null && state.soloRace.race != null
+                ? state.soloRace.participantId
+                : state.network != null ? state.network.localParticipantId : null;
+            if (localId == null) return null;
+            foreach (var racer in race.racers)
+                if (racer != null && racer.participantId == localId) return racer;
+            return null;
+        }
+
+        // The last 15% of the race: the final lap's closing gates, or the
+        // end of an open journey. Drives the music lift and the banner.
+        public static bool FinalStretch(DrivingSessionState s)
+        {
+            if (s == null || s.finished || s.phase != "running") return false;
+            if (s.isOpenRoute) return s.routeProgress >= 0.85f;
+            var gates = s.checkpoints != null ? s.checkpoints.Count : 0;
+            if (gates <= 1 || s.lap < s.lapsRequired - 1) return false;
+            return s.acceptedGatesThisLap >= Mathf.CeilToInt((gates - 1) * 0.85f);
         }
 
         // True when the event belongs to the locally presented racer —

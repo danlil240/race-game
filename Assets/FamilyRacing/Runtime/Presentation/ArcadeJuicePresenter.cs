@@ -41,6 +41,7 @@ namespace FamilyRacing
             internal string id;
             internal MotorState motor;
             internal bool local;
+            internal bool slipstream;
         }
 
         private DrivingWorld drivingWorld;
@@ -136,8 +137,21 @@ namespace FamilyRacing
         private void CollectRacers(FoundationState state)
         {
             racers.Clear();
+            var race = RacePresentationUtil.PresentedRace(state);
             foreach (var r in RacePresentationUtil.Racers(state))
-                racers.Add(new Racer { id = r.key, motor = r.motor, local = r.local });
+            {
+                var slip = false;
+                var gone = false;
+                if (race != null && race.racers != null)
+                    foreach (var row in race.racers)
+                        if (row != null && row.participantId == r.key)
+                        {
+                            slip = row.slipstream;
+                            gone = row.eliminated; // knocked out: off the road
+                        }
+                if (!gone)
+                    racers.Add(new Racer { id = r.key, motor = r.motor, local = r.local, slipstream = slip });
+            }
         }
 
         // Where a racer is drawn this frame: its interpolated vehicle view
@@ -245,10 +259,58 @@ namespace FamilyRacing
                 case GadgetRules.EventEmpHit:
                     Burst(sparks, at + Vector3.up * 1.2f, 30, 6f, Electric, 0.5f, 0.3f);
                     break;
+                case "motor.miniTurbo":
+                {
+                    var tier = Mathf.Clamp(ParseInt(ev.detail), 1, 3);
+                    Cone(sparks, at - forward * 1.8f + Vector3.up * 0.5f, -forward,
+                        16 + tier * 10, 10f + tier * 3f, TierColor(tier), 0.35f);
+                    SpawnRing(at + Vector3.up * 0.3f, 0.8f, 3f + tier * 1.5f, 0.3f, TierColor(tier));
+                    if (local) fovKick = Mathf.Max(fovKick, 4f + tier * 2.5f);
+                    break;
+                }
+                case "motor.trick":
+                    Burst(sparks, at + Vector3.up * 1.2f, 18, 6f, Gold, 0.45f, 0.25f);
+                    break;
+                case "motor.trickLanded":
+                    Burst(sparks, at + Vector3.up * 0.8f, 40, 9f, Gold, 0.5f, 0.3f);
+                    SpawnRing(at + Vector3.up * 0.2f, 1f, 8f, 0.4f, Gold);
+                    Cone(sparks, at - forward * 1.8f + Vector3.up * 0.5f, -forward, 30, 14f, TierColor(3), 0.35f);
+                    if (local) fovKick = Mathf.Max(fovKick, 11f);
+                    break;
+                case "race.slipstream":
+                    SpawnRing(at + Vector3.up * 0.8f, 0.5f, 3.5f, 0.3f, Bubble);
+                    break;
+                case "race.eliminated":
+                    Explosion(at);
+                    Burst(smoke, at + Vector3.up * 1.5f, 30, 5f, SmokeDark, 1.6f, 2f);
+                    break;
+                case "race.lastStanding":
+                    Burst(sparks, at + Vector3.up * 2f, 70, 12f, Gold, 0.8f, 0.35f);
+                    SpawnRing(at + Vector3.up * 0.3f, 1f, 12f, 0.6f, Gold);
+                    break;
                 case GadgetRules.EventShieldBlocked:
                     Burst(sparks, at + Vector3.up * 1.2f, 30, 8f, Bubble, 0.5f, 0.3f);
                     SpawnRing(at + Vector3.up * 1f, 2f, 7f, 0.4f, Bubble);
                     break;
+            }
+        }
+
+        private static int ParseInt(string text)
+        {
+            int value;
+            return int.TryParse(text, System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture, out value) ? value : 0;
+        }
+
+        // Drift spark colours: blue, then orange, then purple.
+        private static Color TierColor(int tier)
+        {
+            switch (tier)
+            {
+                case 3: return new Color(0.78f, 0.35f, 1f, 1f);
+                case 2: return new Color(1f, 0.55f, 0.12f, 1f);
+                case 1: return new Color(0.3f, 0.65f, 1f, 1f);
+                default: return new Color(1f, 0.95f, 0.75f, 1f);
             }
         }
 
@@ -284,6 +346,27 @@ namespace FamilyRacing
                 if (turbo || (racer.motor != null && racer.motor.boostActive))
                     Cone(sparks, at - forward * 1.9f + Vector3.up * 0.55f, -forward, 3, 9f,
                         turbo ? Electric : Flame, 0.22f);
+                var m = racer.motor;
+                if (m != null && m.drifting && m.grounded)
+                {
+                    // Sparks fly off both rear wheels; their colour shows
+                    // which mini-turbo the drift has charged.
+                    var tier = DriftBoostRules.MiniTurboTier(m.driftSeconds);
+                    var right = new Vector3(forward.z, 0f, -forward.x);
+                    var rear = at - forward * 1.5f + Vector3.up * 0.15f;
+                    var count = tier == 0 ? 1 : 2 + tier;
+                    Cone(sparks, rear + right * 0.8f, -forward + Vector3.up * 0.4f, count, 5f, TierColor(tier), 0.18f);
+                    Cone(sparks, rear - right * 0.8f, -forward + Vector3.up * 0.4f, count, 5f, TierColor(tier), 0.18f);
+                }
+                if (m != null && m.miniTurboSeconds > 0f)
+                    Cone(sparks, at - forward * 1.9f + Vector3.up * 0.55f, -forward, 3, 10f,
+                        TierColor(Mathf.Max(1, m.miniTurboTier)), 0.22f);
+                if (racer.slipstream && UnityEngine.Random.value < 0.6f)
+                {
+                    var side = new Vector3(forward.z, 0f, -forward.x) * UnityEngine.Random.Range(-1.4f, 1.4f);
+                    Cone(smoke, at + forward * 2.5f + side + Vector3.up * UnityEngine.Random.Range(0.4f, 1.6f),
+                        -forward, 1, 18f, new Color(1f, 1f, 1f, 0.35f), 0.25f);
+                }
                 if (row != null && row.spinTicksRemaining > 0)
                 {
                     Burst(smoke, at + Vector3.up * 0.3f, 3, 1.5f, SmokeGrey, 0.9f, 0.9f);
@@ -315,6 +398,8 @@ namespace FamilyRacing
                 var row = RowFor(world, local);
                 if (row != null && row.turboTicksRemaining > 0) intensity = 1f;
                 else if (local.motor.boostActive) intensity = 0.65f;
+                else if (local.motor.miniTurboSeconds > 0f) intensity = 0.6f;
+                else if (local.slipstream) intensity = 0.45f;
                 if (row != null && row.spinTicksRemaining > 0) intensity = 0f;
                 if (local.motor.speed < 8f) intensity *= Mathf.Clamp01(local.motor.speed / 8f);
             }

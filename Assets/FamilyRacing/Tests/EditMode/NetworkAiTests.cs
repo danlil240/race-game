@@ -25,7 +25,7 @@ namespace FamilyRacing.Tests
         public void NewWeaponsWaitForUsefulOpportunityAndReleaseInheritedLatch(string kind)
         {
             var racer = RacerAt(0, -10, 0, 12);
-            var context = new AiGadgetContext { heldItemId = kind, kind = kind, heldTicks = 90, heldGeneration = 9 };
+            var context = new AiGadgetContext { heldItemId = kind, kind = kind, heldTicks = 40, heldGeneration = 9 };
             var ai = new AiDriver();
             Assert.IsFalse(ai.Sample(racer, WideSquareCourse(), context).Gadget, "do not waste weapon without a rival");
             context.rivalAhead = context.rivalNearby = context.rivalNearBehind = true;

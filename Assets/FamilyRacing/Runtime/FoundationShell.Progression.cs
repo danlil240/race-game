@@ -27,6 +27,7 @@ namespace FamilyRacing
         private string quickClassId = "";
         private string quickVehicleId = "";
         private string quickDifficulty = "";
+        private bool quickElimination;
         private string trialCourseId = "";
         private string trialClassId = "";
         private VisualElement resultsOverlay;
@@ -67,7 +68,8 @@ namespace FamilyRacing
             var key = campaignEventId + "|" + campaignVehicleId + "|"
                 + campaignDifficulty + "|" + quickCourseId + "|"
                 + quickClassId + "|" + quickVehicleId + "|"
-                + quickDifficulty + "|" + trialCourseId + "|" + trialClassId;
+                + quickDifficulty + "|" + quickElimination + "|"
+                + trialCourseId + "|" + trialClassId;
             var progression = state != null ? state.progression : null;
             if (progression != null)
             {
@@ -637,6 +639,17 @@ namespace FamilyRacing
                         () => { quickDifficulty = id; },
                         "quick.difficulty." + id);
                 }
+                var modeRow = Row(scroll);
+                modeRow.name = "quick.modes";
+                AddLabel(modeRow, T("quick.mode.title", state), 22, Deep);
+                AddButton(modeRow, T("quick.mode.normal", state),
+                    !quickElimination ? Coral : Ocean,
+                    () => { quickElimination = false; },
+                    "quick.mode.normal");
+                AddButton(modeRow, T("quick.mode.elimination", state),
+                    quickElimination ? Coral : Ocean,
+                    () => { quickElimination = true; },
+                    "quick.mode.elimination");
                 var start = AddButton(scroll, T("loop.race", state), Coral,
                     () => StartQuickRace(), "quick.start");
                 ApplyAvailability(start, "quickRace.start");
@@ -718,6 +731,7 @@ namespace FamilyRacing
             p["vehicleId"] = quickVehicleId;
             p["difficulty"] = string.IsNullOrEmpty(quickDifficulty)
                 ? RaceModeRules.DefaultDifficultyId : quickDifficulty;
+            if (quickElimination) p["elimination"] = "true";
             app.Dispatch("quickRace.start", p);
         }
 

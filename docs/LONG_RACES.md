@@ -105,3 +105,25 @@ resume, camera switching and restart without another full traversal.
 
 Evidence: `docs/qa/long-races-2026-10-24/`; developer build log:
 `Logs/grand-tour-delivery-build.log`.
+
+## Fun pass (November 2026)
+
+- **Items by place.** Pickups in four-racer races weight the draw by live
+  standing: the back of the pack mostly gets turbos and homing missiles,
+  the leader mostly shields, mines and foam (`GadgetRules.PlaceWeight`).
+- **Rivals fight back.** In offline races AI more than 30 m behind the
+  leading human gains up to +45% acceleration and +10% top speed; AI more
+  than 50 m ahead eases off by up to 8% (`NetworkRace.CatchUp`). AI spends
+  gadgets sooner.
+- **Slipstream.** One second within 28 m directly behind a rival adds +50%
+  acceleration and +8% top speed, with a 0.8 s slingshot after pulling out.
+- **Drift mini-turbos.** Drift sparks go blue (0.7 s), orange (1.5 s) and
+  purple (2.5 s); releasing fires a 0.5 / 0.9 / 1.4 s kick.
+- **Ramp tricks.** Press drift in the air to roll (up to three per jump).
+  Landing finished tricks pays a mini-turbo and boost meter.
+- **Callouts.** Overtake pop-ups, slipstream / mini-turbo / trick banners,
+  a "Final stretch" banner with faster music in the last 15% of the race,
+  and a camera flash for finishes within half a second.
+- **Elimination.** Quick Race has a *Race type* choice. In Elimination the
+  last racer still running is knocked out every 30 s; the last one
+  standing wins. If you are knocked out the race ends there.

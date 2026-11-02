@@ -420,6 +420,9 @@ namespace FamilyRacing.Tests
             roster[2].requestedTuning = boosted;
             roster[3].requestedTuning = VehicleTuning.Motorcycle01();
             var race = CreateRace(catalog, roster: roster);
+            // Slipstream would legitimately pull a trailing grid slot
+            // along; this test is about tuning only.
+            race.SlipstreamEnabled = false;
             var world = new FlatWorld();
 
             var boost = new DriverInput(0f, false, true, false, false, false, false);
@@ -710,5 +713,69 @@ namespace FamilyRacing.Tests
             Assert.That(EventsOf(events, "race.finished", "p-host"), Is.Empty,
                 "a recovery can never manufacture a finish");
         }
-    }
+    
+        // --- fun pass: elimination, catch-up ---------------------------------
+
+        [Test]
+        public void EliminationKnocksOutLastPlaceUntilOneIsLeft()
+        {
+            var race = CreateRace(TestCatalog(), roster: HumanRoster());
+            race.EliminationIntervalTicks = 60;
+            var events = new List<DrivingEvent>();
+            var state = StepAll(race, new FlatWorld(), 30 + 60 * 3 + 2,
+                collect: events);
+
+            Assert.That(EventsOfKind(events, "race.eliminated"), Is.EqualTo(3));
+            Assert.That(EventsOfKind(events, "race.lastStanding"), Is.EqualTo(1));
+            Assert.That(state.phase, Is.EqualTo(NetworkRace.PhaseFinished));
+            Assert.That(state.result, Is.Not.Null);
+            Assert.That(state.result.racers[0].outcome, Is.EqualTo("finished"));
+            var eliminated = 0;
+            foreach (var racer in state.racers) if (racer.eliminated) eliminated++;
+            Assert.That(eliminated, Is.EqualTo(3));
+            // The first racer knocked out ranks last.
+            string firstOut = null;
+            foreach (var ev in events)
+                if (ev.kind == "race.eliminated") { firstOut = ev.participantId; break; }
+            Assert.That(state.result.racers[3].participantId, Is.EqualTo(firstOut));
+        }
+
+        [Test]
+        public void EliminationIsOffByDefault()
+        {
+            var race = CreateRace(TestCatalog(), roster: HumanRoster());
+            var events = new List<DrivingEvent>();
+            StepAll(race, new FlatWorld(), 30 + 1200, collect: events);
+            Assert.That(EventsOfKind(events, "race.eliminated"), Is.EqualTo(0));
+        }
+
+        [Test]
+        public void CatchUpHelpsTrailingAiAndEasesLeadingAi()
+        {
+            NetworkRace.CatchUp(0f, out var accel, out var cap);
+            Assert.That(accel, Is.EqualTo(1f));
+            Assert.That(cap, Is.EqualTo(1f));
+            NetworkRace.CatchUp(500f, out accel, out cap);
+            Assert.That(accel, Is.EqualTo(NetworkRace.CatchUpMaxAcceleration).Within(1e-5f));
+            Assert.That(cap, Is.EqualTo(NetworkRace.CatchUpMaxSpeedCap).Within(1e-5f));
+            NetworkRace.CatchUp(-500f, out accel, out cap);
+            Assert.That(accel, Is.EqualTo(1f));
+            Assert.That(cap, Is.EqualTo(NetworkRace.EaseOffMinSpeedCap).Within(1e-5f));
+            NetworkRace.CatchUp(100f, out accel, out cap);
+            Assert.That(accel, Is.GreaterThan(1f).And.LessThan(NetworkRace.CatchUpMaxAcceleration));
+        }
+
+        [Test]
+        public void PlaceWeightsFavourAttackAtTheBackAndDefenceAtTheFront()
+        {
+            Assert.That(GadgetRules.PlaceWeight(GadgetKind.HomingMissile, 1f),
+                Is.GreaterThan(GadgetRules.PlaceWeight(GadgetKind.HomingMissile, 0f) * 5f));
+            Assert.That(GadgetRules.PlaceWeight(GadgetKind.Turbo, 1f),
+                Is.GreaterThan(GadgetRules.PlaceWeight(GadgetKind.Turbo, 0f)));
+            Assert.That(GadgetRules.PlaceWeight(GadgetKind.BubbleShield, 0f),
+                Is.GreaterThan(GadgetRules.PlaceWeight(GadgetKind.BubbleShield, 1f)));
+            Assert.That(GadgetRules.PlaceWeight(GadgetKind.Mine, 0f),
+                Is.GreaterThan(GadgetRules.PlaceWeight(GadgetKind.Mine, 1f)));
+        }
+}
 }
