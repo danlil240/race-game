@@ -16,6 +16,9 @@ namespace FamilyRacing.EditorTools
     {
         private static readonly int[][] Shots = { new[] { 65, 210, 380 }, new[] { 100, 260, 420 }, new[] { 100, 300, 470 } };
         private const int CarShot = 150;
+        // Roadside views across the verge: coast village (right) and bay shore (left),
+        // canyon quiver trees and succulents. Encoded as 1000*side + index (side 1 right, 2 left).
+        private static readonly int[][] SideShots = { new[] { 1072, 2120, 3120, 3240 }, Array.Empty<int>(), new[] { 1300, 2204 } };
         [MenuItem("Family Racing/Grand Tour/Capture Screenshots")]
         public static void Capture()
         {
@@ -46,12 +49,24 @@ namespace FamilyRacing.EditorTools
                     int ramp = (open ? 8 : 0) + 80 + 3;
                     var shots = Shots[place].Append(ramp);
                     if (place == 0) shots = shots.Append(CarShot);
+                    shots = shots.Concat(SideShots[place]);
                     foreach (int index in shots)
                     {
-                        var t = LongRaceRoads.Tangent(p, index, open); var r = LongRaceRoads.Right(t);
+                        var t = LongRaceRoads.Tangent(p, index % 1000, open); var r = LongRaceRoads.Right(t);
                         string name;
                         GameObject car = null;
-                        if (index == CarShot)
+                        if (index >= 1000)
+                        {   // Standing on the verge, looking out across the roadside dressing.
+                            int i = index % 1000, kind = index / 1000; float side = kind == 1 ? 1 : -1;
+                            camera.transform.position = p[i] + r * side * 12 - t * 6 + Vector3.up * 3.2f;
+                            camera.transform.LookAt(p[i] + r * side * 40 + t * 22 + Vector3.up * 2.5f); name = side > 0 ? "right" + i : "left" + i;
+                            if (kind == 3)
+                            {   // Out over the bay from the beach: surf line, jetty, anchored ship.
+                                camera.transform.position = p[i] - r * 40 - t * 30 + Vector3.up * 7f;
+                                camera.transform.LookAt(p[i] - r * 110 + t * 30 - Vector3.up * 3f); name = "sea" + i;
+                            }
+                        }
+                        else if (index == CarShot)
                         {   // Grand Tour racer body on the road, front three-quarter view.
                             car = Object.Instantiate(LongRaceAuthoring.Required<GameObject>(AssetTrialAuthoring.Output + "/GrandTourRacer.prefab"));
                             car.transform.SetPositionAndRotation(p[index] + r * 2.5f + Vector3.up * .07f, Quaternion.LookRotation(t));

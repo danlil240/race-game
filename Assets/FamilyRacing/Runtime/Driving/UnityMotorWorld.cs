@@ -124,6 +124,15 @@ namespace FamilyRacing
             // meshes. Our road ribbons are flat meshes: their bounds give
             // the exact vertical separating direction for an overlapping
             // floor, allowing horizontal travel instead of treating it as a wall.
+            // Launch-ramp decks are sloped and often diagonal to the world axes,
+            // so a car beside a deck, clipping its edge, sits inside the deck's
+            // bounds and the fallback below would pin it in place. When the
+            // centre is not over the deck, treat the overlap as floor so the car
+            // keeps going. A car on the deck keeps the step-climb up the kicker.
+            if (blocker is MeshCollider deck && !deck.convex
+                && deck.TryGetComponent<DrivingSurface>(out var ramp) && ramp.launchRamp
+                && !deck.Raycast(new Ray(center + Vector3.up * 20f, Vector3.down), out _, 40f))
+                return Vector3.up;
             var closest = blocker is MeshCollider mesh && !mesh.convex
                 ? blocker.bounds.ClosestPoint(center) : blocker.ClosestPoint(center);
             var away = center - closest;

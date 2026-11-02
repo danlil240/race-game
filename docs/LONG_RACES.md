@@ -17,6 +17,10 @@ Glowing chevron boost pads sit just past every intermediate checkpoint,
 alternating sides of the road. Driving over one gives a 1.6 s turbo kick with
 speed lines and a lens punch. On every other checkpoint a striped jump ramp
 follows the right-hand pad, so taking the pad launches the car off the lip.
+A flight longer than 0.4 s gives the chase camera a small lens widening and
+lift that eases back after landing (off in overhead view and with reduced
+camera shake). A car clipping a ramp's side edge drives on past it instead of
+being pinned by the deck.
 Pickups respawn after about three seconds.
 
 The car reaches 135 km/h, or 185 km/h with held boost. The motorcycle reaches

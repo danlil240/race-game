@@ -1,5 +1,5 @@
 {
-  "purpose": "Grand Tour CC0 look pass: Poly Haven PBR ground sets and decimated scans",
+  "purpose": "Grand Tour CC0 look pass: Poly Haven PBR ground sets, decimated scans and building textures",
   "license": "CC0-1.0",
   "costUsd": 0,
   "sources": [
@@ -18,7 +18,15 @@
     "https://polyhaven.com/a/shrub_sorrel_01",
     "https://polyhaven.com/a/wild_rooibos_bush",
     "https://polyhaven.com/a/crystalline_iceplant",
-    "https://polyhaven.com/a/fir_tree_01"
+    "https://polyhaven.com/a/fir_tree_01",
+    "https://polyhaven.com/a/quiver_tree_02",
+    "https://polyhaven.com/a/cheiridopsis_succulent",
+    "https://polyhaven.com/a/dutch_ship_medium",
+    "https://polyhaven.com/a/lateral_sea_marker",
+    "https://polyhaven.com/a/ocean_buoy",
+    "https://polyhaven.com/a/white_plaster_02",
+    "https://polyhaven.com/a/clay_roof_tiles_02",
+    "https://polyhaven.com/a/weathered_planks"
   ],
   "assets": [
     {
@@ -187,9 +195,95 @@
       ],
       "page": "https://polyhaven.com/a/fir_tree_01",
       "license": "CC0-1.0"
+    },
+    {
+      "id": "quiver_tree_02",
+      "kind": "model",
+      "name": "Quiver Tree 02",
+      "authors": [
+        "Dario Barresi",
+        "Rico Cilliers"
+      ],
+      "page": "https://polyhaven.com/a/quiver_tree_02",
+      "license": "CC0-1.0"
+    },
+    {
+      "id": "cheiridopsis_succulent",
+      "kind": "model",
+      "name": "Cheiridopsis Succulent",
+      "authors": [
+        "James Ray Cock",
+        "Jenelle van Heerden"
+      ],
+      "page": "https://polyhaven.com/a/cheiridopsis_succulent",
+      "license": "CC0-1.0"
+    },
+    {
+      "id": "dutch_ship_medium",
+      "kind": "model",
+      "name": "Dutch Ship Medium",
+      "authors": [
+        "James Ray Cock",
+        "Nicol\u00f2 Zubbini",
+        "Rico Cilliers"
+      ],
+      "page": "https://polyhaven.com/a/dutch_ship_medium",
+      "license": "CC0-1.0"
+    },
+    {
+      "id": "lateral_sea_marker",
+      "kind": "model",
+      "name": "Lateral Sea Marker",
+      "authors": [
+        "James Ray Cock",
+        "Kuutti Siitonen"
+      ],
+      "page": "https://polyhaven.com/a/lateral_sea_marker",
+      "license": "CC0-1.0"
+    },
+    {
+      "id": "ocean_buoy",
+      "kind": "model",
+      "name": "Ocean Buoy",
+      "authors": [
+        "Mateusz Sadek"
+      ],
+      "page": "https://polyhaven.com/a/ocean_buoy",
+      "license": "CC0-1.0"
+    },
+    {
+      "id": "white_plaster_02",
+      "kind": "texture",
+      "name": "White Plaster 02",
+      "authors": [
+        "Rob Tuytel"
+      ],
+      "page": "https://polyhaven.com/a/white_plaster_02",
+      "license": "CC0-1.0"
+    },
+    {
+      "id": "clay_roof_tiles_02",
+      "kind": "texture",
+      "name": "Clay Roof Tiles 02",
+      "authors": [
+        "Amal Kumar"
+      ],
+      "page": "https://polyhaven.com/a/clay_roof_tiles_02",
+      "license": "CC0-1.0"
+    },
+    {
+      "id": "weathered_planks",
+      "kind": "texture",
+      "name": "Weathered Planks",
+      "authors": [
+        "Dario Barresi",
+        "Dimitrios Savva"
+      ],
+      "page": "https://polyhaven.com/a/weathered_planks",
+      "license": "CC0-1.0"
     }
   ],
-  "notes": "Models: Poly Haven 1k glTF, decimated with pymeshlab and saved as OBJ; plant albedo merged with the alpha map into *_diffa_1k.png. Ground sets: roughness packed as 1k URP smoothness masks (*_mask_1k.png). Trees: fir_tree_01's 1k bark maps are used as published (fir_bark/); its twig cut-outs (twig_diff + twig_alpha) are stamped along a stem into two dense branch sprites (fir_branch/fir_branch_diffa_1k.png) by Tools/CC0FirAtlas.py; the branch normal map is flat. The scan itself (7.8M triangles) is not shipped: LongRaceScenery builds card conifers from these textures.",
+  "notes": "Models: Poly Haven 1k glTF, decimated with pymeshlab and saved as OBJ; plant albedo merged with the alpha map into *_diffa_1k.png. Ground sets: roughness packed as 1k URP smoothness masks (*_mask_1k.png). Trees: fir_tree_01's 1k bark maps are used as published (fir_bark/); its twig cut-outs (twig_diff + twig_alpha) are stamped along a stem into two dense branch sprites (fir_branch/fir_branch_diffa_1k.png) by Tools/CC0FirAtlas.py; the branch normal map is flat. The scan itself (7.8M triangles) is not shipped: LongRaceScenery builds card conifers from these textures. Round 3: quiver_tree_02, cheiridopsis_succulent, lateral_sea_marker and ocean_buoy are decimated single-material OBJs; dutch_ship_medium is split by material into dutch_ship_medium_hull/_rigging/_sails, each decimated on its own (6.4k triangles in all). white_plaster_02, clay_roof_tiles_02 and weathered_planks are 1k albedo + GL normal maps used on the generated coast houses and jetties.",
   "files": [
     {
       "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/asphalt_02/asphalt_02_diff_2k.jpg",
@@ -422,6 +516,114 @@
     {
       "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/fir_bark/fir_bark_nor_gl_1k.jpg",
       "sha256": "6a570ab53ab2249ecdfa93e7d3b9a8a2cb1a8ad391400e5a64c708914779b2c3"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/quiver_tree_02/quiver_tree_02.obj",
+      "sha256": "5060cf8fcb643a42bedf6d6a12a131fe8167a013b8e801052737e5f3779be078"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/quiver_tree_02/quiver_tree_02_diff_1k.jpg",
+      "sha256": "546a745ad765529d3c310178321e145909f4817b06679788ad24d29ec7eae7b7"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/quiver_tree_02/quiver_tree_02_nor_gl_1k.jpg",
+      "sha256": "5073a1d9563331d8a7bc57a36cae9f1d1d69470395be0c460a12c57026b5f1f0"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/cheiridopsis_succulent/cheiridopsis_succulent.obj",
+      "sha256": "f0ef5b7b4abdec16c5b22b4db6ec9b0ddb30b91c811ebd90879797f93ef62b07"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/cheiridopsis_succulent/cheiridopsis_succulent_diff_1k.jpg",
+      "sha256": "b58531b626a09af4e74e5c9763f5133cf92bed1ade2801936ebc901b54b4f245"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/cheiridopsis_succulent/cheiridopsis_succulent_nor_gl_1k.jpg",
+      "sha256": "aa2167206898b59410af2d7823c77a8b1f5409a659121ff4c7c82978a7b9f2b4"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/dutch_ship_medium_hull/dutch_ship_medium_hull.obj",
+      "sha256": "49b12bbaf8a66355ec176a768b486d2a0e82c501e58af5998f5dc988a0196ab7"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/dutch_ship_medium_hull/dutch_ship_medium_hull_diff_1k.jpg",
+      "sha256": "8bb56d0a31b08c5ca133041cf703daa33d6742d6df0d267c7fe5eced45c9d605"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/dutch_ship_medium_hull/dutch_ship_medium_hull_nor_gl_1k.jpg",
+      "sha256": "9f2c281b1b34182a8487cb2358d5e926bd1b2a5b898e8a22d17e0c4a5de9fb23"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/dutch_ship_medium_rigging/dutch_ship_medium_rigging.obj",
+      "sha256": "1c47c21ad64618d508661b147d9bfc628c5849837fa928c08389637487a4041a"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/dutch_ship_medium_rigging/dutch_ship_medium_rigging_diff_1k.jpg",
+      "sha256": "e88492e5cceef5b17e31d727b7d67ddce07ca58418e86581d845b949df2cb2d7"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/dutch_ship_medium_rigging/dutch_ship_medium_rigging_nor_gl_1k.jpg",
+      "sha256": "1a6c2fd46ba46239c6fe8d19b7462d86252f161d2dc21954780c12addbb6622c"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/dutch_ship_medium_sails/dutch_ship_medium_sails.obj",
+      "sha256": "fea5055b3e94e3073a2ceb9d2665c35bb883c9816f98296a02556191bbc465d8"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/dutch_ship_medium_sails/dutch_ship_medium_sails_diff_1k.jpg",
+      "sha256": "0a877ee5b446ee5fe624618b3bc7224bd4555a077804c4f1afe61d8ae4600147"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/dutch_ship_medium_sails/dutch_ship_medium_sails_nor_gl_1k.jpg",
+      "sha256": "3ba665979b047c91386e89a855d1b9038f1c2e5cda116ecea1a54f976cf12fa4"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/lateral_sea_marker/lateral_sea_marker.obj",
+      "sha256": "f8948ba0295bcff53a395a3c95bc0f80c9f9c50eae8a054fac9e2adb67939d63"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/lateral_sea_marker/lateral_sea_marker_diff_1k.jpg",
+      "sha256": "0a0a82d1f34e4556c4f0380424792b76a87a341148d7ea784b4e987a73f4ba27"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/lateral_sea_marker/lateral_sea_marker_nor_gl_1k.jpg",
+      "sha256": "a3493b79b2db9cf4e2831778e319458db2edea9c39bbf326a323db43d4957139"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/ocean_buoy/ocean_buoy.obj",
+      "sha256": "992a1b13687af45e4fa440336ff4dd967a7f1eeed7a2e954b749fd3d02775d2b"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/ocean_buoy/ocean_buoy_diff_1k.jpg",
+      "sha256": "379e64ed72deca5805df1d5afbd0fdcdd5f8a8d6aa4f156eed9d3643b071b0c2"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/ocean_buoy/ocean_buoy_nor_gl_1k.jpg",
+      "sha256": "5d02c9df9b5e76b61bf0845839d9ec99f56f994a9095174076c00b560ece4686"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/white_plaster_02/white_plaster_02_diff_1k.jpg",
+      "sha256": "a1ebbe091bd1ae93d2abd5de8d69f9003a8d0ee6532bcf9a87c2492c97051f23"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/white_plaster_02/white_plaster_02_nor_gl_1k.jpg",
+      "sha256": "eb572ca3630d5bfde72e2601b1f02412da23ca005cd19384dced8690be4cb783"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/clay_roof_tiles_02/clay_roof_tiles_02_diff_1k.jpg",
+      "sha256": "227a062b38b170e02c27eaa513dae45dc8bc893a62cbd8d0c08e2c32b381fc25"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/clay_roof_tiles_02/clay_roof_tiles_02_nor_gl_1k.jpg",
+      "sha256": "1548d3ebce335a4590d9e421556c4189a7b63852c793a568c71b9e533f8b62d5"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/weathered_planks/weathered_planks_diff_1k.jpg",
+      "sha256": "01c9a372cfd7a7bf471b59c2458ed3ccecc93448aebf7ba0cc5b3b5b6ed24349"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/CC0/PolyHaven/weathered_planks/weathered_planks_nor_gl_1k.jpg",
+      "sha256": "381d298f3194ec4961b04b4912b9b6efea4b2ff7b914dac57e24c8b6b0be6a25"
     }
   ]
 }

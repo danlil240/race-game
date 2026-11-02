@@ -5,30 +5,10 @@ using Object = UnityEngine.Object;
 
 namespace FamilyRacing.EditorTools
 {
-    // Licensed pack models and original geometry, batched in local road chunks.
+    // CC0 scans and original geometry, batched in local road chunks.
     public static class LongRaceScenery
     {
         private static float Noise(int i, int salt) => Mathf.Repeat(Mathf.Sin(i*12.9898f+salt*78.233f)*43758.5453f,1f);
-        private static GameObject Model(Transform parent,string pack,string name,Vector3 p,float height,float yaw)
-        {
-            var source=AssetDatabase.LoadAssetAtPath<GameObject>(AssetTrialAuthoring.Root+"/"+pack+"/"+name+".fbx");
-            if(source==null)throw new System.InvalidOperationException("Missing tour scenery: "+pack+"/"+name);
-            var go=Object.Instantiate(source);go.name=name;go.transform.rotation=Quaternion.Euler(0,yaw,0)*go.transform.rotation;
-            var rs=go.GetComponentsInChildren<Renderer>();var bounds=rs[0].bounds;foreach(var r in rs.Skip(1))bounds.Encapsulate(r.bounds);
-            go.transform.localScale*=height/Mathf.Max(.01f,bounds.size.y);
-            rs=go.GetComponentsInChildren<Renderer>();bounds=rs[0].bounds;foreach(var r in rs.Skip(1))bounds.Encapsulate(r.bounds);
-            go.transform.position+=p-new Vector3(bounds.center.x,bounds.min.y,bounds.center.z);go.transform.SetParent(parent,true);
-            if(pack=="Quaternius")AssetTrialAuthoring.ConvertMaterials(go,false);
-            else
-            {
-                var mat=LongRaceRoads.Mat("TourPalette"+pack,"FFFFFF");
-                mat.SetTexture("_BaseMap",AssetDatabase.LoadAssetAtPath<Texture2D>(AssetTrialAuthoring.Root+"/"+pack+(pack=="KenneySuburban"?"/variation-c.png":"/colormap.png")));
-                foreach(var r in rs)r.sharedMaterials=r.sharedMaterials.Select(_=>mat).ToArray();
-            }
-            foreach(var c in go.GetComponentsInChildren<Collider>())Object.DestroyImmediate(c);
-            foreach(var t in go.GetComponentsInChildren<Transform>())t.gameObject.layer=2;
-            return go;
-        }
         // CC0 Poly Haven scan (decimated OBJ) with its own PBR material.
         private static GameObject Ph(Transform parent,string id,Vector3 p,float height,float yaw)
         {
@@ -45,6 +25,32 @@ namespace FamilyRacing.EditorTools
             foreach(var r in rs)r.sharedMaterials=r.sharedMaterials.Select(_=>(Material)mat).ToArray();
             foreach(var t in go.GetComponentsInChildren<Transform>())t.gameObject.layer=2;
             return go;
+        }
+        // Multi-material CC0 scan: one decimated OBJ per material part, placed as one
+        // object. `sink` buries that fraction of the height (a hull's draught).
+        private static readonly string[] DutchShip={"dutch_ship_medium_hull","dutch_ship_medium_rigging","dutch_ship_medium_sails"};
+        private static void PhGroup(Transform parent,string[] ids,Vector3 p,float height,float yaw,float sink=.02f)
+        {
+            var go=new GameObject(ids[0]);
+            foreach(var id in ids)
+            {
+                if(!Cache.TryGetValue(id,out var mat))
+                {
+                    var made=LongRaceRoads.Pbr("PH_"+id,id,"FFFFFF",.3f);
+                    // Sails and rigging are single sheets; draw both faces.
+                    if(id.Contains("sails")||id.Contains("rigging"))made.SetFloat("_Cull",0);
+                    Cache[id]=mat=made;
+                }
+                var part=Object.Instantiate(LongRaceAuthoring.Required<GameObject>(LongRaceRoads.PolyHaven+"/"+id+"/"+id+".obj"),go.transform);part.name=id;
+                foreach(var r in part.GetComponentsInChildren<Renderer>())r.sharedMaterials=r.sharedMaterials.Select(_=>(Material)mat).ToArray();
+            }
+            go.transform.rotation=Quaternion.Euler(0,yaw,0);
+            var rs=go.GetComponentsInChildren<Renderer>();var bounds=rs[0].bounds;foreach(var r in rs.Skip(1))bounds.Encapsulate(r.bounds);
+            go.transform.localScale*=height/Mathf.Max(.01f,bounds.size.y);
+            rs=go.GetComponentsInChildren<Renderer>();bounds=rs[0].bounds;foreach(var r in rs.Skip(1))bounds.Encapsulate(r.bounds);
+            go.transform.position+=p-new Vector3(bounds.center.x,bounds.min.y+height*sink,bounds.center.z);
+            go.transform.SetParent(parent,true);
+            foreach(var t in go.GetComponentsInChildren<Transform>())t.gameObject.layer=2;
         }
         // Generated low-poly mesh (pine, grass tuft) authored 1 m tall at the origin.
         private static void Proc(Transform parent,string name,Mesh mesh,Material[] mats,Vector3 p,float height,float yaw,float width=1)
@@ -248,7 +254,11 @@ namespace FamilyRacing.EditorTools
                         if((i+(side>0?0:8))%20==0)Ph(chunk,"namaqualand_boulder_05",G(70+m*40,2),16+q*14,q*360);
                         Ph(chunk,"wild_rooibos_bush",G(17+m*10,1),.9f+q*.8f,m*360);
                         if(i%8==0)Ph(chunk,"wild_rooibos_bush",G(26+q*12,3),1.1f+n*.9f,q*360);
-                        if(i%12==0)Cactus(chunk,G(21+n*6),2.5f+n*2);
+                        // Quiver trees stand alone on the slopes, a few further back; low
+                        // succulent mats hug the verge.
+                        if(i%12==0)Ph(chunk,"quiver_tree_02",G(21+n*9),3.6f+n*2.8f,m*360);
+                        if((i+(side>0?4:10))%24==0)Ph(chunk,"quiver_tree_02",G(48+q*40,2),4.5f+m*3,q*360);
+                        if(i%8==4)Ph(chunk,"cheiridopsis_succulent",G(17.5f+q*5,1),.28f+m*.16f,q*360);
                         if(i%28==0)Mesa(chunk,p[i]+right*side*(140+n*70),30+n*45,70+n*90,i);
                     }
                     else
@@ -262,16 +272,21 @@ namespace FamilyRacing.EditorTools
                         if(i%12==0)Ph(chunk,"wild_rooibos_bush",G(19),.9f+n*.6f,n*360);
                         if(i>30&&i<125&&i%8==0&&side==1)
                         {
-                            Model(chunk,"KenneySuburban",i%16==0?"building-type-a":"building-type-d",G(42+n*18),7+n*3,Mathf.Atan2(t.x,t.z)*Mathf.Rad2Deg-90);
-                            LongRaceRoads.Box(chunk,"VillagePath",p[i]+right*25-Vector3.up*.03f,new Vector3(13,.08f,4),LongRaceRoads.Mat("VillagePaving","D8C8AD"));
+                            House(chunk,G(42+n*18)-Vector3.up*.3f,-right,Mathf.FloorToInt(n*7)%3,(i/8)%3,.9f+m*.25f);
+                            var path=LongRaceRoads.Box(chunk,"VillagePath",G(25)+Vector3.up*.03f,new Vector3(13,.08f,3),LongRaceRoads.Pbr("VillagePaving","gravel_road","E2D3BE",.2f));
+                            path.transform.rotation=Quaternion.LookRotation(t);
                         }
                         if(side==-1&&i%60==0)
                         {
-                            var boatPos=p[i]-right*95;boatPos.y=-3.8f;
-                            Model(chunk,"KenneyWatercraft",i%120==0?"boat-sail-a":"boat-fishing-small",boatPos,9+n*5,n*90);
-                            var pier=LongRaceRoads.Box(chunk,"HarborPier",p[i]-right*42-Vector3.up*.4f,new Vector3(38,.5f,6),LongRaceRoads.Mat("TourPier","A38461"));
-                            pier.transform.rotation=Quaternion.LookRotation(t);
+                            // A tall ship rides at anchor off every other harbour; channel
+                            // markers and buoys mark the rest of the bay.
+                            float shore=Shore(p,open,i);
+                            var sea=p[i]-right*(i%120==0?Mathf.Max(170,shore+70):Mathf.Max(95,shore+30));sea.y=-3.8f;
+                            if(i%120==0)PhGroup(chunk,DutchShip,sea,24+n*4,n*360,.11f);
+                            else Ph(chunk,"lateral_sea_marker",sea-Vector3.up*1.5f,6.8f,n*360);
+                            if(shore>0)Pier(chunk,p[i]-right*(shore+12),t);
                         }
+                        if(side==-1&&i%60==30){var buoy=p[i]-right*(Mathf.Max(70,Shore(p,open,i)+20)+n*40);buoy.y=-3.8f-.7f;Ph(chunk,"ocean_buoy",buoy,2.6f,n*360);}
                     }
                 }
                 if(i%40==0)TurnSign(chunk,p,i,open);
@@ -285,6 +300,7 @@ namespace FamilyRacing.EditorTools
                 lake.transform.rotation=Quaternion.LookRotation(LongRaceRoads.Tangent(p,start,open));
                 Ph(chunk,"rock_moss_set_01",LongRaceRoads.Ground(p,open,start,76,place),5,35);
             }
+            if(place==0)foreach(int side in new[]{-1,1})SurfLine(chunk,p,open,start,end,side);
             if(place==2&&start>p.Length-75)
             {
                 var point=p[start];var right=LongRaceRoads.Right(LongRaceRoads.Tangent(p,start,open));
@@ -323,12 +339,128 @@ namespace FamilyRacing.EditorTools
             for(int k=0;k<sides;k++)tris.AddRange(new[]{top,4*sides+(k+1)%sides,4*sides+k});
             LongRaceRoads.MeshObject(chunk,chunk.parent.parent.name+"_Mesa"+seed,vertices,tris,uv,mat,false);
         }
-        private static void Cactus(Transform chunk,Vector3 p,float height)
+        // Whitewashed coastal house: CC0 plaster walls (three tints), clay tile gable
+        // roof, shuttered windows and a door on the road side. Authored to size so the
+        // plaster and tiles keep their real scale; `variant` changes the footprint.
+        private static Mesh HouseMesh(int variant)=>Cached("TourHouse"+variant,()=>
         {
-            var mat=LongRaceRoads.Mat("TourCactus","598565");
-            LongRaceRoads.Box(chunk,"CactusStem",p+Vector3.up*height*.5f,new Vector3(.45f,height,.45f),mat);
-            LongRaceRoads.Box(chunk,"CactusArm",p+Vector3.up*height*.54f+Vector3.right*.6f,new Vector3(1.5f,.35f,.35f),mat);
-            LongRaceRoads.Box(chunk,"CactusTip",p+Vector3.up*height*.7f+Vector3.right*1.2f,new Vector3(.35f,height*.42f,.35f),mat);
+            float w=new[]{8.5f,11f,7f}[variant],d=new[]{6.5f,7.5f,6f}[variant],h=new[]{5.6f,3.4f,6.2f}[variant],rise=new[]{2.2f,1.9f,2.6f}[variant];
+            var v=new System.Collections.Generic.List<Vector3>();var uv=new System.Collections.Generic.List<Vector2>();
+            var subs=new[]{new System.Collections.Generic.List<int>(),new System.Collections.Generic.List<int>(),new System.Collections.Generic.List<int>(),new System.Collections.Generic.List<int>()};
+            void Quad(int sub,Vector3 a,Vector3 b,Vector3 c,Vector3 e,float tile)
+            {   // a,b bottom edge; c,e top edge (c above a), front face counter-clockwise from outside.
+                int n=v.Count;v.Add(a);v.Add(b);v.Add(c);v.Add(e);
+                float wq=Vector3.Distance(a,b)/tile,hq=Vector3.Distance(a,c)/tile;
+                uv.Add(new Vector2(0,0));uv.Add(new Vector2(wq,0));uv.Add(new Vector2(0,hq));uv.Add(new Vector2(wq,hq));
+                subs[sub].AddRange(new[]{n,n+2,n+1,n+1,n+2,n+3});
+            }
+            float x=w/2,z=d/2,b=-1.2f;
+            Quad(0,new Vector3(x,b,z),new Vector3(-x,b,z),new Vector3(x,h,z),new Vector3(-x,h,z),2.5f);      // front (+z)
+            Quad(0,new Vector3(-x,b,-z),new Vector3(x,b,-z),new Vector3(-x,h,-z),new Vector3(x,h,-z),2.5f);  // back
+            Quad(0,new Vector3(x,b,-z),new Vector3(x,b,z),new Vector3(x,h,-z),new Vector3(x,h,z),2.5f);      // ends
+            Quad(0,new Vector3(-x,b,z),new Vector3(-x,b,-z),new Vector3(-x,h,z),new Vector3(-x,h,-z),2.5f);
+            foreach(float sx in new[]{-1f,1f})
+            {   // Gable triangles carry on in plaster.
+                int n=v.Count;v.Add(new Vector3(sx*x,h,-sx*z));v.Add(new Vector3(sx*x,h,sx*z));v.Add(new Vector3(sx*x,h+rise,0));
+                uv.Add(new Vector2(0,h/2.5f));uv.Add(new Vector2(d/2.5f,h/2.5f));uv.Add(new Vector2(d/5f,(h+rise)/2.5f));
+                subs[0].AddRange(new[]{n,n+2,n+1});
+            }
+            // Roof with a 0.45 m overhang, tiles running down the slope; fascia boards at the eaves.
+            float ox=x+.45f,oz=z+.45f,dropY=rise*.45f/z;
+            Quad(1,new Vector3(ox,h-dropY,oz),new Vector3(-ox,h-dropY,oz),new Vector3(ox,h+rise,0),new Vector3(-ox,h+rise,0),2f);
+            Quad(1,new Vector3(-ox,h-dropY,-oz),new Vector3(ox,h-dropY,-oz),new Vector3(-ox,h+rise,0),new Vector3(ox,h+rise,0),2f);
+            Quad(1,new Vector3(ox,h-dropY-.12f,oz),new Vector3(-ox,h-dropY-.12f,oz),new Vector3(ox,h-dropY,oz),new Vector3(-ox,h-dropY,oz),2f);
+            Quad(1,new Vector3(-ox,h-dropY-.12f,-oz),new Vector3(ox,h-dropY-.12f,-oz),new Vector3(-ox,h-dropY,-oz),new Vector3(ox,h-dropY,-oz),2f);
+            // Windows: dark glass just proud of the wall, painted shutters either side.
+            int floors=h>5?2:1;int across=Mathf.Max(2,Mathf.FloorToInt(w/2.6f));
+            foreach(float face in new[]{1f,-1f})for(int f=0;f<floors;f++)for(int k=0;k<across;k++)
+            {
+                float cx=-x+w*(k+.5f)/across,y0=.9f+f*2.6f,y1=y0+1.3f,zf=face*(z+.03f);
+                bool door=face>0&&f==0&&k==across/2;
+                if(door){y0=-.05f;y1=2.15f;}
+                float hw=door?.55f:.45f;
+                // Mirror x on the back face so every quad still winds outward.
+                Vector3 P(float px,float py,float off)=>new Vector3(face>0?-px:px,py,zf+face*off);
+                Quad(door?3:2,P(cx-hw,y0,0),P(cx+hw,y0,0),P(cx-hw,y1,0),P(cx+hw,y1,0),1f);
+                if(!door)foreach(float sd in new[]{-1f,1f})
+                {
+                    float s0=Mathf.Min(cx+sd*(hw+.02f),cx+sd*(hw+.5f)),s1=Mathf.Max(cx+sd*(hw+.02f),cx+sd*(hw+.5f));
+                    Quad(3,P(s0,y0,.02f),P(s1,y0,.02f),P(s0,y1,.02f),P(s1,y1,.02f),1f);
+                }
+            }
+            var mesh=new Mesh();mesh.SetVertices(v);mesh.SetUVs(0,uv);mesh.subMeshCount=4;
+            for(int k=0;k<4;k++)mesh.SetTriangles(subs[k],k);mesh.RecalculateNormals();mesh.RecalculateTangents();return mesh;
+        });
+        private static void House(Transform chunk,Vector3 p,Vector3 facing,int variant,int tint,float scale)
+        {
+            var walls=LongRaceRoads.Pbr("TourHouseWall"+tint,"white_plaster_02",new[]{"F4F1EA","F1E2C4","E3E9EC"}[tint],.15f,.6f);
+            var roof=LongRaceRoads.Pbr("TourHouseRoof","clay_roof_tiles_02","E8D2C2",.2f);
+            var glass=LongRaceRoads.Mat("TourHouseGlass","26323A");
+            var paint=LongRaceRoads.Mat("TourHouseShutter"+tint,new[]{"2F6F8F","4E7A55","8A5A3C"}[tint]);
+            Proc(chunk,"House",HouseMesh(variant),new[]{walls,roof,glass,paint},p,scale,Mathf.Atan2(facing.x,facing.z)*Mathf.Rad2Deg);
+        }
+        // Timber jetty: weathered CC0 planks on a row of piles.
+        private static void Pier(Transform chunk,Vector3 p,Vector3 along)
+        {
+            var planks=LongRaceRoads.Pbr("TourPierPlanks","weathered_planks","C9B8A2",.15f);planks.SetTextureScale("_BaseMap",new Vector2(3,12));
+            p.y=-2.9f;var pier=LongRaceRoads.Box(chunk,"HarborPier",p,new Vector3(4,.3f,34),planks);
+            pier.transform.rotation=Quaternion.LookRotation(Vector3.Cross(Vector3.up,along));
+            var piles=LongRaceRoads.Pbr("TourPierPiles","weathered_planks","8E7B66",.1f);
+            for(int k=0;k<8;k++)foreach(float sd in new[]{-.45f,.45f})
+                LongRaceRoads.Box(chunk,"PierPile",pier.transform.TransformPoint(new Vector3(sd,0,-.5f+k/7f))-Vector3.up*.6f,new Vector3(.3f,1.6f,.3f),piles);
+        }
+        // Soft foam where the bay meets the beach: a strip along the shoreline on the
+        // sea side, sunk into the sand on its land edge so it reads as a wet surf line.
+        private const float Water=-3.77f;
+        // Distance from the road centre to the coast's waterline on one side (-1 left, 1 right), or -1.
+        private static float Shore(Vector3[] p,bool open,int i,int side=-1)
+        {
+            for(float d=20;d<=156;d+=2)
+            {
+                float y0=LongRaceRoads.Ground(p,open,i,side*d,0).y,y1=LongRaceRoads.Ground(p,open,i,side*(d+2),0).y;
+                if(y0>=Water&&y1<Water)return d+2*(y0-Water)/Mathf.Max(.001f,y0-y1);
+            }
+            return -1;
+        }
+        public static void SurfLine(Transform chunk,Vector3[] p,bool open,int start,int end,int side)
+        {
+            var v=new System.Collections.Generic.List<Vector3>();var uv=new System.Collections.Generic.List<Vector2>();var tris=new System.Collections.Generic.List<int>();
+            bool joined=false;float run=0;Vector3 prev=Vector3.zero;
+            for(int i=start;i<=end;i+=2)
+            {
+                float shore=Shore(p,open,i,side);
+                if(shore<0){joined=false;continue;}
+                var right=LongRaceRoads.Right(LongRaceRoads.Tangent(p,i%p.Length,open))*-side;var c=p[i%p.Length]-right*shore;c.y=Water+.035f;
+                if(joined)run+=Vector3.Distance(prev,c);prev=c;
+                int n=v.Count;v.Add(chunk.InverseTransformPoint(c+right*3.5f-Vector3.up*.25f));v.Add(chunk.InverseTransformPoint(c-right*4.5f));
+                uv.Add(new Vector2(run/14f,0));uv.Add(new Vector2(run/14f,1));
+                if(joined)tris.AddRange(side<0?new[]{n-2,n-1,n,n-1,n+1,n}:new[]{n-2,n,n-1,n-1,n,n+1});
+                joined=true;
+            }
+            if(tris.Count==0)return;
+            LongRaceRoads.MeshObject(chunk,chunk.parent.parent.name+"_TerrainSurf"+start+(side<0?"L":"R"),v,tris,uv,SurfMaterial(),false);
+        }
+        private static Material SurfMaterial()
+        {
+            string path=LongRaceRoads.Dir+"/TourSurf.asset";
+            var tex=AssetDatabase.LoadAssetAtPath<Texture2D>(path);
+            if(tex==null)
+            {   // Two foam bands across the strip, broken up along the shore; fades out on the sea edge.
+                tex=new Texture2D(256,64,TextureFormat.RGBA32,true){name="TourSurf",wrapMode=TextureWrapMode.Repeat};
+                for(int y=0;y<64;y++)for(int x=0;x<256;x++)
+                {
+                    float across=y/63f,along=x/256f*Mathf.PI*2;
+                    float band=Mathf.Exp(-Mathf.Pow((across-.42f)/.13f,2))+.55f*Mathf.Exp(-Mathf.Pow((across-.7f)/.07f,2))*(.5f+.5f*Mathf.Sin(along*3+1.3f));
+                    float breakup=.55f+.45f*Mathf.PerlinNoise(x*.06f,y*.18f);
+                    tex.SetPixel(x,y,new Color(1,1,1,Mathf.Clamp01(band*breakup*.85f)*Mathf.SmoothStep(0,1,across*5)));
+                }
+                tex.Apply();AssetDatabase.CreateAsset(tex,path);
+            }
+            var mat=LongRaceRoads.Mat("TourSurf","F7FBFA","Universal Render Pipeline/Lit");
+            mat.SetTexture("_BaseMap",tex);mat.SetFloat("_Surface",1);mat.SetFloat("_Blend",0);mat.SetFloat("_ZWrite",0);mat.SetFloat("_Smoothness",.4f);
+            mat.SetFloat("_SrcBlend",(float)UnityEngine.Rendering.BlendMode.SrcAlpha);mat.SetFloat("_DstBlend",(float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+            mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");mat.SetOverrideTag("RenderType","Transparent");mat.renderQueue=3000;
+            EditorUtility.SetDirty(mat);return mat;
         }
     }
 }

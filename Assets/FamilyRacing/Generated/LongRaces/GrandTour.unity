@@ -318,6 +318,11 @@ MonoBehaviour:
   feedbackRiseRate: 8
   feedbackDecayRate: 5.5
   reducedFeedbackScale: 0.3
+  airPunchDelay: 0.4
+  airPunchFov: 4
+  airPunchLift: 0.5
+  airPunchRiseRate: 5
+  airPunchFallRate: 3
 --- !u!114 &1246834030
 MonoBehaviour:
   m_ObjectHideFlags: 0
