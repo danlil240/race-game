@@ -695,6 +695,23 @@ namespace FamilyRacing.Tests
             Assert.That(state.soloRace.race, Is.Not.Null);
             Assert.That(state.soloRace.race.racers.Count, Is.EqualTo(4));
             Assert.That(state.soloRace.result, Is.Null);
+            Assert.That(state.soloRace.race.eliminationIntervalTicks,
+                Is.EqualTo(0), "a plain quick race is not Elimination");
+        }
+
+        [Test]
+        public void QuickRaceStartAcceptsTheEliminationRaceType()
+        {
+            var service = ServiceWithProfile(Catalog());
+            var started = service.Execute(Cmd("quickRace.start",
+                P("courseId", "harbor-hop", "classId", "car",
+                    "vehicleId", "car-01", "difficulty", "easy",
+                    "elimination", "true")));
+            Assert.That(started.status, Is.EqualTo(CommandResult.Applied),
+                "the Quick Race 'Race type: Elimination' button sends this: "
+                + started.code);
+            Assert.That(service.Snapshot().soloRace.race
+                .eliminationIntervalTicks, Is.GreaterThan(0));
         }
 
         [Test]

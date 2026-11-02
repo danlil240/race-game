@@ -418,7 +418,8 @@ authored purchase/equip.
   raced event belongs to so the map returns to the raced context.
 - `quickRace.start {courseId, classId, vehicleId, difficulty}` resolves
   the authored circuit event for the course+class pick — a pick with no
-  authored circuit rejects `unknownEvent`.
+  authored circuit rejects `unknownEvent`. Optional `elimination: true`
+  makes it an Elimination race (last place knocked out every 30 s).
 - `timeTrial.start {courseId, classId}` seats the authored normalized
   starter for the class (`soloRace.tuningSource` reports `normalized`
   versus `purchased` for the upgrade-resolved seats).
