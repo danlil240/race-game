@@ -548,6 +548,8 @@ namespace FamilyRacing
                     || racer.session.motor == null
                     || string.IsNullOrEmpty(racer.participantId))
                     continue;
+                // Elimination mode: a knocked-out racer leaves the road.
+                if (racer.eliminated) continue;
                 // Hard capacity: extra participants never manufacture
                 // views beyond the shared four-slot bound.
                 if (!racerViews.ContainsKey(racer.participantId)

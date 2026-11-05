@@ -36,6 +36,47 @@ namespace FamilyRacing.Core.Driving
         // Per-step cap on the applied racer-nudge speed change (m/s).
         public const float NudgeMaxDeltaSpeed = 4f;
 
+        // Drift mini-turbos: hold a drift long enough and the sparks go
+        // blue, then orange, then purple; letting go fires a kick whose
+        // length grows with the tier.
+        public const float MiniTurboTier1Seconds = 0.7f;
+        public const float MiniTurboTier2Seconds = 1.5f;
+        public const float MiniTurboTier3Seconds = 2.5f;
+        public const float MiniTurboAcceleration = 2.4f;
+        public const float MiniTurboSpeedCap = 1.12f;
+
+        // Ramp tricks: press drift in the air for a roll; every trick
+        // you finish before landing pays a mini-turbo and some meter.
+        public const float TrickSeconds = 0.55f;
+        public const float TrickMinAirSeconds = 0.12f;
+        public const int TrickMaxPerJump = 3;
+        public const float TrickBoostCredit = 0.2f;
+
+        public static int MiniTurboTier(float driftSeconds)
+        {
+            if (driftSeconds >= MiniTurboTier3Seconds) return 3;
+            if (driftSeconds >= MiniTurboTier2Seconds) return 2;
+            if (driftSeconds >= MiniTurboTier1Seconds) return 1;
+            return 0;
+        }
+
+        public static float MiniTurboDuration(int tier)
+        {
+            switch (tier)
+            {
+                case 1: return 0.5f;
+                case 2: return 0.9f;
+                case 3: return 1.4f;
+                default: return 0f;
+            }
+        }
+
+        // Landing payout for `tricks` completed rolls.
+        public static float TrickTurboDuration(int tricks)
+        {
+            return tricks <= 0 ? 0f : Math.Min(1.6f, 0.7f + 0.45f * (tricks - 1));
+        }
+
         // Drift engagement: held input, steering intent, grounded and at
         // least the tuning minimum speed — and not recovery-flagged, so
         // a respawn boundary can never emit a phantom driftStart. The

@@ -499,6 +499,7 @@ namespace FamilyRacing
             statusLabel = AddLabel(root, "", 18, Deep);
             statusLabel.name = "status.persistence";
             if (IsPlayfulChaos) ApplyCompactRaceHud(state, top, boostRow);
+            BuildFunHud(state);
         }
 
         // One shared backdrop for HUD strips that float text over the live
@@ -536,6 +537,7 @@ namespace FamilyRacing
             if (state.screen != "driving") return;
             var session = PresentedSession(state);
             if (session == null) return;
+            UpdateFunHud(state);
             if (positionLabel != null)
             {
                 var place = 0;

@@ -131,12 +131,12 @@ namespace FamilyRacing.Core.Networking
         // fully willing seat fires promptly and a zero-willingness seat
         // never fires. The default applies when no difficulty preset
         // authors a willingness (LAN constant).
-        public const float AiGadgetSettleTicks = 90f;
+        public const float AiGadgetSettleTicks = 40f;
         public const float AiGadgetDefaultWillingness = 0.6f;
         // Past the settle delay plus this patience window a held item is
         // spent even without its preferred window — a held slot can
         // never deadlock an AI seat. Deterministic (heldTicks only).
-        public const int AiGadgetPatienceTicks = 120;
+        public const int AiGadgetPatienceTicks = 60;
         // A rival this close behind makes the foam trap worth spending;
         // a live rival patch this close ahead arms the shield.
         public const float AiGadgetRivalBehindMeters = 15f;

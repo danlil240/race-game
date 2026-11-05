@@ -39,6 +39,13 @@ namespace FamilyRacing.Core.Racing
         public float y;
         public float z;
         public float heading;
+        // Live standing (1 = leader) and the field size it ranks in. Zero
+        // means "unknown" (solo practice, time trial, old callers) and
+        // keeps the plain shuffled bag; a known place weights the draw so
+        // racers at the back get the attacking items and the leader gets
+        // the defensive ones.
+        public int position;
+        public int fieldSize;
         public List<GadgetSegment> segments = new List<GadgetSegment>();
     }
 
@@ -541,13 +548,64 @@ namespace FamilyRacing.Core.Racing
                         pickup.radiusMeters, pickup.verticalRangeMeters))
                     continue;
                 if (!string.IsNullOrEmpty(row.heldItemId)) continue;
-                GrantItem(state, row, catalog);
+                if (entry.position > 0 && entry.fieldSize > 1)
+                    GrantByPlace(state, row, catalog, entry.position,
+                        entry.fieldSize);
+                else
+                    GrantItem(state, row, catalog);
                 pickup.active = false;
                 pickup.respawnTicksRemaining =
                     catalog != null ? catalog.pickupRespawnTicks : 0;
                 events.Add(Emit(state, EventPickup, entry.participantId,
                     row.heldItemId, ref seq));
             }
+        }
+
+        // Place-weighted draw: t runs 0 (leader) to 1 (last). Trailing
+        // racers mostly draw turbos and missiles, the leader mostly
+        // shields, mines and foam, so the pack stays close. Uses the same
+        // seeded generator as the bag, so a replay deals the same items.
+        public static float PlaceWeight(string kind, float t)
+        {
+            switch (kind)
+            {
+                case GadgetKind.Turbo: return 1f + 4f * t;
+                case GadgetKind.HomingMissile: return 0.3f + 3.7f * t;
+                case GadgetKind.EmpPulse: return 0.5f + 2f * t;
+                case GadgetKind.BubbleShield: return 3f - 2f * t;
+                case GadgetKind.Mine: return 3f - 2.4f * t;
+                case GadgetKind.FoamTrap: return 3f - 2f * t;
+                default: return 1f;
+            }
+        }
+
+        private static void GrantByPlace(GadgetWorldState state,
+            GadgetRacerState row, GadgetDefinitionCatalog catalog,
+            int position, int fieldSize)
+        {
+            var gadgets = catalog != null ? catalog.gadgets : null;
+            if (gadgets == null || gadgets.Count == 0) return;
+            var t = Math.Max(0f, Math.Min(1f,
+                (position - 1) / (float)(fieldSize - 1)));
+            var total = 0f;
+            foreach (var def in gadgets)
+                if (def != null) total += PlaceWeight(def.kind, t);
+            if (total <= 0f) { GrantItem(state, row, catalog); return; }
+            var rng = (uint)(state.rngState & 0xFFFFFFFFu);
+            var roll = Next(ref rng) / 4294967296f * total;
+            state.rngState = rng;
+            GadgetDefinition pick = null;
+            foreach (var def in gadgets)
+            {
+                if (def == null) continue;
+                pick = def;
+                roll -= PlaceWeight(def.kind, t);
+                if (roll < 0f) break;
+            }
+            row.heldItemId = pick != null ? pick.id : "";
+            row.heldKind = pick != null ? pick.kind : "";
+            row.heldGeneration = ++state.nextPickupGeneration;
+            row.heldTicks = 0;
         }
 
         private static void GrantItem(GadgetWorldState state,

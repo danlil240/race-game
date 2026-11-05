@@ -160,6 +160,8 @@ namespace FamilyRacing.Core.Foundation
                     request.vehicleId = OptionalParam(command, "vehicleId");
                     request.difficultyId =
                         OptionalParam(command, "difficulty");
+                    request.elimination =
+                        OptionalParam(command, "elimination") == "true";
                     break;
                 default: // RaceMode.TimeTrial
                     request.courseId = OptionalParam(command, "courseId");

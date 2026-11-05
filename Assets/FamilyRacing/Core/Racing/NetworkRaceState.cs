@@ -37,6 +37,8 @@ namespace FamilyRacing.Core.Racing
         public int position;                // 1-based standing
         public bool finished;
         public bool dnf;
+        public bool eliminated;             // knocked out in Elimination mode
+        public bool slipstream;             // riding a rival's wake this tick
         public long finishTicks;            // elapsed race ticks at finish; 0 otherwise
         public DrivingSessionState session;
         // Task 9 wire surface: the compact versioned physical-state DTO.
@@ -73,6 +75,8 @@ namespace FamilyRacing.Core.Racing
         public bool paused;
         public long firstFinishElapsedTicks;     // 0 until the first finisher
         public long finishDeadlineElapsedTicks;  // grace deadline; 0 until first finisher
+        public int eliminationIntervalTicks;     // 0 = normal race
+        public long nextEliminationElapsedTicks; // race clock of the next knockout
         public List<NetworkRacerState> racers = new List<NetworkRacerState>();
         public List<int> standings = new List<int>(); // slot indices in rank order
         public List<DrivingEvent> events = new List<DrivingEvent>();
@@ -97,6 +101,8 @@ namespace FamilyRacing.Core.Racing
                 paused = paused,
                 firstFinishElapsedTicks = firstFinishElapsedTicks,
                 finishDeadlineElapsedTicks = finishDeadlineElapsedTicks,
+                eliminationIntervalTicks = eliminationIntervalTicks,
+                nextEliminationElapsedTicks = nextEliminationElapsedTicks,
                 result = result != null ? result.Copy() : null,
                 gadgets = gadgets != null ? gadgets.Copy() : null
             };

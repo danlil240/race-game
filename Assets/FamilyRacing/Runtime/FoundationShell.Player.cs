@@ -541,6 +541,14 @@ namespace FamilyRacing
                         button.style.minHeight = 48;
                         HighlightPlayerToggle(button, diffId == quickDifficulty);
                     }
+                    else if (button.name == "quick.mode.normal"
+                        || button.name == "quick.mode.elimination")
+                    {
+                        button.style.minWidth = 160;
+                        button.style.minHeight = 48;
+                        HighlightPlayerToggle(button,
+                            (button.name == "quick.mode.elimination") == quickElimination);
+                    }
                 }
                 var start = root.Q<Button>(prefix + ".start");
                 if (start != null)

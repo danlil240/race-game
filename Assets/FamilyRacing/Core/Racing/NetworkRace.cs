@@ -17,7 +17,7 @@ namespace FamilyRacing.Core.Racing
     // path): racers step in slot order on one shared tick, identical finish
     // ticks break ties by stable slot index, and the result object is
     // created once and never rebuilt or reordered.
-    public sealed class NetworkRace
+    public sealed partial class NetworkRace
     {
         public const string PhaseCountdown = "countdown";
         public const string PhaseRunning = "running";
@@ -37,6 +37,12 @@ namespace FamilyRacing.Core.Racing
             internal bool finished;
             internal bool dnf;
             internal long finishTicks;
+            // Fun-pass assists (NetworkRace.Assists.cs).
+            internal int draftTicks;       // time spent tucked in a rival's wake
+            internal bool slipstream;      // the draft is paying out this tick
+            internal int slingTicks;       // short carry-over after leaving the wake
+            internal bool eliminated;      // knocked out by Elimination mode
+            internal int eliminationOrder; // 1 = first out
         }
 
         // Local-mode context carried only by TryCreateLocal races: the
@@ -420,6 +426,11 @@ namespace FamilyRacing.Core.Racing
 
             // The single pre-step view every AI sample reads this tick.
             var preStep = SnapshotAll(forInput: true);
+            // Live places and race distance for the fun-pass assists:
+            // place-weighted item draws, slipstream and AI catch-up.
+            var placeOf = PlacesFrom(preStep);
+            var bestHuman = BestHumanDistance(preStep);
+            UpdateSlipstreams(preStep, emitted);
 
             // --- 1) prepare every request (+ pending resets) ------------
             var prepared = new List<Prepared>(racers.Length);
@@ -461,9 +472,9 @@ namespace FamilyRacing.Core.Racing
                 // the prepared request into the simulation batch —
                 // host-authoritative effects reach both backends through
                 // exactly one seam.
-                racer.session.PendingModifiers =
+                racer.session.PendingModifiers = ApplyAssists(racer,
                     GadgetRules.ModifierFor(gadgetWorld,
-                        racer.participantId);
+                        racer.participantId), preStep, bestHuman);
                 var request = racer.session.PrepareStep(input);
                 if (request == null) continue; // session finalized
                 request.participantId = racer.participantId;
@@ -524,6 +535,8 @@ namespace FamilyRacing.Core.Racing
                     {
                         participantId = entry.racer.participantId,
                         slot = entry.racer.slot,
+                        position = placeOf[entry.racer.slot],
+                        fieldSize = ActiveFieldSize(),
                         gadgetHeld = request.input.Gadget,
                         recovering = !request.simulateMotion
                             || request.reset != null
@@ -622,6 +635,7 @@ namespace FamilyRacing.Core.Racing
                     }
                 }
             }
+            StepElimination(emitted);
             TryFinalize(emitted);
             // CompleteStep already produced independent session snapshots.
             // Reuse those owned copies instead of copying every checkpoint
@@ -980,6 +994,10 @@ namespace FamilyRacing.Core.Racing
             Racer b, DrivingSessionState sb)
         {
             if (a.finished != b.finished) return a.finished ? -1 : 1;
+            if (!a.finished && a.eliminated != b.eliminated)
+                return a.eliminated ? 1 : -1;
+            if (!a.finished && a.eliminated)
+                return b.eliminationOrder.CompareTo(a.eliminationOrder);
             if (a.finished)
             {
                 if (a.finishTicks != b.finishTicks)
@@ -1015,6 +1033,9 @@ namespace FamilyRacing.Core.Racing
                 paused = paused,
                 firstFinishElapsedTicks = firstFinishElapsedTicks,
                 finishDeadlineElapsedTicks = finishDeadlineElapsedTicks,
+                eliminationIntervalTicks = eliminationIntervalTicks,
+                nextEliminationElapsedTicks = eliminationIntervalTicks > 0
+                    ? nextEliminationElapsedTicks : 0,
                 result = result,
                 events = emitted ?? new List<DrivingEvent>(),
                 // The published world is a deep copy — observation and
@@ -1050,6 +1071,8 @@ namespace FamilyRacing.Core.Racing
                     position = positionOf[i],
                     finished = racer.finished,
                     dnf = racer.dnf,
+                    eliminated = racer.eliminated,
+                    slipstream = racer.slipstream || racer.slingTicks > 0,
                     finishTicks = racer.finishTicks,
                     session = snaps[i]
                 });

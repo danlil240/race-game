@@ -1267,5 +1267,105 @@ namespace FamilyRacing.Tests
             Assert.That(moto.driftChargePerSecond, Is.Not.EqualTo(car.driftChargePerSecond),
                 "the classes must differ in the charge economy too");
         }
-    }
+    
+        // --- fun pass: drift mini-turbos and ramp tricks ----------------------
+
+
+        [Test]
+        public void LongDriftReleaseFiresTieredMiniTurbo()
+        {
+            var tuning = VehicleTuning.Car01();
+            var world = new TestWorld();
+            var state = new MotorState { grounded = true, speed = tuning.maxSpeed * 0.8f, boostCharge = 0f };
+            var drift = new DriverInput(1f, true, false, false, false, false, false);
+            var seconds = DriftBoostRules.MiniTurboTier2Seconds + 0.1f;
+            for (var t = 0f; t < seconds; t += Dt)
+                state = ArcadeMotor.Step(state, drift, tuning, world, Dt).state;
+            Assert.That(state.drifting, Is.True);
+            Assert.That(DriftBoostRules.MiniTurboTier(state.driftSeconds), Is.EqualTo(2));
+            var release = ArcadeMotor.Step(state, new DriverInput(0f, false, false, false, false, false, false),
+                tuning, world, Dt);
+            Assert.That(HasEvent(release, "miniTurbo"), Is.True);
+            Assert.That(release.state.miniTurboTier, Is.EqualTo(2));
+            Assert.That(release.state.miniTurboSeconds, Is.GreaterThan(0.5f));
+            Assert.That(release.state.driftSeconds, Is.EqualTo(0f));
+        }
+
+        [Test]
+        public void ShortDriftGivesNoMiniTurbo()
+        {
+            var tuning = VehicleTuning.Car01();
+            var world = new TestWorld();
+            var state = new MotorState { grounded = true, speed = tuning.maxSpeed * 0.8f };
+            var drift = new DriverInput(1f, true, false, false, false, false, false);
+            for (var i = 0; i < 5; i++)
+                state = ArcadeMotor.Step(state, drift, tuning, world, Dt).state;
+            var release = ArcadeMotor.Step(state, new DriverInput(0f, false, false, false, false, false, false),
+                tuning, world, Dt);
+            Assert.That(HasEvent(release, "miniTurbo"), Is.False);
+            Assert.That(release.state.miniTurboSeconds, Is.EqualTo(0f));
+        }
+
+        [Test]
+        public void MiniTurboRaisesTheSpeedCap()
+        {
+            var tuning = VehicleTuning.Car01();
+            var world = new TestWorld();
+            var plain = new MotorState { grounded = true, speed = tuning.maxSpeed };
+            var kicked = plain.Copy();
+            kicked.miniTurboSeconds = 1f;
+            kicked.miniTurboTier = 3;
+            var straight = new DriverInput(0f, false, false, false, false, false, false);
+            for (var i = 0; i < 20; i++)
+            {
+                plain = ArcadeMotor.Step(plain, straight, tuning, world, Dt).state;
+                kicked = ArcadeMotor.Step(kicked, straight, tuning, world, Dt).state;
+            }
+            Assert.That(kicked.speed, Is.GreaterThan(plain.speed + 0.5f));
+        }
+
+        [Test]
+        public void AirTrickLandsWithBoost()
+        {
+            var tuning = VehicleTuning.Car01();
+            var world = new TestWorld();
+            var state = new MotorState
+            {
+                y = 6f, grounded = false, verticalSpeed = 4f, airPeakY = 6f,
+                airSeconds = 0.2f, speed = 30f, boostCharge = 0f
+            };
+            var press = new DriverInput(0f, true, false, false, false, false, false);
+            var idle = new DriverInput(0f, false, false, false, false, false, false);
+            var first = ArcadeMotor.Step(state, press, tuning, world, Dt);
+            Assert.That(HasEvent(first, "trick"), Is.True);
+            Assert.That(first.state.trickCount, Is.EqualTo(1));
+            // Holding the button does not chain a second trick.
+            var held = ArcadeMotor.Step(first.state, press, tuning, world, Dt);
+            Assert.That(HasEvent(held, "trick"), Is.False);
+            state = held.state;
+            var landed = false;
+            for (var i = 0; i < 300 && !state.grounded; i++)
+            {
+                var step = ArcadeMotor.Step(state, idle, tuning, world, Dt);
+                if (HasEvent(step, "trickLanded")) landed = true;
+                state = step.state;
+            }
+            Assert.That(state.grounded, Is.True);
+            Assert.That(landed, Is.True);
+            Assert.That(state.miniTurboSeconds, Is.GreaterThan(0f));
+            Assert.That(state.boostCharge, Is.GreaterThan(0f));
+            Assert.That(state.trickCount, Is.EqualTo(0));
+        }
+
+        [Test]
+        public void DriftPressOnTheGroundIsNotATrick()
+        {
+            var tuning = VehicleTuning.Car01();
+            var world = new TestWorld();
+            var state = new MotorState { grounded = true, speed = 20f };
+            var press = new DriverInput(1f, true, false, false, false, false, false);
+            var step = ArcadeMotor.Step(state, press, tuning, world, Dt);
+            Assert.That(HasEvent(step, "trick"), Is.False);
+        }
+}
 }

@@ -16,6 +16,7 @@ namespace FamilyRacing.Core.Racing
         public string classId = "";     // timeTrial (normalized starter class)
         public string vehicleId = "";   // campaign | quickRace | practice
         public string difficultyId = "";// "" resolves to easy
+        public bool elimination;         // quickRace: knock out last place every 30 s
         public string participantId = "";// local human identity
         public string raceId = "";      // "" generates one
         public string commandId = "";   // start-correlation for race.started

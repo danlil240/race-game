@@ -30,6 +30,13 @@ namespace FamilyRacing.Core.Driving
         public bool airWallContact;  // the current airborne episode clipped a barrier
         public float airPeakY;       // highest y of the current airborne episode
         public bool recovering;
+        // Fun pass: drift mini-turbos and ramp tricks (arcade motor).
+        public float driftSeconds;       // length of the current drift
+        public float miniTurboSeconds;   // remaining mini-turbo kick
+        public int miniTurboTier;        // 1 blue, 2 orange, 3 purple
+        public bool driftInputHeld;      // last step's drift button, for trick press edges
+        public int trickCount;           // tricks started this airborne episode
+        public float trickSeconds;       // remaining time of the trick animating now
         public string lastContact = "none"; // "none" | "ground" | "wall" | "obstacle"
         public long tick;
         // Optional full physical state for the physical backend. Null while
@@ -64,6 +71,12 @@ namespace FamilyRacing.Core.Driving
                 airWallContact = airWallContact,
                 airPeakY = airPeakY,
                 recovering = recovering,
+                driftSeconds = driftSeconds,
+                miniTurboSeconds = miniTurboSeconds,
+                miniTurboTier = miniTurboTier,
+                driftInputHeld = driftInputHeld,
+                trickCount = trickCount,
+                trickSeconds = trickSeconds,
                 lastContact = lastContact,
                 tick = tick,
                 physics = physics == null ? null : physics.Copy()

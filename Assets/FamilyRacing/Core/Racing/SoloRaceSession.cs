@@ -239,6 +239,9 @@ namespace FamilyRacing.Core.Racing
                     rulesFingerprint, difficulty, rivalParticipantId,
                     out race, out error, catalog.Gadgets))
                 return false;
+            if (request.elimination && mode == RaceMode.QuickRace)
+                race.EliminationIntervalTicks =
+                    NetworkRace.DefaultEliminationIntervalTicks;
 
             session = new SoloRaceSession(request,
                 RaceModeRules.ModeId(mode), sessionId, raceId, participantId,
