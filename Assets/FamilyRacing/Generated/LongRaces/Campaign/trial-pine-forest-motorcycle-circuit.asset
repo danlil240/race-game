@@ -16,7 +16,7 @@ MonoBehaviour:
   track: {fileID: 11400000, guid: 9a9cc17866514104b838a2e0f1054b53, type: 2}
   laps: 1
   countdownTicks: 90
-  finishGraceSeconds: 240
+  finishGraceSeconds: 45
   vehicleIds:
   - motorcycle-01
   completionCoins: 20

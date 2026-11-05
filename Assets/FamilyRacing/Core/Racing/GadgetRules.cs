@@ -51,6 +51,9 @@ namespace FamilyRacing.Core.Racing
     {
         public long tick;
         public List<GadgetRacerInput> racers = new List<GadgetRacerInput>();
+        // Static course boost pads (BoostPads.Derive). Null or empty means
+        // the course has none; they never ride the world snapshot.
+        public List<GadgetBoostPad> boostPads;
     }
 
     // The boundary result: the next world state (an independent deep
@@ -97,6 +100,17 @@ namespace FamilyRacing.Core.Racing
         public const string EventFoamHit = "gadget.foamHit";
         public const string EventShieldBlocked = "gadget.shieldBlocked";
         public const string EventRespawn = "gadget.respawn";
+        public const string EventBoostPad = "gadget.boostPad";
+
+        // Spin-outs, as whole turns so the racer exits facing forward.
+        // Foam: one slippery 360. Missile: a violent double spin. Mine:
+        // one quick turn. The EMP only stalls the motor, it never spins.
+        public const int FoamSpinTicks = 33;
+        public const float FoamSpinTurns = 1f;
+        public const int MissileSpinTicks = 45;
+        public const float MissileSpinTurns = 2f;
+        public const int MineSpinTicks = 30;
+        public const float MineSpinTurns = 1f;
 
         // Foam patches get this authored trigger height everywhere — the
         // same vertical band pickups use, so a designed jump flies over
@@ -192,6 +206,8 @@ namespace FamilyRacing.Core.Racing
                 mods.accelerationMultiplier *= row.foamSlowMultiplier;
                 mods.speedCapMultiplier *= row.foamSlowMultiplier;
             }
+            if (row.spinTicksRemaining > 0)
+                mods.spinRadiansPerSecond = row.spinRadiansPerSecond;
             return mods;
         }
 
@@ -264,6 +280,18 @@ namespace FamilyRacing.Core.Racing
                 CollectPickups(state, row, entry, catalog,
                     result.events, ref seq);
             }
+
+            // Boost pads after collections: a racer can grab an item and a
+            // pad on the same boundary.
+            if (input.boostPads != null && input.boostPads.Count > 0)
+                foreach (var entry in racers)
+                {
+                    var row = state.Racer(entry.participantId);
+                    if (row == null || entry.finished || entry.recovering)
+                        continue;
+                    ResolveBoostPads(state, row, entry, input.boostPads,
+                        result.events, ref seq);
+                }
 
             MoveProjectiles(state, racers, result.events, ref seq);
             ResolveMines(state, racers, result.events, ref seq);
@@ -366,6 +394,62 @@ namespace FamilyRacing.Core.Racing
                 row.foamSlowMultiplier = 1f;
             if (row.foamImmunityTicksRemaining > 0)
                 row.foamImmunityTicksRemaining--;
+            if (row.spinTicksRemaining > 0
+                && --row.spinTicksRemaining == 0)
+                row.spinRadiansPerSecond = 0f;
+            if (row.boostPadCooldownTicks > 0) row.boostPadCooldownTicks--;
+        }
+
+        // Starts a spin of whole turns over `ticks`, in the direction the
+        // hit came from (sign > 0 spins clockwise seen from above).
+        internal static void StartSpin(GadgetRacerState row, int ticks,
+            float turns, float sign)
+        {
+            if (row == null || ticks <= 0 || turns <= 0f) return;
+            row.spinTicksRemaining = ticks;
+            row.spinRadiansPerSecond = (sign < 0f ? -1f : 1f)
+                * turns * (float)(Math.PI * 2.0) * 30f / ticks;
+        }
+
+        // Which way a hit at (cx, cz) spins a racer: hits from the right
+        // push the tail left (clockwise), hits from the left the other
+        // way; a dead-centre hit picks a deterministic side by slot.
+        internal static float SpinSign(GadgetRacerInput racer, float cx,
+            float cz)
+        {
+            if (racer == null) return 1f;
+            var fx = (float)Math.Sin(racer.heading);
+            var fz = (float)Math.Cos(racer.heading);
+            var cross = fx * (cz - racer.z) - fz * (cx - racer.x);
+            if (Math.Abs(cross) < 0.05f) return racer.slot % 2 == 0 ? 1f : -1f;
+            return cross < 0f ? 1f : -1f;
+        }
+
+        private static void ResolveBoostPads(GadgetWorldState state,
+            GadgetRacerState row, GadgetRacerInput entry,
+            List<GadgetBoostPad> pads, List<DrivingEvent> events, ref int seq)
+        {
+            if (row.boostPadCooldownTicks > 0 || row.spinTicksRemaining > 0)
+                return;
+            foreach (var pad in pads)
+            {
+                if (pad == null) continue;
+                if (!Swept(entry, pad.x, pad.y, pad.z, pad.radiusMeters,
+                        pad.verticalRangeMeters))
+                    continue;
+                // A pad never shortens or weakens a stronger turbo that
+                // is already running; it tops the envelope up.
+                if (row.turboTicksRemaining < BoostPads.TurboTicks)
+                    row.turboTicksRemaining = BoostPads.TurboTicks;
+                if (row.turboAccelerationMultiplier < BoostPads.AccelerationMultiplier)
+                    row.turboAccelerationMultiplier = BoostPads.AccelerationMultiplier;
+                if (row.turboSpeedCapMultiplier < BoostPads.SpeedCapMultiplier)
+                    row.turboSpeedCapMultiplier = BoostPads.SpeedCapMultiplier;
+                row.boostPadCooldownTicks = BoostPads.CooldownTicks;
+                events.Add(Emit(state, EventBoostPad, entry.participantId,
+                    pad.id, ref seq));
+                return;
+            }
         }
 
         // The press edge consumes the held slot and applies the item by
@@ -525,7 +609,13 @@ namespace FamilyRacing.Core.Racing
                     row.foamSlowTicksRemaining = patch.slowTicks;
                     row.foamSlowMultiplier = patch.slowMultiplier;
                     row.foamImmunityTicksRemaining =
-                        patch.slowTicks + patch.immunityTicks;
+                        Math.Max(patch.slowTicks, FoamSpinTicks) + patch.immunityTicks;
+                    // Foam is slippery: the racer loses the back end and
+                    // spins a full 360 while sliding through the patch.
+                    StartSpin(row, FoamSpinTicks, FoamSpinTurns,
+                        SpinSign(entry, patch.x, patch.z));
+                    // The spin replaces any turbo: you cannot boost out.
+                    row.turboTicksRemaining = 0;
                     events.Add(Emit(state, EventFoamHit,
                         entry.participantId, patch.patchId, ref seq));
                 }

@@ -175,10 +175,28 @@ namespace FamilyRacing.EditorTools
 
         private static VehicleDefinitionAsset BuildCar()
         {
+            var visual = ChassisVisual("race-future", "KenneyRacerTrial", "kenney-racer-trial", "kenney-visual", AssetTrialRacers.DetailCar);
+            var vehicle = UnityEngine.Object.Instantiate(Required<VehicleDefinitionAsset>("Assets/FamilyRacing/Generated/Driving/car-01.asset"));
+            vehicle.visual = visual;
+            vehicle.maxSpeed = 25.2f;
+            vehicle.acceleration = 9.5f;
+            vehicle.boostMaxSpeed = 34f;
+            vehicle.boostAcceleration = 16f;
+            return SaveAsset(vehicle, Output + "/car-01.asset");
+        }
+
+        // Grand Tour racer: Kenney Car Kit (CC0) open-wheel "race" body on the same rig.
+        public const string GrandTourVisualPath = Output + "/grand-tour-car-visual.asset";
+        public static VehicleVisualDefinitionAsset GrandTourCarVisual() =>
+            ChassisVisual("race", "GrandTourRacer", "grand-tour-racer", "grand-tour-car-visual", AssetTrialRacers.DetailOpenWheelCar);
+
+        private static VehicleVisualDefinitionAsset ChassisVisual(string fbx, string prefabName, string visualId, string visualAsset,
+            Action<GameObject, GameObject> detail)
+        {
             // Preserve the tested wheel pivots, seat and hand mounts. The imported
             // chassis replaces the body; the shared rider rig still drives it.
             var root = UnityEngine.Object.Instantiate(Required<GameObject>(RacerVisualAuthoring.CarPrefabPath));
-            root.name = "KenneyRacerTrial";
+            root.name = prefabName;
             try
             {
                 foreach (var renderer in root.GetComponentsInChildren<Renderer>())
@@ -188,7 +206,7 @@ namespace FamilyRacing.EditorTools
                         if (t.name.StartsWith("Wheel", StringComparison.Ordinal)) wheel = true;
                     renderer.enabled = wheel || renderer.name == "DashWheel";
                 }
-                var model = UnityEngine.Object.Instantiate(Required<GameObject>(Root + "/Kenney/race-future.fbx"));
+                var model = UnityEngine.Object.Instantiate(Required<GameObject>(Root + "/Kenney/" + fbx + ".fbx"));
                 ConvertMaterials(model, true);
                 // Retain the FBX importer's authored axis conversion.
                 var bounds = BoundsOf(model);
@@ -201,19 +219,12 @@ namespace FamilyRacing.EditorTools
                         renderer.enabled = false;
                 model.transform.SetParent(root.transform, true);
                 model.name = "KenneyChassis";
-                AssetTrialRacers.DetailCar(root, model);
-                var prefab = PrefabUtility.SaveAsPrefabAsset(root, Output + "/KenneyRacerTrial.prefab");
+                detail(root, model);
+                var prefab = PrefabUtility.SaveAsPrefabAsset(root, Output + "/" + prefabName + ".prefab");
                 var visual = UnityEngine.Object.Instantiate(Required<VehicleVisualDefinitionAsset>(RacerVisualAuthoring.CarVisualAssetPath));
-                visual.visualId = "kenney-racer-trial";
+                visual.visualId = visualId;
                 visual.prefab = prefab;
-                visual = SaveAsset(visual, Output + "/kenney-visual.asset");
-                var vehicle = UnityEngine.Object.Instantiate(Required<VehicleDefinitionAsset>("Assets/FamilyRacing/Generated/Driving/car-01.asset"));
-                vehicle.visual = visual;
-                vehicle.maxSpeed = 25.2f;
-                vehicle.acceleration = 9.5f;
-                vehicle.boostMaxSpeed = 34f;
-                vehicle.boostAcceleration = 16f;
-                return SaveAsset(vehicle, Output + "/car-01.asset");
+                return SaveAsset(visual, Output + "/" + visualAsset + ".asset");
             }
             finally { UnityEngine.Object.DestroyImmediate(root); }
         }

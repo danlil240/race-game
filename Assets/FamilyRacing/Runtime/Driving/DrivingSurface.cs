@@ -7,5 +7,7 @@ namespace FamilyRacing
     public sealed class DrivingSurface : MonoBehaviour
     {
         public bool offRoad = true;
+        // Jump ramps: paved (offRoad false) and launching.
+        public bool launchRamp;
     }
 }

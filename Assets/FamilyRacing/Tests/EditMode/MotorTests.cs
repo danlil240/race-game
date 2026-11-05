@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using FamilyRacing.Core.Driving;
+using FamilyRacing.Core.Racing;
 using NUnit.Framework;
 
 namespace FamilyRacing.Tests
@@ -25,6 +26,11 @@ namespace FamilyRacing.Tests
             internal float RampToeZ = float.NaN;
             internal float RampCrestZ;
             internal float RampSlope = 0.25f;
+            // Marks the ramp surface as a launch ramp (keeps climb speed).
+            internal bool LaunchRamp;
+            // Optional curved deck: height above the toe at a distance along
+            // it (the Grand Tour kicker). Followed by the ground probe alone.
+            internal Func<float, float> RampLift;
             // When true the ground probe reports a miss — the sustained
             // contact-outage case (distinct from alternating jitter).
             internal bool ProbeMiss;
@@ -40,6 +46,7 @@ namespace FamilyRacing.Tests
             {
                 if (float.IsNaN(RampToeZ)) return GroundY;
                 if (z <= RampToeZ || z >= RampCrestZ) return GroundY;
+                if (RampLift != null) return GroundY + RampLift(z - RampToeZ);
                 return GroundY + (z - RampToeZ) * RampSlope;
             }
 
@@ -57,7 +64,9 @@ namespace FamilyRacing.Tests
                     normalY = 1f,
                     normalZ = 0f,
                     distance = pose.y - surface,
-                    surfaceId = "ground"
+                    surfaceId = "ground",
+                    launchRamp = LaunchRamp && !float.IsNaN(RampToeZ)
+                        && pose.z > RampToeZ && pose.z < RampCrestZ
                 };
             }
 
@@ -94,7 +103,7 @@ namespace FamilyRacing.Tests
                         surfaceId = "wall"
                     };
                 }
-                if (!float.IsNaN(RampToeZ))
+                if (!float.IsNaN(RampToeZ) && RampLift == null)
                 {
                     // The wedge blocks where its rising surface reaches the
                     // body's underside: material sits under the box only
@@ -441,6 +450,88 @@ namespace FamilyRacing.Tests
             Assert.That(state.grounded, Is.True);
             Assert.That(state.z, Is.GreaterThan(world.RampCrestZ),
                 "the car must land beyond the crest, z=" + state.z);
+        }
+
+        [Test]
+        public void LaunchRampThrowsTheCarHigherAndFurther()
+        {
+            float Flight(bool launch, out float liftAtTakeoff)
+            {
+                var world = new FlatWorld
+                { RampToeZ = 10f, RampCrestZ = 24f, RampSlope = 0.15f, LaunchRamp = launch };
+                var tuning = VehicleTuning.Car01();
+                var state = Spawn();
+                liftAtTakeoff = 0f;
+                var takeoff = float.NaN;
+                for (var i = 0; i < 900; i++)
+                {
+                    var result = ArcadeMotor.Step(state, Neutral(), tuning, world, Dt);
+                    state = result.state;
+                    foreach (var ev in result.events)
+                    {
+                        if (ev.kind == "becameAirborne") { takeoff = state.z; liftAtTakeoff = state.verticalSpeed; }
+                        if (ev.kind == "landed") return state.z - takeoff;
+                    }
+                }
+                return 0f;
+            }
+            var plainDistance = Flight(false, out var plainLift);
+            var launchDistance = Flight(true, out var launchLift);
+            Assert.That(plainLift, Is.LessThanOrEqualTo(0f), "a plain crest only drops the car");
+            Assert.That(launchLift, Is.GreaterThan(1f), "the launch lip throws the car upward");
+            Assert.That(launchDistance, Is.GreaterThan(plainDistance * 1.2f),
+                "launch=" + launchDistance + " plain=" + plainDistance);
+        }
+
+        // Grand Tour kicker (Editor LongRaceRoads.RampLift: 2.6 m over 18 m,
+        // quadratic) at the Grand Tour car's speeds, with and without the
+        // boost pad 10 m before the toe. Logs airtime, distance and peak.
+        [TestCase(false)]
+        [TestCase(true)]
+        public void GrandTourKickerThrowsAFullSpeedCarIntoARealJump(bool pad)
+        {
+            const float height = 2.6f, length = 18f, toe = 400f;
+            var world = new FlatWorld
+            {
+                RampToeZ = toe, RampCrestZ = toe + length, LaunchRamp = true,
+                RampLift = s => height * (s / length) * (s / length)
+            };
+            var tuning = VehicleTuning.Car01();
+            tuning.maxSpeed = 37.5f; tuning.acceleration = 11.5f;
+            tuning.boostMaxSpeed = 51.4f; tuning.boostAcceleration = 20f;
+            var kick = new MotorModifiers
+            {
+                accelerationMultiplier = BoostPads.AccelerationMultiplier,
+                speedCapMultiplier = BoostPads.SpeedCapMultiplier
+            };
+            var state = Spawn();
+            float takeoffZ = float.NaN, takeoffSpeed = 0f, lift = 0f, air = 0f, peak = 0f;
+            int kickTicks = 0;
+            for (var i = 0; i < 2400; i++)
+            {
+                if (pad && kickTicks == 0 && state.z >= toe - 10f && state.z < toe) kickTicks = BoostPads.TurboTicks;
+                var modifiers = kickTicks > 0 ? kick : null;
+                if (kickTicks > 0) kickTicks--;
+                var result = ArcadeMotor.Step(state, Neutral(), tuning, world, Dt, null, modifiers);
+                state = result.state;
+                if (!float.IsNaN(takeoffZ)) { air += Dt; peak = Math.Max(peak, state.y); }
+                foreach (var ev in result.events)
+                {
+                    if (ev.kind == "becameAirborne")
+                    { takeoffZ = state.z; takeoffSpeed = state.speed; lift = state.verticalSpeed; }
+                    if (ev.kind == "landed" && !float.IsNaN(takeoffZ))
+                    {
+                        TestContext.WriteLine("RAMP pad=" + pad + " takeoff=" + takeoffSpeed.ToString("F1")
+                            + "m/s lift=" + lift.ToString("F1") + "m/s air=" + air.ToString("F2")
+                            + "s distance=" + (state.z - takeoffZ).ToString("F1") + "m peak=" + peak.ToString("F1") + "m");
+                        Assert.That(air, Is.GreaterThan(pad ? 1.2f : 1.0f), "airtime");
+                        Assert.That(state.z - takeoffZ, Is.GreaterThan(pad ? 55f : 35f), "flight distance");
+                        Assert.That(peak, Is.LessThan(9f), "the landing stays controllable");
+                        return;
+                    }
+                }
+            }
+            Assert.Fail("never took off or never landed");
         }
 
         [Test]

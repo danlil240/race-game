@@ -577,6 +577,13 @@ namespace FamilyRacing
             if (state.driving != null
                 && !string.IsNullOrEmpty(state.driving.raceId))
                 return state.driving.raceId;
+            // Local race modes (quick race, campaign, time trial) publish
+            // under soloRace; without this the effects and race audio
+            // stayed silent for every offline race.
+            var solo = state.soloRace;
+            if (solo != null && !string.IsNullOrEmpty(solo.raceId)
+                && (solo.race != null || solo.trial != null))
+                return solo.raceId;
             var race = state.networkRace;
             if (race != null && !string.IsNullOrEmpty(race.raceId))
                 return race.raceId;
@@ -587,6 +594,7 @@ namespace FamilyRacing
         {
             if (state == null) return false;
             if (state.paused) return true;
+            if (state.soloRace != null && state.soloRace.paused) return true;
             if (state.network != null && state.network.paused) return true;
             if (state.networkRace != null && state.networkRace.paused)
                 return true;
@@ -642,11 +650,27 @@ namespace FamilyRacing
                 });
                 return list; // solo and LAN never share a screen
             }
-            var race = state.networkRace;
+            var soloRace = state.soloRace;
+            if (soloRace != null && soloRace.trial != null
+                && soloRace.trial.motor != null)
+            {
+                list.Add(new PresentedRacer
+                {
+                    key = soloRace.participantId ?? soloRace.raceId ?? "solo",
+                    vehicleId = soloRace.trial.vehicleId ?? "",
+                    motor = soloRace.trial.motor,
+                    local = true
+                });
+                return list;
+            }
+            var race = soloRace != null && soloRace.race != null
+                ? soloRace.race : state.networkRace;
             if (race != null && race.racers != null)
             {
-                var localId = state.network != null
-                    ? state.network.localParticipantId : null;
+                var localId = race != state.networkRace
+                    ? soloRace.participantId
+                    : state.network != null
+                        ? state.network.localParticipantId : null;
                 foreach (var racer in race.racers)
                 {
                     if (racer == null || racer.session == null
@@ -673,8 +697,11 @@ namespace FamilyRacing
         {
             var pid = ev != null ? ev.participantId : "";
             if (string.IsNullOrEmpty(pid)) return true;
-            var localId = state != null && state.network != null
-                ? state.network.localParticipantId : null;
+            var localId = state != null && state.soloRace != null
+                && state.soloRace.race != null
+                ? state.soloRace.participantId
+                : state != null && state.network != null
+                    ? state.network.localParticipantId : null;
             return localId == null || pid == localId;
         }
 

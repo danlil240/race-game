@@ -225,26 +225,26 @@ namespace FamilyRacing.EditorTools
         }
 
         // The authored first-world gadget catalog (M5 Task 5): the
-        // balanced pickup defaults — a five-second turbo at 1.75x
-        // acceleration/1.50x cap, a one-charge bubble shield, and a
-        // 3 m/180-tick foam trap slowing rivals to 0.70x for 45 ticks
-        // with 60 ticks of post-hit immunity. The pickup respawn is
-        // 300 ticks at one held slot. Re-runs rewrite the rows to the
+        // arcade pickup defaults — a punchy four-second turbo at 3x
+        // acceleration/1.55x cap, a one-charge bubble shield, a 3.5 m
+        // foam trap that spins rivals out (360) and slows them to 0.60x,
+        // and a fast 80 m/s homing missile that reacquires targets. The
+        // pickup respawn is 100 ticks at one held slot. Re-runs rewrite the rows to the
         // contract so the asset can never drift silently.
         private static GadgetCatalogAsset EnsureGadgetCatalog()
         {
             var asset = EnsureAsset<GadgetCatalogAsset>(
                 "gadget-catalog-01.asset");
-            asset.pickupRespawnTicks = 300;
+            asset.pickupRespawnTicks = 100;
             asset.heldSlotCapacity = 1;
             asset.gadgets = new[]
             {
                 new GadgetCatalogAsset.GadgetRow
                 {
                     gadgetId = "turbo-01", kind = "turbo",
-                    durationTicks = 150,
-                    accelerationMultiplier = 1.75f,
-                    speedCapMultiplier = 1.50f
+                    durationTicks = 120,
+                    accelerationMultiplier = 3f,
+                    speedCapMultiplier = 1.55f
                 },
                 new GadgetCatalogAsset.GadgetRow
                 {
@@ -254,17 +254,17 @@ namespace FamilyRacing.EditorTools
                 new GadgetCatalogAsset.GadgetRow
                 {
                     gadgetId = "foam-trap-01", kind = "foam-trap",
-                    patchRadiusMeters = 3f, patchLifetimeTicks = 180,
-                    slowMultiplier = 0.70f, slowDurationTicks = 45,
-                    immunityTicks = 60
+                    patchRadiusMeters = 3.5f, patchLifetimeTicks = 300,
+                    slowMultiplier = 0.60f, slowDurationTicks = 60,
+                    immunityTicks = 45
                 },
                 new GadgetCatalogAsset.GadgetRow
                 {
                     gadgetId = "homing-missile-01", kind = "homing-missile",
-                    patchRadiusMeters = 1.5f, patchLifetimeTicks = 90,
-                    projectileSpeedMetersPerSecond = 45f, targetingRangeMeters = 70f,
-                    turnRadiansPerSecond = 3f, slowMultiplier = .4f,
-                    slowDurationTicks = 27, immunityTicks = 45
+                    patchRadiusMeters = 2.4f, patchLifetimeTicks = 150,
+                    projectileSpeedMetersPerSecond = 80f, targetingRangeMeters = 160f,
+                    turnRadiansPerSecond = 8f, slowMultiplier = .35f,
+                    slowDurationTicks = 50, immunityTicks = 45
                 },
                 new GadgetCatalogAsset.GadgetRow
                 {

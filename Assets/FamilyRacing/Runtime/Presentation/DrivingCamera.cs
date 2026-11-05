@@ -52,6 +52,15 @@ namespace FamilyRacing
         [SerializeField] private float feedbackRiseRate = 8f;
         [SerializeField] private float feedbackDecayRate = 5.5f;
         [SerializeField] private float reducedFeedbackScale = 0.3f;
+        // Big-jump punch: once the car has been airborne past the delay
+        // (a real ramp flight, not a bump), the chase lens widens a few
+        // degrees and the camera rises a little, easing back after touchdown.
+        // Off in overhead mode and under "reduce camera shake".
+        [SerializeField] private float airPunchDelay = 0.4f;
+        [SerializeField] private float airPunchFov = 4f;
+        [SerializeField] private float airPunchLift = 0.5f;
+        [SerializeField] private float airPunchRiseRate = 5f;
+        [SerializeField] private float airPunchFallRate = 3f;
 
         private Camera cam;
         private bool engaged;
@@ -69,6 +78,8 @@ namespace FamilyRacing
         private bool prevGrounded = true;
         private bool prevGroundedValid;
         private float lastFallSpeed;
+        private float airPunch;
+        private bool airPunchFovApplied;
         private AudioSource thumpSource;
         private static AudioClip thumpClip;
         private readonly DrivingCameraState facts = new DrivingCameraState();
@@ -138,6 +149,11 @@ namespace FamilyRacing
                     ? state.draftProfile.effectsVolume : 0.8f);
         }
 
+        // Extra lens widening requested by the arcade effects presenter
+        // (turbo pickups, boost pads), in degrees. Eased in and out there.
+        public float GadgetFovKick { get; set; }
+        private float travelFramingUntil;
+
         // Task 6 seam: frame any committed motor pose — the LAN race
         // screen follows the locally owned racer's *predicted* (visually
         // blended) pose, not a raw snapshot pose, so corrections ease in
@@ -171,14 +187,27 @@ namespace FamilyRacing
             var rate = reduced ? reducedFollowRate : followRate;
             var dt = Mathf.Max(0f, deltaSeconds);
             var blend = 1f - Mathf.Exp(-rate * dt);
+            var punchTarget = !overhead && !reduced && !motor.grounded
+                && motor.airSeconds > airPunchDelay ? 1f : 0f;
+            airPunch = Mathf.Lerp(airPunch, punchTarget, 1f - Mathf.Exp(
+                -(punchTarget > airPunch ? airPunchRiseRate : airPunchFallRate) * dt));
+            if (punchTarget == 0f && airPunch < 0.001f) airPunch = 0f;
             if (speedFeedbackEnabled)
             {
                 // A fixed horizon and a small lens change convey acceleration.
                 // Reduced motion disables the lens animation entirely.
                 var extraFov = overhead ? 0f : Mathf.Clamp01(motor.speed / 26f) * 5f
-                    + (motor.boostActive ? 3f : 0f);
+                    + (motor.boostActive ? 5f : 0f) + Mathf.Clamp(GadgetFovKick, 0f, 14f)
+                    + airPunch * airPunchFov;
                 cam.fieldOfView = reduced ? savedFieldOfView
                     : Mathf.Lerp(cam.fieldOfView, savedFieldOfView + extraFov, blend);
+            }
+            else if (airPunch > 0f || airPunchFovApplied)
+            {
+                // Without speed feedback the lens is otherwise untouched,
+                // so the punch owns it only while it is active.
+                cam.fieldOfView = savedFieldOfView + airPunch * airPunchFov;
+                airPunchFovApplied = airPunch > 0f;
             }
 
             var rawTarget = new Vector3(motor.x, motor.y + targetUp, motor.z);
@@ -191,7 +220,7 @@ namespace FamilyRacing
 
             var desired = mode == "overhead"
                 ? OverheadDesired(smoothTarget)
-                : ChaseDesired(motor, smoothTarget);
+                : ChaseDesired(motor, smoothTarget) + Vector3.up * (airPunch * airPunchLift);
             desired = ClearOfObstacles(smoothTarget, desired, dt,
                 firstFrame || teleported);
             var lookDir = smoothTarget - desired;
@@ -323,6 +352,19 @@ namespace FamilyRacing
         {
             var forward = new Vector3(
                 Mathf.Sin(motor.heading), 0f, Mathf.Cos(motor.heading));
+            // During a spin-out (or any slide where the car points well
+            // away from where it is going) follow the direction of travel,
+            // so the camera watches the car spin instead of orbiting it.
+            // A short hold keeps the travel framing through the whole spin
+            // rather than flipping each quarter turn.
+            var right = new Vector3(forward.z, 0f, -forward.x);
+            var travel = forward * motor.speed + right * motor.lateralSpeed;
+            var now = Time.unscaledTime;
+            if (travel.sqrMagnitude > 16f
+                && (motor.speed < 0f || Mathf.Abs(motor.lateralSpeed) > Mathf.Abs(motor.speed) * 0.9f))
+                travelFramingUntil = now + 0.45f;
+            if (now < travelFramingUntil && travel.sqrMagnitude > 4f)
+                forward = travel.normalized;
             return target - forward * chaseBack + Vector3.up * chaseUp;
         }
 
@@ -390,6 +432,8 @@ namespace FamilyRacing
             suspensionDip = 0f;
             prevGroundedValid = false;
             lastFallSpeed = 0f;
+            airPunch = 0f;
+            airPunchFovApplied = false;
             // The Awake-captured menu pose survives every disengage:
             // each race leaving restores it, not just the first.
             if (cam != null && savedPose)

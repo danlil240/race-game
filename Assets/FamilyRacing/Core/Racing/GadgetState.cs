@@ -118,6 +118,14 @@ namespace FamilyRacing.Core.Racing
         // expiring early can never change an in-flight slow.
         public float foamSlowMultiplier = 1f;
         public int foamImmunityTicksRemaining;
+        // Spin-out after a foam, missile or mine hit: the forced yaw rate
+        // and how many ticks of it remain. Authored as whole turns so the
+        // racer always comes out facing forward.
+        public int spinTicksRemaining;
+        public float spinRadiansPerSecond;
+        // Boost pad re-trigger guard: a racer straddling a pad for
+        // several ticks gets one kick, not a chain.
+        public int boostPadCooldownTicks;
         // One-shot edge latch: a use fires only on the pressed edge, so
         // holding the input consumes at most one item until release.
         public bool gadgetHeld;
@@ -283,7 +291,10 @@ namespace FamilyRacing.Core.Racing
                         > NetworkSettings.GadgetImmunePatchCapacity
                     || !Finite(racer.turboAccelerationMultiplier)
                     || !Finite(racer.turboSpeedCapMultiplier)
-                    || !Finite(racer.foamSlowMultiplier))
+                    || !Finite(racer.foamSlowMultiplier)
+                    || !Finite(racer.spinRadiansPerSecond)
+                    || racer.spinTicksRemaining < 0
+                    || racer.boostPadCooldownTicks < 0)
                 { error = "gadgetRacer"; return false; }
                 // The kind tag must agree with the slot: empty slot ->
                 // empty kind; held item -> a known kind only.

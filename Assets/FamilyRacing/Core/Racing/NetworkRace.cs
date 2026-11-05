@@ -104,6 +104,7 @@ namespace FamilyRacing.Core.Racing
         // treats null as "gadgets inert".
         private readonly GadgetDefinitionCatalog gadgets;
         private GadgetWorldState gadgetWorld;
+        private readonly List<GadgetBoostPad> boostPads;
 
         private NetworkRace(string sessionId, string raceId,
             DrivingContentCatalog content, EventDefinition evt,
@@ -202,6 +203,7 @@ namespace FamilyRacing.Core.Racing
                     course.pickupSites, GadgetRules.StableSeed(raceId),
                     roster, raceId);
             }
+            boostPads = BoostPads.Derive(course);
         }
 
         // Validates the whole roster before constructing anything: a
@@ -512,7 +514,7 @@ namespace FamilyRacing.Core.Racing
             Dictionary<string, List<DrivingEvent>> gadgetEvents = null;
             if (gadgetWorld != null)
             {
-                var gadgetInput = new GadgetStepInput { tick = hostTick };
+                var gadgetInput = new GadgetStepInput { tick = hostTick, boostPads = boostPads };
                 for (var i = 0; i < prepared.Count; i++)
                 {
                     var entry = prepared[i];

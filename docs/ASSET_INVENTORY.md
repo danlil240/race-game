@@ -187,3 +187,42 @@ Reconciliation notes:
 - Tutorial voice clips (existing open gate from earlier milestones) —
   requires licensed synthetic voices per `GAME_PLAN.md` §3; unchanged
   by this task.
+
+## CC0 Grand Tour art (Poly Haven)
+
+Free downloads (US$0) from Poly Haven, all licensed CC0 1.0 (public domain, commercial use allowed, no attribution required). Stored under `Assets/FamilyRacing/Art/CC0/PolyHaven/<id>/`; per-file SHA-256 and source pages in `Assets/FamilyRacing/Art/CC0/sources.json`. Page for each asset: `https://polyhaven.com/a/<id>`. Licence: https://polyhaven.com/license.
+
+Processing: ground sets use 2k albedo and GL normal maps (gravel_road and cliff_side at 1k) with roughness packed into 1k URP smoothness masks (`*_mask_1k.png`). Models come from the 1k glTF, decimated with pymeshlab to 1.4k-4.3k triangles and saved as OBJ; plant albedo is merged with the published alpha map into `*_diffa_1k.png`. Grass tufts are generated in code (`LongRaceScenery`), not downloaded. Trees (round 2): fir_tree_01's 7.8M-triangle scan is not shipped; its 1k bark maps are used as published and its twig cut-outs are stamped into two dense branch sprites (`fir_branch_diffa_1k.png`, made by `Tools/CC0FirAtlas.py`, flat normal map). `LongRaceScenery.Conifer` builds card conifers from them (~450 triangles each: bark trunk, crossed branch cards, dark crown core): spruce/fir for the pine forest, a flat-crowned stone pine for the coast and the canyon oasis. These replace the Quaternius CommonTree_1/CommonTree_3 and the old faceted pines on the Grand Tour; distant primitive-sphere hills are now noise-displaced domes under forrest_ground_01 with trees on them.
+
+Round 3: the canyon's box cacti are replaced by Poly Haven quiver trees (quiver_tree_02, decimated to 3.2k triangles) and low cheiridopsis succulent mats (2.8k). On the coast the Kenney Suburban houses and Kenney Watercraft boats are gone from the Grand Tour: `LongRaceScenery.HouseMesh` builds three whitewashed house shapes (about 100 triangles each: plaster walls in three tints, clay tile gable roof, glass and painted shutters) textured with white_plaster_02 and clay_roof_tiles_02, jetties use weathered_planks, and the bay gets a dutch_ship_medium at anchor (split by material into hull, rigging and sails and decimated to 6.4k triangles in all), lateral sea markers (1.4k) and buoys (1k). A generated foam strip (`LongRaceScenery.SurfLine`, texture made in code) follows the waterline. Models were split per material and decimated with pymeshlab from the 1k glTF; quiver_tree_01 was tried and dropped because its leaf rosettes did not survive decimation.
+
+| Poly Haven id | Kind | Used for | Authors |
+|---|---|---|---|
+| asphalt_02 | texture | road surface | Rob Tuytel |
+| gravel_road | texture | canyon verge | Amal Kumar |
+| coast_sand_rocks_02 | texture | coast ground and verge | Rob Tuytel |
+| forrest_ground_01 | texture | pine forest ground and verge | Rob Tuytel |
+| red_laterite_soil_stones | texture | canyon ground | Amal Kumar |
+| cliff_side | texture | canyon mesas | Dario Barresi, James Ray Cock, Jenelle van Heerden |
+| rock_09 | model | coast/forest boulders | Jenelle van Heerden |
+| rock_07 | model | coast boulders | Jenelle van Heerden |
+| rock_moss_set_01 | model | forest rocks | Kless Gyzen |
+| namaqualand_boulder_04 | model | canyon boulders | Jenelle van Heerden |
+| namaqualand_boulder_05 | model | canyon boulders and outcrops | Dario Barresi, Jenelle van Heerden |
+| fern_02 | model | forest verge plants | Rico Cilliers, Rob Tuytel |
+| shrub_sorrel_01 | model | coast verge shrubs | Rico Cilliers |
+| wild_rooibos_bush | model | canyon shrubs | James Ray Cock, Jenelle van Heerden |
+| crystalline_iceplant | model | coast ground cover | James Ray Cock, Jenelle van Heerden |
+| fir_tree_01 | model textures (bark + twig atlas only) | Grand Tour firs and stone pines | Rico Cilliers, Rob Tuytel |
+| quiver_tree_02 | model | canyon quiver trees (round 3) | Dario Barresi, Rico Cilliers |
+| cheiridopsis_succulent | model | canyon verge succulents (round 3) | James Ray Cock, Jenelle van Heerden |
+| dutch_ship_medium | model (hull, rigging, sails) | coast: tall ship at anchor (round 3) | James Ray Cock, Nicolò Zubbini, Rico Cilliers |
+| lateral_sea_marker | model | coast: channel markers (round 3) | James Ray Cock, Kuutti Siitonen |
+| ocean_buoy | model | coast: buoys (round 3) | Mateusz Sadek |
+| white_plaster_02 | texture | coast house walls (round 3) | Rob Tuytel |
+| clay_roof_tiles_02 | texture | coast house roofs (round 3) | Amal Kumar |
+| weathered_planks | texture | coast jetties (round 3) | Dario Barresi, Dimitrios Savva |
+
+## Grand Tour racer body (Kenney Car Kit, CC0)
+
+The Grand Tour car racers use Kenney's open-wheel `race.fbx` from Car Kit 3.1 (CC0 1.0, US$0) — the same kit, licence and `colormap.png` as the asset-trial `race-future.fbx` already in `Assets/FamilyRacing/Art/AssetTrial/Kenney/`. Downloaded from the kit mirror at https://github.com/Arslan12216775/kenney_car-kit (its `License.txt` is Kenney's CC0 text, and its `race-future.fbx` and `colormap.png` are byte-identical to the copies already in the repo); SHA-256 in `Assets/FamilyRacing/Art/AssetTrial/sources.json`. `AssetTrialAuthoring.GrandTourCarVisual` builds `Generated/AssetTrial/GrandTourRacer.prefab` on the shared rider rig: the body's dominant colour becomes the per-racer `PaintAccent`, the rig's tyres and steering wheel are kept, and the seat sits in the model's cockpit ring.

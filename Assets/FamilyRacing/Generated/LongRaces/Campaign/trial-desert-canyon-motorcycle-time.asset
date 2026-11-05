@@ -16,7 +16,7 @@ MonoBehaviour:
   track: {fileID: 11400000, guid: 3fcf9997ab146d64583ee38f39a631f7, type: 2}
   laps: 1
   countdownTicks: 90
-  finishGraceSeconds: 240
+  finishGraceSeconds: 45
   vehicleIds:
   - motorcycle-01
   completionCoins: 20
@@ -29,7 +29,7 @@ MonoBehaviour:
   outsideBoundsSeconds: 1.5
   eventType: time
   vehicleClass: motorcycle
-  parTicks: 12600
+  parTicks: 4500
   isFinale: 0
   objectives:
   - objectiveId: trial-desert-canyon-motorcycle-time-intro
@@ -37,12 +37,12 @@ MonoBehaviour:
     alternatives:
     - metric: finishWithinTicks
       comparator: atMost
-      threshold: 18000
+      threshold: 6750
       alsoRequires: []
   - objectiveId: trial-desert-canyon-motorcycle-time-mastery
     kind: mastery
     alternatives:
     - metric: finishWithinTicks
       comparator: atMost
-      threshold: 12600
+      threshold: 4500
       alsoRequires: []

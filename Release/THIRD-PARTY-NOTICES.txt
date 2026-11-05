@@ -85,3 +85,30 @@ The Windows player is NOT Authenticode-signed (no paid code-signing
 certificate is part of this private family release). The Android
 package is signed with the family release key whose SHA-256
 certificate fingerprint is recorded in release-manifest.json.
+
+CC0 art (Poly Haven)
+--------------------
+Ground textures and scanned rock/plant models in the Grand Tour courses
+come from Poly Haven (https://polyhaven.com) and are dedicated to the
+public domain under CC0 1.0 (https://polyhaven.com/license). No
+attribution is required; credited here as a courtesy. Assets: asphalt_02,
+gravel_road, coast_sand_rocks_02, forrest_ground_01,
+red_laterite_soil_stones, cliff_side, rock_09, rock_07, rock_moss_set_01,
+namaqualand_boulder_04, namaqualand_boulder_05, fern_02, shrub_sorrel_01,
+wild_rooibos_bush, crystalline_iceplant, fir_tree_01 (bark and twig
+textures, the twigs re-arranged into branch sprites), quiver_tree_02,
+cheiridopsis_succulent, dutch_ship_medium, lateral_sea_marker, ocean_buoy,
+white_plaster_02, clay_roof_tiles_02, weathered_planks. Authors: Rob
+Tuytel, Amal Kumar, Dario Barresi, Dimitrios Savva, James Ray Cock,
+Jenelle van Heerden, Kless Gyzen, Kuutti Siitonen, Mateusz Sadek, Nicolò
+Zubbini, Rico Cilliers. Sources and checksums: docs/ASSET_INVENTORY.md and
+Assets/FamilyRacing/Art/CC0/sources.json.
+
+CC0 vehicle bodies (Kenney)
+---------------------------
+The Grand Tour racer body (race.fbx) and the asset-trial body
+(race-future.fbx) with their shared colormap.png come from Kenney's Car
+Kit 3.1 (https://kenney.nl/assets/car-kit), dedicated to the public
+domain under CC0 1.0 (Assets/FamilyRacing/Art/AssetTrial/Kenney/License.txt).
+No attribution is required; credited here as a courtesy. Checksums:
+Assets/FamilyRacing/Art/AssetTrial/sources.json.

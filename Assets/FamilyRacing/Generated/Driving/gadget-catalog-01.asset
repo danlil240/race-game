@@ -12,14 +12,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: c1b2c3d4e5f64789a0b1c2d3e4f50c0c, type: 3}
   m_Name: gadget-catalog-01
   m_EditorClassIdentifier: FamilyRacing.Runtime::FamilyRacing.GadgetCatalogAsset
-  pickupRespawnTicks: 300
+  pickupRespawnTicks: 100
   heldSlotCapacity: 1
   gadgets:
   - gadgetId: turbo-01
     kind: turbo
-    durationTicks: 150
-    accelerationMultiplier: 1.75
-    speedCapMultiplier: 1.5
+    durationTicks: 120
+    accelerationMultiplier: 3
+    speedCapMultiplier: 1.55
     charges: 0
     patchRadiusMeters: 0
     patchLifetimeTicks: 0
@@ -43,25 +43,25 @@ MonoBehaviour:
     accelerationMultiplier: 1
     speedCapMultiplier: 1
     charges: 0
-    patchRadiusMeters: 3
-    patchLifetimeTicks: 180
-    slowMultiplier: 0.7
-    slowDurationTicks: 45
-    immunityTicks: 60
+    patchRadiusMeters: 3.5
+    patchLifetimeTicks: 300
+    slowMultiplier: 0.6
+    slowDurationTicks: 60
+    immunityTicks: 45
   - gadgetId: homing-missile-01
     kind: homing-missile
     durationTicks: 0
     accelerationMultiplier: 1
     speedCapMultiplier: 1
     charges: 0
-    patchRadiusMeters: 1.5
-    patchLifetimeTicks: 90
-    slowMultiplier: 0.4
-    slowDurationTicks: 27
+    patchRadiusMeters: 2.4
+    patchLifetimeTicks: 150
+    slowMultiplier: 0.35
+    slowDurationTicks: 50
     immunityTicks: 45
-    projectileSpeedMetersPerSecond: 45
-    targetingRangeMeters: 70
-    turnRadiansPerSecond: 3
+    projectileSpeedMetersPerSecond: 80
+    targetingRangeMeters: 160
+    turnRadiansPerSecond: 8
     armingTicks: 18
   - gadgetId: mine-01
     kind: mine

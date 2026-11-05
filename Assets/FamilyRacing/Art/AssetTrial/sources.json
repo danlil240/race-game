@@ -135,6 +135,10 @@
     {
       "path": "Assets/FamilyRacing/Art/AssetTrial/KenneyWatercraft/License.txt",
       "sha256": "f5f520f81277128fb422aebe334d2f08e6d8e5f7face6008885d8ff920253724"
+    },
+    {
+      "path": "Assets/FamilyRacing/Art/AssetTrial/Kenney/race.fbx",
+      "sha256": "40ef0c0caa3acb6b692661ea7648fc8b0b3e3a112bb99e6c73c7d2536f47b662"
     }
   ]
 }

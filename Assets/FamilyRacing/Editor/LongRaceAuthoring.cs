@@ -28,6 +28,7 @@ namespace FamilyRacing.EditorTools
         {
             Directory.CreateDirectory(Output);Directory.CreateDirectory(Output+"/Campaign");AssetDatabase.Refresh();
             LongRaceRoads.Build();
+            AssetTrialAuthoring.GrandTourCarVisual();
             var scene=EditorSceneManager.OpenScene(AssetTrialAuthoring.ScenePath);
             if(!EditorSceneManager.SaveScene(scene,ScenePath,false))throw new IOException("Cannot save Grand Tour scene");
             var world=scene.GetRootGameObjects().SelectMany(g=>g.GetComponentsInChildren<DrivingWorld>(true)).Single();
@@ -47,6 +48,7 @@ namespace FamilyRacing.EditorTools
                 vehicle.acceleration=bike?12.5f:11.5f;vehicle.boostAcceleration=20f;
                 vehicle.steeringRate=bike?1.9f:1.65f;vehicle.grip=bike?6.5f:5.5f;
                 vehicle.boostDurationSeconds=3.4f;vehicle.boostDrainPerSecond=.29f;
+                if(!bike)vehicle.visual=Required<VehicleVisualDefinitionAsset>(AssetTrialAuthoring.GrandTourVisualPath);
                 vehicle=LongRaceRoads.Save(vehicle,Output+"/"+vehicle.vehicleId+".asset");
                 vehicles.GetArrayElementAtIndex(i).objectReferenceValue=vehicle;
             }
@@ -57,16 +59,17 @@ namespace FamilyRacing.EditorTools
             {
                 if(light.type!=LightType.Directional)continue;
                 light.color=new Color(1,.94f,.83f);light.intensity=1.12f;light.shadows=LightShadows.Soft;
-                light.shadowStrength=.72f;light.shadowBias=.035f;light.transform.rotation=Quaternion.Euler(38,-38,0);
+                light.shadowStrength=.8f;light.shadowBias=.035f;light.transform.rotation=Quaternion.Euler(38,-38,0);
             }
-            RenderSettings.ambientMode=AmbientMode.Trilight;RenderSettings.ambientSkyColor=new Color(.46f,.58f,.67f);
-            RenderSettings.ambientEquatorColor=new Color(.42f,.45f,.4f);RenderSettings.ambientGroundColor=new Color(.24f,.27f,.23f);
-            RenderSettings.fog=true;RenderSettings.fogMode=FogMode.Linear;
-            RenderSettings.fogColor=new Color(.66f,.77f,.79f);RenderSettings.fogStartDistance=290;RenderSettings.fogEndDistance=1000;
+            // Ambient and fog follow the sky; LongRaceVisibility swaps them per course at runtime.
+            RenderSettings.ambientMode=AmbientMode.Trilight;RenderSettings.fog=true;RenderSettings.fogMode=FogMode.Linear;
             RenderSettings.skybox=LongRaceRoads.Mat("GrandTourSky","FFFFFF","FamilyRacing/Grand Tour Sky");
+            LongRaceRoads.ApplyAtmosphere(0,RenderSettings.skybox);
             var pc=Object.Instantiate(Required<UniversalRenderPipelineAsset>(VisualBenchmarkSetup.PcPipelinePath));
-            pc.name="GrandTourPC";pc.msaaSampleCount=4;pc.shadowDistance=140;
+            pc.name="GrandTourPC";pc.msaaSampleCount=4;pc.shadowDistance=240;pc.shadowCascadeCount=4;
             var pcSettings=new SerializedObject(pc);pcSettings.FindProperty("m_SoftShadowsSupported").boolValue=true;
+            pcSettings.FindProperty("m_MainLightShadowmapResolution").intValue=4096;
+            var softQuality=pcSettings.FindProperty("m_SoftShadowQuality");if(softQuality!=null)softQuality.intValue=3;
             pcSettings.ApplyModifiedPropertiesWithoutUndo();
             pc=LongRaceRoads.Save(pc,Output+"/GrandTourPC.asset");
             foreach(var profile in scene.GetRootGameObjects().SelectMany(g=>g.GetComponentsInChildren<RenderProfileController>(true)))
@@ -90,12 +93,13 @@ namespace FamilyRacing.EditorTools
             {
                 var source=eventSlots.GetArrayElementAtIndex(i).objectReferenceValue as EventDefinitionAsset;if(source==null)continue;
                 var evt=Object.Instantiate(source);int place=Array.IndexOf(AssetTrialCircuits.Ids,source.track.courseId);if(place<0)place=0;
-                evt.track=Required<TrackDefinitionAsset>(LongRaceRoads.TrackPath(place));evt.laps=place==0?2:1;
-                evt.minCourseY=-40;evt.finishGraceSeconds=240;evt.parTicks=evt.eventType==GameplayEventType.Time?12600:0;
+                evt.track=Required<TrackDefinitionAsset>(LongRaceRoads.TrackPath(place));evt.laps=1;
+                // Short races: a 45 s finish grace and a 2.5 minute par.
+                evt.minCourseY=-40;evt.finishGraceSeconds=45;evt.parTicks=evt.eventType==GameplayEventType.Time?4500:0;
                 if(evt.objectives!=null)foreach(var objective in evt.objectives)
                     foreach(var condition in objective.alternatives)
                         if(condition.metric==FamilyRacing.Core.Progression.ObjectiveMetric.FinishWithinTicks)
-                            condition.threshold=objective.kind=="mastery"?12600:18000;
+                            condition.threshold=objective.kind=="mastery"?4500:6750;
                 evt=LongRaceRoads.Save(evt,Output+"/Campaign/"+evt.eventId+".asset");eventSlots.GetArrayElementAtIndex(i).objectReferenceValue=evt;
             }
             var sourceCatalog=world.FindProperty("gameplayCatalog").objectReferenceValue as GameplayCatalogAsset;

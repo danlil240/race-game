@@ -17,7 +17,13 @@ namespace FamilyRacing.EditorTools
         public static readonly string[] Ids = { "coastal-grand-tour-v1", "pine-lake-journey-v1", "canyon-expedition-v1" };
         public static readonly string[] Names = { "Coastal Grand Tour", "Pine Lake Journey", "Canyon Expedition" };
         public static readonly string[] HebrewNames = { "מסע החוף הגדול", "מסע אגם האורנים", "הרפתקת הקניון" };
-        public static readonly float[] Lengths = { 7000f, 14000f, 15000f };
+        // Short, punchy routes: one 4 km coastal lap and two ~4 km
+        // journeys, so a whole race is a few minutes, not a quarter hour.
+        // Journeys use only their opening control points (instead of
+        // squashing the full 6.5 km layout) so bends keep the gentle
+        // radii the 135 km/h tuning was built for.
+        public static readonly float[] Lengths = { 4000f, 4000f, 4400f };
+        private static readonly int[] ControlCounts = { 12, 6, 6 };
         public const float RoadHalf = 9f, RailOffset = 14f;
         public static string TrackPath(int place) => Dir + "/" + Ids[place] + ".asset";
         private static readonly Vector2[][] Controls = {
@@ -26,9 +32,29 @@ namespace FamilyRacing.EditorTools
             new[] { new Vector2(0,0),new Vector2(0,350),new Vector2(-200,780),new Vector2(-120,1150),new Vector2(340,1600),new Vector2(600,1960),new Vector2(260,2370),new Vector2(-100,2780),new Vector2(-480,3200),new Vector2(-320,3570),new Vector2(160,4000),new Vector2(520,4450),new Vector2(420,4880),new Vector2(-40,5330),new Vector2(90,5790),new Vector2(480,6200),new Vector2(400,6700) }
         };
 
+        // Sky, fog and sky-matched ambient per place: hazy blue coast, cooler
+        // misty pine valley, warm dusty canyon.
+        public static readonly LongRaceVisibility.Atmosphere[] Atmospheres = {
+            Air(0, "254F86", "B4D0D6", "A9C6CC", "7598B0", "75807A", "3E463C", 240, 1100),
+            Air(1, "2F5F8A", "B0C4C4", "9DB4B4", "6F8FA4", "5F6F62", "33402F", 170, 900),
+            Air(2, "2E6AAE", "E8D2B4", "DCC2A2", "7A96B4", "8F7A66", "54402F", 260, 1200),
+        };
+        private static LongRaceVisibility.Atmosphere Air(int place, string zenith, string horizon, string fog, string sky, string equator, string ground, float start, float end)
+        {
+            Color C(string hex) { ColorUtility.TryParseHtmlString("#" + hex, out var c); return c; }
+            return new LongRaceVisibility.Atmosphere { courseId = Ids[place], zenith = C(zenith), horizon = C(horizon), fog = C(fog),
+                ambientSky = C(sky), ambientEquator = C(equator), ambientGround = C(ground), fogStart = start, fogEnd = end };
+        }
+        public static void ApplyAtmosphere(int place, Material skybox)
+        {
+            var a = Atmospheres[place];
+            RenderSettings.fogColor = a.fog; RenderSettings.fogStartDistance = a.fogStart; RenderSettings.fogEndDistance = a.fogEnd;
+            RenderSettings.ambientSkyColor = a.ambientSky; RenderSettings.ambientEquatorColor = a.ambientEquator; RenderSettings.ambientGroundColor = a.ambientGround;
+            if (skybox != null) { skybox.SetColor("_Zenith", a.zenith); skybox.SetColor("_Horizon", a.horizon); }
+        }
         public static Vector3[] Sample(int place)
         {
-            bool open = place != 0; var controls = Controls[place]; var dense = new List<Vector3>();
+            bool open = place != 0; var controls = Controls[place].Take(ControlCounts[place]).ToArray(); var dense = new List<Vector3>();
             int segments = open ? controls.Length - 1 : controls.Length;
             for (int i = 0; i < segments; i++)
             {
@@ -85,10 +111,35 @@ namespace FamilyRacing.EditorTools
         {
             string path = Dir + "/" + name + ".mat"; var mat = AssetDatabase.LoadAssetAtPath<Material>(path);
             if (mat == null) { mat = new Material(Shader.Find(shader)) { name = name }; AssetDatabase.CreateAsset(mat, path); }
+            else if (mat.shader.name != shader) mat.shader = Shader.Find(shader);
             ColorUtility.TryParseHtmlString("#" + hex, out var c);
             if (mat.HasProperty("_BaseColor")) mat.SetColor("_BaseColor", c);
             if (mat.HasProperty("_Smoothness")) mat.SetFloat("_Smoothness", .16f);
             mat.enableInstancing = true; EditorUtility.SetDirty(mat); return mat;
+        }
+        public const string PolyHaven = CC0ArtImport.Root + "/PolyHaven";
+        // URP Lit from a CC0 Poly Haven set: albedo (RGBA when the leaves cut
+        // out), GL normal map and, for ground sets, roughness packed as smoothness.
+        public static Material Pbr(string name, string id, string tint, float smoothness = .5f, float normal = 1f, float gain = 1f)
+        {
+            var mat = Mat(name, tint, "Universal Render Pipeline/Lit"); string stem = PolyHaven + "/" + id + "/" + id;
+            var cutout = AssetDatabase.LoadAssetAtPath<Texture2D>(stem + "_diffa_1k.png");
+            var albedo = cutout ?? AssetDatabase.LoadAssetAtPath<Texture2D>(stem + "_diff_2k.jpg") ?? LongRaceAuthoring.Required<Texture2D>(stem + "_diff_1k.jpg");
+            mat.SetTexture("_BaseMap", albedo); mat.SetTextureScale("_BaseMap", Vector2.one);
+            if (gain != 1f) mat.SetColor("_BaseColor", mat.GetColor("_BaseColor") * gain);
+            mat.SetTexture("_BumpMap", AssetDatabase.LoadAssetAtPath<Texture2D>(stem + "_nor_gl_2k.jpg") ?? LongRaceAuthoring.Required<Texture2D>(stem + "_nor_gl_1k.jpg"));
+            mat.SetFloat("_BumpScale", normal); mat.EnableKeyword("_NORMALMAP");
+            var mask = AssetDatabase.LoadAssetAtPath<Texture2D>(stem + "_mask_1k.png");
+            mat.SetTexture("_MetallicGlossMap", mask);
+            if (mask != null) mat.EnableKeyword("_METALLICSPECGLOSSMAP"); else mat.DisableKeyword("_METALLICSPECGLOSSMAP");
+            mat.SetFloat("_Metallic", 0); mat.SetFloat("_Smoothness", smoothness);
+            mat.SetFloat("_EnvironmentReflections", 0); mat.EnableKeyword("_ENVIRONMENTREFLECTIONS_OFF");
+            bool clip = cutout != null;
+            mat.SetFloat("_AlphaClip", clip ? 1 : 0); mat.SetFloat("_Cutoff", .5f); mat.SetFloat("_Cull", clip ? 0 : 2);
+            if (clip) mat.EnableKeyword("_ALPHATEST_ON"); else mat.DisableKeyword("_ALPHATEST_ON");
+            mat.SetOverrideTag("RenderType", clip ? "TransparentCutout" : "Opaque");
+            mat.renderQueue = clip ? (int)RenderQueue.AlphaTest : -1;
+            EditorUtility.SetDirty(mat); return mat;
         }
         public static GameObject Box(Transform parent, string name, Vector3 center, Vector3 scale, Material mat, bool solid = false)
         {
@@ -100,7 +151,7 @@ namespace FamilyRacing.EditorTools
         {
             var mesh = new Mesh { name = name, indexFormat = IndexFormat.UInt32 };
             mesh.SetVertices(v); mesh.SetTriangles(tris, 0); if (uv != null) mesh.SetUVs(0, uv);
-            mesh.RecalculateNormals(); mesh.RecalculateBounds(); mesh = Save(mesh, Dir + "/" + name + ".asset");
+            mesh.RecalculateNormals(); if (uv != null) mesh.RecalculateTangents(); mesh.RecalculateBounds(); mesh = Save(mesh, Dir + "/" + name + ".asset");
             var go = Node(parent, name).gameObject;
             go.AddComponent<MeshFilter>().sharedMesh = mesh;
             go.AddComponent<MeshRenderer>().sharedMaterial = mat;
@@ -109,8 +160,8 @@ namespace FamilyRacing.EditorTools
 
         public static GameObject Build()
         {
-            Directory.CreateDirectory(Dir); AssetDatabase.Refresh();
-            var root = new GameObject("GrandTourWorld"); root.AddComponent<LongRaceVisibility>();
+            Directory.CreateDirectory(Dir); AssetDatabase.Refresh(); LongRaceScenery.ResetCache();
+            var root = new GameObject("GrandTourWorld"); root.AddComponent<LongRaceVisibility>().atmospheres = Atmospheres;
             try
             {
                 for (int place = 0; place < 3; place++) BuildPlace(root.transform, place);
@@ -121,11 +172,15 @@ namespace FamilyRacing.EditorTools
         private static void BuildPlace(Transform world, int place)
         {
             var root = Node(world, Ids[place]); var p = Sample(place); bool open = place > 0;
-            var road = Mat("TourAsphalt", "A6ADB3");
-            road.SetTexture("_BaseMap", AssetDatabase.LoadAssetAtPath<Texture2D>(AssetTrialAuthoring.Output + "/Materials/Texture_road.asset"));
-            var ivory = Mat("WarmRoadPaint", "FFF4D2"); var verge = Mat("Verge" + place, place == 0 ? "C9B995" : place == 1 ? "8A9580" : "C69B74");
-            var soil = Mat("Landscape" + place, place == 0 ? "CDBD94" : place == 1 ? "688754" : "BD8058");
-            var groundTex = GroundTexture(place); soil.SetTexture("_BaseMap", groundTex);
+            // Bright, fine-grained asphalt (4 m tiles) keeps the road readable at speed.
+            var road = Pbr("TourAsphalt", "asphalt_02", "E4E7EA", .55f, .8f);
+            var ivory = Mat("WarmRoadPaint", "FFF4D2");
+            // Verge: pale packed sand on the coast, dark forest litter, red gravel in the canyon.
+            var verge = place == 0 ? Pbr("Verge0", "coast_sand_rocks_02", "F2E8D2", .35f, 1f, 1.25f)
+                : place == 1 ? Pbr("Verge1", "forrest_ground_01", "B8B49C", .35f)
+                : Pbr("Verge2", "gravel_road", "F0C49B", .4f);
+            var soil = Pbr("Landscape" + place, place == 0 ? "coast_sand_rocks_02" : place == 1 ? "forrest_ground_01" : "red_laterite_soil_stones",
+                place == 0 ? "F4EEDC" : place == 1 ? "D6DCC4" : "F6D8BE", .45f, 1f, place == 0 ? 1.35f : place == 1 ? 1.1f : 1f);
             if (place == 0)
                 Box(root,"CoastalOcean",new Vector3(500,-3.8f,150),new Vector3(6500,.06f,6500),Mat("TourOcean","FFFFFF","FamilyRacing/Trial Coastal Water"));
             Band(root, p, open, "Road", -RoadHalf, RoadHalf, .04f, road, true);
@@ -167,15 +222,14 @@ namespace FamilyRacing.EditorTools
             }
             int startIndex = open ? 8 : 0, finishIndex = open ? p.Length - 9 : 0;
             Arch(root, p, startIndex, open, false); if (open) Arch(root, p, finishIndex, true, true);
+            var gates = GateIndexes(p, open, startIndex, finishIndex);
+            // A jump ramp sits on every other intermediate gate, in the
+            // same lane as that gate's boost pad (BoostPads.Derive puts the
+            // pad 14 m past the gate on the right for even gates), so a
+            // racer who takes the pad hits the ramp with turbo.
+            var ramps = Node(root, "JumpRamps");
+            for (int n = 2; n < gates.Count - (open ? 1 : 0); n += 2) JumpRamp(ramps, p, open, gates[n], n);
             AuthorTrack(p, place, startIndex, finishIndex);
-        }
-        private static Texture2D GroundTexture(int place)
-        {
-            var path = Dir + "/GroundNoise" + place + ".asset";
-            var tex = new Texture2D(128,128,TextureFormat.RGB24,true) { name = "GroundNoise" + place, wrapMode = TextureWrapMode.Repeat };
-            for (int y = 0; y < 128; y++) for (int x = 0; x < 128; x++)
-            { float n = .94f + .07f*Mathf.PerlinNoise(x*.14f,y*.14f) + .012f*Mathf.Sin(x*2.7f+y*1.6f); tex.SetPixel(x,y,new Color(n,n,n)); }
-            tex.Apply(); return Save(tex, path);
         }
         private static void Band(Transform root, Vector3[] p, bool open, string name, float left, float right, float lift, Material mat, bool solid, bool rough = false)
         {
@@ -195,21 +249,36 @@ namespace FamilyRacing.EditorTools
                 if (rough) root.Find(key).gameObject.AddComponent<DrivingSurface>();
             }
         }
+        private static readonly float[] TerrainOffsets = {-160f,-115f,-70f,-32f,-15f,15f,32f,70f,115f,160f};
+        private static float TerrainHeight(Vector3[] p,int i,float side,int place)
+        {
+            int j=i%p.Length; float away=Mathf.Max(0,Mathf.Abs(side)-18f);
+            float noise=Mathf.PerlinNoise((p[j].x+side)*.006f,p[j].z*.006f);
+            float height=place==0 ? -away*.035f + noise*away*.025f : away*(place==1?.13f:.23f)*noise;
+            if(place==1&&side>65&&i>100&&(i%160<=30||i%160>=150))height=-3f;
+            return height;
+        }
+        // World point on the generated landscape `side` metres right of road point i
+        // (linear between the terrain mesh's columns, like the mesh itself).
+        public static Vector3 Ground(Vector3[] p,bool open,int i,float side,int place)
+        {
+            i-=i%2; int j=i%p.Length; var o=TerrainOffsets; side=Mathf.Clamp(side,o[0],o[o.Length-1]);
+            int k=0; while(k<o.Length-2&&side>o[k+1])k++;
+            float h=Mathf.Lerp(TerrainHeight(p,i,o[k],place),TerrainHeight(p,i,o[k+1],place),Mathf.InverseLerp(o[k],o[k+1],side));
+            return p[j]+Right(Tangent(p,j,open))*side+Vector3.up*(h-.18f);
+        }
         private static void TerrainChunk(Transform root, Vector3[] p, bool open, int start, int end, int place, Material mat)
         {
             var v = new List<Vector3>(); var uv = new List<Vector2>(); var tris = new List<int>();
-            var offsets = new[] {-160f,-115f,-70f,-32f,-15f,15f,32f,70f,115f,160f};
+            var offsets = TerrainOffsets;
             for (int i=start;i<=end;i+=2)
             {
                 int j=i%p.Length; var right=Right(Tangent(p,j,open));
                 for(int k=0;k<offsets.Length;k++)
                 {
-                    float side=offsets[k]; float away=Mathf.Max(0,Mathf.Abs(side)-18f);
-                    float noise=Mathf.PerlinNoise((p[j].x+side)*.006f,p[j].z*.006f);
-                    float height=place==0 ? -away*.035f + noise*away*.025f : away*(place==1?.13f:.23f)*noise;
-                    if(place==1&&side>65&&i>100&&(i%160<=30||i%160>=150))height=-3f;
+                    float side=offsets[k]; float height=TerrainHeight(p,i,side,place);
                     var point=p[j]+right*side+Vector3.up*(height-.18f);
-                    v.Add(root.InverseTransformPoint(point)); uv.Add(new Vector2(point.x/18,point.z/18));
+                    v.Add(root.InverseTransformPoint(point)); uv.Add(new Vector2(point.x/9,point.z/9));
                 }
             }
             int rows=v.Count/offsets.Length;
@@ -261,12 +330,7 @@ namespace FamilyRacing.EditorTools
             var spawn=Pose(p,start,open,15);track.spawnPosition=spawn.position;track.spawnHeadingDegrees=spawn.headingDegrees;
             track.spawnSlots=Enumerable.Range(0,4).Select(i=>Pose(p,start,open,15+i/2*7,i%2==0?-2.5f:2.5f)).ToArray();
             track.aiRoute=p.Select(point=>new TrackDefinitionAsset.RoutePoint{x=point.x,z=point.z,radius=4.5f}).ToArray();
-            var indexes=new List<int>{start};
-            // Roads have continuous barriers; 320 m gate intervals preserve
-            // ordered progress while keeping four-racer snapshots under the
-            // established 32 KB LAN packet ceiling, including pickup state.
-            for(int i=start+40;i<(open?finish:p.Length);i+=40)indexes.Add(i);
-            if(open&&indexes.Last()!=finish)indexes.Add(finish);
+            var indexes=GateIndexes(p,open,start,finish);
             track.gates=indexes.Select((i,n)=>{var t=Tangent(p,i,open);var safe=Pose(p,i,open,5);return new TrackDefinitionAsset.Gate {
                 id=n==0?"start":open&&i==finish?"finish":"gate-"+n,center=p[i],halfWidth=12.5f,
                 direction=new Vector2(t.x,t.z),recoverPosition=safe.position,recoverHeadingDegrees=safe.headingDegrees};}).ToArray();
@@ -278,6 +342,79 @@ namespace FamilyRacing.EditorTools
             track=Save(track,TrackPath(place));
             File.WriteAllText(Dir+"/"+Ids[place]+".json",JsonUtility.ToJson(track,true));
             Debug.Log("LONG_ROUTE "+Ids[place]+" points="+p.Length+" gates="+track.gates.Length+" targetMeters="+Lengths[place]);
+        }
+        private static List<int> GateIndexes(Vector3[] p,bool open,int start,int finish)
+        {
+            var indexes=new List<int>{start};
+            // Roads have continuous barriers; 320 m gate intervals preserve
+            // ordered progress while keeping four-racer snapshots under the
+            // established 32 KB LAN packet ceiling, including pickup state.
+            for(int i=start+40;i<(open?finish:p.Length);i+=40)indexes.Add(i);
+            if(open&&indexes.Last()!=finish)indexes.Add(finish);
+            return indexes;
+        }
+        // Point and right vector a given distance along the road from index i.
+        private static (Vector3 point,Vector3 right) Along(Vector3[] p,bool open,int i,float meters)
+        {
+            float steps=meters/8f;int k=Mathf.FloorToInt(steps);float f=steps-k;
+            int a=open?Mathf.Min(i+k,p.Length-1):(i+k)%p.Length;int b=open?Mathf.Min(a+1,p.Length-1):(a+1)%p.Length;
+            var right=Vector3.Lerp(Right(Tangent(p,a,open)),Right(Tangent(p,b,open)),f).normalized;
+            return (Vector3.Lerp(p[a],p[b],f),right);
+        }
+        public const float RampStart = 24f, RampLength = 18f, RampHeight = 2.6f, RampInner = 1.6f, RampOuter = 7.6f;
+        // Kicker profile: flat toe, steepest at the lip (slope 2H/L = 0.29),
+        // gentle enough for the motor's step-climb to follow every tick.
+        public static float RampLift(float s) => RampHeight * (s / RampLength) * (s / RampLength);
+        private static void JumpRamp(Transform root,Vector3[] p,bool open,int gate,int n)
+        {
+            var deck=new List<Vector3>();var deckUv=new List<Vector2>();var deckTris=new List<int>();
+            var skirt=new List<Vector3>();var skirtTris=new List<int>();
+            int rows=Mathf.RoundToInt(RampLength);
+            for(int row=0;row<=rows;row++)
+            {
+                float s=row*RampLength/rows;var (c,r)=Along(p,open,gate,RampStart+s);
+                var baseY=Vector3.up*.05f;var lift=Vector3.up*(.05f+RampLift(s));
+                deck.Add(c+r*RampInner+lift);deck.Add(c+r*RampOuter+lift);
+                deckUv.Add(new Vector2(0,s/3f));deckUv.Add(new Vector2(1,s/3f));
+                skirt.Add(c+r*RampInner+baseY);skirt.Add(c+r*RampInner+lift);
+                skirt.Add(c+r*RampOuter+baseY);skirt.Add(c+r*RampOuter+lift);
+                if(row<rows)
+                {
+                    int d=row*2;deckTris.AddRange(new[]{d,d+2,d+1,d+1,d+2,d+3});
+                    int k=row*4;
+                    skirtTris.AddRange(new[]{k,k+4,k+1,k+1,k+4,k+5});       // inner face
+                    skirtTris.AddRange(new[]{k+2,k+3,k+6,k+3,k+7,k+6});     // outer face
+                }
+            }
+            int last=rows*4;skirtTris.AddRange(new[]{last,last+2,last+1,last+1,last+2,last+3}); // back face
+            string key=root.parent.name+"_JumpRamp"+n;
+            MeshObject(root,key+"Deck",deck,deckTris,deckUv,RampDeckMaterial(),true);
+            var surface=root.Find(key+"Deck").gameObject.AddComponent<DrivingSurface>();
+            surface.offRoad=false;surface.launchRamp=true;
+            MeshObject(root,key+"Skirt",skirt,skirtTris,null,Mat("RampSkirt","2E4A5A"),false);
+            // Orange flags either side of the toe so the ramp reads from far away.
+            var (toe,tr)=Along(p,open,gate,RampStart-2f);
+            foreach(float lane in new[]{RampInner-.4f,RampOuter+.4f})
+            {
+                Box(root,"RampFlagPole",toe+tr*lane+Vector3.up*1.3f,new Vector3(.1f,2.6f,.1f),Mat("TourPost","52666B"));
+                var flag=Box(root,"RampFlag",toe+tr*lane+Vector3.up*2.3f+tr*(lane<4?-.45f:.45f),new Vector3(.9f,.55f,.04f),Mat("RampFlagOrange","FF7A1A"));
+                flag.transform.rotation=Quaternion.LookRotation(tr);
+            }
+        }
+        private static Material RampDeckMaterial()
+        {
+            var mat=Mat("RampDeck","FFFFFF");
+            var path=Dir+"/RampStripes.asset";
+            var tex=new Texture2D(64,64,TextureFormat.RGB24,true){name="RampStripes",wrapMode=TextureWrapMode.Repeat};
+            ColorUtility.TryParseHtmlString("#FF8A1F",out var orange);ColorUtility.TryParseHtmlString("#FFF1CF",out var cream);
+            for(int y=0;y<64;y++)for(int x=0;x<64;x++)
+            {
+                // Chevrons pointing up the ramp.
+                float v=(y+Mathf.Abs(x-31.5f)*.9f)%32f;tex.SetPixel(x,y,v<16f?orange:cream);
+            }
+            tex.Apply();tex=Save(tex,path);mat.SetTexture("_BaseMap",tex);
+            if(mat.HasProperty("_Smoothness"))mat.SetFloat("_Smoothness",.3f);
+            return mat;
         }
         private static void Arch(Transform root,Vector3[] p,int i,bool open,bool finish)
         {

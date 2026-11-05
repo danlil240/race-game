@@ -87,7 +87,7 @@ namespace FamilyRacing.Core.Localization
             ["hud.routeProgress"] = new[] { "Journey", "מסע" },
             ["route.journey"] = new[] { "Start to finish", "מהזינוק לסיום" },
             ["route.circuit"] = new[] { "2 laps", "2 הקפות" },
-            ["route.duration"] = new[] { "5–8 min", "5–8 דקות" },
+            ["route.duration"] = new[] { "2–4 min", "2–4 דקות" },
             ["hud.gate"] = new[] { "Gate", "שער" },
             ["hud.paused"] = new[] { "Paused", "מושהה" },
             ["hud.resume"] = new[] { "Resume", "המשך" },
