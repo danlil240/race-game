@@ -1407,5 +1407,156 @@ def main():
     unittest.main()
 
 
+class CommandBudgetTests(unittest.TestCase):
+    """The launch driver relaunches the player before its 10,000
+    command-identity capacity is spent; it needs an honest count."""
+
+    def test_counting_client_counts_only_command_frames(self):
+        module = scenario()
+        sent = []
+        client = module.CountingLoopClient.__new__(
+            module.CountingLoopClient)
+        client.commands_sent = 0
+        base = module.LoopClient
+        original = base.send
+        base.send = lambda self, frame: sent.append(frame)
+        try:
+            client.send({"type": "command", "commandId": "a"})
+            client.send({"type": "finish"})
+            client.send({"type": "command", "commandId": "b"})
+        finally:
+            base.send = original
+        self.assertEqual(client.commands_sent, 2)
+        self.assertEqual(len(sent), 3)
+
+    def test_window_keeps_only_recent_action_states(self):
+        module = scenario()
+        client = module.CountingLoopClient.__new__(
+            module.CountingLoopClient)
+        client.action_states = {}
+        base = module.LoopClient
+        original = base.read
+        counter = iter(range(10 ** 6))
+
+        def fake_read(self, remaining):
+            key = next(counter)
+            self.action_states[key] = {"tick": key}
+            return {"type": "delta"}
+
+        base.read = fake_read
+        try:
+            for _ in range(module.ACTION_STATE_WINDOW + 50):
+                client.read(1)
+        finally:
+            base.read = original
+        self.assertEqual(len(client.action_states),
+                         module.ACTION_STATE_WINDOW)
+        newest = module.ACTION_STATE_WINDOW + 49
+        self.assertIn(newest, client.action_states)
+        self.assertNotIn(0, client.action_states)
+
+    def test_refused_send_marks_the_connection_lost(self):
+        module = scenario()
+        client = module.CountingLoopClient.__new__(
+            module.CountingLoopClient)
+        client.commands_sent = 0
+        client._terminal = None
+        base = module.LoopClient
+
+        def refuse(self, frame):
+            raise ConnectionAbortedError("aborted")
+
+        original = base.send
+        base.send = refuse
+        try:
+            with self.assertRaises(ConnectionAbortedError):
+                client.send({"type": "command", "commandId": "x"})
+        finally:
+            base.send = original
+        self.assertTrue(client.connection_lost)
+
+    def test_budget_leaves_room_for_a_long_event(self):
+        module = scenario()
+        # One scripted race sends about 2,000 commands; a generation
+        # must never start an event it cannot finish under capacity.
+        self.assertLessEqual(module.COMMAND_BUDGET + 4000, 10000)
+
+    def test_attached_runs_keep_their_client(self):
+        module = scenario()
+        marker = object()
+        self.assertIs(module.keep_client(marker, after=lambda c: None),
+                      marker)
+
+
+class RacingSoloDriverTests(unittest.TestCase):
+    """The campaign driver uses the AI's ordinary inputs: sustained
+    boost, drift through real steering demand and spent gadgets."""
+
+    def make(self, motor, held="", tick=100):
+        module = scenario()
+        sent = []
+
+        class Peer:
+            info = {"runId": "run"}
+            last_state_tick = tick
+
+            def send(self, frame):
+                sent.append(frame)
+
+        peer = Peer()
+        peer.state = {"soloRace": {
+            "mode": "campaign", "phase": "running",
+            "participantId": "me",
+            "race": {"racers": [{"participantId": "me", "session": {
+                "motor": motor, "simulationTick": tick}}],
+                "gadgets": {"racers": [{"participantId": "me",
+                                        "heldItemId": held}]}}}}
+        driver = module.RacingSoloDriver(peer)
+        return module, driver, peer, sent
+
+    def params(self, frame):
+        return frame["parameters"]
+
+    def test_drifts_through_sharp_steering_at_speed(self):
+        _, driver, _, sent = self.make(
+            {"grounded": True, "speed": 20.0})
+        driver._send(0.8)
+        driver._send(0.2)
+        self.assertEqual(self.params(sent[0])["drift"], "true")
+        self.assertEqual(self.params(sent[1])["drift"], "false")
+
+    def test_keeps_an_active_boost_on_straights(self):
+        _, driver, _, sent = self.make(
+            {"grounded": True, "speed": 20.0, "boostActive": True,
+             "boostCharge": 0.4})
+        driver._send(0.05, boost=False)
+        driver._send(0.6, boost=False)
+        self.assertEqual(self.params(sent[0])["boost"], "true")
+        self.assertEqual(self.params(sent[1])["boost"], "false")
+
+    def test_spends_a_held_gadget_after_settling(self):
+        module, driver, peer, sent = self.make(
+            {"grounded": True, "speed": 20.0}, held="turbo-01", tick=100)
+        driver._send(0.0)
+        session = peer.state["soloRace"]["race"]["racers"][0]["session"]
+        session["simulationTick"] = 100 + module.GADGET_SETTLE_TICKS
+        driver._send(0.0)
+        session["simulationTick"] += 3
+        driver._send(0.0)
+        presses = [self.params(f)["gadget"] for f in sent]
+        self.assertEqual(presses, ["false", "true", "false"])
+
+    def test_recover_never_drifts_or_fires(self):
+        module, driver, peer, sent = self.make(
+            {"grounded": True, "speed": 20.0}, held="turbo-01", tick=500)
+        driver.gadget_item = "turbo-01"
+        driver.gadget_seen_at = 0
+        driver._send(0.9, recover=True)
+        params = self.params(sent[0])
+        self.assertEqual(params["recover"], "true")
+        self.assertEqual(params["drift"], "false")
+        self.assertEqual(params["gadget"], "false")
+
+
 if __name__ == "__main__":
     main()
