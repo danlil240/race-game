@@ -1429,6 +1429,52 @@ class CommandBudgetTests(unittest.TestCase):
         self.assertEqual(client.commands_sent, 2)
         self.assertEqual(len(sent), 3)
 
+    def test_window_keeps_only_recent_action_states(self):
+        module = scenario()
+        client = module.CountingLoopClient.__new__(
+            module.CountingLoopClient)
+        client.action_states = {}
+        base = module.LoopClient
+        original = base.read
+        counter = iter(range(10 ** 6))
+
+        def fake_read(self, remaining):
+            key = next(counter)
+            self.action_states[key] = {"tick": key}
+            return {"type": "delta"}
+
+        base.read = fake_read
+        try:
+            for _ in range(module.ACTION_STATE_WINDOW + 50):
+                client.read(1)
+        finally:
+            base.read = original
+        self.assertEqual(len(client.action_states),
+                         module.ACTION_STATE_WINDOW)
+        newest = module.ACTION_STATE_WINDOW + 49
+        self.assertIn(newest, client.action_states)
+        self.assertNotIn(0, client.action_states)
+
+    def test_refused_send_marks_the_connection_lost(self):
+        module = scenario()
+        client = module.CountingLoopClient.__new__(
+            module.CountingLoopClient)
+        client.commands_sent = 0
+        client._terminal = None
+        base = module.LoopClient
+
+        def refuse(self, frame):
+            raise ConnectionAbortedError("aborted")
+
+        original = base.send
+        base.send = refuse
+        try:
+            with self.assertRaises(ConnectionAbortedError):
+                client.send({"type": "command", "commandId": "x"})
+        finally:
+            base.send = original
+        self.assertTrue(client.connection_lost)
+
     def test_budget_leaves_room_for_a_long_event(self):
         module = scenario()
         # One scripted race sends about 2,000 commands; a generation

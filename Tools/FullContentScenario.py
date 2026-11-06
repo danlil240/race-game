@@ -145,9 +145,18 @@ COMMAND_BUDGET = 5000
 VALIDATION_TRACE_MB = 1024
 
 
+# Client.action_states keeps the full reconstructed state for every
+# command; over thousands of input.set holds that grew the harness past
+# 2 GB, and the long garbage-collection pauses that followed stalled the
+# reader past the player's 2 s send timeout. Callers read a command's
+# state right after its result, so a short window is enough.
+ACTION_STATE_WINDOW = 256
+
+
 class CountingLoopClient(LoopClient):
     """LoopClient that counts the command identities it has sent, so the
-    launch driver can relaunch before the player's capacity is spent."""
+    launch driver can relaunch before the player's capacity is spent,
+    and keeps only recent command-correlated states."""
 
     def __init__(self, connection, evidence):
         self.commands_sent = 0
@@ -156,7 +165,25 @@ class CountingLoopClient(LoopClient):
     def send(self, frame):
         if frame.get("commandId") is not None:
             self.commands_sent += 1
-        super().send(frame)
+        try:
+            super().send(frame)
+        except OSError as error:
+            # A refused send (e.g. ConnectionAbortedError) is as terminal
+            # as a closed read side.
+            if getattr(self, "_terminal", None) is None:
+                self._terminal = error
+            raise
+
+    def read(self, remaining):
+        event = super().read(remaining)
+        states = self.action_states
+        while len(states) > ACTION_STATE_WINDOW:
+            del states[next(iter(states))]
+        return event
+
+    @property
+    def connection_lost(self):
+        return getattr(self, "_terminal", None) is not None
 
 
 def keep_client(client, after=None):
@@ -1638,14 +1665,31 @@ def run_launch(player_command, evidence, scope, players, fixture,
                 store once the command budget is spent (the player
                 rejects commands past IdentityCapacity)."""
                 current = roster[-1]
-                if old.commands_sent < COMMAND_BUDGET:
+                lost = old.connection_lost
+                if not lost and old.commands_sent < COMMAND_BUDGET:
                     return old
-                finish_client(old, current["directory"], report,
-                              current["name"], "loop")
+                if lost:
+                    # The stream dropped mid-event; that event is
+                    # already failed. Its trace can never verify, so
+                    # the run cannot pass, but later events still get
+                    # an honest attempt on a fresh generation.
+                    checks.failed(
+                        "trace." + current["name"],
+                        "player stream lost (%s); relaunched on the "
+                        "same profile store" % (old._terminal,))
+                    report["traces"][current["name"]] = {
+                        "verified": False,
+                        "error": repr(old._terminal)}
+                else:
+                    finish_client(old, current["directory"], report,
+                                  current["name"], "loop")
                 try:
                     old.close()
                 except Exception:
                     pass
+                # Drop the finished generation's client so its stream
+                # state can be freed.
+                current["client"] = None
                 current["alive"] = False
                 terminate_process(current["process"], shutdown_timeout)
                 generation = current["generation"] + 1
@@ -1665,9 +1709,10 @@ def run_launch(player_command, evidence, scope, players, fixture,
                     fresh.solo_routes = old.solo_routes
                 if after is not None:
                     after(fresh)
-                notes.append("%s: relaunched after %d commands on the "
-                             "same profile store" % (name,
-                                                     old.commands_sent))
+                notes.append("%s: relaunched after %d commands%s on the "
+                             "same profile store" % (
+                                 name, old.commands_sent,
+                                 " and a lost stream" if lost else ""))
                 return fresh
 
             if scope == "catalog":
