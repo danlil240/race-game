@@ -1488,5 +1488,75 @@ class CommandBudgetTests(unittest.TestCase):
                       marker)
 
 
+class RacingSoloDriverTests(unittest.TestCase):
+    """The campaign driver uses the AI's ordinary inputs: sustained
+    boost, drift through real steering demand and spent gadgets."""
+
+    def make(self, motor, held="", tick=100):
+        module = scenario()
+        sent = []
+
+        class Peer:
+            info = {"runId": "run"}
+            last_state_tick = tick
+
+            def send(self, frame):
+                sent.append(frame)
+
+        peer = Peer()
+        peer.state = {"soloRace": {
+            "mode": "campaign", "phase": "running",
+            "participantId": "me",
+            "race": {"racers": [{"participantId": "me", "session": {
+                "motor": motor, "simulationTick": tick}}],
+                "gadgets": {"racers": [{"participantId": "me",
+                                        "heldItemId": held}]}}}}
+        driver = module.RacingSoloDriver(peer)
+        return module, driver, peer, sent
+
+    def params(self, frame):
+        return frame["parameters"]
+
+    def test_drifts_through_sharp_steering_at_speed(self):
+        _, driver, _, sent = self.make(
+            {"grounded": True, "speed": 20.0})
+        driver._send(0.8)
+        driver._send(0.2)
+        self.assertEqual(self.params(sent[0])["drift"], "true")
+        self.assertEqual(self.params(sent[1])["drift"], "false")
+
+    def test_keeps_an_active_boost_on_straights(self):
+        _, driver, _, sent = self.make(
+            {"grounded": True, "speed": 20.0, "boostActive": True,
+             "boostCharge": 0.4})
+        driver._send(0.05, boost=False)
+        driver._send(0.6, boost=False)
+        self.assertEqual(self.params(sent[0])["boost"], "true")
+        self.assertEqual(self.params(sent[1])["boost"], "false")
+
+    def test_spends_a_held_gadget_after_settling(self):
+        module, driver, peer, sent = self.make(
+            {"grounded": True, "speed": 20.0}, held="turbo-01", tick=100)
+        driver._send(0.0)
+        session = peer.state["soloRace"]["race"]["racers"][0]["session"]
+        session["simulationTick"] = 100 + module.GADGET_SETTLE_TICKS
+        driver._send(0.0)
+        session["simulationTick"] += 3
+        driver._send(0.0)
+        presses = [self.params(f)["gadget"] for f in sent]
+        self.assertEqual(presses, ["false", "true", "false"])
+
+    def test_recover_never_drifts_or_fires(self):
+        module, driver, peer, sent = self.make(
+            {"grounded": True, "speed": 20.0}, held="turbo-01", tick=500)
+        driver.gadget_item = "turbo-01"
+        driver.gadget_seen_at = 0
+        driver._send(0.9, recover=True)
+        params = self.params(sent[0])
+        self.assertEqual(params["recover"], "true")
+        self.assertEqual(params["drift"], "false")
+        self.assertEqual(params["gadget"], "false")
+
+
 if __name__ == "__main__":
     main()

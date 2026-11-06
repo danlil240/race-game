@@ -69,16 +69,18 @@ import json
 import math
 import sys
 import traceback
+import uuid
 from pathlib import Path
 
 from AgentScenario import SUPPORTED_STATE_SCHEMAS
 from RestartScenario import (build_fingerprint, file_hash, write_json)
-from NetworkScenario import read_connection, _LAN_DRIVERS
+from NetworkScenario import (read_connection, lan_inputs, _LAN_DRIVERS,
+                             LAN_BOOST_MAX_STEER)
 from GameplayLoopScenario import (
     Checks, LoopClient, campaign_rows, drive_loop_race,
     expect_new_receipt, finish_client, launch_generation,
     profile_snapshot, progression_available, record_content_identity,
-    run_lan_scope, start_campaign_event, terminate_process,
+    run_lan_scope, start_campaign_event, terminate_process, SoloDriver,
     verify_run_generations, PRESERVED_KEYS, CONTENT_UNAVAILABLE,
     _SOLO_DRIVERS)
 
@@ -184,6 +186,87 @@ class CountingLoopClient(LoopClient):
     @property
     def connection_lost(self):
         return getattr(self, "_terminal", None) is not None
+
+
+# The AI's own input policy (NetworkSettings.cs): drift through real
+# steering demand at speed, which also charges the drift mini-turbos.
+AI_DRIFT_STEER_THRESHOLD = 0.55
+AI_DRIFT_MIN_SPEED = 5.0
+# Hold a picked-up gadget this many sim ticks before pressing, and wait
+# this long before pressing again if the item is still held.
+GADGET_SETTLE_TICKS = 20
+GADGET_RETRY_TICKS = 30
+
+
+def local_gadget_row(state):
+    """The human seat's row in the published gadget world, or {}."""
+    solo = (state or {}).get("soloRace") or {}
+    world = (solo.get("race") or {}).get("gadgets") or {}
+    own = solo.get("participantId")
+    return next((row for row in world.get("racers") or []
+                 if isinstance(row, dict)
+                 and row.get("participantId") == own), {})
+
+
+class RacingSoloDriver(SoloDriver):
+    """The solo follower with the race inputs the AI uses on the same
+    tuning: it keeps a started boost burst until the motor ends it, drifts
+    through real steering demand (so drift mini-turbos charge) and spends
+    picked-up gadgets. The stock follower released boost as soon as the
+    meter dipped under the start threshold and never drifted or used
+    items, which left it about 15 s a lap behind easy AI on Lighthouse
+    Loop and unable to finish 3-lap finales inside the DNF window. Every
+    action is still an ordinary bounded input.set hold."""
+
+    def __init__(self, peer, remote=False):
+        super().__init__(peer, remote=remote)
+        self.gadget_item = ""
+        self.gadget_seen_at = 0
+        self.gadget_pressed_at = None
+
+    def _gadget_press(self, tick):
+        item = local_gadget_row(self.peer.state).get("heldItemId") or ""
+        if item != self.gadget_item:
+            self.gadget_item = item
+            self.gadget_seen_at = tick
+            self.gadget_pressed_at = None
+        if not item or tick - self.gadget_seen_at < GADGET_SETTLE_TICKS:
+            return False
+        if self.gadget_pressed_at is not None \
+                and tick - self.gadget_pressed_at < GADGET_RETRY_TICKS:
+            return False
+        self.gadget_pressed_at = tick
+        return True
+
+    def _send(self, steering, boost=False, recover=False):
+        racer = self._racer() or {}
+        session = racer.get("session") or {}
+        motor = session.get("motor") or {}
+        tick = session.get("simulationTick") or 0
+        sustain = bool(motor.get("boostActive")) \
+            and abs(steering) <= LAN_BOOST_MAX_STEER
+        drift = (not recover and motor.get("grounded") is True
+                 and abs(steering) >= AI_DRIFT_STEER_THRESHOLD
+                 and (motor.get("speed") or 0.0) >= AI_DRIFT_MIN_SPEED)
+        gadget = not recover and self._gadget_press(tick)
+        values = lan_inputs(steering=steering, duration=self.hold_ticks,
+                            drift=drift, boost=bool(boost or sustain),
+                            recover=recover)
+        values["gadget"] = gadget
+        frame = {
+            "type": "command", "protocolVersion": 1,
+            "runId": self.peer.info["runId"],
+            "commandId": str(uuid.uuid4()),
+            "participantId": "local", "action": "input.set",
+            "parameters": {
+                key: (str(value).lower() if isinstance(value, bool)
+                      else str(value))
+                for key, value in values.items()},
+        }
+        try:
+            self.peer.send(frame)
+        except (OSError, ValueError):
+            self.send_ok = False
 
 
 def keep_client(client, after=None):
@@ -1043,7 +1126,8 @@ def drive_campaign_event(client, record, checks, notes):
     vehicle, started = start_campaign_event(client, event_id, checks)
     record["commandIds"].append(started["commandId"])
     result_obj = drive_loop_race(client, checks,
-                                 "campaign " + event_id)
+                                 "campaign " + event_id,
+                                 driver_class=RacingSoloDriver)
     after = profile_snapshot(client)
     receipt = expect_new_receipt(before, after, result_obj,
                                  "campaign " + event_id)
@@ -1315,7 +1399,8 @@ def run_modes_scope(client, checks, report, fixture, evidence_root,
                     before = profile_snapshot(client)
                     result_obj = drive_loop_race(
                         client, checks,
-                        "quickRace %s/%s" % (course_id, class_id))
+                        "quickRace %s/%s" % (course_id, class_id),
+                        driver_class=RacingSoloDriver)
                     expect_new_receipt(
                         before, profile_snapshot(client), result_obj,
                         "quickRace %s/%s" % (course_id, class_id))
@@ -1379,7 +1464,8 @@ def run_modes_scope(client, checks, report, fixture, evidence_root,
                         % solo.get("tuningSource")
                     result_obj = drive_loop_race(
                         client, checks,
-                        "timeTrial %s/%s" % (course_id, class_id))
+                        "timeTrial %s/%s" % (course_id, class_id),
+                        driver_class=RacingSoloDriver)
                     profile = client.state.get("savedProfile") or {}
                     durable = [r for r in
                                profile.get("timeTrialRecords") or []

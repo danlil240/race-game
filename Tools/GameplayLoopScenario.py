@@ -395,11 +395,11 @@ def wait_loop_state(client, predicate, timeout, what):
         on_event=lambda event: pump_all_drivers())
 
 
-def drive_solo_until(client, done, timeout, note):
+def drive_solo_until(client, done, timeout, note, driver_class=None):
     """Drive the live solo/tutorial session until `done(state)` fires or
     the honest deadline passes — every steering correction is an
     input.set hold, stalls press recover like a player."""
-    driver = SoloDriver(client, remote=False)
+    driver = (driver_class or SoloDriver)(client, remote=False)
     _SOLO_DRIVERS.append(driver)
     try:
         deadline = time.monotonic() + timeout
@@ -829,9 +829,11 @@ def start_campaign_event(client, event_id, checks):
         % (event_id, last))
 
 
-def drive_loop_race(client, checks, label, finish_timeout=420):
+def drive_loop_race(client, checks, label, finish_timeout=420,
+                    driver_class=None):
     """Drive the live solo session to a finalized result; return the
-    result dict the immutable seam published."""
+    result dict the immutable seam published. `driver_class` swaps the
+    default SoloDriver for a scope's own input policy."""
     def finished(state):
         solo = state.get("soloRace") or {}
         if solo.get("result") is not None:
@@ -842,7 +844,7 @@ def drive_loop_race(client, checks, label, finish_timeout=420):
         trial = solo.get("trial") or {}
         return trial.get("phase") == "finished"
     drive_solo_until(client, finished, finish_timeout,
-                     label + " finish")
+                     label + " finish", driver_class=driver_class)
     solo = client.state.get("soloRace") or {}
     result = solo.get("result")
     if result is None:
