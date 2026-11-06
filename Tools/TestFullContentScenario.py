@@ -1407,5 +1407,40 @@ def main():
     unittest.main()
 
 
+class CommandBudgetTests(unittest.TestCase):
+    """The launch driver relaunches the player before its 10,000
+    command-identity capacity is spent; it needs an honest count."""
+
+    def test_counting_client_counts_only_command_frames(self):
+        module = scenario()
+        sent = []
+        client = module.CountingLoopClient.__new__(
+            module.CountingLoopClient)
+        client.commands_sent = 0
+        base = module.LoopClient
+        original = base.send
+        base.send = lambda self, frame: sent.append(frame)
+        try:
+            client.send({"type": "command", "commandId": "a"})
+            client.send({"type": "finish"})
+            client.send({"type": "command", "commandId": "b"})
+        finally:
+            base.send = original
+        self.assertEqual(client.commands_sent, 2)
+        self.assertEqual(len(sent), 3)
+
+    def test_budget_leaves_room_for_a_long_event(self):
+        module = scenario()
+        # One scripted race sends about 2,000 commands; a generation
+        # must never start an event it cannot finish under capacity.
+        self.assertLessEqual(module.COMMAND_BUDGET + 4000, 10000)
+
+    def test_attached_runs_keep_their_client(self):
+        module = scenario()
+        marker = object()
+        self.assertIs(module.keep_client(marker, after=lambda c: None),
+                      marker)
+
+
 if __name__ == "__main__":
     main()

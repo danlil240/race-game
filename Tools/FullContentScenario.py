@@ -133,6 +133,37 @@ HUMAN_ONLY_GAPS = [
 ]
 
 
+# A player process admits at most FoundationService.IdentityCapacity
+# (10,000) command identities, and a scripted race sends about 2,000
+# input.set holds, so one process fits only a handful of events. Self-
+# launched solo scopes start a fresh player generation on the same
+# profile store before an event once this many commands were sent.
+COMMAND_BUDGET = 5000
+
+# The player's default validation trace cap (256 MiB) fills after about
+# two scripted races; each generation gets a larger cap.
+VALIDATION_TRACE_MB = 1024
+
+
+class CountingLoopClient(LoopClient):
+    """LoopClient that counts the command identities it has sent, so the
+    launch driver can relaunch before the player's capacity is spent."""
+
+    def __init__(self, connection, evidence):
+        self.commands_sent = 0
+        super().__init__(connection, evidence)
+
+    def send(self, frame):
+        if frame.get("commandId") is not None:
+            self.commands_sent += 1
+        super().send(frame)
+
+
+def keep_client(client, after=None):
+    """Default no-op relaunch hook: attached runs own no process."""
+    return client
+
+
 DEFAULT_ROUTES = (Path(__file__).resolve().parents[1]
                   / "Assets/FamilyRacing/Generated/FullContent/courses.json")
 
@@ -1032,6 +1063,12 @@ def drive_campaign_event(client, record, checks, notes):
                             "maskBefore": mask_before}
     ended, _ = client.applied("results.continue")
     record["commandIds"].append(ended["commandId"])
+    if not record["completed"]:
+        record["detail"] = ("did not finish — mask %d -> %d, receipt %s"
+                            % (mask_before, mask_after,
+                               record["resultId"]))
+        record["status"] = "failed"
+        return
     record["detail"] = "finished (%s) — mask %d -> %d, receipt %s" % (
         "victory" if record["victory"] else "non-victory",
         mask_before, mask_after, record["resultId"])
@@ -1039,7 +1076,10 @@ def drive_campaign_event(client, record, checks, notes):
 
 
 def run_campaign_scope(client, checks, report, fixture,
-                       evidence_root, routes_path=None):
+                       evidence_root, routes_path=None,
+                       relaunch=keep_client):
+    """Drive every campaign event; returns the client of the final
+    player generation (relaunch may replace it between events)."""
     inv = expected_inventory()
     records = [new_event_record(row, fixture=fixture)
                for row in inv["regular"] + inv["finales"]]
@@ -1066,7 +1106,7 @@ def run_campaign_scope(client, checks, report, fixture,
             world_rows=world_rows, reward_facts=None)
         publish_coverage(report, checks, evidence_root, records,
                          coverage)
-        return
+        return client
     prepare_course_routes(client, report, fixture, evidence_root, routes_path)
     identity = content.split("|")[0]
     if identity != PRODUCTION_CONTENT_IDENTITY:
@@ -1105,6 +1145,8 @@ def run_campaign_scope(client, checks, report, fixture,
                     if r["worldId"] == wid and r["kind"] == "finale"]
         for record in ordered:
             event_id = record["eventId"]
+            client = relaunch(client, after=lambda c, wid=wid: c.applied(
+                "campaign.selectWorld", {"worldId": wid}))
             observed = next(
                 (r for r in campaign_rows(client.state)
                  if r.get("eventId") == event_id), None)
@@ -1129,6 +1171,7 @@ def run_campaign_scope(client, checks, report, fixture,
                 record["status"] = "failed"
                 record["detail"] = "%s: %s" % (type(error).__name__,
                                                error)
+            if record["status"] == "failed":
                 checks.failed("campaign.event." + event_id,
                               record["detail"])
                 # Recover to the campaign map so later events can
@@ -1176,6 +1219,7 @@ def run_campaign_scope(client, checks, report, fixture,
         world_rows=world_rows, reward_facts=reward_facts)
     publish_coverage(report, checks, evidence_root, records,
                      coverage)
+    return client
 
 
 # ---------------------------------------------------------------------------
@@ -1183,7 +1227,9 @@ def run_campaign_scope(client, checks, report, fixture,
 # ---------------------------------------------------------------------------
 
 def run_modes_scope(client, checks, report, fixture, evidence_root,
-                    routes_path=None):
+                    routes_path=None, relaunch=keep_client):
+    """Quick Race and Time Trial over every combo; returns the client of
+    the final player generation."""
     inv = expected_inventory()
     combos = [(course, class_id)
               for world in inv["worlds"]
@@ -1202,7 +1248,7 @@ def run_modes_scope(client, checks, report, fixture, evidence_root,
                     CONTENT_UNAVAILABLE)
         write_json(Path(evidence_root) / "modes.json", {"rows": rows})
         report["modes"] = rows
-        return
+        return client
     prepare_course_routes(client, report, fixture, evidence_root, routes_path)
     ledger_before = {row["eventId"]: dict(row)
                      for row in campaign_rows(client.state)}
@@ -1215,6 +1261,9 @@ def run_modes_scope(client, checks, report, fixture, evidence_root,
                             "quickRace.open rejected " + repr(opened))
     campaign_ledger_stable = True
     for course_id, class_id in combos:
+        if quick_open:
+            client = relaunch(client, after=lambda c: c.applied(
+                "quickRace.open"))
         name = "modes.quickRace.%s-%s" % (course_id, class_id)
         row = {"combo": "%s-%s" % (course_id, class_id),
                "mode": "quickRace", "status": "notVerified",
@@ -1276,6 +1325,9 @@ def run_modes_scope(client, checks, report, fixture, evidence_root,
         checks.not_verified("modes.timeTrial.open",
                             "timeTrial.open rejected " + repr(opened))
     for course_id, class_id in combos:
+        if trial_open:
+            client = relaunch(client, after=lambda c: c.applied(
+                "timeTrial.open"))
         name = "modes.timeTrial.%s-%s" % (course_id, class_id)
         row = {"combo": "%s-%s" % (course_id, class_id),
                "mode": "timeTrial", "status": "notVerified",
@@ -1346,6 +1398,7 @@ def run_modes_scope(client, checks, report, fixture, evidence_root,
                       "a non-campaign mode moved the campaign ledger")
     write_json(Path(evidence_root) / "modes.json", {"rows": rows})
     report["modes"] = rows
+    return client
 
 
 # ---------------------------------------------------------------------------
@@ -1467,6 +1520,8 @@ def run_launch(player_command, evidence, scope, players, fixture,
                             "sha256": file_hash(executable)}
     if not fixture:
         report["buildFiles"] = build_fingerprint(executable)
+        player_command = [*player_command, "--validation-trace-mb",
+                          str(VALIDATION_TRACE_MB)]
     roster = []
     try:
         if scope == "lan":
@@ -1572,11 +1627,49 @@ def run_launch(player_command, evidence, scope, players, fixture,
             entry = {"name": "solo", "process": process, "info": info,
                      "directory": directory, "evidence": ev,
                      "profileDir": profile_dir,
-                     "client": LoopClient(info, ev), "alive": True,
-                     "generation": 1}
+                     "client": CountingLoopClient(info, ev),
+                     "alive": True, "generation": 1}
             roster.append(entry)
             client = entry["client"]
             ensure_profile(client, checks, require_fresh=True)
+
+            def relaunch(old, after=None):
+                """Start a fresh player generation on the same profile
+                store once the command budget is spent (the player
+                rejects commands past IdentityCapacity)."""
+                current = roster[-1]
+                if old.commands_sent < COMMAND_BUDGET:
+                    return old
+                finish_client(old, current["directory"], report,
+                              current["name"], "loop")
+                try:
+                    old.close()
+                except Exception:
+                    pass
+                current["alive"] = False
+                terminate_process(current["process"], shutdown_timeout)
+                generation = current["generation"] + 1
+                name = "solo-gen%d" % generation
+                process_n, info_n, directory_n, ev_n = launch_generation(
+                    player_command, root, name, profile_dir,
+                    startup_timeout, report, "budget-relaunch", fixture)
+                fresh = CountingLoopClient(info_n, ev_n)
+                roster.append({"name": name, "process": process_n,
+                               "info": info_n, "directory": directory_n,
+                               "evidence": ev_n,
+                               "profileDir": profile_dir,
+                               "client": fresh, "alive": True,
+                               "generation": generation})
+                fresh.applied("profile.select", {"slot": 0})
+                if hasattr(old, "solo_routes"):
+                    fresh.solo_routes = old.solo_routes
+                if after is not None:
+                    after(fresh)
+                notes.append("%s: relaunched after %d commands on the "
+                             "same profile store" % (name,
+                                                     old.commands_sent))
+                return fresh
+
             if scope == "catalog":
                 run_catalog_scope(client, checks, report, fixture,
                                   root)
@@ -1584,27 +1677,33 @@ def run_launch(player_command, evidence, scope, players, fixture,
                 finish_client(client, directory, report, "solo",
                               "loop")
             elif scope == "modes":
-                run_modes_scope(client, checks, report, fixture, root,
-                                routes_path=routes_path)
+                client = run_modes_scope(client, checks, report,
+                                         fixture, root,
+                                         routes_path=routes_path,
+                                         relaunch=relaunch)
                 record_content_identity(client, report)
-                finish_client(client, directory, report, "solo",
-                              "loop")
+                last = roster[-1]
+                finish_client(client, last["directory"], report,
+                              last["name"], "loop")
             else:
-                # campaign: generation 1 drives the full adventure;
-                # generation 2 proves durable progress survived a real
-                # process restart.
-                run_campaign_scope(client, checks, report, fixture,
-                                   root, routes_path=routes_path)
+                # campaign: the budgeted generations drive the full
+                # adventure; one more generation proves durable
+                # progress survived a real process restart.
+                client = run_campaign_scope(client, checks, report,
+                                            fixture, root,
+                                            routes_path=routes_path,
+                                            relaunch=relaunch)
                 expected = profile_snapshot(client) or {}
                 record_content_identity(client, report)
-                finish_client(client, directory, report, "solo",
-                              "loop")
+                last = roster[-1]
+                finish_client(client, last["directory"], report,
+                              last["name"], "loop")
                 try:
                     client.close()
                 except Exception:
                     pass
-                entry["alive"] = False
-                terminate_process(process, shutdown_timeout)
+                last["alive"] = False
+                terminate_process(last["process"], shutdown_timeout)
                 process2, info2, directory2, ev2 = launch_generation(
                     player_command, root, "solo-restart",
                     profile_dir, startup_timeout, report, "restart",
@@ -1613,7 +1712,8 @@ def run_launch(player_command, evidence, scope, players, fixture,
                           "info": info2, "directory": directory2,
                           "evidence": ev2, "profileDir": profile_dir,
                           "client": LoopClient(info2, ev2),
-                          "alive": True, "generation": 2}
+                          "alive": True,
+                          "generation": last["generation"] + 1}
                 roster.append(entry2)
                 client2 = entry2["client"]
                 client2.applied("profile.select", {"slot": 0})
