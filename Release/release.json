@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "versionName": "1.0.0",
-  "androidVersionCode": 1,
-  "previousAndroidVersionCode": 0,
+  "androidVersionCode": 2,
+  "previousAndroidVersionCode": 1,
   "applicationId": "com.daniel.familyracing",
   "companyName": "Family Racing",
   "productName": "Family Racing",

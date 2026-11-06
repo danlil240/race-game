@@ -14,7 +14,7 @@ namespace FamilyRacing.Tests
     public sealed class LongRaceWorldPlayTests
     {
         [TestCase(false)] [TestCase(true)]
-        public void AuthoredTurboProvidesFiveSecondsOfUsefulSpeedWithoutSpendingExtraMeter(bool vehicleBoost)
+        public void AuthoredTurboProvidesFourSecondsOfUsefulSpeedWithoutSpendingExtraMeter(bool vehicleBoost)
         {
 #if UNITY_EDITOR
             var catalog=LongRaceAuthoring.Required<GadgetCatalogAsset>("Assets/FamilyRacing/Generated/Driving/gadget-catalog-01.asset").ToCatalog(out var error);
@@ -33,18 +33,18 @@ namespace FamilyRacing.Tests
                 var motor=new MotorState { grounded=true,speed=tuning.maxSpeed,boostCharge=1f };
                 var baseline=motor.Copy();
                 var input=new DriverInput(0,false,vehicleBoost,false,false,false,false);
-                for(int tick=0;tick<150;tick++)
+                for(int tick=0;tick<120;tick++)
                 {
                     motor=ArcadeMotor.Step(motor,input,tuning,world,1f/30f,null,GadgetRules.ModifierFor(gadgets,"driver")).state;
                     baseline=ArcadeMotor.Step(baseline,input,tuning,world,1f/30f).state;
                     Assert.That(motor.boostCharge,Is.EqualTo(baseline.boostCharge).Within(.0001f),"pickup must not drain extra rechargeable boost");
-                    if(tick==45||tick==120||tick==149)
-                        Assert.That(motor.speed,Is.GreaterThan(baseline.speed+8f),"pickup must deliver a substantial speed gain throughout its five seconds, including with vehicle turbo");
+                    if(tick==45||tick==90||tick==119)
+                        Assert.That(motor.speed,Is.GreaterThan(baseline.speed+8f),"pickup must deliver a substantial speed gain throughout its four seconds, including with vehicle turbo");
                     gadgets=GadgetRules.Step(new GadgetStepInput { tick=tick+2,racers=new System.Collections.Generic.List<GadgetRacerInput> {
                         new GadgetRacerInput { participantId="driver" } } },gadgets,catalog).state;
                 }
                 var expired=GadgetRules.ModifierFor(gadgets,"driver");
-                Assert.That(expired.speedCapMultiplier,Is.EqualTo(1f),"pickup must expire after five seconds");
+                Assert.That(expired.speedCapMultiplier,Is.EqualTo(1f),"pickup must expire after four seconds");
                 Assert.That(expired.accelerationMultiplier,Is.EqualTo(1f));
                 var after=ArcadeMotor.Step(motor,input,tuning,world,1f/30f,null,expired).state;
                 Assert.That(after.speed,Is.LessThan(motor.speed),"normal motor drag resumes after pickup expiry");
