@@ -188,6 +188,10 @@ class CountingLoopClient(LoopClient):
         return getattr(self, "_terminal", None) is not None
 
 
+# A campaign event that ends unfinished (DNF) or errors is attempted up
+# to this many times in total, as a player would retry it.
+MAX_EVENT_ATTEMPTS = 3
+
 # The AI's own input policy (NetworkSettings.cs): drift through real
 # steering demand at speed, which also charges the drift mini-turbos.
 AI_DRIFT_STEER_THRESHOLD = 0.55
@@ -1276,17 +1280,17 @@ def run_campaign_scope(client, checks, report, fixture,
                 checks.not_verified(
                     "campaign.event." + event_id, record["detail"])
                 continue
-            try:
-                drive_campaign_event(client, record, checks, notes)
-            except Exception as error:
-                record["status"] = "failed"
-                record["detail"] = "%s: %s" % (type(error).__name__,
-                                               error)
-            if record["status"] == "failed":
-                checks.failed("campaign.event." + event_id,
-                              record["detail"])
-                # Recover to the campaign map so later events can
-                # still be attempted honestly.
+            while True:
+                try:
+                    drive_campaign_event(client, record, checks, notes)
+                except Exception as error:
+                    record["status"] = "failed"
+                    record["detail"] = "%s: %s" % (
+                        type(error).__name__, error)
+                if record["status"] != "failed":
+                    break
+                # Recover to the campaign map so the event (or later
+                # events) can still be attempted honestly.
                 try:
                     client.command("results.continue")
                 except Exception:
@@ -1294,6 +1298,21 @@ def run_campaign_scope(client, checks, report, fixture,
                         client.command("race.exit")
                     except Exception:
                         pass
+                record.setdefault("failedAttempts", []).append(
+                    record["detail"])
+                if record["attempts"] >= MAX_EVENT_ATTEMPTS:
+                    break
+                # A player retries a race they did not finish; one bad
+                # run must not lock a world's finales (and every later
+                # world) for the rest of the campaign.
+                notes.append("%s: retry %d after %s" % (
+                    event_id, record["attempts"] + 1, record["detail"]))
+                client = relaunch(
+                    client, after=lambda c, wid=wid: c.applied(
+                        "campaign.selectWorld", {"worldId": wid}))
+            if record["status"] == "failed":
+                checks.failed("campaign.event." + event_id,
+                              record["detail"])
                 continue
             checks.passed(
                 ("campaign.finale." if record["kind"] == "finale"
@@ -1446,48 +1465,70 @@ def run_modes_scope(client, checks, report, fixture, evidence_root,
                "detail": ""}
         if not trial_open:
             row["detail"] = "timeTrial.open rejected"
-        else:
+        attempts = 0
+        while trial_open and attempts < MAX_EVENT_ATTEMPTS:
+            attempts += 1
+            if attempts > 1:
+                # Retry an unfinished trial the way a player would.
+                report["notes"].append("%s: retry %d after %s" % (
+                    name, attempts, row["detail"]))
+                client = relaunch(client, after=lambda c: c.applied(
+                    "timeTrial.open"))
+                try:
+                    client.command("timeTrial.open")
+                except Exception:
+                    pass
             probe, _ = client.command(
                 "timeTrial.start",
                 {"courseId": course_id, "classId": class_id})
             if probe["status"] != "applied":
+                row["status"] = "notVerified"
                 row["detail"] = ("no authored time event resolved "
                                  "for the pick: %s"
                                  % (probe.get("code")
                                     or probe["status"]))
-            else:
+                break
+            try:
+                solo = client.state.get("soloRace") or {}
+                assert solo.get("tuningSource") == "normalized", \
+                    "timeTrial did not report the normalized " \
+                    "starter (tuningSource=%r)" \
+                    % solo.get("tuningSource")
+                result_obj = drive_loop_race(
+                    client, checks,
+                    "timeTrial %s/%s" % (course_id, class_id),
+                    driver_class=RacingSoloDriver)
+                own = next((r for r in result_obj.get("racers") or []
+                            if r and r.get("participantId")
+                            == solo.get("participantId")), {}) or {}
+                assert own.get("outcome") == "finished", \
+                    "trial ended without a finish (outcome %r)" \
+                    % own.get("outcome")
+                profile = client.state.get("savedProfile") or {}
+                durable = [r for r in
+                           profile.get("timeTrialRecords") or []
+                           if r.get("courseId") == course_id
+                           and r.get("classId") == class_id]
+                assert durable \
+                    and durable[-1].get("bestTicks", 0) > 0, \
+                    "finished trial left no durable record"
+                client.applied("results.continue")
+                row.update(status="passed",
+                           detail="normalized record %d ticks "
+                           "durable"
+                           % durable[-1]["bestTicks"],
+                           resultId=result_obj.get("resultId"),
+                           attempts=attempts)
+                break
+            except Exception as error:
+                row["status"] = "failed"
+                row["detail"] = "%s: %s" % (
+                    type(error).__name__, error)
+                row["attempts"] = attempts
                 try:
-                    solo = client.state.get("soloRace") or {}
-                    assert solo.get("tuningSource") == "normalized", \
-                        "timeTrial did not report the normalized " \
-                        "starter (tuningSource=%r)" \
-                        % solo.get("tuningSource")
-                    result_obj = drive_loop_race(
-                        client, checks,
-                        "timeTrial %s/%s" % (course_id, class_id),
-                        driver_class=RacingSoloDriver)
-                    profile = client.state.get("savedProfile") or {}
-                    durable = [r for r in
-                               profile.get("timeTrialRecords") or []
-                               if r.get("courseId") == course_id
-                               and r.get("classId") == class_id]
-                    assert durable \
-                        and durable[-1].get("bestTicks", 0) > 0, \
-                        "finished trial left no durable record"
-                    client.applied("results.continue")
-                    row.update(status="passed",
-                               detail="normalized record %d ticks "
-                               "durable"
-                               % durable[-1]["bestTicks"],
-                               resultId=result_obj.get("resultId"))
-                except Exception as error:
-                    row["status"] = "failed"
-                    row["detail"] = "%s: %s" % (
-                        type(error).__name__, error)
-                    try:
-                        client.command("results.continue")
-                    except Exception:
-                        pass
+                    client.command("results.continue")
+                except Exception:
+                    pass
         rows.append(row)
         if row["status"] == "passed":
             checks.passed(name, row["detail"])
