@@ -69,16 +69,18 @@ import json
 import math
 import sys
 import traceback
+import uuid
 from pathlib import Path
 
 from AgentScenario import SUPPORTED_STATE_SCHEMAS
 from RestartScenario import (build_fingerprint, file_hash, write_json)
-from NetworkScenario import read_connection, _LAN_DRIVERS
+from NetworkScenario import (read_connection, lan_inputs, _LAN_DRIVERS,
+                             LAN_BOOST_MAX_STEER)
 from GameplayLoopScenario import (
     Checks, LoopClient, campaign_rows, drive_loop_race,
     expect_new_receipt, finish_client, launch_generation,
     profile_snapshot, progression_available, record_content_identity,
-    run_lan_scope, start_campaign_event, terminate_process,
+    run_lan_scope, start_campaign_event, terminate_process, SoloDriver,
     verify_run_generations, PRESERVED_KEYS, CONTENT_UNAVAILABLE,
     _SOLO_DRIVERS)
 
@@ -131,6 +133,149 @@ HUMAN_ONLY_GAPS = [
     "child/family playtest pacing (6-10 h target) is a human-only "
     "study this scenario cannot substitute",
 ]
+
+
+# A player process admits at most FoundationService.IdentityCapacity
+# (10,000) command identities, and a scripted race sends about 2,000
+# input.set holds, so one process fits only a handful of events. Self-
+# launched solo scopes start a fresh player generation on the same
+# profile store before an event once this many commands were sent.
+COMMAND_BUDGET = 5000
+
+# The player's default validation trace cap (256 MiB) fills after about
+# two scripted races; each generation gets a larger cap.
+VALIDATION_TRACE_MB = 1024
+
+
+# Client.action_states keeps the full reconstructed state for every
+# command; over thousands of input.set holds that grew the harness past
+# 2 GB, and the long garbage-collection pauses that followed stalled the
+# reader past the player's 2 s send timeout. Callers read a command's
+# state right after its result, so a short window is enough.
+ACTION_STATE_WINDOW = 256
+
+
+class CountingLoopClient(LoopClient):
+    """LoopClient that counts the command identities it has sent, so the
+    launch driver can relaunch before the player's capacity is spent,
+    and keeps only recent command-correlated states."""
+
+    def __init__(self, connection, evidence):
+        self.commands_sent = 0
+        super().__init__(connection, evidence)
+
+    def send(self, frame):
+        if frame.get("commandId") is not None:
+            self.commands_sent += 1
+        try:
+            super().send(frame)
+        except OSError as error:
+            # A refused send (e.g. ConnectionAbortedError) is as terminal
+            # as a closed read side.
+            if getattr(self, "_terminal", None) is None:
+                self._terminal = error
+            raise
+
+    def read(self, remaining):
+        event = super().read(remaining)
+        states = self.action_states
+        while len(states) > ACTION_STATE_WINDOW:
+            del states[next(iter(states))]
+        return event
+
+    @property
+    def connection_lost(self):
+        return getattr(self, "_terminal", None) is not None
+
+
+# A campaign event that ends unfinished (DNF) or errors is attempted up
+# to this many times in total, as a player would retry it.
+MAX_EVENT_ATTEMPTS = 3
+
+# The AI's own input policy (NetworkSettings.cs): drift through real
+# steering demand at speed, which also charges the drift mini-turbos.
+AI_DRIFT_STEER_THRESHOLD = 0.55
+AI_DRIFT_MIN_SPEED = 5.0
+# Hold a picked-up gadget this many sim ticks before pressing, and wait
+# this long before pressing again if the item is still held.
+GADGET_SETTLE_TICKS = 20
+GADGET_RETRY_TICKS = 30
+
+
+def local_gadget_row(state):
+    """The human seat's row in the published gadget world, or {}."""
+    solo = (state or {}).get("soloRace") or {}
+    world = (solo.get("race") or {}).get("gadgets") or {}
+    own = solo.get("participantId")
+    return next((row for row in world.get("racers") or []
+                 if isinstance(row, dict)
+                 and row.get("participantId") == own), {})
+
+
+class RacingSoloDriver(SoloDriver):
+    """The solo follower with the race inputs the AI uses on the same
+    tuning: it keeps a started boost burst until the motor ends it, drifts
+    through real steering demand (so drift mini-turbos charge) and spends
+    picked-up gadgets. The stock follower released boost as soon as the
+    meter dipped under the start threshold and never drifted or used
+    items, which left it about 15 s a lap behind easy AI on Lighthouse
+    Loop and unable to finish 3-lap finales inside the DNF window. Every
+    action is still an ordinary bounded input.set hold."""
+
+    def __init__(self, peer, remote=False):
+        super().__init__(peer, remote=remote)
+        self.gadget_item = ""
+        self.gadget_seen_at = 0
+        self.gadget_pressed_at = None
+
+    def _gadget_press(self, tick):
+        item = local_gadget_row(self.peer.state).get("heldItemId") or ""
+        if item != self.gadget_item:
+            self.gadget_item = item
+            self.gadget_seen_at = tick
+            self.gadget_pressed_at = None
+        if not item or tick - self.gadget_seen_at < GADGET_SETTLE_TICKS:
+            return False
+        if self.gadget_pressed_at is not None \
+                and tick - self.gadget_pressed_at < GADGET_RETRY_TICKS:
+            return False
+        self.gadget_pressed_at = tick
+        return True
+
+    def _send(self, steering, boost=False, recover=False):
+        racer = self._racer() or {}
+        session = racer.get("session") or {}
+        motor = session.get("motor") or {}
+        tick = session.get("simulationTick") or 0
+        sustain = bool(motor.get("boostActive")) \
+            and abs(steering) <= LAN_BOOST_MAX_STEER
+        drift = (not recover and motor.get("grounded") is True
+                 and abs(steering) >= AI_DRIFT_STEER_THRESHOLD
+                 and (motor.get("speed") or 0.0) >= AI_DRIFT_MIN_SPEED)
+        gadget = not recover and self._gadget_press(tick)
+        values = lan_inputs(steering=steering, duration=self.hold_ticks,
+                            drift=drift, boost=bool(boost or sustain),
+                            recover=recover)
+        values["gadget"] = gadget
+        frame = {
+            "type": "command", "protocolVersion": 1,
+            "runId": self.peer.info["runId"],
+            "commandId": str(uuid.uuid4()),
+            "participantId": "local", "action": "input.set",
+            "parameters": {
+                key: (str(value).lower() if isinstance(value, bool)
+                      else str(value))
+                for key, value in values.items()},
+        }
+        try:
+            self.peer.send(frame)
+        except (OSError, ValueError):
+            self.send_ok = False
+
+
+def keep_client(client, after=None):
+    """Default no-op relaunch hook: attached runs own no process."""
+    return client
 
 
 DEFAULT_ROUTES = (Path(__file__).resolve().parents[1]
@@ -985,7 +1130,8 @@ def drive_campaign_event(client, record, checks, notes):
     vehicle, started = start_campaign_event(client, event_id, checks)
     record["commandIds"].append(started["commandId"])
     result_obj = drive_loop_race(client, checks,
-                                 "campaign " + event_id)
+                                 "campaign " + event_id,
+                                 driver_class=RacingSoloDriver)
     after = profile_snapshot(client)
     receipt = expect_new_receipt(before, after, result_obj,
                                  "campaign " + event_id)
@@ -1032,6 +1178,12 @@ def drive_campaign_event(client, record, checks, notes):
                             "maskBefore": mask_before}
     ended, _ = client.applied("results.continue")
     record["commandIds"].append(ended["commandId"])
+    if not record["completed"]:
+        record["detail"] = ("did not finish — mask %d -> %d, receipt %s"
+                            % (mask_before, mask_after,
+                               record["resultId"]))
+        record["status"] = "failed"
+        return
     record["detail"] = "finished (%s) — mask %d -> %d, receipt %s" % (
         "victory" if record["victory"] else "non-victory",
         mask_before, mask_after, record["resultId"])
@@ -1039,7 +1191,10 @@ def drive_campaign_event(client, record, checks, notes):
 
 
 def run_campaign_scope(client, checks, report, fixture,
-                       evidence_root, routes_path=None):
+                       evidence_root, routes_path=None,
+                       relaunch=keep_client):
+    """Drive every campaign event; returns the client of the final
+    player generation (relaunch may replace it between events)."""
     inv = expected_inventory()
     records = [new_event_record(row, fixture=fixture)
                for row in inv["regular"] + inv["finales"]]
@@ -1066,7 +1221,7 @@ def run_campaign_scope(client, checks, report, fixture,
             world_rows=world_rows, reward_facts=None)
         publish_coverage(report, checks, evidence_root, records,
                          coverage)
-        return
+        return client
     prepare_course_routes(client, report, fixture, evidence_root, routes_path)
     identity = content.split("|")[0]
     if identity != PRODUCTION_CONTENT_IDENTITY:
@@ -1105,6 +1260,8 @@ def run_campaign_scope(client, checks, report, fixture,
                     if r["worldId"] == wid and r["kind"] == "finale"]
         for record in ordered:
             event_id = record["eventId"]
+            client = relaunch(client, after=lambda c, wid=wid: c.applied(
+                "campaign.selectWorld", {"worldId": wid}))
             observed = next(
                 (r for r in campaign_rows(client.state)
                  if r.get("eventId") == event_id), None)
@@ -1123,16 +1280,17 @@ def run_campaign_scope(client, checks, report, fixture,
                 checks.not_verified(
                     "campaign.event." + event_id, record["detail"])
                 continue
-            try:
-                drive_campaign_event(client, record, checks, notes)
-            except Exception as error:
-                record["status"] = "failed"
-                record["detail"] = "%s: %s" % (type(error).__name__,
-                                               error)
-                checks.failed("campaign.event." + event_id,
-                              record["detail"])
-                # Recover to the campaign map so later events can
-                # still be attempted honestly.
+            while True:
+                try:
+                    drive_campaign_event(client, record, checks, notes)
+                except Exception as error:
+                    record["status"] = "failed"
+                    record["detail"] = "%s: %s" % (
+                        type(error).__name__, error)
+                if record["status"] != "failed":
+                    break
+                # Recover to the campaign map so the event (or later
+                # events) can still be attempted honestly.
                 try:
                     client.command("results.continue")
                 except Exception:
@@ -1140,6 +1298,21 @@ def run_campaign_scope(client, checks, report, fixture,
                         client.command("race.exit")
                     except Exception:
                         pass
+                record.setdefault("failedAttempts", []).append(
+                    record["detail"])
+                if record["attempts"] >= MAX_EVENT_ATTEMPTS:
+                    break
+                # A player retries a race they did not finish; one bad
+                # run must not lock a world's finales (and every later
+                # world) for the rest of the campaign.
+                notes.append("%s: retry %d after %s" % (
+                    event_id, record["attempts"] + 1, record["detail"]))
+                client = relaunch(
+                    client, after=lambda c, wid=wid: c.applied(
+                        "campaign.selectWorld", {"worldId": wid}))
+            if record["status"] == "failed":
+                checks.failed("campaign.event." + event_id,
+                              record["detail"])
                 continue
             checks.passed(
                 ("campaign.finale." if record["kind"] == "finale"
@@ -1176,6 +1349,7 @@ def run_campaign_scope(client, checks, report, fixture,
         world_rows=world_rows, reward_facts=reward_facts)
     publish_coverage(report, checks, evidence_root, records,
                      coverage)
+    return client
 
 
 # ---------------------------------------------------------------------------
@@ -1183,7 +1357,9 @@ def run_campaign_scope(client, checks, report, fixture,
 # ---------------------------------------------------------------------------
 
 def run_modes_scope(client, checks, report, fixture, evidence_root,
-                    routes_path=None):
+                    routes_path=None, relaunch=keep_client):
+    """Quick Race and Time Trial over every combo; returns the client of
+    the final player generation."""
     inv = expected_inventory()
     combos = [(course, class_id)
               for world in inv["worlds"]
@@ -1202,7 +1378,7 @@ def run_modes_scope(client, checks, report, fixture, evidence_root,
                     CONTENT_UNAVAILABLE)
         write_json(Path(evidence_root) / "modes.json", {"rows": rows})
         report["modes"] = rows
-        return
+        return client
     prepare_course_routes(client, report, fixture, evidence_root, routes_path)
     ledger_before = {row["eventId"]: dict(row)
                      for row in campaign_rows(client.state)}
@@ -1215,6 +1391,9 @@ def run_modes_scope(client, checks, report, fixture, evidence_root,
                             "quickRace.open rejected " + repr(opened))
     campaign_ledger_stable = True
     for course_id, class_id in combos:
+        if quick_open:
+            client = relaunch(client, after=lambda c: c.applied(
+                "quickRace.open"))
         name = "modes.quickRace.%s-%s" % (course_id, class_id)
         row = {"combo": "%s-%s" % (course_id, class_id),
                "mode": "quickRace", "status": "notVerified",
@@ -1239,7 +1418,8 @@ def run_modes_scope(client, checks, report, fixture, evidence_root,
                     before = profile_snapshot(client)
                     result_obj = drive_loop_race(
                         client, checks,
-                        "quickRace %s/%s" % (course_id, class_id))
+                        "quickRace %s/%s" % (course_id, class_id),
+                        driver_class=RacingSoloDriver)
                     expect_new_receipt(
                         before, profile_snapshot(client), result_obj,
                         "quickRace %s/%s" % (course_id, class_id))
@@ -1276,53 +1456,79 @@ def run_modes_scope(client, checks, report, fixture, evidence_root,
         checks.not_verified("modes.timeTrial.open",
                             "timeTrial.open rejected " + repr(opened))
     for course_id, class_id in combos:
+        if trial_open:
+            client = relaunch(client, after=lambda c: c.applied(
+                "timeTrial.open"))
         name = "modes.timeTrial.%s-%s" % (course_id, class_id)
         row = {"combo": "%s-%s" % (course_id, class_id),
                "mode": "timeTrial", "status": "notVerified",
                "detail": ""}
         if not trial_open:
             row["detail"] = "timeTrial.open rejected"
-        else:
+        attempts = 0
+        while trial_open and attempts < MAX_EVENT_ATTEMPTS:
+            attempts += 1
+            if attempts > 1:
+                # Retry an unfinished trial the way a player would.
+                report["notes"].append("%s: retry %d after %s" % (
+                    name, attempts, row["detail"]))
+                client = relaunch(client, after=lambda c: c.applied(
+                    "timeTrial.open"))
+                try:
+                    client.command("timeTrial.open")
+                except Exception:
+                    pass
             probe, _ = client.command(
                 "timeTrial.start",
                 {"courseId": course_id, "classId": class_id})
             if probe["status"] != "applied":
+                row["status"] = "notVerified"
                 row["detail"] = ("no authored time event resolved "
                                  "for the pick: %s"
                                  % (probe.get("code")
                                     or probe["status"]))
-            else:
+                break
+            try:
+                solo = client.state.get("soloRace") or {}
+                assert solo.get("tuningSource") == "normalized", \
+                    "timeTrial did not report the normalized " \
+                    "starter (tuningSource=%r)" \
+                    % solo.get("tuningSource")
+                result_obj = drive_loop_race(
+                    client, checks,
+                    "timeTrial %s/%s" % (course_id, class_id),
+                    driver_class=RacingSoloDriver)
+                own = next((r for r in result_obj.get("racers") or []
+                            if r and r.get("participantId")
+                            == solo.get("participantId")), {}) or {}
+                assert own.get("outcome") == "finished", \
+                    "trial ended without a finish (outcome %r)" \
+                    % own.get("outcome")
+                profile = client.state.get("savedProfile") or {}
+                durable = [r for r in
+                           profile.get("timeTrialRecords") or []
+                           if r.get("courseId") == course_id
+                           and r.get("classId") == class_id]
+                assert durable \
+                    and durable[-1].get("bestTicks", 0) > 0, \
+                    "finished trial left no durable record"
+                client.applied("results.continue")
+                row.update(status="passed",
+                           detail="normalized record %d ticks "
+                           "durable"
+                           % durable[-1]["bestTicks"],
+                           resultId=result_obj.get("resultId"),
+                           attempts=attempts)
+                break
+            except Exception as error:
+                row["status"] = "failed"
+                row["detail"] = "%s: %s" % (
+                    type(error).__name__, error)
+                row["attempts"] = attempts
                 try:
-                    solo = client.state.get("soloRace") or {}
-                    assert solo.get("tuningSource") == "normalized", \
-                        "timeTrial did not report the normalized " \
-                        "starter (tuningSource=%r)" \
-                        % solo.get("tuningSource")
-                    result_obj = drive_loop_race(
-                        client, checks,
-                        "timeTrial %s/%s" % (course_id, class_id))
-                    profile = client.state.get("savedProfile") or {}
-                    durable = [r for r in
-                               profile.get("timeTrialRecords") or []
-                               if r.get("courseId") == course_id
-                               and r.get("classId") == class_id]
-                    assert durable \
-                        and durable[-1].get("bestTicks", 0) > 0, \
-                        "finished trial left no durable record"
-                    client.applied("results.continue")
-                    row.update(status="passed",
-                               detail="normalized record %d ticks "
-                               "durable"
-                               % durable[-1]["bestTicks"],
-                               resultId=result_obj.get("resultId"))
-                except Exception as error:
-                    row["status"] = "failed"
-                    row["detail"] = "%s: %s" % (
-                        type(error).__name__, error)
-                    try:
-                        client.command("results.continue")
-                    except Exception:
-                        pass
+                    client.command("results.continue")
+                except Exception:
+                    pass
         rows.append(row)
         if row["status"] == "passed":
             checks.passed(name, row["detail"])
@@ -1346,6 +1552,7 @@ def run_modes_scope(client, checks, report, fixture, evidence_root,
                       "a non-campaign mode moved the campaign ledger")
     write_json(Path(evidence_root) / "modes.json", {"rows": rows})
     report["modes"] = rows
+    return client
 
 
 # ---------------------------------------------------------------------------
@@ -1467,6 +1674,8 @@ def run_launch(player_command, evidence, scope, players, fixture,
                             "sha256": file_hash(executable)}
     if not fixture:
         report["buildFiles"] = build_fingerprint(executable)
+        player_command = [*player_command, "--validation-trace-mb",
+                          str(VALIDATION_TRACE_MB)]
     roster = []
     try:
         if scope == "lan":
@@ -1572,11 +1781,67 @@ def run_launch(player_command, evidence, scope, players, fixture,
             entry = {"name": "solo", "process": process, "info": info,
                      "directory": directory, "evidence": ev,
                      "profileDir": profile_dir,
-                     "client": LoopClient(info, ev), "alive": True,
-                     "generation": 1}
+                     "client": CountingLoopClient(info, ev),
+                     "alive": True, "generation": 1}
             roster.append(entry)
             client = entry["client"]
             ensure_profile(client, checks, require_fresh=True)
+
+            def relaunch(old, after=None):
+                """Start a fresh player generation on the same profile
+                store once the command budget is spent (the player
+                rejects commands past IdentityCapacity)."""
+                current = roster[-1]
+                lost = old.connection_lost
+                if not lost and old.commands_sent < COMMAND_BUDGET:
+                    return old
+                if lost:
+                    # The stream dropped mid-event; that event is
+                    # already failed. Its trace can never verify, so
+                    # the run cannot pass, but later events still get
+                    # an honest attempt on a fresh generation.
+                    checks.failed(
+                        "trace." + current["name"],
+                        "player stream lost (%s); relaunched on the "
+                        "same profile store" % (old._terminal,))
+                    report["traces"][current["name"]] = {
+                        "verified": False,
+                        "error": repr(old._terminal)}
+                else:
+                    finish_client(old, current["directory"], report,
+                                  current["name"], "loop")
+                try:
+                    old.close()
+                except Exception:
+                    pass
+                # Drop the finished generation's client so its stream
+                # state can be freed.
+                current["client"] = None
+                current["alive"] = False
+                terminate_process(current["process"], shutdown_timeout)
+                generation = current["generation"] + 1
+                name = "solo-gen%d" % generation
+                process_n, info_n, directory_n, ev_n = launch_generation(
+                    player_command, root, name, profile_dir,
+                    startup_timeout, report, "budget-relaunch", fixture)
+                fresh = CountingLoopClient(info_n, ev_n)
+                roster.append({"name": name, "process": process_n,
+                               "info": info_n, "directory": directory_n,
+                               "evidence": ev_n,
+                               "profileDir": profile_dir,
+                               "client": fresh, "alive": True,
+                               "generation": generation})
+                fresh.applied("profile.select", {"slot": 0})
+                if hasattr(old, "solo_routes"):
+                    fresh.solo_routes = old.solo_routes
+                if after is not None:
+                    after(fresh)
+                notes.append("%s: relaunched after %d commands%s on the "
+                             "same profile store" % (
+                                 name, old.commands_sent,
+                                 " and a lost stream" if lost else ""))
+                return fresh
+
             if scope == "catalog":
                 run_catalog_scope(client, checks, report, fixture,
                                   root)
@@ -1584,27 +1849,33 @@ def run_launch(player_command, evidence, scope, players, fixture,
                 finish_client(client, directory, report, "solo",
                               "loop")
             elif scope == "modes":
-                run_modes_scope(client, checks, report, fixture, root,
-                                routes_path=routes_path)
+                client = run_modes_scope(client, checks, report,
+                                         fixture, root,
+                                         routes_path=routes_path,
+                                         relaunch=relaunch)
                 record_content_identity(client, report)
-                finish_client(client, directory, report, "solo",
-                              "loop")
+                last = roster[-1]
+                finish_client(client, last["directory"], report,
+                              last["name"], "loop")
             else:
-                # campaign: generation 1 drives the full adventure;
-                # generation 2 proves durable progress survived a real
-                # process restart.
-                run_campaign_scope(client, checks, report, fixture,
-                                   root, routes_path=routes_path)
+                # campaign: the budgeted generations drive the full
+                # adventure; one more generation proves durable
+                # progress survived a real process restart.
+                client = run_campaign_scope(client, checks, report,
+                                            fixture, root,
+                                            routes_path=routes_path,
+                                            relaunch=relaunch)
                 expected = profile_snapshot(client) or {}
                 record_content_identity(client, report)
-                finish_client(client, directory, report, "solo",
-                              "loop")
+                last = roster[-1]
+                finish_client(client, last["directory"], report,
+                              last["name"], "loop")
                 try:
                     client.close()
                 except Exception:
                     pass
-                entry["alive"] = False
-                terminate_process(process, shutdown_timeout)
+                last["alive"] = False
+                terminate_process(last["process"], shutdown_timeout)
                 process2, info2, directory2, ev2 = launch_generation(
                     player_command, root, "solo-restart",
                     profile_dir, startup_timeout, report, "restart",
@@ -1613,7 +1884,8 @@ def run_launch(player_command, evidence, scope, players, fixture,
                           "info": info2, "directory": directory2,
                           "evidence": ev2, "profileDir": profile_dir,
                           "client": LoopClient(info2, ev2),
-                          "alive": True, "generation": 2}
+                          "alive": True,
+                          "generation": last["generation"] + 1}
                 roster.append(entry2)
                 client2 = entry2["client"]
                 client2.applied("profile.select", {"slot": 0})
