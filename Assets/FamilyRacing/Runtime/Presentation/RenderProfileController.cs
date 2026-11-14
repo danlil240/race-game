@@ -97,16 +97,61 @@ namespace FamilyRacing
             LowEndDevice = tablet && Application.platform == RuntimePlatform.Android;
             var urp = QualitySettings.renderPipeline
                 as UniversalRenderPipelineAsset;
-            // The A7 Lite GPU is fill-bound in the open-world courses:
-            // a little less internal resolution and a shorter shadow
-            // range on the device itself (never in the editor or on PC).
+            // A shorter shadow range on the device itself (never in the
+            // editor or on PC). Resolution stays at the authored scale:
+            // cutting it made the game look visibly worse.
             if (LowEndDevice && urp != null)
             {
-                urp.renderScale = Mathf.Min(urp.renderScale, 0.65f);
                 urp.shadowDistance = Mathf.Min(urp.shadowDistance, 20f);
             }
             ActiveRenderScale = urp != null ? urp.renderScale
                 : (tablet ? TabletRenderScale : PcRenderScale);
+        }
+        // Field render diagnostics on real tablets: one RENDER_STATS line
+        // every two seconds with what a frame actually costs (draw calls,
+        // batches, set-pass calls, triangles, CPU/GPU frame time), so
+        // tablet optimisation targets the measured cost.
+        private Unity.Profiling.ProfilerRecorder drawCalls, batches, setPass, triangles, vertices, mainThread;
+        private readonly FrameTiming[] timings = new FrameTiming[1];
+        private float nextStats;
+        private void OnEnable()
+        {
+            drawCalls = Unity.Profiling.ProfilerRecorder.StartNew(Unity.Profiling.ProfilerCategory.Render, "Draw Calls Count");
+            batches = Unity.Profiling.ProfilerRecorder.StartNew(Unity.Profiling.ProfilerCategory.Render, "Batches Count");
+            setPass = Unity.Profiling.ProfilerRecorder.StartNew(Unity.Profiling.ProfilerCategory.Render, "SetPass Calls Count");
+            triangles = Unity.Profiling.ProfilerRecorder.StartNew(Unity.Profiling.ProfilerCategory.Render, "Triangles Count");
+            vertices = Unity.Profiling.ProfilerRecorder.StartNew(Unity.Profiling.ProfilerCategory.Render, "Vertices Count");
+            mainThread = Unity.Profiling.ProfilerRecorder.StartNew(Unity.Profiling.ProfilerCategory.Internal, "Main Thread", 30);
+        }
+        private void OnDisable()
+        {
+            drawCalls.Dispose(); batches.Dispose(); setPass.Dispose();
+            triangles.Dispose(); vertices.Dispose(); mainThread.Dispose();
+        }
+        private void Update()
+        {
+            if (!LowEndDevice) return;
+            FrameTimingManager.CaptureFrameTimings();
+            if (Time.unscaledTime < nextStats) return;
+            nextStats = Time.unscaledTime + 2f;
+            var got = FrameTimingManager.GetLatestTimings(1, timings);
+            double mainMs = 0; var n = mainThread.Count;
+            for (var i = 0; i < n; i++) mainMs += mainThread.GetSample(i).Value * 1e-6;
+            if (n > 0) mainMs /= n;
+            var cam = Camera.main;
+            Debug.Log("RENDER_STATS draws=" + drawCalls.LastValue
+                + " batches=" + batches.LastValue
+                + " setpass=" + setPass.LastValue
+                + " tris=" + triangles.LastValue
+                + " verts=" + vertices.LastValue
+                + " mainMs=" + mainMs.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture)
+                + " cpuMs=" + (got > 0 ? timings[0].cpuFrameTime.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) : "na")
+                + " gpuMs=" + (got > 0 ? timings[0].gpuFrameTime.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture) : "na")
+                + " screen=" + Screen.width + "x" + Screen.height
+                + " scale=" + ActiveRenderScale.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)
+                + " far=" + (cam != null ? cam.farClipPlane.ToString("0") : "na")
+                + " gpu=" + SystemInfo.graphicsDeviceName
+                + " fps=" + (1f / Mathf.Max(0.0001f, Time.smoothDeltaTime)).ToString("0"));
         }
     }
 }
