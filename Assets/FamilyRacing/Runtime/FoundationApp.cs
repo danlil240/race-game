@@ -586,7 +586,7 @@ namespace FamilyRacing
                 if (racer.participantId == localId)
                 {
                     var predicted = raceBridge != null
-                        ? raceBridge.SmoothedLocalMotor(now) : null;
+                        ? raceBridge.SmoothedLocalMotor(now, alpha) : null;
                     localPose = predicted;
                     if (localPose == null && racer.session != null)
                         localPose = racer.session.motor;

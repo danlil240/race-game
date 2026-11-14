@@ -331,13 +331,53 @@ namespace FamilyRacing.Networking
         /// vehicle view; null until prediction is seeded.</summary>
         public MotorState SmoothedLocalMotor(double nowSeconds)
         {
+            return SmoothedLocalMotor(nowSeconds, 1f);
+        }
+
+        // Inter-tick smoothing for the local predicted car: prediction
+        // advances in 30 Hz steps, so on a ~30 fps tablet some frames see
+        // no new tick and others two — the car visibly stutters. With the
+        // frame's tick alpha the pose blends from the previous predicted
+        // tick to the current one (one tick behind, like solo racing).
+        private MotorState previousLiveTick, currentLiveTick;
+        public MotorState SmoothedLocalMotor(double nowSeconds, float alpha)
+        {
             var live = prediction != null ? prediction.Predicted : null;
             if (live == null) return null;
+            if (currentLiveTick == null || live.tick != currentLiveTick.tick)
+                previousLiveTick = currentLiveTick;
+            currentLiveTick = live;
+            var pose = previousLiveTick != null
+                    && previousLiveTick.tick == live.tick - 1 && alpha < 1f
+                ? LerpMotor(previousLiveTick, live, Mathf.Clamp01(alpha))
+                : live;
             var dt = double.IsNaN(lastSmoothTime)
                 ? 0 : nowSeconds - lastSmoothTime;
             lastSmoothTime = nowSeconds;
-            smoothedLocal = smoother.Apply(live, dt);
+            smoothedLocal = smoother.Apply(pose, dt);
             return smoothedLocal;
+        }
+
+        private static MotorState LerpMotor(MotorState a, MotorState b, float t)
+        {
+            var dx = b.x - a.x; var dy = b.y - a.y; var dz = b.z - a.z;
+            // A teleport (recovery, snap) never blends across the gap.
+            if (dx * dx + dy * dy + dz * dz > 25f) return b;
+            var pose = b.Copy();
+            pose.x = a.x + dx * t;
+            pose.y = a.y + dy * t;
+            pose.z = a.z + dz * t;
+            pose.heading = a.heading + Mathf.DeltaAngle(a.heading * Mathf.Rad2Deg,
+                b.heading * Mathf.Rad2Deg) * Mathf.Deg2Rad * t;
+            var pa = a.physics; var pb = pose.physics;
+            if (pa != null && pb != null)
+            {
+                var qa = new Quaternion(pa.attitudeX, pa.attitudeY, pa.attitudeZ, pa.attitudeW);
+                var qb = new Quaternion(pb.attitudeX, pb.attitudeY, pb.attitudeZ, pb.attitudeW);
+                var q = Quaternion.Slerp(qa, qb, t);
+                pb.TrySetAttitude(q.x, q.y, q.z, q.w);
+            }
+            return pose;
         }
 
         // Every reconcile: the simulated pose corrects immediately; the
@@ -1064,6 +1104,7 @@ namespace FamilyRacing.Networking
             smoother.Reset();
             smoothedLocal = null;
             lastSmoothTime = double.NaN;
+            previousLiveTick = currentLiveTick = null;
         }
 
         private void ClientTick(DriverInput localInput, NetworkSessionState snap)
