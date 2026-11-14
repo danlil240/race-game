@@ -114,11 +114,17 @@ namespace FamilyRacing
                 Quaternion.Slerp(mirrorCamera.transform.rotation,
                     Quaternion.LookRotation(lookAt - desired, Vector3.up), blend));
             previousLocalPosition = localPosition; hasPose = true;
-            // Tablet budget: the mirror is a second full scene render, so a
-            // real tablet draws it every third frame at a shorter range.
-            mirrorCamera.enabled = !RenderProfileController.LowEndDevice
-                || Time.frameCount % 3 == 0;
+            // Tablet budget: the mirror is a second full scene render.
+            // Drawing it every third frame made every third frame slow
+            // (measured 16/49/33 ms repeating - a visible periodic stall),
+            // so a real tablet shows the mirror only while it has something
+            // to show (a deployed trap or a hit replay) and otherwise
+            // spends every frame on the road ahead.
+            var showMirror = !RenderProfileController.LowEndDevice
+                || !string.IsNullOrEmpty(focusedId) || shotRemaining > 0f;
+            mirrorCamera.enabled = showMirror;
             UpdateHud(state.language == "he");
+            frame.style.display = showMirror ? DisplayStyle.Flex : DisplayStyle.None;
         }
 
         private static NetworkRacerState Find(NetworkRaceState race, string id)

@@ -27,6 +27,9 @@ namespace FamilyRacing
 
         public const int TabletTargetFrameRate = 30;
         public const int PcTargetFrameRate = 60;
+        // Experiment 2026-11-14: uncapped the A7 Lite lands on a 33/33/16 ms
+        // mix (~36 fps); a 30 cap is tried for an even 33 ms cadence.
+        public const int GE8320TargetFrameRate = 30;
         public const float TabletRenderScale = 0.75f;
         public const float PcRenderScale = 1.0f;
 
@@ -89,7 +92,7 @@ namespace FamilyRacing
                 && SystemInfo.graphicsDeviceName.IndexOf("PowerVR Rogue GE8320",
                     System.StringComparison.OrdinalIgnoreCase) >= 0)
             {
-                Application.targetFrameRate = PcTargetFrameRate;
+                Application.targetFrameRate = GE8320TargetFrameRate;
             }
             ActiveProfile = wanted;
             // Real tablet hardware (not a forced benchmark profile on PC)
