@@ -576,6 +576,7 @@ namespace FamilyRacing
             var overrides = new Dictionary<string, MotorState>(
                 StringComparer.Ordinal);
             lastPoseSources.Clear();
+            drivingWorld.ContinuousPoseIds.Clear();
             MotorState localPose = null;
             foreach (var racer in race.racers)
             {
@@ -593,7 +594,10 @@ namespace FamilyRacing
                     if (localPose != null)
                         overrides[racer.participantId] = localPose;
                     if (predicted != null)
+                    {
                         lastPoseSources[racer.participantId] = "predicted";
+                        drivingWorld.ContinuousPoseIds.Add(racer.participantId);
+                    }
                 }
                 else
                 {
@@ -603,6 +607,7 @@ namespace FamilyRacing
                     if (remote != null)
                     {
                         overrides[racer.participantId] = remote;
+                        drivingWorld.ContinuousPoseIds.Add(racer.participantId);
                         lastPoseSources[racer.participantId] =
                             "interpolated";
                     }

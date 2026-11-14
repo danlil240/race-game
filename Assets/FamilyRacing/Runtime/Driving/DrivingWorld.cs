@@ -599,6 +599,11 @@ namespace FamilyRacing
             return view;
         }
 
+        // Participants whose pose override is continuous this frame (see
+        // VehiclePresentation.ApplyContinuousPose); the frame owner fills it.
+        public readonly HashSet<string> ContinuousPoseIds =
+            new HashSet<string>(System.StringComparer.Ordinal);
+
         private void ApplyRacerVisual(RacerView view, NetworkRacerState racer,
             float visualAlpha, MotorState poseOverride,
             ParticipantState participant)
@@ -645,8 +650,12 @@ namespace FamilyRacing
                 view.presentation.NotifyFinished();
             var steering = racer.session.input != null
                 ? racer.session.input.steering : 0f;
-            view.presentation.ApplyPose(
-                poseOverride ?? racer.session.motor, steering, visualAlpha);
+            if (poseOverride != null
+                && ContinuousPoseIds.Contains(racer.participantId ?? ""))
+                view.presentation.ApplyContinuousPose(poseOverride, steering);
+            else
+                view.presentation.ApplyPose(
+                    poseOverride ?? racer.session.motor, steering, visualAlpha);
             raceFacts.Add(new RacerPresentationState
             {
                 participantId = racer.participantId,

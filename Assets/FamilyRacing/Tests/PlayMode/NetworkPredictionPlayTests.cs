@@ -523,7 +523,11 @@ namespace FamilyRacing.Tests
                     client.Now);
                 Assert.That(last, Is.Not.Null,
                     "no buffered remote pose for the host racer");
-                Assert.That(client.Bridge.RenderHostTime(client.Now),
+                // The render clock is the low-passed host clock minus the
+                // interpolation delay, so right after the start it may sit
+                // a few ms either side of zero; the host clock estimate
+                // itself must be running.
+                Assert.That(client.Bridge.EstimatedHostSeconds(client.Now),
                     Is.GreaterThan(0));
 
                 // Stop the host entirely: no more snapshots can arrive.

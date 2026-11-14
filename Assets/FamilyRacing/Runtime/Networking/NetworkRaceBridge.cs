@@ -144,6 +144,7 @@ namespace FamilyRacing.Networking
         private long lastSentEpoch = -1;
         private long lastSnapshotHostTick;
         private double lastSnapshotReceivedAt = double.NaN;
+        private double hostClockOffset = double.NaN;
         // Render-time clock, injectable so tests can drive deterministic
         // host-time estimates; defaults to unscaled real time.
         internal Func<double> NowSeconds =
@@ -298,9 +299,12 @@ namespace FamilyRacing.Networking
         public double EstimatedHostSeconds(double nowSeconds)
         {
             if (double.IsNaN(lastSnapshotReceivedAt)) return 0;
-            return lastSnapshotHostTick
-                / (double)NetworkSettings.SimulationTicksPerSecond
-                + (nowSeconds - lastSnapshotReceivedAt);
+            // Snapshots are only seen at rendered-frame boundaries, so each
+            // arrival time is quantized by up to a frame (33 ms on a
+            // tablet). Anchoring to the latest arrival made remote cars
+            // speed up and slow down with that jitter; the low-passed
+            // host-clock offset gives a steady render clock instead.
+            return nowSeconds + hostClockOffset;
         }
 
         /// <summary>The host-time coordinate remote racers render at:
@@ -347,10 +351,18 @@ namespace FamilyRacing.Networking
             if (currentLiveTick == null || live.tick != currentLiveTick.tick)
                 previousLiveTick = currentLiveTick;
             currentLiveTick = live;
-            var pose = previousLiveTick != null
-                    && previousLiveTick.tick == live.tick - 1 && alpha < 1f
-                ? LerpMotor(previousLiveTick, live, Mathf.Clamp01(alpha))
-                : live;
+            // The pose is CONTINUOUS (it moves every rendered frame), so the
+            // caller must draw it as-is - never through the per-tick
+            // interpolation the committed poses use. A frame that spanned
+            // several ticks rebuilds the final one-tick window from the span.
+            var pose = live;
+            if (previousLiveTick != null && alpha < 1f)
+            {
+                var gap = live.tick - previousLiveTick.tick;
+                if (gap >= 1 && gap <= 4)
+                    pose = LerpMotor(previousLiveTick, live,
+                        1f - (1f - Mathf.Clamp01(alpha)) / gap);
+            }
             var dt = double.IsNaN(lastSmoothTime)
                 ? 0 : nowSeconds - lastSmoothTime;
             lastSmoothTime = nowSeconds;
@@ -1252,6 +1264,13 @@ namespace FamilyRacing.Networking
             lastSnapshotHostTick = snapshot.state != null
                 ? snapshot.state.hostTick : 0;
             lastSnapshotReceivedAt = NowSeconds();
+            var clockSample = lastSnapshotHostTick
+                / (double)NetworkSettings.SimulationTicksPerSecond
+                - lastSnapshotReceivedAt;
+            hostClockOffset = double.IsNaN(hostClockOffset)
+                    || Math.Abs(clockSample - hostClockOffset) > 0.25
+                ? clockSample
+                : hostClockOffset + (clockSample - hostClockOffset) * 0.1;
             interpolation.Push(snapshot);
             pendingReconcile = snapshot;
         }
@@ -1488,6 +1507,7 @@ namespace FamilyRacing.Networking
             lastSentEpoch = -1;
             lastSnapshotHostTick = 0;
             lastSnapshotReceivedAt = double.NaN;
+            hostClockOffset = double.NaN;
             inputSequence = 0;
         }
 
