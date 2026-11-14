@@ -100,6 +100,8 @@ namespace FamilyRacing.Core.Networking
         public bool LastCorrectionSnap { get; private set; }
         public long Corrections { get; private set; }
         public long Snaps { get; private set; }
+        // Snapshots whose horizon matched the prediction (no rewind).
+        public long ConfirmedSnapshots { get; private set; }
         public bool ResyncRequested { get; private set; }
         public string LastResyncReason { get; private set; } = "";
         public long ResyncCount { get; private set; }
@@ -428,6 +430,24 @@ namespace FamilyRacing.Core.Networking
                     > NetworkSettings.CorrectionEpsilonDegrees)
                 Corrections++;
 
+            // A confirmed prediction needs no rewind: when the measured
+            // horizon error sits inside the correction epsilon the live
+            // predicted body already IS the authoritative future, so the
+            // restore + PhysX replay (3-4 extra physics steps on every
+            // 15 Hz snapshot — the dominant main-thread cost on a tablet
+            // client) is skipped. Drift cannot hide: the error is an
+            // absolute pose comparison, so the first snapshot past the
+            // epsilon rewinds and replays as before.
+            if (!snap && LastErrorMeasured && predicted != null
+                && LastErrorDistance <= NetworkSettings.CorrectionEpsilonMeters
+                && LastErrorDegrees <= NetworkSettings.CorrectionEpsilonDegrees)
+            {
+                LastReplayCount = 0;
+                LastReplaySeconds = 0;
+                ConfirmedSnapshots++;
+                return predicted.Copy();
+            }
+
             // Restore the full authoritative state on the injected body —
             // pose, velocities, attitude, angular velocity, controller
             // and suspension histories — then replay only unacknowledged
@@ -490,6 +510,7 @@ namespace FamilyRacing.Core.Networking
             LastCorrectionSnap = false;
             Corrections = 0;
             Snaps = 0;
+            ConfirmedSnapshots = 0;
             ResyncRequested = false;
             LastResyncReason = "";
             ResyncCount = 0;
