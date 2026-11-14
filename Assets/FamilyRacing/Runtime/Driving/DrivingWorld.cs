@@ -567,6 +567,7 @@ namespace FamilyRacing
                 ApplyRacerVisual(view, racer, visualAlpha, overrideMotor,
                     participant);
             }
+            MeasureMotionSmoothness();
             // Deterministic cleanup in ordinal key order.
             var stale = new List<string>();
             foreach (var key in racerViews.Keys)
@@ -576,6 +577,66 @@ namespace FamilyRacing
             RebuildFactBuffer();
         }
 
+        // Field diagnostic (tablets only): how evenly the DRAWN vehicles
+        // and the camera actually move. Per rendered frame each tracked
+        // transform's speed is compared with its speed the frame before;
+        // the mean relative change over two seconds is logged as a
+        // percentage (0 = perfectly even motion). Works identically for
+        // solo and LAN frames, so the two can be compared directly.
+        private struct MotionProbe { public Vector3 pos; public float speed; public int samples; public float sum, worst; public bool has; }
+        private readonly Dictionary<string, MotionProbe> motionProbes =
+            new Dictionary<string, MotionProbe>(System.StringComparer.Ordinal);
+        private float nextMotionLog;
+        private static readonly bool MotionProbeForced = System.Array.IndexOf(
+            System.Environment.GetCommandLineArgs(), "--motion-probe") >= 0;
+        private void ProbeMotion(string key, Vector3 position, float dt)
+        {
+            MotionProbe probe;
+            motionProbes.TryGetValue(key, out probe);
+            if (probe.has && dt > 0.0001f)
+            {
+                var speed = (position - probe.pos).magnitude / dt;
+                var reference = Mathf.Max(speed, probe.speed);
+                if (probe.speed > 4f && reference < 200f)
+                {
+                    var change = Mathf.Abs(speed - probe.speed) / reference;
+                    probe.sum += change; probe.samples++;
+                    if (change > probe.worst) probe.worst = change;
+                }
+                probe.speed = speed;
+            }
+            probe.pos = position; probe.has = true;
+            motionProbes[key] = probe;
+        }
+        private void MeasureMotionSmoothness()
+        {
+            if (!RenderProfileController.LowEndDevice && !MotionProbeForced) return;
+            var dt = Time.unscaledDeltaTime;
+            foreach (var pair in racerViews)
+                if (pair.Value != null && pair.Value.root != null)
+                    ProbeMotion(IsLocalSeat(pair.Key) ? "local" : "remote:" + pair.Key,
+                        pair.Value.root.transform.position, dt);
+            var cam = Camera.main;
+            if (cam != null) ProbeMotion("camera", cam.transform.position, dt);
+            if (Time.unscaledTime < nextMotionLog) return;
+            nextMotionLog = Time.unscaledTime + 2f;
+            var text = new System.Text.StringBuilder("MOTION_SMOOTHNESS");
+            var keys = new List<string>(motionProbes.Keys);
+            keys.Sort(System.StringComparer.Ordinal);
+            foreach (var key in keys)
+            {
+                var probe = motionProbes[key];
+                var label = key.StartsWith("remote:") ? "remote" : key;
+                if (probe.samples > 0)
+                    text.Append(' ').Append(label).Append("=")
+                        .Append((100f * probe.sum / probe.samples).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture))
+                        .Append("%/max").Append((100f * probe.worst).ToString("0", System.Globalization.CultureInfo.InvariantCulture)).Append('%');
+                probe.sum = 0; probe.samples = 0; probe.worst = 0;
+                motionProbes[key] = probe;
+            }
+            text.Append(" dtMs=").Append((dt * 1000f).ToString("0"));
+            Debug.Log(text.ToString());
+        }
         private RacerView EnsureRacerView(string participantId)
         {
             RacerView view;

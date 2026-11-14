@@ -936,7 +936,7 @@ namespace FamilyRacing.Tests
             Assert.That(
                 FamilyRacing.Core.Networking.NetworkSettings
                     .LanProtocolVersion,
-                Is.EqualTo(4));
+                Is.EqualTo(5));
             Assert.That(
                 FamilyRacing.Core.Networking.NetworkSettings
                     .StateSchemaVersion,

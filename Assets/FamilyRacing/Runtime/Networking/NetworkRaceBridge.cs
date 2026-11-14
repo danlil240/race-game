@@ -145,6 +145,10 @@ namespace FamilyRacing.Networking
         private long lastSnapshotHostTick;
         private double lastSnapshotReceivedAt = double.NaN;
         private double hostClockOffset = double.NaN;
+        // Diagnostics: accepted snapshots and the widest host-tick gap
+        // between consecutive ones (reset by the reader).
+        public long SnapshotsAccepted;
+        public long MaxSnapshotTickGap;
         // Render-time clock, injectable so tests can drive deterministic
         // host-time estimates; defaults to unscaled real time.
         internal Func<double> NowSeconds =
@@ -325,6 +329,22 @@ namespace FamilyRacing.Networking
                 RenderHostTime(nowSeconds));
         }
 
+        /// <summary>True when the last sampled pose for this remote was
+        /// extrapolated past (or held at) its newest snapshot.</summary>
+        // Newest snapshot host tick minus the render coordinate, in ticks:
+        // positive = interpolating inside the buffer.
+        public double TicksBehindNewest(double nowSeconds)
+        {
+            return lastSnapshotHostTick - RenderHostTime(nowSeconds)
+                * NetworkSettings.SimulationTicksPerSecond;
+        }
+
+        public bool RemoteExtrapolating(string participantId)
+        {
+            return interpolation.IsStale(participantId)
+                || interpolation.ExtrapolationSeconds(participantId) > 0;
+        }
+
         /// <summary>Task 6 render seam: the local racer's pose to draw —
         /// the LIVE predicted motor plus the decaying correction offset.
         /// Feeding prediction.Predicted (not a reconcile-time pose) is
@@ -335,61 +355,13 @@ namespace FamilyRacing.Networking
         /// vehicle view; null until prediction is seeded.</summary>
         public MotorState SmoothedLocalMotor(double nowSeconds)
         {
-            return SmoothedLocalMotor(nowSeconds, 1f);
-        }
-
-        // Inter-tick smoothing for the local predicted car: prediction
-        // advances in 30 Hz steps, so on a ~30 fps tablet some frames see
-        // no new tick and others two — the car visibly stutters. With the
-        // frame's tick alpha the pose blends from the previous predicted
-        // tick to the current one (one tick behind, like solo racing).
-        private MotorState previousLiveTick, currentLiveTick;
-        public MotorState SmoothedLocalMotor(double nowSeconds, float alpha)
-        {
             var live = prediction != null ? prediction.Predicted : null;
             if (live == null) return null;
-            if (currentLiveTick == null || live.tick != currentLiveTick.tick)
-                previousLiveTick = currentLiveTick;
-            currentLiveTick = live;
-            // The pose is CONTINUOUS (it moves every rendered frame), so the
-            // caller must draw it as-is - never through the per-tick
-            // interpolation the committed poses use. A frame that spanned
-            // several ticks rebuilds the final one-tick window from the span.
-            var pose = live;
-            if (previousLiveTick != null && alpha < 1f)
-            {
-                var gap = live.tick - previousLiveTick.tick;
-                if (gap >= 1 && gap <= 4)
-                    pose = LerpMotor(previousLiveTick, live,
-                        1f - (1f - Mathf.Clamp01(alpha)) / gap);
-            }
             var dt = double.IsNaN(lastSmoothTime)
                 ? 0 : nowSeconds - lastSmoothTime;
             lastSmoothTime = nowSeconds;
-            smoothedLocal = smoother.Apply(pose, dt);
+            smoothedLocal = smoother.Apply(live, dt);
             return smoothedLocal;
-        }
-
-        private static MotorState LerpMotor(MotorState a, MotorState b, float t)
-        {
-            var dx = b.x - a.x; var dy = b.y - a.y; var dz = b.z - a.z;
-            // A teleport (recovery, snap) never blends across the gap.
-            if (dx * dx + dy * dy + dz * dz > 25f) return b;
-            var pose = b.Copy();
-            pose.x = a.x + dx * t;
-            pose.y = a.y + dy * t;
-            pose.z = a.z + dz * t;
-            pose.heading = a.heading + Mathf.DeltaAngle(a.heading * Mathf.Rad2Deg,
-                b.heading * Mathf.Rad2Deg) * Mathf.Deg2Rad * t;
-            var pa = a.physics; var pb = pose.physics;
-            if (pa != null && pb != null)
-            {
-                var qa = new Quaternion(pa.attitudeX, pa.attitudeY, pa.attitudeZ, pa.attitudeW);
-                var qb = new Quaternion(pb.attitudeX, pb.attitudeY, pb.attitudeZ, pb.attitudeW);
-                var q = Quaternion.Slerp(qa, qb, t);
-                pb.TrySetAttitude(q.x, q.y, q.z, q.w);
-            }
-            return pose;
         }
 
         // Every reconcile: the simulated pose corrects immediately; the
@@ -986,6 +958,7 @@ namespace FamilyRacing.Networking
             }
             lastPublished = snapshot;
             SnapshotsPublished++;
+            hostLogPublished++; hostLogBytes = packet.Length;
             var sent = false;
             var allSent = true;
             foreach (var connectionId in session.HostConnections())
@@ -994,11 +967,22 @@ namespace FamilyRacing.Networking
                 if (!ok)
                     LastError = "snapshotSend:" + transport.LastError
                         + " len=" + packet.Length;
+                if (!ok) hostLogSendFailures++;
                 sent |= ok;
                 allSent &= ok;
             }
+            if (Time.realtimeSinceStartupAsDouble >= hostLogNext)
+            {
+                hostLogNext = Time.realtimeSinceStartupAsDouble + 2.0;
+                Debug.Log("LAN_HOST snapshots=" + hostLogPublished + " sendFailures=" + hostLogSendFailures
+                    + " bytes=" + hostLogBytes + " lastError=" + LastError);
+                hostLogPublished = hostLogSendFailures = 0;
+            }
             return sent && allSent;
         }
+        // Field diagnostics for the host's snapshot stream.
+        private int hostLogPublished, hostLogSendFailures, hostLogBytes;
+        private double hostLogNext;
 
         // Reliable ordered delivery of staged authoritative events. Each
         // batch carries identities so consumers apply every event once
@@ -1116,7 +1100,6 @@ namespace FamilyRacing.Networking
             smoother.Reset();
             smoothedLocal = null;
             lastSmoothTime = double.NaN;
-            previousLiveTick = currentLiveTick = null;
         }
 
         private void ClientTick(DriverInput localInput, NetworkSessionState snap)
@@ -1261,8 +1244,12 @@ namespace FamilyRacing.Networking
             // a burst coalesces to the newest authoritative boundary —
             // restore authoritative, replay unacknowledged — exactly
             // once per frame inside the shared replay budget.
+            var previousHostTick = lastSnapshotHostTick;
             lastSnapshotHostTick = snapshot.state != null
                 ? snapshot.state.hostTick : 0;
+            SnapshotsAccepted++;
+            if (previousHostTick > 0 && lastSnapshotHostTick - previousHostTick > MaxSnapshotTickGap)
+                MaxSnapshotTickGap = lastSnapshotHostTick - previousHostTick;
             lastSnapshotReceivedAt = NowSeconds();
             var clockSample = lastSnapshotHostTick
                 / (double)NetworkSettings.SimulationTicksPerSecond

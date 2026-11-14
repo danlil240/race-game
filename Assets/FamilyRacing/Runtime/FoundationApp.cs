@@ -567,6 +567,10 @@ namespace FamilyRacing
         // remote racers render interpolated poses where a client-side lane
         // exists. Returns the locally owned racer's rendered pose for the
         // camera to follow; null when the local participant is not seated.
+        // Diagnostic: how many drawn remote poses were extrapolated or held
+        // (the snapshot buffer ran dry) since the last report.
+        private int remoteSamples, remoteExtrapolated;
+        private float nextRemoteLog;
         private MotorState ApplyNetworkFrame(NetworkRaceState race,
             FoundationState state, float alpha)
         {
@@ -587,17 +591,17 @@ namespace FamilyRacing
                 if (racer.participantId == localId)
                 {
                     var predicted = raceBridge != null
-                        ? raceBridge.SmoothedLocalMotor(now, alpha) : null;
+                        ? raceBridge.SmoothedLocalMotor(now) : null;
                     localPose = predicted;
                     if (localPose == null && racer.session != null)
                         localPose = racer.session.motor;
                     if (localPose != null)
                         overrides[racer.participantId] = localPose;
+                    // The predicted pose is a committed 30 Hz tick pose, so
+                    // it takes the same tick-interpolated draw path as a
+                    // solo racer (not the continuous path remotes use).
                     if (predicted != null)
-                    {
                         lastPoseSources[racer.participantId] = "predicted";
-                        drivingWorld.ContinuousPoseIds.Add(racer.participantId);
-                    }
                 }
                 else
                 {
@@ -606,6 +610,8 @@ namespace FamilyRacing
                         : null;
                     if (remote != null)
                     {
+                        remoteSamples++;
+                        if (raceBridge.RemoteExtrapolating(racer.participantId)) remoteExtrapolated++;
                         overrides[racer.participantId] = remote;
                         drivingWorld.ContinuousPoseIds.Add(racer.participantId);
                         lastPoseSources[racer.participantId] =
@@ -615,6 +621,16 @@ namespace FamilyRacing
             }
             // The roster resolves human cosmetics (avatar + color slot);
             // racers without a roster entry are AI and map by slot.
+            if (remoteSamples > 0 && Time.unscaledTime >= nextRemoteLog)
+            {
+                nextRemoteLog = Time.unscaledTime + 2f;
+                Debug.Log("LAN_REMOTE samples=" + remoteSamples + " extrapolated=" + remoteExtrapolated
+                    + " snapshots=" + raceBridge.SnapshotsAccepted + " maxTickGap=" + raceBridge.MaxSnapshotTickGap
+                    + " renderLagTicks=" + ((raceBridge.EstimatedHostSeconds(now) * 30.0) - raceBridge.RenderHostTime(now) * 30.0).ToString("0.0")
+                    + " behindNewestTicks=" + raceBridge.TicksBehindNewest(now).ToString("0.0"));
+                raceBridge.SnapshotsAccepted = 0; raceBridge.MaxSnapshotTickGap = 0;
+                remoteSamples = remoteExtrapolated = 0;
+            }
             drivingWorld.ApplyRaceFrame(race, alpha, overrides,
                 state.network != null ? state.network.participants : null);
             return localPose;

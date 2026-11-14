@@ -16,7 +16,7 @@ namespace FamilyRacing.Core.Networking
         // a seat is dealt rather than silently racing without items.
         // Protocol 4 adds moving missiles, armed mines, and EMP visuals;
         // protocol-3 clients cannot validate or render this weapon state.
-        public const int LanProtocolVersion = 4;
+        public const int LanProtocolVersion = 5; // 5: deflated snapshot envelope
 
         // Observation schema emitted by FoundationState once the network
         // slice exists. Profile schema (1 -> 2 in a later task) is a
@@ -250,7 +250,10 @@ namespace FamilyRacing.Core.Networking
         // per remote racer for interpolation.
         public const int InterpolationBufferCapacity = 64;
         // Remote racers render this far behind the newest host tick.
-        public const double InterpolationDelaySeconds = 0.1;
+        // Two 15 Hz snapshot intervals (133 ms) plus margin: at 100 ms a
+        // 30 fps client, which only sees snapshots at frame boundaries,
+        // regularly ran past its newest snapshot and extrapolated.
+        public const double InterpolationDelaySeconds = 0.15;
         // Past the newest buffered pose, extrapolation runs at most this
         // far, then the last pose holds and reports stale.
         public const double ExtrapolationLimitSeconds = 0.1;

@@ -198,11 +198,28 @@ namespace FamilyRacing.Networking
                 }
             }
             var json = JsonUtility.ToJson(wire);
-            packet = Wrap(SnapshotTag, json);
+            var plain = Wrap(SnapshotTag, json);
             // Explicit failure on overflow — never truncate racer state.
-            if (packet.Length > NetworkSettings.SnapshotCeilingBytes)
+            // The ceiling stays a bound on the JSON itself.
+            if (plain.Length > NetworkSettings.SnapshotCeilingBytes)
             { packet = null; error = "snapshotOverflow"; return false; }
+            // A four-racer snapshot is ~21-25 KB of JSON: 18 fragments on
+            // the reliable lane, 15 times a second, per client. Any lost
+            // fragment stalls everything behind it and a full send window
+            // drops whole snapshots (measured gaps of 4-84 host ticks on
+            // 30 fps clients). The body deflates to a few KB, so the same
+            // state rides in a handful of fragments.
+            packet = WrapDeflated(SnapshotTag, plain);
             return true;
+        }
+
+        /// <summary>The JSON body a snapshot packet carries (inflated
+        /// when the envelope is deflated) - diagnostics and tests.</summary>
+        public static bool TryReadSnapshotJson(byte[] packet, out string json)
+        {
+            string error;
+            return UnwrapMaybeDeflated(packet, SnapshotTag,
+                NetworkSettings.SnapshotCeilingBytes, out json, out error);
         }
 
         public static bool TryDecodeSnapshot(byte[] packet,
@@ -211,7 +228,8 @@ namespace FamilyRacing.Networking
             snapshot = null;
             error = null;
             string json;
-            if (!Unwrap(packet, SnapshotTag, NetworkSettings.SnapshotCeilingBytes,
+            if (!UnwrapMaybeDeflated(packet, SnapshotTag,
+                    NetworkSettings.SnapshotCeilingBytes,
                     out json, out error)) return false;
             // JsonUtility materializes an explicit JSON null on an object
             // or list field as a fresh default instance — "state":null
@@ -417,6 +435,73 @@ namespace FamilyRacing.Networking
             return packet;
         }
 
+        // Deflated envelope: tag, one 0x00 marker byte (a JSON body always
+        // starts with '{', so the marker can never be mistaken for one),
+        // then the raw deflate stream of the JSON body.
+        private const byte DeflateMarker = 0;
+
+        private static byte[] WrapDeflated(byte[] tag, byte[] plainPacket)
+        {
+            using (var buffer = new System.IO.MemoryStream(plainPacket.Length / 4 + 16))
+            {
+                buffer.Write(tag, 0, HeaderBytes);
+                buffer.WriteByte(DeflateMarker);
+                using (var deflate = new System.IO.Compression.DeflateStream(buffer,
+                    System.IO.Compression.CompressionLevel.Fastest, true))
+                    deflate.Write(plainPacket, HeaderBytes,
+                        plainPacket.Length - HeaderBytes);
+                return buffer.ToArray();
+            }
+        }
+
+        // Accepts both the plain JSON envelope and the deflated one. The
+        // byte ceiling binds the JSON after inflation, so a hostile or
+        // corrupt stream can never expand past the typed wire bound.
+        private static bool UnwrapMaybeDeflated(byte[] packet, byte[] tag,
+            int maxBytes, out string json, out string error)
+        {
+            if (packet == null || packet.Length <= HeaderBytes + 1
+                || packet[HeaderBytes] != DeflateMarker)
+                return Unwrap(packet, tag, maxBytes, out json, out error);
+            json = null;
+            error = null;
+            if (packet.Length > maxBytes)
+            { error = "oversizedPacket"; return false; }
+            for (var i = 0; i < HeaderBytes; i++)
+                if (packet[i] != tag[i]) { error = "wrongType"; return false; }
+            try
+            {
+                using (var source = new System.IO.MemoryStream(packet,
+                    HeaderBytes + 1, packet.Length - HeaderBytes - 1))
+                using (var inflate = new System.IO.Compression.DeflateStream(source,
+                    System.IO.Compression.CompressionMode.Decompress))
+                {
+                    var body = new byte[maxBytes];
+                    var total = 0;
+                    while (true)
+                    {
+                        if (total == body.Length)
+                        {
+                            // Full buffer: one more byte means overflow.
+                            if (inflate.ReadByte() >= 0)
+                            { error = "oversizedPacket"; return false; }
+                            break;
+                        }
+                        var read = inflate.Read(body, total, body.Length - total);
+                        if (read <= 0) break;
+                        total += read;
+                    }
+                    if (total == 0) { error = "badPacket"; return false; }
+                    json = Encoding.UTF8.GetString(body, 0, total);
+                    return true;
+                }
+            }
+            catch (Exception)
+            {
+                error = "malformed";
+                return false;
+            }
+        }
         private static bool Unwrap(byte[] packet, byte[] tag, int maxBytes,
             out string json, out string error)
         {
