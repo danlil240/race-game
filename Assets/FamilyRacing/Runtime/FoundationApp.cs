@@ -285,6 +285,13 @@ namespace FamilyRacing
             // Commands publish their action-boundary state+result before the
             // next observation tick is emitted.
             bridge?.Pump();
+            // A LAN peer must keep pumping while its window is unfocused:
+            // a PC host left in the background (the family is holding the
+            // tablets) otherwise freezes, and every tablet's Ready/Start
+            // request waits forever. Solo play still pauses on focus loss.
+            if (bridge == null)
+                Application.runInBackground = CurrentScreen != null
+                    && CurrentScreen.StartsWith("lan-", StringComparison.Ordinal);
             // Transport/discovery callbacks run on this thread and queue
             // session outcomes; monotonic wall time expires joins and
             // request round-trips whether or not the app is paused.

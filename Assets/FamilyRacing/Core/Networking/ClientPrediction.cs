@@ -564,14 +564,16 @@ namespace FamilyRacing.Core.Networking
             return null;
         }
 
-        // Acknowledged history entries are dead weight: only the entry at
-        // the ack horizon (already consumed for the error measure) and
-        // older go; unacknowledged entries survive for the next measure.
+        // Acknowledged history entries older than the ack horizon are dead
+        // weight. The horizon entry itself survives: a host tick that
+        // consumed no new sample repeats the same ack, and that repeat must
+        // still measure (a missing horizon forces a snap every snapshot).
+        // Unacknowledged entries survive for the next measure.
         private void PruneHistory()
         {
             var dead = new List<long>();
             foreach (var seq in history.Keys)
-                if (seq <= lastAckedSequence) dead.Add(seq);
+                if (seq < lastAckedSequence) dead.Add(seq);
             foreach (var seq in dead) history.Remove(seq);
         }
 

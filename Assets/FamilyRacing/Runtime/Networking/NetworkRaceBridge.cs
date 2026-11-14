@@ -1025,7 +1025,38 @@ namespace FamilyRacing.Networking
                 BindPredictionSimulation();
                 prediction.Reconcile(snapshot, LocalTuning(), clientWorld);
                 BlendCorrection();
+                LogPredictionHealth();
             }
+        }
+
+        // Field diagnostics for client rubber-banding: one logcat/Player.log
+        // line every two seconds of racing with the reconciliation counters
+        // and the worst error seen since the previous line.
+        private double nextPredictionLog;
+        private float worstErrorMeters;
+        private long loggedCorrections, loggedSnaps, loggedResyncs;
+        private int worstPending;
+        private void LogPredictionHealth()
+        {
+            if (prediction == null) return;
+            worstErrorMeters = Mathf.Max(worstErrorMeters, prediction.LastErrorDistance);
+            worstPending = Mathf.Max(worstPending, prediction.PendingCount);
+            var now = Time.realtimeSinceStartupAsDouble;
+            if (now < nextPredictionLog) return;
+            nextPredictionLog = now + 2.0;
+            Debug.Log("LAN_PREDICTION corrections=+" + (prediction.Corrections - loggedCorrections)
+                + " snaps=+" + (prediction.Snaps - loggedSnaps)
+                + " resyncs=+" + (prediction.ResyncCount - loggedResyncs)
+                + " lastResync=" + prediction.LastResyncReason
+                + " worstErrorM=" + worstErrorMeters.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)
+                + " worstPending=" + worstPending
+                + " lastReplay=" + prediction.LastReplayCount
+                + " fps=" + (1f / Mathf.Max(0.0001f, Time.smoothDeltaTime)).ToString("0", System.Globalization.CultureInfo.InvariantCulture));
+            loggedCorrections = prediction.Corrections;
+            loggedSnaps = prediction.Snaps;
+            loggedResyncs = prediction.ResyncCount;
+            worstErrorMeters = 0f;
+            worstPending = 0;
         }
 
         private void ResetPresentation()

@@ -343,6 +343,25 @@ namespace FamilyRacing.Tests
         }
 
         [Test]
+        public void BacklogBeyondCatchUpDepthSkipsOldestSamples()
+        {
+            // A backlog deeper than one packet would otherwise become
+            // permanent input delay: the oldest samples are skipped so the
+            // host consumes from the newest CatchUpDepth samples.
+            var total = NetworkSettings.InputCatchUpDepth + 3;
+            for (var i = 1; i <= total; i++)
+                Assert.That(Enqueue(buffer, Frame("p-guest", i, steering: 0.05f * i),
+                    "p-guest", out _), Is.True);
+            var input = buffer.Consume("p-guest", 1);
+            var first = total - NetworkSettings.InputCatchUpDepth + 1;
+            Assert.That(input.Steering, Is.EqualTo(0.05f * first).Within(0.0001f));
+            Assert.That(buffer.AckFor("p-guest").inputSequence, Is.EqualTo(first));
+            Assert.That(buffer.QueueDepth("p-guest"),
+                Is.EqualTo(NetworkSettings.InputCatchUpDepth - 1));
+            Assert.That(buffer.SkippedSamples, Is.EqualTo(3));
+        }
+
+        [Test]
         public void HeldInputSurvivesShortGapsThenNeutralizes()
         {
             Assert.That(Enqueue(buffer,

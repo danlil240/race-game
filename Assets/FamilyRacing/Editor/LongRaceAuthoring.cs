@@ -162,6 +162,27 @@ namespace FamilyRacing.EditorTools
         public static void Build()=>BuildPlayer("Builds/Windows-LongRaces/FamilyRacing.exe",BuildOptions.Development);
         public static void BuildOrdinary()=>BuildPlayer("Builds/Windows-LongRaces-Ordinary/FamilyRacing.exe",BuildOptions.None);
         public static void BuildBoth(){Validate();Build();BuildOrdinary();}
+        // Tablet build of the same Grand Tour scene: a directly installable,
+        // debug-signed APK (adb install -r) for family LAN play.
+        public static void BuildAndroidOrdinary()
+        {
+            var oldExport=EditorUserBuildSettings.exportAsGoogleAndroidProject;
+            var oldBundle=EditorUserBuildSettings.buildAppBundle;
+            try
+            {
+                EditorUserBuildSettings.exportAsGoogleAndroidProject=false;
+                EditorUserBuildSettings.buildAppBundle=false;
+                const string path="Builds/Android-LongRaces-Ordinary/FamilyRacing.apk";
+                var report=BuildPipeline.BuildPlayer(new BuildPlayerOptions { scenes=new[]{ScenePath},locationPathName=path,target=BuildTarget.Android,options=BuildOptions.None });
+                Debug.Log("GRAND_TOUR_BUILD "+path+" "+report.summary.result+" errors="+report.summary.totalErrors);
+                if(report.summary.result!=BuildResult.Succeeded)throw new InvalidOperationException("Grand Tour Android build failed");
+            }
+            finally
+            {
+                EditorUserBuildSettings.exportAsGoogleAndroidProject=oldExport;
+                EditorUserBuildSettings.buildAppBundle=oldBundle;
+            }
+        }
         public static void PruneUnusedGeneratedAssets()
         {
             // This folder was created solely for this upgrade. Remove obsolete
