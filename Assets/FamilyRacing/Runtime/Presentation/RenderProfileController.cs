@@ -39,6 +39,9 @@ namespace FamilyRacing
         public string ActiveProfile { get; private set; } = ProfileNone;
         public float ActiveRenderScale { get; private set; }
         public bool TabletActive => ActiveProfile == ProfileTablet;
+        // True on an actual Android tablet: open-world scenery, fog and the
+        // rear-view mirror scale down so the A7 Lite GPU keeps a playable rate.
+        public static bool LowEndDevice { get; private set; }
 
         // Platform/override resolution, kept static so tests can pin it:
         // --render-profile tablet|pc forces a profile (benchmark evidence);
@@ -89,8 +92,19 @@ namespace FamilyRacing
                 Application.targetFrameRate = PcTargetFrameRate;
             }
             ActiveProfile = wanted;
+            // Real tablet hardware (not a forced benchmark profile on PC)
+            // also trims the long-race view distance; see LongRaceVisibility.
+            LowEndDevice = tablet && Application.platform == RuntimePlatform.Android;
             var urp = QualitySettings.renderPipeline
                 as UniversalRenderPipelineAsset;
+            // The A7 Lite GPU is fill-bound in the open-world courses:
+            // a little less internal resolution and a shorter shadow
+            // range on the device itself (never in the editor or on PC).
+            if (LowEndDevice && urp != null)
+            {
+                urp.renderScale = Mathf.Min(urp.renderScale, 0.65f);
+                urp.shadowDistance = Mathf.Min(urp.shadowDistance, 20f);
+            }
             ActiveRenderScale = urp != null ? urp.renderScale
                 : (tablet ? TabletRenderScale : PcRenderScale);
         }

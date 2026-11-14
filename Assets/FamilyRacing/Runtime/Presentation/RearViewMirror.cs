@@ -114,7 +114,10 @@ namespace FamilyRacing
                 Quaternion.Slerp(mirrorCamera.transform.rotation,
                     Quaternion.LookRotation(lookAt - desired, Vector3.up), blend));
             previousLocalPosition = localPosition; hasPose = true;
-            mirrorCamera.enabled = true;
+            // Tablet budget: the mirror is a second full scene render, so a
+            // real tablet draws it every third frame at a shorter range.
+            mirrorCamera.enabled = !RenderProfileController.LowEndDevice
+                || Time.frameCount % 3 == 0;
             UpdateHud(state.language == "he");
         }
 
@@ -154,7 +157,7 @@ namespace FamilyRacing
             mirrorCamera.tag = "Untagged";
             mirrorCamera.fieldOfView = 65f;
             mirrorCamera.nearClipPlane = .2f;
-            mirrorCamera.farClipPlane = 180f;
+            mirrorCamera.farClipPlane = RenderProfileController.LowEndDevice ? 110f : 180f;
             mirrorCamera.allowHDR = false;
             mirrorCamera.allowMSAA = false;
             mirrorCamera.depth = source.depth - 1;
@@ -165,7 +168,10 @@ namespace FamilyRacing
             data.renderPostProcessing = false;
             data.requiresColorOption = CameraOverrideOption.Off;
             data.requiresDepthOption = CameraOverrideOption.Off;
-            texture = new RenderTexture(600, 200, 16, RenderTextureFormat.ARGB32) {
+            texture = RenderProfileController.LowEndDevice
+                ? new RenderTexture(360, 120, 16, RenderTextureFormat.ARGB32) {
+                    name = "Rear view mirror", antiAliasing = 1, filterMode = FilterMode.Bilinear }
+                : new RenderTexture(600, 200, 16, RenderTextureFormat.ARGB32) {
                 name = "Rear view mirror", antiAliasing = 1, filterMode = FilterMode.Bilinear };
             texture.Create();
             mirrorCamera.targetTexture = texture;
