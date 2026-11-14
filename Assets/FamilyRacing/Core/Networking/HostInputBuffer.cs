@@ -54,6 +54,8 @@ namespace FamilyRacing.Core.Networking
 
         // Number of times a lane overflowed the replay bound and resynced.
         public int OverflowCount { get { return overflowCount; } }
+        // Samples skipped by the latency catch-up (see Consume).
+        public long SkippedSamples { get; private set; }
         public bool RaceActive { get { return active; } }
         public string SessionId { get { return sessionId; } }
         public string RaceId { get { return raceId; } }
@@ -265,6 +267,17 @@ namespace FamilyRacing.Core.Networking
                     lane.staleTicks = 0;
                 }
                 return lane.held;
+            }
+            // Latency catch-up: one sample per tick can never drain a
+            // backlog, so a burst (Wi-Fi batching, a client frame hitch, a
+            // slightly fast client clock) would otherwise become permanent
+            // input delay - the tablet's prediction then runs ever further
+            // ahead and snaps back. Beyond a small jitter cushion the
+            // oldest samples are skipped; the newest input still drives.
+            while (lane.queue.Count > NetworkSettings.InputCatchUpDepth)
+            {
+                lane.queue.Dequeue();
+                SkippedSamples++;
             }
             if (lane.queue.Count > 0)
             {

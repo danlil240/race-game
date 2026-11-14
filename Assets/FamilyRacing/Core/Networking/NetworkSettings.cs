@@ -194,6 +194,10 @@ namespace FamilyRacing.Core.Networking
         // commands/steering clear to neutral; the connection timeout then
         // hands control to AI.
         public const int InputStaleTicks = 15;
+        // Host jitter cushion per racer: queued input beyond this many
+        // samples (one full input packet, ~133 ms) is skipped oldest-first so
+        // latency cannot grow.
+        public const int InputCatchUpDepth = InputPacketSampleCapacity;
         // How far ahead of the newest seen sequence a frame may claim
         // before it is rejected as bogus future traffic.
         public const long InputSequenceWindow = 120;
