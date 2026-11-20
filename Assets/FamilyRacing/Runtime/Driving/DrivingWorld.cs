@@ -568,6 +568,7 @@ namespace FamilyRacing
                     participant);
                 if (IsLocalSeat(racer.participantId))
                 {
+                    probeLocalFinished = racer.finished || racer.dnf;
                     probeLocalTick = (overrideMotor ?? racer.session.motor).tick;
                     probeLocalSpeed = (overrideMotor ?? racer.session.motor).speed;
                     probeAlpha = visualAlpha;
@@ -596,6 +597,7 @@ namespace FamilyRacing
         private long probeLocalTick, probePrevLocalTick;
         private float probeAlpha, probePrevAlpha, probeLocalSpeed;
         private int hiccupLogs;
+        private bool probeLocalFinished;
         private float motionMaxDt;
         private int motionSlowFrames, motionFrames;
         private static readonly bool MotionProbeForced = System.Array.IndexOf(
@@ -611,7 +613,8 @@ namespace FamilyRacing
                 if (probe.speed > 4f && reference < 200f)
                 {
                     var change = Mathf.Abs(speed - probe.speed) / reference;
-                    if (key == "local" && change > 0.6f && hiccupLogs < 120)
+                    if (key == "local" && change > 0.6f && hiccupLogs < 120
+                        && !probeLocalFinished)
                     {
                         hiccupLogs++;
                         var inv = System.Globalization.CultureInfo.InvariantCulture;
@@ -637,7 +640,8 @@ namespace FamilyRacing
             if (dt > 0.045f) motionSlowFrames++;
             motionFrames++;
             foreach (var pair in racerViews)
-                if (pair.Value != null && pair.Value.root != null)
+                if (pair.Value != null && pair.Value.root != null
+                    && !(probeLocalFinished && IsLocalSeat(pair.Key)))
                     ProbeMotion(IsLocalSeat(pair.Key) ? "local" : "remote:" + pair.Key,
                         pair.Value.root.transform.position, dt);
             var cam = Camera.main;

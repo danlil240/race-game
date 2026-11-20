@@ -202,7 +202,10 @@ namespace FamilyRacing.Core.Networking
         // Host jitter cushion: after a lane runs dry it resumes once this
         // many samples are queued, or after waiting this many ticks.
         public const int InputJitterTargetSamples = 3;
-        public const int InputJitterMaxWaitTicks = 3;
+        // 2, not 3: the wait itself slips the host timeline by that many
+        // ticks (a PC host held a guest 3 ticks once: a 5.5 m forward
+        // correction at 55 m/s, past the snap bound).
+        public const int InputJitterMaxWaitTicks = 2;
         // How far ahead of the newest seen sequence a frame may claim
         // before it is rejected as bogus future traffic.
         public const long InputSequenceWindow = 120;

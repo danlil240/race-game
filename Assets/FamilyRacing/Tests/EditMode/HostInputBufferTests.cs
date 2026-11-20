@@ -345,22 +345,29 @@ namespace FamilyRacing.Tests
         [Test]
         public void BacklogBeyondCatchUpDepthSkipsOldestSamples()
         {
-            // A backlog deeper than one packet would otherwise become
-            // permanent input delay: the oldest samples are skipped so the
-            // host consumes from the newest CatchUpDepth samples.
-            var total = NetworkSettings.InputCatchUpDepth + 3;
+            // A backlog deeper than the catch-up depth would otherwise
+            // become permanent input delay. It drains one extra sample per
+            // host tick (never the whole excess at once), so each tick
+            // skips the oldest sample and consumes the next.
+            var total = NetworkSettings.InputCatchUpDepth + 5;
             for (var i = 1; i <= total; i++)
                 Assert.That(Enqueue(buffer, Frame("p-guest", i, steering: 0.05f * i),
                     "p-guest", out _), Is.True);
-            var input = buffer.Consume("p-guest", 1);
-            var first = total - NetworkSettings.InputCatchUpDepth + 1;
-            Assert.That(input.Steering, Is.EqualTo(0.05f * first).Within(0.0001f));
-            Assert.That(buffer.AckFor("p-guest").inputSequence, Is.EqualTo(first));
+            for (var tick = 1; tick <= 3; tick++)
+            {
+                var input = buffer.Consume("p-guest", tick);
+                Assert.That(input.Steering, Is.EqualTo(0.05f * (2 * tick)).Within(0.0001f),
+                    "tick " + tick + " skips one sample and applies the next");
+                Assert.That(buffer.AckFor("p-guest").inputSequence, Is.EqualTo(2 * tick));
+                Assert.That(buffer.SkippedSamples, Is.EqualTo(tick));
+            }
+            // Back inside the depth: no further skipping.
             Assert.That(buffer.QueueDepth("p-guest"),
                 Is.EqualTo(NetworkSettings.InputCatchUpDepth - 1));
+            buffer.Consume("p-guest", 4);
+            Assert.That(buffer.AckFor("p-guest").inputSequence, Is.EqualTo(7));
             Assert.That(buffer.SkippedSamples, Is.EqualTo(3));
         }
-
         [Test]
         public void HeldInputSurvivesShortGapsThenNeutralizes()
         {

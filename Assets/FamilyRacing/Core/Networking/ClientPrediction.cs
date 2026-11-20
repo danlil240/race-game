@@ -104,6 +104,9 @@ namespace FamilyRacing.Core.Networking
         public long ConfirmedSnapshots { get; private set; }
         // True when the latest Reconcile left the predicted body untouched.
         public bool LastReconcileConfirmed { get; private set; }
+        // True when the latest snapshot reports the local racer finished
+        // (or out): the host has frozen it and nothing is predicted any more.
+        public bool LastAuthoritativeFinished { get; private set; }
         // Human-readable breakdown of the last measured correction; "" when none.
         public string LastErrorDetail { get; private set; } = "";
         private MotorModifiers currentModifiers;
@@ -370,6 +373,7 @@ namespace FamilyRacing.Core.Networking
                 || authoritativeEpoch > appliedRecoveryEpoch;
             appliedRecoveryEpoch = authoritativeEpoch;
             lastAuthoritative = authoritative.Copy();
+            LastAuthoritativeFinished = racer.finished || racer.dnf;
 
             // The host layers per-tick modifiers on every racer before it
             // steps: gadget effects and the slipstream draft. Predicting
