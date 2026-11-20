@@ -45,3 +45,6 @@ connection.json
 # Generated QA sessions and playtest evidence stay local
 /docs/qa/
 /docs/playtests/*/
+
+# Local code knowledge graph (graphify)
+/graphify-out/

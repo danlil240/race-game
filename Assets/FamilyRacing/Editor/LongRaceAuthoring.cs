@@ -188,6 +188,10 @@ namespace FamilyRacing.EditorTools
         {
             var oldExport=EditorUserBuildSettings.exportAsGoogleAndroidProject;
             var oldBundle=EditorUserBuildSettings.buildAppBundle;
+            // Frame timing feeds the tablet RENDER_STATS log. It is switched
+            // on for this build only and put back, so a build never leaves
+            // ProjectSettings.asset modified in the working tree.
+            var oldFrameTiming=PlayerSettings.enableFrameTimingStats;
             try
             {
                 EditorUserBuildSettings.exportAsGoogleAndroidProject=false;
@@ -203,6 +207,7 @@ namespace FamilyRacing.EditorTools
             {
                 EditorUserBuildSettings.exportAsGoogleAndroidProject=oldExport;
                 EditorUserBuildSettings.buildAppBundle=oldBundle;
+                PlayerSettings.enableFrameTimingStats=oldFrameTiming;
             }
         }
         public static void PruneUnusedGeneratedAssets()
