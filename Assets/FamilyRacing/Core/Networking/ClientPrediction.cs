@@ -440,7 +440,11 @@ namespace FamilyRacing.Core.Networking
                     + " turbo=" + authoritative.miniTurboSeconds.ToString("0.00", inv) + "/" + horizon.miniTurboSeconds.ToString("0.00", inv)
                     + " contact=" + authoritative.lastContact + "/" + horizon.lastContact
                     + " grounded=" + authoritative.grounded + "/" + horizon.grounded
-                    + " pending=" + pending.Count;
+                    + " pending=" + pending.Count
+                    + " recovering=" + authoritative.recovering
+                    + " epoch=" + authoritativeEpoch
+                    + " airborne=" + authoritative.airSeconds.ToString("0.00", inv)
+                    + " mods=" + (currentModifiers != null);
             }            if (snap)
                 history.Clear();
             else

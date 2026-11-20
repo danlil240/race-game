@@ -566,6 +566,12 @@ namespace FamilyRacing
                     byId.TryGetValue(racer.participantId, out participant);
                 ApplyRacerVisual(view, racer, visualAlpha, overrideMotor,
                     participant);
+                if (IsLocalSeat(racer.participantId))
+                {
+                    probeLocalTick = (overrideMotor ?? racer.session.motor).tick;
+                    probeLocalSpeed = (overrideMotor ?? racer.session.motor).speed;
+                    probeAlpha = visualAlpha;
+                }
             }
             MeasureMotionSmoothness();
             // Deterministic cleanup in ordinal key order.
@@ -587,6 +593,11 @@ namespace FamilyRacing
         private readonly Dictionary<string, MotionProbe> motionProbes =
             new Dictionary<string, MotionProbe>(System.StringComparer.Ordinal);
         private float nextMotionLog;
+        private long probeLocalTick, probePrevLocalTick;
+        private float probeAlpha, probePrevAlpha, probeLocalSpeed;
+        private int hiccupLogs;
+        private float motionMaxDt;
+        private int motionSlowFrames, motionFrames;
         private static readonly bool MotionProbeForced = System.Array.IndexOf(
             System.Environment.GetCommandLineArgs(), "--motion-probe") >= 0;
         private void ProbeMotion(string key, Vector3 position, float dt)
@@ -600,6 +611,16 @@ namespace FamilyRacing
                 if (probe.speed > 4f && reference < 200f)
                 {
                     var change = Mathf.Abs(speed - probe.speed) / reference;
+                    if (key == "local" && change > 0.6f && hiccupLogs < 120)
+                    {
+                        hiccupLogs++;
+                        var inv = System.Globalization.CultureInfo.InvariantCulture;
+                        Debug.Log("LOCAL_HICCUP drawnSpeed=" + speed.ToString("0.0", inv) + " prevDrawnSpeed=" + probe.speed.ToString("0.0", inv)
+                            + " motorSpeed=" + probeLocalSpeed.ToString("0.0", inv) + " dtMs=" + (dt * 1000f).ToString("0", inv)
+                            + " alpha=" + probeAlpha.ToString("0.00", inv) + " prevAlpha=" + probePrevAlpha.ToString("0.00", inv)
+                            + " tick=" + probeLocalTick + " tickDelta=" + (probeLocalTick - probePrevLocalTick)
+                            + " movedM=" + (position - probe.pos).magnitude.ToString("0.00", inv));
+                    }
                     probe.sum += change; probe.samples++;
                     if (change > probe.worst) probe.worst = change;
                 }
@@ -612,12 +633,16 @@ namespace FamilyRacing
         {
             if (!RenderProfileController.LowEndDevice && !MotionProbeForced) return;
             var dt = Time.unscaledDeltaTime;
+            if (dt > motionMaxDt) motionMaxDt = dt;
+            if (dt > 0.045f) motionSlowFrames++;
+            motionFrames++;
             foreach (var pair in racerViews)
                 if (pair.Value != null && pair.Value.root != null)
                     ProbeMotion(IsLocalSeat(pair.Key) ? "local" : "remote:" + pair.Key,
                         pair.Value.root.transform.position, dt);
             var cam = Camera.main;
             if (cam != null) ProbeMotion("camera", cam.transform.position, dt);
+            probePrevAlpha = probeAlpha; probePrevLocalTick = probeLocalTick;
             if (Time.unscaledTime < nextMotionLog) return;
             nextMotionLog = Time.unscaledTime + 2f;
             var text = new System.Text.StringBuilder("MOTION_SMOOTHNESS");
@@ -634,6 +659,9 @@ namespace FamilyRacing
                 probe.sum = 0; probe.samples = 0; probe.worst = 0;
                 motionProbes[key] = probe;
             }
+            text.Append(" maxDtMs=").Append((motionMaxDt * 1000f).ToString("0"))
+                .Append(" slowFrames=").Append(motionSlowFrames).Append('/').Append(motionFrames);
+            motionMaxDt = 0f; motionSlowFrames = 0; motionFrames = 0;
             text.Append(" dtMs=").Append((dt * 1000f).ToString("0"));
             Debug.Log(text.ToString());
         }

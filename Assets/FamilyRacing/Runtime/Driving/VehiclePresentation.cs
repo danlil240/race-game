@@ -178,18 +178,7 @@ namespace FamilyRacing
                 // The render frame can span several simulation ticks.
                 // Compare travel per tick so normal fast motion is not
                 // mistaken for a teleport after a missed frame.
-                var snapDistance = TeleportSnapDistance;
-                if (tickGap > 1)
-                {
-                    // A skipped recovery can already have cleared its
-                    // one-tick flag. Its near-zero velocity must not
-                    // qualify a relocation as continuous fast travel.
-                    var velocity = new Vector3(motor.speed, motor.lateralSpeed, motor.verticalSpeed);
-                    var travel = velocity.magnitude * span
-                        / Core.Networking.NetworkSettings.SimulationTicksPerSecond;
-                    snapDistance = Mathf.Max(TeleportSnapDistance,
-                        Mathf.Min(TeleportSnapDistance * span, travel + 0.5f));
-                }
+                var snapDistance = SnapDistanceFor(motor, span);
                 if (reset || (interpCurPos - interpPrevPos).sqrMagnitude
                         > snapDistance * snapDistance)
                 {
@@ -225,7 +214,24 @@ namespace FamilyRacing
         // tick applied. TeleportSnapDistance exceeds the largest legal
         // per-tick move (Grand Tour boost speed <= 54.2 m/s, or 1.81 m
         // per 30 Hz tick). Render-frame travel is scaled by its tick span.
+        // The fixed 2 m floor alone is wrong at speed: with slipstream,
+        // boost and a mini-turbo stacked, tablets logged 60-78 m/s (2.0-2.6 m
+        // per tick), so ordinary fast driving tripped it on every tick -
+        // the car was drawn a full step ahead, stood still a frame, then
+        // moved a short frame. The bound therefore scales with the travel
+        // the motor's own velocity explains over the span; a relocation the
+        // velocity cannot explain (a recovery whose flag already cleared)
+        // still snaps.
         private const float TeleportSnapDistance = 2f;
+
+        private static float SnapDistanceFor(MotorState motor, float spanTicks)
+        {
+            var velocity = new Vector3(motor.speed, motor.lateralSpeed,
+                motor.verticalSpeed);
+            var travel = velocity.magnitude * Mathf.Max(1f, spanTicks)
+                / Core.Networking.NetworkSettings.SimulationTicksPerSecond;
+            return Mathf.Max(TeleportSnapDistance, travel * 1.5f + 0.5f);
+        }
         private Vector3 interpPrevPos, interpCurPos;
         private float interpPrevYaw, interpCurYaw;
         private long interpTick = -1;
@@ -265,9 +271,8 @@ namespace FamilyRacing
                 physCurWheels = SnapshotWheels(phys.wheels);
                 physTick = motor.tick;
                 if (!physHasPose || phys.recoveryEpoch != physEpoch
-                    || (physCurPos - physPrevPos).sqrMagnitude
-                        > TeleportSnapDistance * TeleportSnapDistance
-                            * Mathf.Clamp(physTickGap, 1, 8) * Mathf.Clamp(physTickGap, 1, 8))
+                    || (physCurPos - physPrevPos).magnitude
+                        > SnapDistanceFor(motor, Mathf.Clamp(physTickGap, 1, 8)))
                 {
                     // First sample, respawn teleport, or a recovery
                     // epoch change: land exactly on the new commit —

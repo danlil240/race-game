@@ -1087,14 +1087,18 @@ namespace FamilyRacing.Networking
         // line every two seconds of racing with the reconciliation counters
         // and the worst error seen since the previous line.
         private double nextPredictionLog;
-        private int correctionTraceCount;
+        private int correctionTraceCount, bigCorrectionTraceCount;
         private float worstErrorMeters;
         private long loggedCorrections, loggedSnaps, loggedResyncs;
         private int worstPending;
         private void LogPredictionHealth()
         {
             if (prediction == null) return;
-            if (correctionTraceCount < 400 && prediction.LastErrorDetail.Length > 0)
+            // Every large correction is traced (bounded); small ones only
+            // for the first hundred.
+            if (prediction.LastErrorDetail.Length > 0
+                && ((prediction.LastErrorDistance > 0.4f && bigCorrectionTraceCount++ < 400)
+                    || correctionTraceCount < 100))
             {
                 correctionTraceCount++;
                 Debug.Log("CORRECTION_TRACE err=" + prediction.LastErrorDistance.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture) + " " + prediction.LastErrorDetail);
