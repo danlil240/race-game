@@ -104,6 +104,9 @@ namespace FamilyRacing.Core.Networking
         public long ConfirmedSnapshots { get; private set; }
         // True when the latest Reconcile left the predicted body untouched.
         public bool LastReconcileConfirmed { get; private set; }
+        // Human-readable breakdown of the last measured correction; "" when none.
+        public string LastErrorDetail { get; private set; } = "";
+        private MotorModifiers currentModifiers;
         public bool ResyncRequested { get; private set; }
         public string LastResyncReason { get; private set; } = "";
         public long ResyncCount { get; private set; }
@@ -205,6 +208,8 @@ namespace FamilyRacing.Core.Networking
                         participantId = participantId,
                         input = input,
                         rulesBefore = NormalizedRules(state, true),
+                        modifiers = currentModifiers != null
+                            ? currentModifiers.Copy() : null,
                         simulateMotion = true
                     }
                 });
@@ -366,6 +371,25 @@ namespace FamilyRacing.Core.Networking
             appliedRecoveryEpoch = authoritativeEpoch;
             lastAuthoritative = authoritative.Copy();
 
+            // The host layers per-tick modifiers on every racer before it
+            // steps: gadget effects and the slipstream draft. Predicting
+            // without them left the client a little slow whenever it was
+            // drafting (measured: along-track error with dSpeed ~0.4-2 m/s on
+            // nearly every snapshot). The snapshot carries both facts, so
+            // prediction and replay apply the same modifiers the host is
+            // applying now.
+            var mods = FamilyRacing.Core.Racing.GadgetRules.ModifierFor(
+                snapshot.state.gadgets, participantId)
+                ?? MotorModifiers.Neutral();
+            if (racer.slipstream)
+            {
+                mods.accelerationMultiplier *=
+                    FamilyRacing.Core.Racing.NetworkRace.SlipstreamAcceleration;
+                mods.speedCapMultiplier *=
+                    FamilyRacing.Core.Racing.NetworkRace.SlipstreamSpeedCap;
+            }
+            currentModifiers = mods.IsNeutral() ? null : mods;
+
             var ack = FindAck(snapshot);
             if (ack != null && ack.inputSequence > lastAckedSequence)
                 lastAckedSequence = ack.inputSequence;
@@ -392,7 +416,32 @@ namespace FamilyRacing.Core.Networking
                 ? Distance(horizon, authoritative) : 0f;
             LastErrorDegrees = LastErrorMeasured
                 ? OrientationDegrees(horizon, authoritative) : 0f;
-            if (snap)
+            // Field diagnostic: what exactly differed at the ack horizon.
+            LastErrorDetail = "";
+            if (LastErrorMeasured
+                && (LastErrorDistance > NetworkSettings.CorrectionEpsilonMeters
+                    || LastErrorDegrees > NetworkSettings.CorrectionEpsilonDegrees))
+            {
+                var fx = (float)Math.Sin(authoritative.heading);
+                var fz = (float)Math.Cos(authoritative.heading);
+                var ex = authoritative.x - horizon.x;
+                var ez = authoritative.z - horizon.z;
+                var inv = System.Globalization.CultureInfo.InvariantCulture;
+                LastErrorDetail = "along=" + (ex * fx + ez * fz).ToString("0.00", inv)
+                    + " lat=" + (ex * fz - ez * fx).ToString("0.00", inv)
+                    + " dy=" + (authoritative.y - horizon.y).ToString("0.00", inv)
+                    + " dSpeed=" + (authoritative.speed - horizon.speed).ToString("0.00", inv)
+                    + " speed=" + authoritative.speed.ToString("0.0", inv)
+                    + " dHeadDeg=" + LastErrorDegrees.ToString("0.0", inv)
+                    + " heldTicks=" + (ack != null ? snapshot.state.hostTick - ack.hostTick : -1)
+                    + " slip=" + racer.slipstream
+                    + " drift=" + authoritative.drifting + "/" + horizon.drifting
+                    + " boost=" + authoritative.boostActive + "/" + horizon.boostActive
+                    + " turbo=" + authoritative.miniTurboSeconds.ToString("0.00", inv) + "/" + horizon.miniTurboSeconds.ToString("0.00", inv)
+                    + " contact=" + authoritative.lastContact + "/" + horizon.lastContact
+                    + " grounded=" + authoritative.grounded + "/" + horizon.grounded
+                    + " pending=" + pending.Count;
+            }            if (snap)
                 history.Clear();
             else
                 PruneHistory();
@@ -528,6 +577,7 @@ namespace FamilyRacing.Core.Networking
             // The injected simulation survives a Reset (its owner manages
             // the roster); only the seed flag resets so the next race
             // re-initializes it with fresh facts.
+            currentModifiers = null;
             simulationSeeded = false;
         }
 

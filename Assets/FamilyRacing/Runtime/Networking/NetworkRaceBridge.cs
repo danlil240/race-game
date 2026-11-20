@@ -1087,12 +1087,18 @@ namespace FamilyRacing.Networking
         // line every two seconds of racing with the reconciliation counters
         // and the worst error seen since the previous line.
         private double nextPredictionLog;
+        private int correctionTraceCount;
         private float worstErrorMeters;
         private long loggedCorrections, loggedSnaps, loggedResyncs;
         private int worstPending;
         private void LogPredictionHealth()
         {
             if (prediction == null) return;
+            if (correctionTraceCount < 400 && prediction.LastErrorDetail.Length > 0)
+            {
+                correctionTraceCount++;
+                Debug.Log("CORRECTION_TRACE err=" + prediction.LastErrorDistance.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture) + " " + prediction.LastErrorDetail);
+            }
             worstErrorMeters = Mathf.Max(worstErrorMeters, prediction.LastErrorDistance);
             worstPending = Mathf.Max(worstPending, prediction.PendingCount);
             var now = Time.realtimeSinceStartupAsDouble;
