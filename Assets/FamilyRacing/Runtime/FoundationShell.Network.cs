@@ -659,6 +659,13 @@ namespace FamilyRacing
                 foreach (var p in net.participants)
                     if (p.occupied && p.participantId == participantId)
                         return ParticipantName(p, state);
+            // Computer racers carry a slot id ("ai-slot-2"); name them the
+            // way the lobby does instead of showing the raw id.
+            const string aiPrefix = "ai-slot-";
+            if (participantId != null && participantId.StartsWith(aiPrefix, StringComparison.Ordinal)
+                && int.TryParse(participantId.Substring(aiPrefix.Length), out var aiSlot))
+                return T("lan.ai", state) + " " + (aiSlot + 1).ToString(
+                    System.Globalization.CultureInfo.InvariantCulture);
             return participantId ?? "";
         }
 

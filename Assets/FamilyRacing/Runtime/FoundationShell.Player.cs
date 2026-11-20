@@ -182,14 +182,17 @@ namespace FamilyRacing
             {
                 StylePlayerDriving(state);
                 StyleKidOverlayButtons(state);
+                StyleKidResultsPanel(state);
             }
-            else if (state.screen != "lan-race")
+            foreach (var button in root.Query<Button>().ToList())
+                button.style.opacity = button.enabledSelf ? 1f : 0.45f;
+            // Kid skin last: it may keep a disabled-but-selected choice
+            // bright (a guest sees the host's pick).
+            if (state.screen != "driving" && state.screen != "lan-race")
             {
                 StylePlayerSetup(state);
                 StyleKidScreen(state);
             }
-            foreach (var button in root.Query<Button>().ToList())
-                button.style.opacity = button.enabledSelf ? 1f : 0.45f;
         }
 
         private void StylePlayerSetup(FoundationState state)
