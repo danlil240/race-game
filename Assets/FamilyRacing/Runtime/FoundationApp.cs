@@ -295,6 +295,7 @@ namespace FamilyRacing
             // Transport/discovery callbacks run on this thread and queue
             // session outcomes; monotonic wall time expires joins and
             // request round-trips whether or not the app is paused.
+            var costT0 = System.Diagnostics.Stopwatch.GetTimestamp();
             lanLink?.Pump(DateTime.UtcNow);
             service.AdvanceNetworkWallTime(Time.realtimeSinceStartupAsDouble);
             DrainNetworkBoundary();
@@ -308,6 +309,7 @@ namespace FamilyRacing
             // unseen. Re-arm comes from the pause-edge cleanup below.
             driverInput?.Pump(AgentControlsInput || lastNetworkPaused,
                 CurrentScreen);
+            var costT1 = System.Diagnostics.Stopwatch.GetTimestamp();
             accumulator += Time.unscaledDeltaTime;
             var step = 1f / TickRate;
             var steps = 0;
@@ -362,11 +364,13 @@ namespace FamilyRacing
                     bridge.EmitTick(tickState);
                 }
             }
+            var costT2 = System.Diagnostics.Stopwatch.GetTimestamp();
             presentation.backlogSteps = (int)(accumulator / step);
             if (steps == MaxStepsPerFrame && accumulator >= step)
                 presentation.stepOverloads++;
             FoundationState state;
             using (SnapshotMarker.Auto()) state = service.Snapshot();
+            var costT3 = System.Diagnostics.Stopwatch.GetTimestamp();
             // Fraction of the current sim tick already elapsed — the
             // vehicle and shield visuals interpolate between committed
             // poses by this alpha instead of stepping at the 30 Hz tick rate.
@@ -469,9 +473,11 @@ namespace FamilyRacing
             var networkPaused = state.network != null && state.network.paused;
             if (networkPaused && !lastNetworkPaused) ObserveInputCleanup();
             lastNetworkPaused = networkPaused;
+            var costT4 = System.Diagnostics.Stopwatch.GetTimestamp();
             RefreshPresentation(state);
             state.presentation = presentation.Copy();
             using (HudMarker.Auto()) shell?.Refresh(state);
+            LogFrameCost(costT0, costT1, costT2, costT3, costT4, steps);
             if (rearViewMirror != null)
                 rearViewMirror.ApplyFrame(state,
                     GetComponent<UnityEngine.UIElements.UIDocument>()?.rootVisualElement,
@@ -567,6 +573,36 @@ namespace FamilyRacing
         // remote racers render interpolated poses where a client-side lane
         // exists. Returns the locally owned racer's rendered pose for the
         // camera to follow; null when the local participant is not seated.
+        // Field diagnostic (real tablets, or --motion-probe): where the main
+        // thread's game-side frame time goes, averaged over two seconds.
+        // net = transport pump + snapshot decode + reconcile; sim = the
+        // 30 Hz steps (physics, prediction); copy = the state snapshot;
+        // world = vehicle/camera/effects presentation; hud = UI refresh.
+        private static readonly bool FrameCostForced = Array.IndexOf(
+            Environment.GetCommandLineArgs(), "--motion-probe") >= 0;
+        private double costNet, costSim, costCopy, costWorld, costHud;
+        private int costFrames, costSteps;
+        private float costNextLog;
+        private void LogFrameCost(long t0, long t1, long t2, long t3, long t4, int steps)
+        {
+            if (!RenderProfileController.LowEndDevice && !FrameCostForced) return;
+            var t5 = System.Diagnostics.Stopwatch.GetTimestamp();
+            var ms = 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+            costNet += (t1 - t0) * ms; costSim += (t2 - t1) * ms;
+            costCopy += (t3 - t2) * ms; costWorld += (t4 - t3) * ms;
+            costHud += (t5 - t4) * ms; costFrames++; costSteps += steps;
+            if (Time.unscaledTime < costNextLog) return;
+            costNextLog = Time.unscaledTime + 2f;
+            var inv = System.Globalization.CultureInfo.InvariantCulture;
+            Debug.Log("FRAME_COST net=" + (costNet / costFrames).ToString("0.0", inv)
+                + " sim=" + (costSim / costFrames).ToString("0.0", inv)
+                + " copy=" + (costCopy / costFrames).ToString("0.0", inv)
+                + " world=" + (costWorld / costFrames).ToString("0.0", inv)
+                + " hud=" + (costHud / costFrames).ToString("0.0", inv)
+                + " stepsPerFrame=" + ((float)costSteps / costFrames).ToString("0.00", inv)
+                + " frames=" + costFrames + " screen=" + CurrentScreen);
+            costNet = costSim = costCopy = costWorld = costHud = 0; costFrames = costSteps = 0;
+        }
         // Test-only LAN autopilot: launched with --autopilot (PC command
         // line, or `am start ... -e unity --autopilot` on Android) the
         // local racer in a LAN race is steered by the same AiDriver the

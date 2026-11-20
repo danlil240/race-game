@@ -1110,6 +1110,8 @@ namespace FamilyRacing.Networking
                 + " lastResync=" + prediction.LastResyncReason
                 + " worstErrorM=" + worstErrorMeters.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)
                 + " worstPending=" + worstPending
+                + " decodeMs=" + (NetworkWireCodec.DecodeCount > 0
+                    ? (NetworkWireCodec.DecodeStopwatchTicks * 1000.0 / System.Diagnostics.Stopwatch.Frequency / NetworkWireCodec.DecodeCount) : 0).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)
                 + " lastReplay=" + prediction.LastReplayCount
                 + " fps=" + (1f / Mathf.Max(0.0001f, Time.smoothDeltaTime)).ToString("0", System.Globalization.CultureInfo.InvariantCulture));
             loggedCorrections = prediction.Corrections;
@@ -1117,6 +1119,7 @@ namespace FamilyRacing.Networking
             loggedResyncs = prediction.ResyncCount;
             worstErrorMeters = 0f;
             worstPending = 0;
+            NetworkWireCodec.DecodeStopwatchTicks = 0; NetworkWireCodec.DecodeCount = 0;
         }
 
         private void ResetPresentation()

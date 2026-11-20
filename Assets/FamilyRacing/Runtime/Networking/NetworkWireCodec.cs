@@ -222,7 +222,23 @@ namespace FamilyRacing.Networking
                 NetworkSettings.SnapshotCeilingBytes, out json, out error);
         }
 
+        // Diagnostics: cumulative decode cost (Stopwatch ticks) and count.
+        public static long DecodeStopwatchTicks;
+        public static long DecodeCount;
+
         public static bool TryDecodeSnapshot(byte[] packet,
+            out NetworkSnapshot snapshot, out string error)
+        {
+            var started = System.Diagnostics.Stopwatch.GetTimestamp();
+            try { return TryDecodeSnapshotCore(packet, out snapshot, out error); }
+            finally
+            {
+                DecodeStopwatchTicks += System.Diagnostics.Stopwatch.GetTimestamp() - started;
+                DecodeCount++;
+            }
+        }
+
+        private static bool TryDecodeSnapshotCore(byte[] packet,
             out NetworkSnapshot snapshot, out string error)
         {
             snapshot = null;
@@ -300,25 +316,50 @@ namespace FamilyRacing.Networking
         // Parse<T> report them as malformed on their own.
         private static bool HasMalformedStructure(string json)
         {
-            JObject root;
+            // A forward-only token walk: only the JSON kind of `state`,
+            // `state.racers` and `state.gadgets` matters, and every other
+            // value is skipped unread. Building a full JObject tree of a
+            // ~21 KB snapshot for these three checks ran 15 times a second
+            // on every client and was a large share of a tablet guest's
+            // per-snapshot cost.
             try
             {
-                root = JObject.Parse(json);
+                using (var text = new System.IO.StringReader(json))
+                using (var reader = new Newtonsoft.Json.JsonTextReader(text))
+                {
+                    if (!reader.Read()
+                        || reader.TokenType != Newtonsoft.Json.JsonToken.StartObject)
+                        return false;
+                    while (reader.Read()
+                        && reader.TokenType == Newtonsoft.Json.JsonToken.PropertyName)
+                    {
+                        var name = (string)reader.Value;
+                        if (!reader.Read()) return false;
+                        if (name != "state") { reader.Skip(); continue; }
+                        if (reader.TokenType != Newtonsoft.Json.JsonToken.StartObject)
+                            return true;
+                        while (reader.Read()
+                            && reader.TokenType == Newtonsoft.Json.JsonToken.PropertyName)
+                        {
+                            var field = (string)reader.Value;
+                            if (!reader.Read()) return false;
+                            if (field == "racers"
+                                && reader.TokenType != Newtonsoft.Json.JsonToken.StartArray)
+                                return true;
+                            if (field == "gadgets"
+                                && reader.TokenType != Newtonsoft.Json.JsonToken.StartObject)
+                                return true;
+                            reader.Skip();
+                        }
+                    }
+                    return false;
+                }
             }
             catch (Exception)
             {
                 return false;
             }
-            var state = root["state"];
-            if (state != null && !(state is JObject)) return true;
-            var racers = state is JObject stateObject
-                ? stateObject["racers"] : null;
-            if (racers != null && !(racers is JArray)) return true;
-            var gadgets = state is JObject stateForGadgets
-                ? stateForGadgets["gadgets"] : null;
-            return gadgets != null && !(gadgets is JObject);
         }
-
         // True when a decoded GadgetWorldState is the absent-field
         // artifact rather than a sent payload: a live authoritative
         // world always carries its roster rows, so an empty racer list
