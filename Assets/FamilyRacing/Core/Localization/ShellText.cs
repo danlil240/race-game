@@ -77,6 +77,7 @@ namespace FamilyRacing.Core.Localization
             ["tutorial.replay"] = new[] { "Hear it again", "שמעו שוב" },
             ["tutorial.exit"] = new[] { "Exit lesson", "יציאה מהשיעור" },
             ["tutorial.cue.steering"] = new[] { "Hold ◀ or ▶ to steer!", "החזיקו ◀ או ▶ כדי לפנות!" },
+            ["tutorial.cue.steering.touch"] = new[] { "Slide your finger left or right to steer!", "החליקו את האצבע ימינה או שמאלה כדי לפנות!" },
             ["tutorial.cue.brake"] = new[] { "Hold Brake to slow down before a turn!", "החזיקו בלימה כדי להאט לפני פנייה!" },
             ["tutorial.cue.drift"] = new[] { "Hold Drift while turning to slide!", "החזיקו דריפט בזמן הפניה כדי להחליק!" },
             ["tutorial.cue.boost"] = new[] { "Press Boost to zoom super fast!", "לחצו על האצה כדי לנסוע ממש מהר!" },

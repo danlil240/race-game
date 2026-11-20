@@ -273,7 +273,7 @@ namespace FamilyRacing.Tests
         {
             StartRace();
             RefreshDriving();
-            yield return WaitForWidget<Button>("driving.steerLeft");
+            yield return WaitForWidget<Button>("driving.boost");
             Step(90);
             Assert.That(Snapshot().driving.phase, Is.EqualTo("running"));
             Frame(0.1f);
@@ -360,6 +360,52 @@ namespace FamilyRacing.Tests
                 up.target = element;
                 element.SendEvent(up);
             }
+        }
+
+        // Swipe steering: a finger lands on open HUD space (not a control),
+        // then moves; the steer pad captures it from the HUD root.
+        private VisualElement SteerPad => Widget<VisualElement>("hud.controls.steerPad");
+
+        private void SwipeDown(int fingerId, float x = 640f)
+        {
+            var deck = Widget<VisualElement>("hud.controls");
+            var touch = new Touch { fingerId = fingerId, position = new Vector2(x, 400f), phase = TouchPhase.Began };
+            using (var down = PointerDownEvent.GetPooled(touch, EventModifiers.None))
+            {
+                down.target = deck;
+                deck.SendEvent(down);
+            }
+        }
+
+        private void SwipeMove(int fingerId, float x)
+        {
+            var pad = SteerPad;
+            var touch = new Touch { fingerId = fingerId, position = new Vector2(x, 400f), phase = TouchPhase.Moved };
+            using (var move = PointerMoveEvent.GetPooled(touch, EventModifiers.None))
+            {
+                move.target = pad;
+                pad.SendEvent(move);
+            }
+        }
+
+        private void SwipeUp(int fingerId, float x = 640f, bool cancel = false)
+        {
+            var pad = SteerPad;
+            var touch = new Touch { fingerId = fingerId, position = new Vector2(x, 400f),
+                phase = cancel ? TouchPhase.Canceled : TouchPhase.Ended };
+            if (cancel)
+                using (var evt = PointerCancelEvent.GetPooled(touch, EventModifiers.None))
+                { evt.target = pad; pad.SendEvent(evt); }
+            else
+                using (var evt = PointerUpEvent.GetPooled(touch, EventModifiers.None))
+                { evt.target = pad; pad.SendEvent(evt); }
+        }
+
+        // Full left lock: drag well past the full-lock travel.
+        private void SwipeHoldLeft(int fingerId)
+        {
+            SwipeDown(fingerId, 640f);
+            SwipeMove(fingerId, 640f - SwipeSteering.FullLock - 20f);
         }
 
         private static void PointerCancelOn(VisualElement element, int fingerId = 0)
@@ -772,31 +818,61 @@ namespace FamilyRacing.Tests
         public IEnumerator TouchDeckSeparatesThumbsAndPressFeedbackSurvivesRefresh()
         {
             yield return ToRunning();
-            var left = Widget<Button>("driving.steerLeft");
-            var right = Widget<Button>("driving.steerRight");
+            Assert.That(Widget<Button>("driving.steerLeft"), Is.Null, "steering has no buttons");
+            Assert.That(Widget<Button>("driving.steerRight"), Is.Null);
             var boost = Widget<Button>("driving.boost");
-            Assert.That(left.parent.name, Is.EqualTo("hud.controls.steering"));
             Assert.That(boost.parent.name, Is.EqualTo("hud.controls.actions"));
-            Assert.That(left.worldBound.xMax, Is.LessThan(right.worldBound.xMin));
-            Assert.That(right.worldBound.xMax + 100, Is.LessThan(boost.worldBound.xMin),
-                "Leave the center of the track unobstructed between thumb clusters.");
-            Assert.That(left.Q("control.icon"), Is.Not.Null);
+            Assert.That(SteerPad.pickingMode, Is.EqualTo(PickingMode.Ignore),
+                "the swipe pad never blocks anything underneath");
             Assert.That(Widget<Button>("driving.pause").parent.name, Is.EqualTo("hud.utilities"));
-            PointerDownOn(left, fingerId: 0);
+            SwipeHoldLeft(0);
             PointerDownOn(boost, fingerId: 1);
             Pump();
             shell.Refresh(Snapshot());
-            Assert.That(left.ClassListContains("race-control--pressed"), Is.True);
             Assert.That(boost.ClassListContains("race-control--pressed"), Is.True);
             Assert.That(Snapshot().input.steering, Is.EqualTo(-1));
             Assert.That(Snapshot().input.boost, Is.True);
-            PointerUpOn(left, fingerId: 0);
-            Assert.That(left.ClassListContains("race-control--pressed"), Is.False);
+            SwipeUp(0);
             Assert.That(boost.ClassListContains("race-control--pressed"), Is.True);
+            Pump();
+            Assert.That(Snapshot().input.steering, Is.EqualTo(0f).Within(0.001f),
+                "lifting the finger recenters the steering");
             PointerCancelOn(boost, fingerId: 1);
             Assert.That(boost.ClassListContains("race-control--pressed"), Is.False);
             Pump();
             Assert.That(Snapshot().input.boost, Is.False);
+        }
+
+        [UnityTest]
+        public IEnumerator SwipeSteeringIsProportionalAndIgnoresButtons()
+        {
+            yield return ToRunning();
+            // A tiny wobble inside the dead zone does nothing.
+            SwipeDown(0, 640f);
+            SwipeMove(0, 640f + SwipeSteering.DeadZone - 1f);
+            Pump();
+            Assert.That(Snapshot().input.steering, Is.EqualTo(0f).Within(0.001f));
+            // Half travel steers partly, full travel steers fully.
+            SwipeMove(0, 640f + SwipeSteering.FullLock * 0.5f);
+            Pump();
+            var half = Snapshot().input.steering;
+            Assert.That(half, Is.GreaterThan(0.2f).And.LessThan(0.8f));
+            SwipeMove(0, 640f + SwipeSteering.FullLock * 2f);
+            Pump();
+            Assert.That(Snapshot().input.steering, Is.EqualTo(1f).Within(0.001f));
+            // Past full lock the center follows the finger, so swinging back
+            // one full-lock width reaches center at once.
+            SwipeMove(0, 640f + SwipeSteering.FullLock);
+            Pump();
+            Assert.That(Snapshot().input.steering, Is.EqualTo(0f).Within(0.001f));
+            SwipeUp(0);
+            Pump();
+
+            // A touch that starts on a button belongs to that button.
+            var boost = Widget<Button>("driving.boost");
+            PointerDownOn(boost, fingerId: 2);
+            Assert.That(((SwipeSteering)SteerPad).Steering, Is.False);
+            PointerUpOn(boost, fingerId: 2);
         }
 
         [UnityTest]
@@ -807,9 +883,13 @@ namespace FamilyRacing.Tests
             state.language = "he";
             shell.Refresh(state);
             yield return null;
-            var left = Widget<Button>("driving.steerLeft");
-            var right = Widget<Button>("driving.steerRight");
-            Assert.That(left.worldBound.xMax, Is.LessThan(right.worldBound.xMin));
+            // Swiping right steers right in Hebrew too.
+            SwipeDown(0, 640f);
+            SwipeMove(0, 640f + SwipeSteering.FullLock + 10f);
+            Pump();
+            Assert.That(Snapshot().input.steering, Is.EqualTo(1f).Within(0.001f));
+            SwipeUp(0);
+            Pump();
             Assert.That(Widget<VisualElement>("hud.controls").languageDirection, Is.EqualTo(LanguageDirection.LTR));
             Assert.That(Widget<Button>("driving.boost").text,
                 Is.EqualTo(Core.Localization.ShellText.Get("input.boost", "he")));
@@ -855,7 +935,7 @@ namespace FamilyRacing.Tests
             yield return ToRunning();
             // Three simultaneous touches, distinct finger ids — the same
             // multi-touch composition a child produces on the tablet.
-            PointerDownOn(Widget<VisualElement>("driving.steerLeft"), fingerId: 0);
+            SwipeHoldLeft(0);
             PointerDownOn(Widget<VisualElement>("driving.drift"), fingerId: 1);
             PointerDownOn(Widget<VisualElement>("driving.boost"), fingerId: 2);
             Pump();
@@ -866,7 +946,7 @@ namespace FamilyRacing.Tests
             Assert.That(input.boost, Is.True);
 
             // Parity: the identical agent command produces the same state.
-            PointerUpOn(Widget<VisualElement>("driving.steerLeft"), fingerId: 0);
+            SwipeUp(0);
             PointerUpOn(Widget<VisualElement>("driving.drift"), fingerId: 1);
             PointerUpOn(Widget<VisualElement>("driving.boost"), fingerId: 2);
             Pump();
@@ -886,23 +966,23 @@ namespace FamilyRacing.Tests
         public IEnumerator HoldReleaseAndCancelEndHeldInput()
         {
             yield return ToRunning();
-            var steer = Widget<VisualElement>("driving.steerRight");
-
-            PointerDownOn(steer, fingerId: 0);
+            SwipeDown(0, 640f);
+            SwipeMove(0, 640f + SwipeSteering.FullLock + 10f);
             Pump();
             Assert.That(Snapshot().input.steering, Is.EqualTo(1f).Within(0.001f));
-            PointerUpOn(steer, fingerId: 0);
+            SwipeUp(0);
             Pump();
             Assert.That(Snapshot().input.steering, Is.EqualTo(0f).Within(0.001f),
-                "pointer up ends the hold");
+                "pointer up ends the swipe");
 
-            PointerDownOn(steer, fingerId: 3);
+            SwipeDown(3, 640f);
+            SwipeMove(3, 640f + SwipeSteering.FullLock + 10f);
             Pump();
             Assert.That(Snapshot().input.steering, Is.EqualTo(1f).Within(0.001f));
-            PointerCancelOn(steer, fingerId: 3);
+            SwipeUp(3, cancel: true);
             Pump();
             Assert.That(Snapshot().input.steering, Is.EqualTo(0f).Within(0.001f),
-                "a cancelled touch ends the hold like a release");
+                "a cancelled touch ends the swipe like a release");
         }
 
         [UnityTest]
@@ -935,7 +1015,7 @@ namespace FamilyRacing.Tests
         public IEnumerator CameraToggleDuringHeldSteerKeepsTheHold()
         {
             yield return ToRunning();
-            PointerDownOn(Widget<VisualElement>("driving.steerLeft"), fingerId: 0);
+            SwipeHoldLeft(0);
             Pump();
             Assert.That(Snapshot().input.steering, Is.EqualTo(-1f).Within(0.001f));
 
@@ -951,7 +1031,7 @@ namespace FamilyRacing.Tests
             var state = Frame(0.1f);
             Assert.That(state.driving.camera.mode, Is.EqualTo("overhead"),
                 "the actual camera switched while the turn was held");
-            PointerUpOn(Widget<VisualElement>("driving.steerLeft"), fingerId: 0);
+            SwipeUp(0);
             Pump();
         }
 
@@ -959,7 +1039,7 @@ namespace FamilyRacing.Tests
         public IEnumerator LocaleChangeDuringHeldSteerReleasesAndRebuilds()
         {
             yield return ToRunning();
-            PointerDownOn(Widget<VisualElement>("driving.steerLeft"), fingerId: 0);
+            SwipeHoldLeft(0);
             Pump();
             Assert.That(Snapshot().input.steering, Is.EqualTo(-1f).Within(0.001f));
 

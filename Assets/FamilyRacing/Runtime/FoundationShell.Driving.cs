@@ -663,7 +663,8 @@ namespace FamilyRacing
                     if (tutorialIconLabel != null)
                         tutorialIconLabel.text = tutorial.icon;
                     if (tutorialCueLabel != null)
-                        tutorialCueLabel.text = T(tutorial.objective, state);
+                        tutorialCueLabel.text = T(TouchRaceLayout && tutorial.objective == "tutorial.cue.steering"
+                            ? "tutorial.cue.steering.touch" : tutorial.objective, state);
                     if (tutorialProgressLabel != null)
                         tutorialProgressLabel.text = tutorial.phase == "lessons"
                             ? T("tutorial.lesson", state) + " " +

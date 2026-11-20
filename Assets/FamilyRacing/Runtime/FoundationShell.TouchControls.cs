@@ -30,12 +30,11 @@ namespace FamilyRacing
             if (Application.isMobilePlatform || playerPresentation)
                 keys.style.display = DisplayStyle.None;
 
-            var steering = new VisualElement { name = controlsName + ".steering", pickingMode = PickingMode.Ignore };
-            steering.AddToClassList("race-steering");
-            steering.languageDirection = LanguageDirection.LTR;
-            deck.Add(steering);
-            AddTouchHold(steering, "", "left", "cyan", held => app.Input.TouchLeft(held), prefix + "steerLeft");
-            AddTouchHold(steering, "", "right", "cyan", held => app.Input.TouchRight(held), prefix + "steerRight");
+            // Steering has no buttons: a finger dragged sideways anywhere
+            // that is not a control steers, and lifting it recenters.
+            var steerPad = new SwipeSteering(app.Input) { name = controlsName + ".steerPad" };
+            deck.Add(steerPad);
+            steerPad.Attach(root);
 
             var actions = new VisualElement { name = controlsName + ".actions", pickingMode = PickingMode.Ignore };
             actions.AddToClassList("race-actions");
@@ -62,11 +61,8 @@ namespace FamilyRacing
                 var safe = UnityEngine.Screen.safeArea;
                 var sx = deck.resolvedStyle.width / Mathf.Max(1, UnityEngine.Screen.width);
                 var sy = deck.resolvedStyle.height / Mathf.Max(1, UnityEngine.Screen.height);
-                var left = Mathf.Max(20, safe.xMin * sx + 12);
                 var right = Mathf.Max(20, (UnityEngine.Screen.width - safe.xMax) * sx + 12);
                 var bottom = Mathf.Max(22, safe.yMin * sy + 12);
-                steering.style.left = left;
-                steering.style.bottom = bottom;
                 actions.style.right = right;
                 actions.style.bottom = bottom;
                 utilities.style.right = right;
@@ -143,6 +139,103 @@ namespace FamilyRacing
                 pointers.Clear();
                 button.RemoveFromClassList("race-control--pressed");
             });
+        }
+    }
+
+    // Drag-anywhere steering in the style of mobile racing games. The touch
+    // point is the center; finger travel left/right maps to -1..1 with a
+    // small dead zone and a gentle curve so tiny wobbles do not jerk the car.
+    // If the finger goes past full lock the center follows it, so swinging
+    // back the other way answers at once instead of after a long dead trip.
+    // Touches that land on a button (boost, brake, pause...) are left alone.
+    internal sealed class SwipeSteering : VisualElement
+    {
+        // Panel units (the panel is scaled to a 1280x800 reference).
+        internal const float FullLock = 120f;
+        internal const float DeadZone = 6f;
+        private const float Curve = 1.35f;
+        private const float Step = 0.05f; // quantize so input.set is not sent every frame
+
+        private readonly FoundationInput input;
+        private VisualElement host;
+        private int pointerId = -1;
+        private float anchorX;
+        private float current;
+        private float peak;
+        private int changes;
+
+        public SwipeSteering(FoundationInput input)
+        {
+            this.input = input;
+            pickingMode = PickingMode.Ignore;
+            AddToClassList("race-steer-pad");
+            RegisterCallback<PointerMoveEvent>(evt => { if (evt.pointerId == pointerId) Track(evt.position.x); });
+            RegisterCallback<PointerUpEvent>(evt => End(evt.pointerId));
+            RegisterCallback<PointerCancelEvent>(evt => End(evt.pointerId));
+            RegisterCallback<PointerCaptureOutEvent>(evt => End(evt.pointerId));
+            RegisterCallback<DetachFromPanelEvent>(_ =>
+            {
+                if (host != null) host.UnregisterCallback<PointerDownEvent>(OnHostPointerDown, TrickleDown.TrickleDown);
+                host = null;
+                Release();
+            });
+        }
+
+        public bool Steering => pointerId >= 0;
+        public float Value => current;
+
+        // Listen on the whole HUD so the pad never blocks anything beneath.
+        public void Attach(VisualElement hudRoot)
+        {
+            host = hudRoot;
+            host.RegisterCallback<PointerDownEvent>(OnHostPointerDown, TrickleDown.TrickleDown);
+        }
+
+        private void OnHostPointerDown(PointerDownEvent evt)
+        {
+            if (pointerId >= 0 || !enabledInHierarchy) return;
+            for (var ve = evt.target as VisualElement; ve != null && ve != host; ve = ve.parent)
+                if (ve.focusable) return; // a button or other control owns this touch
+            pointerId = evt.pointerId;
+            anchorX = evt.position.x;
+            current = 0f;
+            peak = 0f;
+            changes = 0;
+            this.CapturePointer(pointerId);
+            input.TouchSteer(0f);
+        }
+
+        internal void Track(float x)
+        {
+            var dx = x - anchorX;
+            if (dx > FullLock) { anchorX = x - FullLock; dx = FullLock; }
+            else if (dx < -FullLock) { anchorX = x + FullLock; dx = -FullLock; }
+            var mag = Mathf.Max(0f, Mathf.Abs(dx) - DeadZone) / (FullLock - DeadZone);
+            var value = Mathf.Sign(dx) * Mathf.Pow(Mathf.Clamp01(mag), Curve);
+            value = Mathf.Round(value / Step) * Step;
+            if (Mathf.Approximately(value, current)) return;
+            current = value;
+            changes++;
+            if (Mathf.Abs(value) > Mathf.Abs(peak)) peak = value;
+            input.TouchSteer(value);
+        }
+
+        private void End(int id)
+        {
+            if (id != pointerId) return;
+            Release();
+        }
+
+        private void Release()
+        {
+            var id = pointerId;
+            if (id >= 0)
+                Debug.Log("TOUCH_STEER release peak=" + peak.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)
+                    + " last=" + current.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture) + " changes=" + changes);
+            pointerId = -1;
+            current = 0f;
+            if (id >= 0 && this.HasPointerCapture(id)) this.ReleasePointer(id);
+            input.TouchSteer(0f);
         }
     }
 

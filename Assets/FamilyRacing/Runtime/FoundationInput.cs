@@ -17,6 +17,7 @@ namespace FamilyRacing
 
         private FoundationApp app;
         private bool touchLeft, touchRight, touchDrift, touchBoost, touchBrake;
+        private float touchSteer; // analog drag steering, -1..1
         private bool pendingGadget, pendingRecover;
         private DriverInput lastSent = new DriverInput(0f, false, false, false, false, false, false);
         private bool sentNeutral = true;
@@ -32,11 +33,13 @@ namespace FamilyRacing
 
         public bool PhysicalActive =>
             touchLeft || touchRight || touchDrift || touchBoost || touchBrake
-            || !sentNeutral;
+            || touchSteer != 0f || !sentNeutral;
 
         // Touch button hooks called by FoundationShell pointer handlers.
         public void TouchLeft(bool held) { touchLeft = held; }
         public void TouchRight(bool held) { touchRight = held; }
+        // Drag-anywhere steering: the shell maps finger travel to -1..1.
+        public void TouchSteer(float steering) { touchSteer = Mathf.Clamp(steering, -1f, 1f); }
         public void TouchDrift(bool held) { touchDrift = held; }
         public void TouchBoost(bool held) { touchBoost = held; }
         public void TouchBrake(bool held) { touchBrake = held; }
@@ -46,6 +49,7 @@ namespace FamilyRacing
         public void ResetPhysical()
         {
             touchLeft = touchRight = touchDrift = touchBoost = touchBrake = false;
+            touchSteer = 0f;
             pendingGadget = pendingRecover = false;
         }
 
@@ -147,7 +151,7 @@ namespace FamilyRacing
                 keyGadget, keyRecover, false, false, null, keyBrake ? 1f : 0f);
             // Opposing touches cancel rather than preferring one side.
             var touchInput = new DriverInput(
-                (touchRight ? 1f : 0f) - (touchLeft ? 1f : 0f),
+                Mathf.Clamp(touchSteer + (touchRight ? 1f : 0f) - (touchLeft ? 1f : 0f), -1f, 1f),
                 touchDrift, touchBoost, pendingGadget, pendingRecover,
                 false, false, null, touchBrake ? 1f : 0f);
             pendingGadget = pendingRecover = false;
@@ -157,7 +161,8 @@ namespace FamilyRacing
             {
                 var neutral = keySteer == 0f && !keyDrift && !keyBoost
                     && !keyBrake && !keyGadget && !keyRecover
-                    && !touchLeft && !touchRight && !touchDrift && !touchBoost
+                    && !touchLeft && !touchRight && touchSteer == 0f
+                    && !touchDrift && !touchBoost
                     && !touchBrake && composed.Steering == 0f
                     && composed.Brake == 0f;
                 if (!neutral) return; // swallow until every control releases
