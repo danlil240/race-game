@@ -384,7 +384,9 @@ namespace FamilyRacing.Networking
                 smoothedLocal = null;
                 return;
             }
-            if (smoothedLocal != null)
+            // A confirmed snapshot changed nothing: any offset already
+            // decaying keeps decaying instead of restarting its blend.
+            if (smoothedLocal != null && !prediction.LastReconcileConfirmed)
                 smoother.Correct(smoothedLocal, corrected,
                     prediction.LastCorrectionSnap);
         }

@@ -46,11 +46,16 @@ namespace FamilyRacing.Core.Networking
                 remainingSeconds = 0;
                 return;
             }
-            offsetX += rendered.x - corrected.x;
-            offsetY += rendered.y - corrected.y;
-            offsetZ += rendered.z - corrected.z;
-            offsetHeading = WrapAngle(offsetHeading
-                + WrapAngle(rendered.heading - corrected.heading));
+            // The rendered pose is what the player was just shown, which
+            // already includes any offset still decaying - so the new
+            // offset REPLACES the old one. Accumulating it re-added the
+            // leftover on every correction: with snapshots every 66 ms the
+            // offset doubled faster than a 0.2 s blend could decay it and
+            // the rendered car left the world.
+            offsetX = rendered.x - corrected.x;
+            offsetY = rendered.y - corrected.y;
+            offsetZ = rendered.z - corrected.z;
+            offsetHeading = WrapAngle(rendered.heading - corrected.heading);
             var rp = rendered.physics;
             var cp = corrected.physics;
             if (rp != null && cp != null)

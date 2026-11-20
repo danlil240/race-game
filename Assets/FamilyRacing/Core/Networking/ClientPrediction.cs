@@ -102,6 +102,8 @@ namespace FamilyRacing.Core.Networking
         public long Snaps { get; private set; }
         // Snapshots whose horizon matched the prediction (no rewind).
         public long ConfirmedSnapshots { get; private set; }
+        // True when the latest Reconcile left the predicted body untouched.
+        public bool LastReconcileConfirmed { get; private set; }
         public bool ResyncRequested { get; private set; }
         public string LastResyncReason { get; private set; } = "";
         public long ResyncCount { get; private set; }
@@ -323,6 +325,7 @@ namespace FamilyRacing.Core.Networking
         public MotorState Reconcile(NetworkSnapshot snapshot,
             VehicleTuning tuning, IMotorWorld world)
         {
+            LastReconcileConfirmed = false;
             if (snapshot == null || snapshot.state == null)
                 return Predicted;
             var raceChanged = !string.Equals(raceId, snapshot.raceId ?? "",
@@ -434,6 +437,7 @@ namespace FamilyRacing.Core.Networking
                 LastReplayCount = 0;
                 LastReplaySeconds = 0;
                 ConfirmedSnapshots++;
+                LastReconcileConfirmed = true;
                 return predicted.Copy();
             }
 
