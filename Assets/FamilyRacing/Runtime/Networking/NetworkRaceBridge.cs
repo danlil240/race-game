@@ -347,6 +347,13 @@ namespace FamilyRacing.Networking
                 * NetworkSettings.SimulationTicksPerSecond;
         }
 
+        /// <summary>The client's live predicted local motor; null on a
+        /// host or before prediction is seeded.</summary>
+        public MotorState LocalPredictedMotor
+        {
+            get { return prediction != null ? prediction.Predicted : null; }
+        }
+
         public bool RemoteExtrapolating(string participantId)
         {
             return interpolation.IsStale(participantId)
@@ -985,7 +992,7 @@ namespace FamilyRacing.Networking
             {
                 hostLogNext = Time.realtimeSinceStartupAsDouble + 2.0;
                 Debug.Log("LAN_HOST snapshots=" + hostLogPublished + " sendFailures=" + hostLogSendFailures
-                    + " bytes=" + hostLogBytes + " lastError=" + LastError);
+                    + " bytes=" + hostLogBytes                    + " starvations=" + (inputs.Starvations - hostLogStarvations)                    + " skipped=" + (inputs.SkippedSamples - hostLogSkipped)                    + " lastError=" + LastError);                hostLogStarvations = inputs.Starvations; hostLogSkipped = inputs.SkippedSamples;
                 hostLogPublished = hostLogSendFailures = 0;
             }
             return sent && allSent;
@@ -993,6 +1000,7 @@ namespace FamilyRacing.Networking
         // Field diagnostics for the host's snapshot stream.
         private int hostLogPublished, hostLogSendFailures, hostLogBytes;
         private double hostLogNext;
+        private long hostLogStarvations, hostLogSkipped;
 
         // Reliable ordered delivery of staged authoritative events. Each
         // batch carries identities so consumers apply every event once

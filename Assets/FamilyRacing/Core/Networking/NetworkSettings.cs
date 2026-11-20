@@ -195,9 +195,14 @@ namespace FamilyRacing.Core.Networking
         // hands control to AI.
         public const int InputStaleTicks = 15;
         // Host jitter cushion per racer: queued input beyond this many
-        // samples (one full input packet, ~133 ms) is skipped oldest-first so
+        // samples (~230 ms: the 3-sample jitter cushion plus one 4-sample
+        // packet clump) is skipped oldest-first so
         // latency cannot grow.
-        public const int InputCatchUpDepth = InputPacketSampleCapacity;
+        public const int InputCatchUpDepth = 7;
+        // Host jitter cushion: after a lane runs dry it resumes once this
+        // many samples are queued, or after waiting this many ticks.
+        public const int InputJitterTargetSamples = 3;
+        public const int InputJitterMaxWaitTicks = 3;
         // How far ahead of the newest seen sequence a frame may claim
         // before it is rejected as bogus future traffic.
         public const long InputSequenceWindow = 120;

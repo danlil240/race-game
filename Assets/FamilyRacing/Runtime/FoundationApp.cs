@@ -330,7 +330,7 @@ namespace FamilyRacing
                 // One local 30 Hz boundary on the replication path: host
                 // consumes validated inputs and steps the authoritative
                 // race (publishing at 15 Hz); a client emits one sample.
-                raceBridge?.StepTick(service.CurrentInput,
+                raceBridge?.StepTick(AutopilotOr(service.CurrentInput),
                     drivingWorld != null ? drivingWorld.MotorWorld : null);
                 var raceEvents = raceBridge != null ? raceBridge.DrainRaceEvents() : null;
                 if (raceEvents != null && raceEvents.Count > 0)
@@ -567,6 +567,72 @@ namespace FamilyRacing
         // remote racers render interpolated poses where a client-side lane
         // exists. Returns the locally owned racer's rendered pose for the
         // camera to follow; null when the local participant is not seated.
+        // Test-only LAN autopilot: launched with --autopilot (PC command
+        // line, or `am start ... -e unity --autopilot` on Android) the
+        // local racer in a LAN race is steered by the same AiDriver the
+        // computer-controlled cars use, through the normal input path
+        // (prediction, input packets, host validation). It exists so a LAN
+        // session can be driven and measured on real devices without a
+        // person holding each one. No menu or setting reaches it.
+        private static readonly bool AutopilotEnabled = ResolveAutopilot();
+        private Core.Racing.AiDriver autopilot;
+        private string autopilotRaceId = "";
+        private string lastLocalLanId = "";
+
+        private static bool ResolveAutopilot()
+        {
+            if (Array.IndexOf(Environment.GetCommandLineArgs(), "--autopilot") >= 0)
+                return true;
+#if UNITY_ANDROID && !UNITY_EDITOR
+            try
+            {
+                using (var player = new AndroidJavaClass("com.unity3d.player.UnityPlayer"))
+                using (var activity = player.GetStatic<AndroidJavaObject>("currentActivity"))
+                using (var intent = activity.Call<AndroidJavaObject>("getIntent"))
+                {
+                    if (intent.Call<bool>("getBooleanExtra", "autopilot", false)) return true;
+                    var unityArgs = intent.Call<string>("getStringExtra", "unity");
+                    return unityArgs != null && unityArgs.Contains("--autopilot");
+                }
+            }
+            catch (Exception) { return false; }
+#else
+            return false;
+#endif
+        }
+
+        private DriverInput AutopilotOr(DriverInput manual)
+        {
+            if (!AutopilotEnabled || raceBridge == null || drivingWorld == null)
+                return manual;
+            var race = raceBridge.LatestState;
+            if (race == null || race.racers == null || race.phase != "running"
+                || string.IsNullOrEmpty(lastLocalLanId))
+                return manual;
+            foreach (var racer in race.racers)
+            {
+                if (racer == null || racer.participantId != lastLocalLanId
+                    || racer.session == null) continue;
+                var catalog = drivingWorld.Catalog;
+                Core.Racing.CourseDefinition course;
+                if (catalog == null || catalog.Courses == null
+                    || !catalog.Courses.TryGetValue(racer.session.courseId ?? "", out course))
+                    return manual;
+                if (autopilot == null || autopilotRaceId != (race.raceId ?? ""))
+                {
+                    autopilot = new Core.Racing.AiDriver();
+                    autopilotRaceId = race.raceId ?? "";
+                    Debug.Log("AUTOPILOT engaged for " + lastLocalLanId);
+                }
+                // Steer from where this device believes the car is: the
+                // predicted pose on a client, the authoritative one on a host.
+                var session = racer.session.Copy();
+                var predicted = raceBridge.LocalPredictedMotor;
+                if (predicted != null) session.motor = predicted;
+                return autopilot.Sample(session, course);
+            }
+            return manual;
+        }
         // Diagnostic: how many drawn remote poses were extrapolated or held
         // (the snapshot buffer ran dry) since the last report.
         private int remoteSamples, remoteExtrapolated;
@@ -576,6 +642,7 @@ namespace FamilyRacing
         {
             var localId = state.network != null
                 ? state.network.localParticipantId : "";
+            lastLocalLanId = localId ?? "";
             // Frame time: matches the bridge's snapshot arrival clock.
             var now = Time.unscaledTimeAsDouble;
             var overrides = new Dictionary<string, MotorState>(
