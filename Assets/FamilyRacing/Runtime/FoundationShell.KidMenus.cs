@@ -1398,39 +1398,647 @@ namespace FamilyRacing
 
         private void StyleKidLan(FoundationState state)
         {
-            var icons = new Dictionary<string, string>
+            // Every LAN screen opens with its title; the prose hint under
+            // it goes, the title becomes the bold screen heading.
+            var first = root.childCount > 0 ? root[0] as Label : null;
+            if (first != null)
             {
-                ["lan.host"] = "crown", ["lan.discover"] = "search", ["lan.stopSearch"] = "stop",
-                ["lan.join"] = "play", ["lan.leave"] = "exit", ["lan.ready"] = "check",
-                ["lan.start"] = "play", ["lan.rematch"] = "retry", ["lan.reconnect"] = "wifi",
-            };
-            foreach (var pair in icons)
-            {
-                var button = root.Q<Button>(pair.Key);
-                if (button == null) continue;
-                button.style.minHeight = 70;
-                button.style.fontSize = 24;
-                Round(button, 30);
-                SideMark(button, new MenuIcon(pair.Value, 34, KidText, MirrorIcon(pair.Value, state)), 34);
+                first.style.fontSize = 34;
+                first.style.unityFontStyleAndWeight = FontStyle.Bold;
+                first.style.color = state.screen == "lan-recovery" ? KidYellow : KidText;
+                first.style.marginTop = 10;
+                first.style.marginBottom = 8;
+                if (root.childCount > 1 && root[1] is Label hint && string.IsNullOrEmpty(hint.name))
+                    hint.style.display = DisplayStyle.None;
             }
-            var start = root.Q<Button>("lan.start");
-            if (start != null) { start.style.backgroundColor = KidGreen; start.style.minWidth = 260; }
+            switch (state.screen)
+            {
+                case "lan-browser": StyleKidLanBrowser(state); break;
+                case "lan-lobby": StyleKidLanLobby(state); break;
+                case "lan-results": StyleKidLanResults(state); break;
+                case "lan-recovery": StyleKidLanRecovery(state); break;
+            }
             foreach (var label in root.Query<Label>().ToList())
                 if (ColorDistance(label.style.color.value, Deep) < 0.12f)
                     label.style.color = KidMuted;
             foreach (var field in root.Query<TextField>().ToList())
-            {
                 foreach (var input in field.Query(className: "unity-text-field__input").ToList())
                 {
                     input.style.backgroundColor = KidSurface;
                     input.style.color = KidText;
                     NoBorder(input);
                     Round(input, 16);
-                    input.style.minHeight = 56;
-                    input.style.fontSize = 24;
+                    input.style.minHeight = 52;
+                    input.style.fontSize = 22;
                     Pad(input, 4, 14);
                 }
+        }
+
+        // Big square choice tile made from an existing builder button: the
+        // button keeps its name, text and callback; only the look changes.
+        private void LanTile(Button button, string icon, Color fill, float width, float height, float iconSize)
+        {
+            if (button == null) return;
+            var text = button.text;
+            button.text = "";
+            button.tooltip = text;
+            button.Clear();
+            button.style.width = width;
+            button.style.height = height;
+            button.style.backgroundColor = fill;
+            button.style.flexDirection = FlexDirection.Column;
+            button.style.alignItems = Align.Center;
+            button.style.justifyContent = Justify.Center;
+            NoBorder(button);
+            Round(button, 30);
+            Pad(button, 8, 8);
+            Margin(button, 8, 10);
+            button.Add(new MenuIcon(icon, iconSize, IconInk(fill)));
+            var label = new Label(text) { name = button.name + ".label", pickingMode = PickingMode.Ignore };
+            label.style.fontSize = 26;
+            label.style.color = IconInk(fill);
+            label.style.unityFontStyleAndWeight = FontStyle.Bold;
+            label.style.marginTop = 6;
+            button.Add(label);
+            AddPressFeedback(button);
+        }
+
+        private void HideWhenDisabled(Button button)
+        {
+            if (button != null && !button.enabledSelf) button.style.display = DisplayStyle.None;
+        }
+
+        private void StyleKidLanBrowser(FoundationState state)
+        {
+            var host = root.Q<Button>("lan.host");
+            var discover = root.Q<Button>("lan.discover");
+            var stop = root.Q<Button>("lan.discovery.stop");
+            var hostEnabled = host != null && host.enabledSelf;
+            LanTile(host, "crown", KidOrange, 300, 170, 80);
+            if (discover != null && discover.enabledSelf)
+                LanTile(discover, "search", KidTeal, 300, 170, 80);
+            else if (discover != null)
+                discover.style.display = DisplayStyle.None;
+            if (stop != null)
+            {
+                if (stop.enabledSelf)
+                {
+                    LanTile(stop, "stop", KidSurface, 300, 170, 70);
+                    // Searching: the search tile shows as the live state.
+                }
+                else stop.style.display = DisplayStyle.None;
             }
+            var row = host != null ? host.parent : null;
+            if (row != null)
+            {
+                row.style.marginTop = 6;
+                if (Rtl(state)) row.style.flexDirection = FlexDirection.RowReverse;
+            }
+
+            // Found races: one big join tile per host, no list chrome.
+            var foundCaption = new List<Label>();
+            foreach (var child in root.Children())
+                if (child.name == null || child.name == "")
+                    foreach (var grand in child.Children())
+                        if (grand is Label l && string.IsNullOrEmpty(l.name)
+                            && l.text == T("lan.found", state))
+                            foundCaption.Add(l);
+            foreach (var l in foundCaption) l.style.display = DisplayStyle.None;
+            var none = root.Q<Label>("lan.discovered.none");
+            if (none != null)
+            {
+                none.style.fontSize = 22;
+                none.style.color = KidMuted;
+                none.style.marginTop = 10;
+            }
+            var seenHosts = new HashSet<string>();
+            var discovered = state.network != null ? state.network.discovered : null;
+            foreach (var card in root.Query<VisualElement>().ToList())
+            {
+                var n = card.name ?? "";
+                if (!n.StartsWith("lan.discovered.") || n == "lan.discovered.none" || n.Split('.').Length != 3)
+                    continue;
+                int.TryParse(n.Split('.')[2], out var index);
+                var entry = discovered != null && index < discovered.Count ? discovered[index] : null;
+                // One host can answer on several network adapters: show it
+                // once, by its name, with the address as small print.
+                if (entry != null && !string.IsNullOrEmpty(entry.hostName))
+                {
+                    if (!seenHosts.Add(entry.hostName + ":" + entry.port))
+                    {
+                        card.style.display = DisplayStyle.None;
+                        continue;
+                    }
+                    if (card.Q<Label>(n + ".host") == null)
+                    {
+                        var hostLabel = new Label(entry.hostName) { name = n + ".host", pickingMode = PickingMode.Ignore };
+                        hostLabel.style.fontSize = 26;
+                        hostLabel.style.color = KidText;
+                        hostLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
+                        card.Insert(0, hostLabel);
+                    }
+                }
+                card.style.flexDirection = FlexDirection.Row;
+                card.style.alignItems = Align.Center;
+                card.style.backgroundColor = KidSurface;
+                Round(card, 28);
+                Pad(card, 10, 18);
+                Margin(card, 8, 8);
+                if (card.Q<MenuIcon>() == null)
+                    card.Insert(0, new MenuIcon("wifi", 52, KidTeal) { style = { marginRight = 14 } });
+                var addressLabel = card.Q<Label>(n + ".address");
+                if (addressLabel != null)
+                {
+                    var named = card.Q<Label>(n + ".host") != null;
+                    addressLabel.style.fontSize = named ? 16 : 24;
+                    addressLabel.style.color = named ? KidMuted : KidText;
+                    addressLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
+                    addressLabel.style.marginLeft = 10;
+                }
+                foreach (var join in card.Query<Button>().ToList())
+                {
+                    NoBorder(join);
+                    Round(join, 30);
+                    join.style.backgroundColor = KidGreen;
+                    join.style.minWidth = 170;
+                    join.style.height = join.style.minHeight = 70;
+                    join.style.fontSize = 26;
+                    join.style.marginLeft = 16;
+                    SideMark(join, new MenuIcon("play", 34, KidText), 34);
+                }
+            }
+
+            // Typing an address is a grown-up fallback: keep it, but small
+            // and at the bottom of the screen.
+            var manual = root.Q("lan.manual");
+            if (manual != null)
+            {
+                manual.style.marginTop = 26;
+                manual.style.opacity = 0.85f;
+                manual.style.alignItems = Align.Center;
+                foreach (var label in manual.Query<Label>().ToList())
+                {
+                    label.style.fontSize = 18;
+                    label.style.color = KidMuted;
+                }
+                var join = root.Q<Button>("lan.join");
+                if (join != null)
+                {
+                    NoBorder(join);
+                    Round(join, 26);
+                    join.style.backgroundColor = KidSurface;
+                    join.style.height = join.style.minHeight = 56;
+                    join.style.fontSize = 22;
+                    SideMark(join, new MenuIcon("play", 28, KidText), 28);
+                }
+            }
+            HideWhenDisabled(root.Q<Button>("lan.leave"));
+            var leave = root.Q<Button>("lan.leave");
+            if (leave != null && leave.style.display != DisplayStyle.None)
+            {
+                NoBorder(leave);
+                Round(leave, 30);
+                leave.style.height = leave.style.minHeight = 64;
+                SideMark(leave, new MenuIcon("exit", 32, KidText, MirrorIcon("exit", state)), 32);
+            }
+            var error = root.Q<Label>("lan.join.error");
+            if (error != null) { error.style.color = KidYellow; error.style.fontSize = 22; }
+            if (!hostEnabled && host != null) host.style.opacity = 0.45f;
+        }
+
+        private string LanEventCourse(string eventId)
+        {
+            var content = LoopContent();
+            if (content == null || content.Driving == null || eventId == null) return "";
+            return content.Driving.Events.TryGetValue(eventId, out var evt) && evt != null ? evt.courseId : "";
+        }
+
+        private Texture2D AvatarPortrait(string avatar, int fallbackSlot)
+        {
+            if (playerHud == null) return null;
+            var index = fallbackSlot;
+            for (var i = 0; i < AnimalKeys.Length; i++)
+                if (AnimalKeys[i] == "profile.animal." + avatar) index = i;
+            return playerHud.Portrait(index);
+        }
+
+        private void StyleKidLanLobby(FoundationState state)
+        {
+            var net = state.network;
+            var descriptor = net != null ? net.descriptor : null;
+            var localId = net != null ? net.localParticipantId : "";
+            var myVehicle = "";
+            if (net != null)
+                foreach (var p in net.participants)
+                    if (p.occupied && p.participantId == localId) myVehicle = p.vehicleId;
+
+            // Course row: picture tiles. Class and vehicle: icon chips.
+            VisualElement courseRow = null, classRow = null, vehicleRow = null;
+            foreach (var button in root.Query<Button>().ToList())
+            {
+                var n = button.name ?? "";
+                if (n.StartsWith("lan.course."))
+                {
+                    var eventId = n.Substring("lan.course.".Length);
+                    var selected = ColorDistance(button.style.backgroundColor.value, KidOrange) < 0.1f;
+                    var enabled = button.enabledSelf;
+                    var text = button.text;
+                    button.text = "";
+                    button.tooltip = text;
+                    button.Clear();
+                    button.style.width = 240;
+                    button.style.height = 176;
+                    button.style.flexDirection = FlexDirection.Column;
+                    button.style.backgroundColor = selected ? KidOrange : KidSurface;
+                    button.style.overflow = Overflow.Hidden;
+                    NoBorder(button);
+                    Round(button, 24);
+                    Pad(button, 0, 0);
+                    Margin(button, 6, 6);
+                    var courseId = LanEventCourse(eventId);
+                    var art = KidImage(playerHud != null ? playerHud.CoursePreview(courseId) : null, 240, 124, 0);
+                    art.style.width = new Length(100, LengthUnit.Percent);
+                    art.style.backgroundColor = KidBg;
+                    button.Add(art);
+                    var label = new Label(text) { name = n + ".label", pickingMode = PickingMode.Ignore };
+                    label.style.fontSize = 20;
+                    label.style.color = KidText;
+                    label.style.unityFontStyleAndWeight = FontStyle.Bold;
+                    label.style.unityTextAlign = TextAnchor.MiddleCenter;
+                    label.style.flexGrow = 1;
+                    label.style.whiteSpace = WhiteSpace.Normal;
+                    button.Add(label);
+                    if (selected)
+                    {
+                        var tick = new VisualElement { pickingMode = PickingMode.Ignore };
+                        tick.style.position = Position.Absolute;
+                        tick.style.top = 8; tick.style.right = 8;
+                        tick.style.width = tick.style.height = 40;
+                        tick.style.backgroundColor = KidOrange;
+                        tick.style.alignItems = Align.Center;
+                        tick.style.justifyContent = Justify.Center;
+                        Round(tick, 20);
+                        tick.Add(new MenuIcon("check", 26, KidText));
+                        button.Add(tick);
+                    }
+                    // Guests see the host's pick; the other courses stay
+                    // visible but quiet.
+                    if (!enabled) button.style.opacity = selected ? 1f : 0.35f;
+                    AddPressFeedback(button);
+                    courseRow = button.parent;
+                }
+                else if (n.StartsWith("lan.class."))
+                {
+                    var classId = n.Substring("lan.class.".Length);
+                    var selected = ColorDistance(button.style.backgroundColor.value, KidOrange) < 0.1f;
+                    StyleBigChip(button, VehicleIcon(classId), selected, 190, 70, 44);
+                    if (selected) button.style.opacity = 1f;
+                    classRow = button.parent != null && button.parent.name == "kid.wrap" ? button.parent.parent : button.parent;
+                }
+                else if (n.StartsWith("lan.vehicle."))
+                {
+                    var vehicleId = n.Substring("lan.vehicle.".Length);
+                    StyleBigChip(button, VehicleIcon(vehicleId), vehicleId == myVehicle, 210, 70, 44);
+                    if (vehicleId == myVehicle) button.style.opacity = 1f;
+                    vehicleRow = button.parent != null && button.parent.name == "kid.wrap" ? button.parent.parent : button.parent;
+                }
+            }
+            HideRowCaptions(courseRow);
+            HideRowCaptions(classRow);
+            HideRowCaptions(vehicleRow);
+            if (classRow != null)
+            {
+                PairRows(classRow, vehicleRow, "lan.pickRow");
+                if (Rtl(state)) classRow.parent.style.flexDirection = FlexDirection.RowReverse;
+            }
+            if (Rtl(state))
+                foreach (var row in new[] { courseRow, classRow, vehicleRow })
+                    if (row != null) row.style.flexDirection = FlexDirection.RowReverse;
+
+            // Players: one card per slot with the racer's face and a big
+            // ready mark instead of words.
+            VisualElement roster = null;
+            if (net != null)
+                foreach (var p in net.participants)
+                {
+                    var card = root.Q("lan.slot." + p.slot);
+                    if (card == null) continue;
+                    roster = card.parent;
+                    card.style.width = 210;
+                    card.style.height = 228;
+                    card.style.minWidth = 0;
+                    card.style.alignItems = Align.Center;
+                    card.style.justifyContent = Justify.FlexStart;
+                    card.style.backgroundColor = p.occupied
+                        ? KidCardColors[p.slot % KidCardColors.Length] : KidSurface;
+                    Round(card, 28);
+                    Pad(card, 10, 8);
+                    Margin(card, 8, 8);
+                    var name = card.Q<Label>("lan.slot." + p.slot + ".name");
+                    var status = card.Q<Label>("lan.slot." + p.slot + ".status");
+                    var vehicle = card.Q<Label>("lan.slot." + p.slot + ".vehicle");
+                    if (!p.occupied)
+                    {
+                        card.style.opacity = 0.6f;
+                        card.Insert(0, new MenuIcon("plus", 64, KidMuted));
+                        if (name != null) { name.style.fontSize = 20; name.style.color = KidMuted; }
+                        if (status != null) status.style.display = DisplayStyle.None;
+                        continue;
+                    }
+                    var face = KidImage(p.controlSource == "ai" ? null : AvatarPortrait(p.avatar, p.slot), 104, 104, 52);
+                    face.style.backgroundColor = new Color(1f, 1f, 1f, 0.22f);
+                    face.style.alignItems = Align.Center;
+                    face.style.justifyContent = Justify.Center;
+                    if (p.controlSource == "ai") face.Add(new MenuIcon("car", 64, KidText));
+                    card.Insert(0, face);
+                    // Ready / offline badge on the face's corner.
+                    var badgeIcon = !p.connected ? "out" : p.ready || p.controlSource == "ai" ? "check" : null;
+                    if (badgeIcon != null)
+                    {
+                        var badge = new VisualElement { pickingMode = PickingMode.Ignore };
+                        badge.style.position = Position.Absolute;
+                        badge.style.top = 8; badge.style.right = 8;
+                        badge.style.width = badge.style.height = 46;
+                        badge.style.backgroundColor = !p.connected ? Coral : KidGreen;
+                        badge.style.alignItems = Align.Center;
+                        badge.style.justifyContent = Justify.Center;
+                        Round(badge, 23);
+                        badge.Add(new MenuIcon(badgeIcon, 30, KidText));
+                        card.Add(badge);
+                    }
+                    if (name != null)
+                    {
+                        name.style.fontSize = 22;
+                        name.style.color = KidText;
+                        name.style.unityFontStyleAndWeight = FontStyle.Bold;
+                        name.style.marginTop = 6;
+                        name.style.whiteSpace = WhiteSpace.Normal;
+                    }
+                    if (status != null)
+                    {
+                        status.style.fontSize = 18;
+                        status.style.color = KidText;
+                        status.style.opacity = 0.9f;
+                    }
+                    if (vehicle != null) vehicle.style.display = DisplayStyle.None;
+                }
+            if (roster != null)
+            {
+                HideRowCaptions(roster);
+                roster.style.marginTop = 6;
+                if (Rtl(state)) roster.style.flexDirection = FlexDirection.RowReverse;
+            }
+
+            // Actions: Ready is a big toggle, Start the big green go.
+            var ready = root.Q<Button>("lan.ready");
+            var start = root.Q<Button>("lan.start");
+            var leave = root.Q<Button>("lan.leave");
+            var localReady = false;
+            if (net != null)
+                foreach (var p in net.participants)
+                    if (p.occupied && p.participantId == localId) localReady = p.ready;
+            if (ready != null)
+            {
+                NoBorder(ready);
+                Round(ready, 34);
+                ready.style.backgroundColor = localReady ? KidGreen : KidOrange;
+                ready.style.minWidth = 220;
+                ready.style.height = ready.style.minHeight = 76;
+                ready.style.fontSize = 28;
+                SideMark(ready, new MenuIcon("check", 38, KidText), 38);
+                AddPressFeedback(ready);
+            }
+            if (start != null)
+            {
+                if (!start.enabledSelf && net != null && net.role != "host")
+                    start.style.display = DisplayStyle.None;
+                else
+                {
+                    KidStartButton(start, state);
+                    start.style.minWidth = 240;
+                    start.style.height = start.style.minHeight = 76;
+                }
+            }
+            if (leave != null)
+            {
+                NoBorder(leave);
+                Round(leave, 34);
+                leave.style.height = leave.style.minHeight = 76;
+                leave.style.fontSize = 24;
+                SideMark(leave, new MenuIcon("exit", 34, KidText, MirrorIcon("exit", state)), 34);
+            }
+            var actions = ready != null ? ready.parent : null;
+            if (actions != null && actions.name == "kid.wrap") actions = actions.parent;
+            if (actions != null)
+            {
+                actions.style.marginTop = 10;
+                actions.style.alignItems = Align.Center;
+                if (Rtl(state)) actions.style.flexDirection = FlexDirection.RowReverse;
+            }
+            var error = root.Q<Label>("lan.lobby.error");
+            if (error != null) { error.style.color = KidYellow; error.style.fontSize = 22; }
+            var lanStatus = root.Q<Label>("lan.status");
+            if (lanStatus != null) { lanStatus.style.fontSize = 22; lanStatus.style.color = KidMuted; }
+            // The lobby is taller than the tablet screen once every row is
+            // big; let it scroll rather than squeeze.
+            WrapRootInScroll("lan.lobby.scroll");
+        }
+
+        // Moves everything except corner/overlay elements into one hidden-
+        // bar scroll view, so tall screens scroll instead of squashing.
+        private void WrapRootInScroll(string name)
+        {
+            if (root.Q<ScrollView>(name) != null) return;
+            var scroll = new ScrollView { name = name };
+            scroll.style.flexGrow = 1;
+            scroll.verticalScrollerVisibility = ScrollerVisibility.Hidden;
+            scroll.horizontalScrollerVisibility = ScrollerVisibility.Hidden;
+            scroll.contentContainer.style.alignItems = Align.Stretch;
+            var move = new List<VisualElement>();
+            foreach (var child in root.Children())
+                if (child.style.position.value != Position.Absolute) move.Add(child);
+            foreach (var child in move)
+            {
+                child.style.flexShrink = 0;
+                scroll.Add(child);
+            }
+            root.Insert(0, scroll);
+        }
+
+        private void StyleKidLanResults(FoundationState state)
+        {
+            for (var i = 0; ; i++)
+            {
+                var row = root.Q("lan.result." + i);
+                if (row == null) break;
+                row.style.width = 720;
+                row.style.alignSelf = Align.Center;
+                row.style.alignItems = Align.Center;
+                row.style.justifyContent = Justify.FlexStart;
+                row.style.backgroundColor = i == 0 ? KidOrange : KidSurface;
+                Round(row, 26);
+                Pad(row, 8, 16);
+                Margin(row, 5, 0);
+                var medal = new VisualElement { pickingMode = PickingMode.Ignore };
+                medal.style.width = medal.style.height = 56;
+                medal.style.alignItems = Align.Center;
+                medal.style.justifyContent = Justify.Center;
+                medal.style.marginRight = 14;
+                // The line already starts with its place number; only the
+                // winner gets a trophy in front of it.
+                if (i == 0) medal.Add(new MenuIcon("trophy", 50, KidYellow));
+                row.Insert(0, medal);
+                var line = row.Q<Label>("lan.result." + i + ".line");
+                if (line != null)
+                {
+                    line.style.fontSize = 26;
+                    line.style.color = KidText;
+                    line.style.unityFontStyleAndWeight = FontStyle.Bold;
+                }
+            }
+            foreach (var label in root.Query<Label>().ToList())
+                if (label.name != null && label.name.StartsWith("lan.delivery."))
+                {
+                    label.style.fontSize = 18;
+                    label.style.color = KidMuted;
+                }
+            var rematch = root.Q<Button>("lan.rematch");
+            if (rematch != null && rematch.enabledSelf)
+            {
+                NoBorder(rematch);
+                Round(rematch, 34);
+                rematch.style.backgroundColor = KidGreen;
+                rematch.style.minWidth = 240;
+                rematch.style.height = rematch.style.minHeight = 76;
+                rematch.style.fontSize = 28;
+                SideMark(rematch, new MenuIcon("retry", 38, KidText), 38);
+            }
+            // Grown-up and host-only actions disappear while they can't be
+            // used; their availability changes without a rebuild, so check
+            // a few times a second.
+            var ask = root.Q<Button>("lan.results.request");
+            if (ask != null && root.Q("lan.result.0") != null)
+                (ask.parent != null && ask.parent.name == "kid.wrap" ? ask.parent : (VisualElement)ask)
+                    .style.display = DisplayStyle.None;
+            foreach (var id in new[] { "lan.results.retrySave", "lan.rematch" })
+            {
+                var b = root.Q<Button>(id);
+                if (b == null) continue;
+                var target = b.parent != null && b.parent.name == "kid.wrap" ? b.parent : (VisualElement)b;
+                target.style.display = b.enabledSelf ? DisplayStyle.Flex : DisplayStyle.None;
+                b.schedule.Execute(() =>
+                    target.style.display = b.enabledSelf ? DisplayStyle.Flex : DisplayStyle.None).Every(300);
+            }
+            var leave = root.Q<Button>("lan.leave");
+            if (leave != null)
+            {
+                NoBorder(leave);
+                Round(leave, 34);
+                leave.style.height = leave.style.minHeight = 76;
+                leave.style.fontSize = 24;
+                SideMark(leave, new MenuIcon("home", 34, KidText), 34);
+            }
+            var actions = leave != null ? leave.parent : null;
+            if (actions != null && actions.name == "kid.wrap") actions = actions.parent;
+            if (actions != null)
+            {
+                actions.style.marginTop = 14;
+                if (Rtl(state)) actions.style.flexDirection = FlexDirection.RowReverse;
+            }
+        }
+
+        private void StyleKidLanRecovery(FoundationState state)
+        {
+            var status = root.Q<Label>("lan.recovery.status");
+            if (status != null && status.parent != null && status.parent.Q("kid.recovery.icon") == null)
+            {
+                var icon = new MenuIcon("wifi", 120, KidYellow) { name = "kid.recovery.icon" };
+                icon.style.alignSelf = Align.Center;
+                icon.style.marginTop = 20;
+                icon.style.marginBottom = 10;
+                status.parent.Insert(status.parent.IndexOf(status), icon);
+                status.style.fontSize = 24;
+                status.style.color = KidText;
+            }
+            var reconnect = root.Q<Button>("lan.reconnect");
+            if (reconnect != null)
+            {
+                NoBorder(reconnect);
+                Round(reconnect, 34);
+                reconnect.style.backgroundColor = KidGreen;
+                reconnect.style.minWidth = 260;
+                reconnect.style.height = reconnect.style.minHeight = 80;
+                reconnect.style.fontSize = 28;
+                SideMark(reconnect, new MenuIcon("retry", 38, KidText), 38);
+            }
+            var leave = root.Q<Button>("lan.leave");
+            if (leave != null)
+            {
+                NoBorder(leave);
+                Round(leave, 34);
+                leave.style.height = leave.style.minHeight = 80;
+                leave.style.fontSize = 24;
+                SideMark(leave, new MenuIcon("home", 34, KidText), 34);
+            }
+        }
+
+        private void StyleKidResultsPanel(FoundationState state)
+        {
+            var panel = root.Q("results.panel");
+            if (panel == null || panel.Q("kid.results") != null) return;
+            panel.Add(new VisualElement { name = "kid.results" });
+            var title = panel.Q<Label>("results.title");
+            if (title != null)
+            {
+                title.style.fontSize = 34;
+                title.style.unityFontStyleAndWeight = FontStyle.Bold;
+                title.style.color = KidText;
+            }
+            void IconRow(Label label, string icon, float size, Color tint, int fontSize, Color color)
+            {
+                if (label == null || label.parent == null) return;
+                var row = new VisualElement { name = label.name + ".row", pickingMode = PickingMode.Ignore };
+                row.style.flexDirection = FlexDirection.Row;
+                row.style.alignItems = Align.Center;
+                row.style.justifyContent = Justify.Center;
+                row.style.marginTop = row.style.marginBottom = 4;
+                label.parent.Insert(label.parent.IndexOf(label), row);
+                row.Add(new MenuIcon(icon, size, tint) { style = { marginRight = 12 } });
+                label.style.fontSize = fontSize;
+                label.style.color = color;
+                label.style.unityFontStyleAndWeight = FontStyle.Bold;
+                row.Add(label);
+            }
+            IconRow(resultsPlaceLabel, "trophy", 64, KidYellow, 52, KidYellow);
+            // Trophy for a win, a finish flag for every other place.
+            var placeIcon = resultsPlaceLabel != null && resultsPlaceLabel.parent != null
+                ? resultsPlaceLabel.parent.Q<MenuIcon>() : null;
+            if (placeIcon != null)
+                placeIcon.schedule.Execute(() =>
+                {
+                    var m = System.Text.RegularExpressions.Regex.Match(resultsPlaceLabel != null ? resultsPlaceLabel.text ?? "" : "", "([0-9]+)/");
+                    var won = m.Success && m.Groups[1].Value == "1";
+                    placeIcon.Set(won ? "trophy" : "flag", won ? KidYellow : KidText);
+                }).Every(400);
+            IconRow(resultsTimeLabel, "stopwatch", 40, KidText, 28, KidText);
+            IconRow(resultsCoinsLabel, "coin", 40, KidYellow, 30, KidText);
+            if (resultsBreakdownLabel != null)
+            {
+                resultsBreakdownLabel.style.fontSize = 16;
+                resultsBreakdownLabel.style.color = KidMuted;
+            }
+            if (resultsRecordLabel != null)
+            {
+                resultsRecordLabel.style.color = KidYellow;
+                resultsRecordLabel.style.unityFontStyleAndWeight = FontStyle.Bold;
+            }
+            var finish = root.Q("finish.panel");
+            if (finish != null)
+                foreach (var label in finish.Query<Label>().ToList())
+                {
+                    label.style.color = KidText;
+                    label.style.unityFontStyleAndWeight = FontStyle.Bold;
+                }
         }
 
         // In-race overlays: big icon actions, no frames.
