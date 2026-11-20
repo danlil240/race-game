@@ -277,6 +277,9 @@ namespace FamilyRacing.Core.Networking
         // burst. A correction that would exceed the remaining budget
         // holds the fresh authoritative pose and resynchronizes instead
         // of spreading a partially replayed world across later frames.
+        // The budget binds only corrections that actually rewind: a
+        // snapshot that confirms the prediction replays nothing and is
+        // exempt (see ClientPrediction.Reconcile).
         public const int PredictionReplayTicksPerFrame = 12;
     }
 }

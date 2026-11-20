@@ -378,17 +378,6 @@ namespace FamilyRacing.Core.Networking
                     return ResyncHold(authoritative, "missingHistory",
                         snap, tuning);
 
-            // One rendered frame shares a single replay budget across
-            // every correction it processes — a packet burst can never
-            // multiply a PhysX replay burst. A correction that would
-            // exceed the remaining budget holds the fresh authoritative
-            // pose rather than spreading a partially replayed world
-            // across later frames.
-            if (frameReplayTicks + pending.Count
-                    > NetworkSettings.PredictionReplayTicksPerFrame)
-                return ResyncHold(authoritative, "replayBudget",
-                    snap, tuning);
-
             // Error is measured at the ack horizon: the predicted pose
             // after the last consumed sample versus the authoritative
             // pose the snapshot carries — distance AND full-attitude
@@ -447,6 +436,21 @@ namespace FamilyRacing.Core.Networking
                 ConfirmedSnapshots++;
                 return predicted.Copy();
             }
+
+            // The budget only matters when a rewind is actually needed: a
+            // confirmed snapshot (above) replays nothing, so a long but
+            // correct unacknowledged tail - two tablets at ~25 fps sit
+            // around 300-400 ms - must never trigger a resync by itself.
+            // One rendered frame shares a single replay budget across
+            // every correction it processes — a packet burst can never
+            // multiply a PhysX replay burst. A correction that would
+            // exceed the remaining budget holds the fresh authoritative
+            // pose rather than spreading a partially replayed world
+            // across later frames.
+            if (frameReplayTicks + pending.Count
+                    > NetworkSettings.PredictionReplayTicksPerFrame)
+                return ResyncHold(authoritative, "replayBudget",
+                    snap, tuning);
 
             // Restore the full authoritative state on the injected body —
             // pose, velocities, attitude, angular velocity, controller
