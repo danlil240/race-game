@@ -173,7 +173,11 @@ namespace FamilyRacing
             // equip/unequip button — the same cosmetic.equip command
             // agents drive.
             var owned = profile.ownedCosmetics;
-            if (owned == null || owned.Count == 0) return;
+            if (owned == null || owned.Count == 0)
+            {
+                if (playerPresentation) StylePlayerGarage(state);
+                return;
+            }
             var cosmeticsTitle = AddLabel(garagePanel,
                 T("garage.cosmetics", state), 22, Deep);
             cosmeticsTitle.name = "garage.cosmetics";
