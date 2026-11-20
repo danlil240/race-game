@@ -610,33 +610,40 @@ namespace FamilyRacing
         // (prediction, input packets, host validation). It exists so a LAN
         // session can be driven and measured on real devices without a
         // person holding each one. No menu or setting reaches it.
-        private static readonly bool AutopilotEnabled = ResolveAutopilot();
+        private bool? autopilotEnabled;
         private Core.Racing.AiDriver autopilot;
         private string autopilotRaceId = "";
         private string lastLocalLanId = "";
 
-        private static bool ResolveAutopilot()
+        // Two switches, neither reachable from the game: the --autopilot
+        // command-line argument (PC, or Android's `-e unity --autopilot`
+        // launch extra, which Unity appends to the arguments), or an
+        // `autopilot.flag` file in the app's own files directory that a
+        // developer creates over adb. No JNI: an earlier version read the
+        // launch intent through AndroidJavaObject and aborted the whole app
+        // (JNI "jlr_method == null") on a normal launch without extras.
+        private bool AutopilotEnabled
         {
-            if (Array.IndexOf(Environment.GetCommandLineArgs(), "--autopilot") >= 0)
-                return true;
-#if UNITY_ANDROID && !UNITY_EDITOR
-            try
+            get
             {
-                using (var player = new AndroidJavaClass("com.unity3d.player.UnityPlayer"))
-                using (var activity = player.GetStatic<AndroidJavaObject>("currentActivity"))
-                using (var intent = activity.Call<AndroidJavaObject>("getIntent"))
+                if (!autopilotEnabled.HasValue)
                 {
-                    if (intent.Call<bool>("getBooleanExtra", "autopilot", false)) return true;
-                    var unityArgs = intent.Call<string>("getStringExtra", "unity");
-                    return unityArgs != null && unityArgs.Contains("--autopilot");
+                    var enabled = Array.IndexOf(
+                        Environment.GetCommandLineArgs(), "--autopilot") >= 0;
+                    if (!enabled)
+                    {
+                        try
+                        {
+                            enabled = File.Exists(Path.Combine(
+                                Application.persistentDataPath, "autopilot.flag"));
+                        }
+                        catch (Exception) { enabled = false; }
+                    }
+                    autopilotEnabled = enabled;
                 }
+                return autopilotEnabled.Value;
             }
-            catch (Exception) { return false; }
-#else
-            return false;
-#endif
         }
-
         private DriverInput AutopilotOr(DriverInput manual)
         {
             if (!AutopilotEnabled || raceBridge == null || drivingWorld == null)
