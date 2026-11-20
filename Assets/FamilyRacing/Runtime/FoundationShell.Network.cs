@@ -40,6 +40,8 @@ namespace FamilyRacing
         private string lanJoinErrorKey = "";
         private string lanJoinErrorCode = "";
         private string lanJoinErrorField = "";
+        private Label lanLobbyErrorLabel;
+        private string lanLobbyErrorCode = "";
 
         // Rebuild signature for LAN screens: the rendered roster,
         // configuration, discovery and delivery rows are part of the key
@@ -68,6 +70,11 @@ namespace FamilyRacing
                     + (r.state ?? "");
             return key;
         }
+
+        // Roster/discovery cards: the player presentation recolors Deep
+        // text to cream, so the cards need its dark slate behind them or
+        // names and ready states vanish cream-on-cream.
+        private Color LanCardColor => playerPresentation ? PlayerSlate : Cream;
 
         private static bool IsLanScreen(string screen)
         {
@@ -172,7 +179,7 @@ namespace FamilyRacing
                     var entry = net.discovered[index];
                     var card = new VisualElement();
                     card.name = "lan.discovered." + index;
-                    card.style.backgroundColor = Cream;
+                    card.style.backgroundColor = LanCardColor;
                     card.style.marginLeft = card.style.marginRight = 6;
                     card.style.paddingTop = card.style.paddingBottom = 4;
                     var address = AddLabel(card,
@@ -467,7 +474,7 @@ namespace FamilyRacing
                     var p = net.participants[i];
                     var card = new VisualElement();
                     card.name = "lan.slot." + p.slot;
-                    card.style.backgroundColor = Cream;
+                    card.style.backgroundColor = LanCardColor;
                     card.style.minWidth = 170;
                     card.style.marginLeft = card.style.marginRight = 6;
                     card.style.paddingTop = card.style.paddingBottom = 4;
@@ -499,7 +506,8 @@ namespace FamilyRacing
                                     ? T("lan.ready", state)
                                     : T("lan.notReady", state)));
                         var status = AddLabel(card, statusText, 18,
-                            p.connected ? Deep : Coral);
+                            !p.connected ? Coral
+                                : (p.ready && p.controlSource != "ai" ? Seafoam : Deep));
                         status.name = "lan.slot." + p.slot + ".status";
                         var vehicle = AddLabel(card,
                             VehicleName(p.vehicleId, state), 16, Off);
@@ -510,18 +518,82 @@ namespace FamilyRacing
             }
 
             var actions = Row(root);
-            var ready = AddButton(actions, T("lan.ready", state), Seafoam,
-                () => app.Dispatch("lan.ready",
-                    ReadyParam(net, localId)), "lan.ready");
+            var localReady = false;
+            if (net != null)
+                foreach (var p in net.participants)
+                    if (p.occupied && p.participantId == localId)
+                        localReady = p.ready;
+            // The ready toggle shows its own state: the selected (orange)
+            // look while this player is ready, like the course pickers.
+            var ready = AddButton(actions, T("lan.ready", state),
+                localReady ? Coral : Seafoam,
+                () =>
+                {
+                    EnsureLanSetup(state, eventId, classId, vehicles, myVehicle);
+                    PaintLanLobbyOutcome(state, app.Dispatch("lan.ready",
+                        ReadyParam(net, localId)));
+                }, "lan.ready");
             ApplyAvailability(ready, "lan.ready");
             var start = AddButton(actions, T("lan.start", state), Coral,
-                () => app.Dispatch("lan.start", emptyParams), "lan.start");
+                () =>
+                {
+                    EnsureLanSetup(state, eventId, classId, vehicles, myVehicle);
+                    PaintLanLobbyOutcome(state,
+                        app.Dispatch("lan.start", emptyParams));
+                }, "lan.start");
             ApplyAvailability(start, "lan.start");
             var leave = AddButton(actions, T("lan.leave", state), Deep,
                 () => app.Dispatch("lan.leave", emptyParams), "lan.leave");
             ApplyAvailability(leave, "lan.leave");
 
+            lanLobbyErrorLabel = AddLabel(root, "", 20, Coral);
+            lanLobbyErrorLabel.name = "lan.lobby.error";
+            lanLobbyErrorLabel.text = ReasonText(lanLobbyErrorCode, state);
+
             LanStatus(state, isHost ? "" : T("lan.waitHost", state));
+        }
+
+        // The lobby highlights the first course/class/vehicle as the
+        // default pick, but the session only learns a choice when someone
+        // taps it. Ready/Start commit the highlighted defaults first so a
+        // family that never touched the pickers still gets a race instead
+        // of a silent notConfigured refusal.
+        private void EnsureLanSetup(FoundationState state, string eventId,
+            string classId, IReadOnlyList<string> vehicles, string myVehicle)
+        {
+            var net = state.network;
+            if (net == null) return;
+            var descriptor = net.descriptor;
+            var configured = descriptor != null
+                && !string.IsNullOrEmpty(descriptor.eventId);
+            if (!configured && net.role == "host" && !string.IsNullOrEmpty(eventId))
+            {
+                ConfigureLan(eventId, classId);
+                configured = true;
+            }
+            if (configured && string.IsNullOrEmpty(myVehicle)
+                && vehicles != null && vehicles.Count > 0)
+            {
+                var p = new Dictionary<string, string>();
+                p["vehicleId"] = vehicles[0];
+                app.Dispatch("lan.vehicle", p);
+            }
+        }
+
+        // A synchronous refusal of Ready/Start is shown under the buttons
+        // instead of vanishing; any accepted press clears it.
+        private void PaintLanLobbyOutcome(FoundationState state,
+            CommandResult result)
+        {
+            var failed = result == null
+                || result.status == CommandResult.Rejected
+                || result.status == CommandResult.Failed;
+            lanLobbyErrorCode = failed
+                ? (result != null && !string.IsNullOrEmpty(result.code)
+                    ? result.code : "rejected")
+                : "";
+            if (lanLobbyErrorLabel != null)
+                lanLobbyErrorLabel.text = ReasonText(lanLobbyErrorCode, state);
         }
 
         private string classIdFor(string eventId, string currentClassId)

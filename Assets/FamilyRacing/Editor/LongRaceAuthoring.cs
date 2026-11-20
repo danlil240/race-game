@@ -162,6 +162,49 @@ namespace FamilyRacing.EditorTools
         public static void Build()=>BuildPlayer("Builds/Windows-LongRaces/FamilyRacing.exe",BuildOptions.Development);
         public static void BuildOrdinary()=>BuildPlayer("Builds/Windows-LongRaces-Ordinary/FamilyRacing.exe",BuildOptions.None);
         public static void BuildBoth(){Validate();Build();BuildOrdinary();}
+        // The tablet swaps world Lit materials to Simple Lit at runtime
+        // (LongRaceVisibility.Start). Shader variants only ship when a
+        // built material uses them, so two tiny Resources materials pin
+        // the opaque and the cutout Simple Lit variants into the player.
+        private static void EnsureTabletShaderVariants()
+        {
+            const string dir="Assets/FamilyRacing/Generated/LongRaces/Resources";
+            if(!AssetDatabase.IsValidFolder(dir))AssetDatabase.CreateFolder("Assets/FamilyRacing/Generated/LongRaces","Resources");
+            var shader=Shader.Find("Universal Render Pipeline/Simple Lit");
+            if(shader==null)throw new InvalidOperationException("Simple Lit shader not found");
+            foreach(var cutout in new[]{false,true})
+            {
+                var path=dir+(cutout?"/TabletSimpleLitCutout.mat":"/TabletSimpleLitOpaque.mat");
+                if(AssetDatabase.LoadAssetAtPath<Material>(path)!=null)continue;
+                var material=new Material(shader);
+                material.shaderKeywords=cutout?new[]{"_ALPHATEST_ON"}:new string[0];
+                if(cutout){material.SetFloat("_AlphaClip",1f);material.renderQueue=2450;}
+                AssetDatabase.CreateAsset(material,path);
+            }
+            AssetDatabase.SaveAssets();
+        }        // Tablet build of the same Grand Tour scene: a directly installable,
+        // debug-signed APK (adb install -r) for family LAN play.
+        public static void BuildAndroidOrdinary()
+        {
+            var oldExport=EditorUserBuildSettings.exportAsGoogleAndroidProject;
+            var oldBundle=EditorUserBuildSettings.buildAppBundle;
+            try
+            {
+                EditorUserBuildSettings.exportAsGoogleAndroidProject=false;
+                EditorUserBuildSettings.buildAppBundle=false;
+                PlayerSettings.enableFrameTimingStats=true;
+                EnsureTabletShaderVariants();
+                const string path="Builds/Android-LongRaces-Ordinary/FamilyRacing.apk";
+                var report=BuildPipeline.BuildPlayer(new BuildPlayerOptions { scenes=new[]{ScenePath},locationPathName=path,target=BuildTarget.Android,options=BuildOptions.None });
+                Debug.Log("GRAND_TOUR_BUILD "+path+" "+report.summary.result+" errors="+report.summary.totalErrors);
+                if(report.summary.result!=BuildResult.Succeeded)throw new InvalidOperationException("Grand Tour Android build failed");
+            }
+            finally
+            {
+                EditorUserBuildSettings.exportAsGoogleAndroidProject=oldExport;
+                EditorUserBuildSettings.buildAppBundle=oldBundle;
+            }
+        }
         public static void PruneUnusedGeneratedAssets()
         {
             // This folder was created solely for this upgrade. Remove obsolete

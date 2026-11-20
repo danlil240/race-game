@@ -144,10 +144,23 @@ namespace FamilyRacing.Networking
         private long lastSentEpoch = -1;
         private long lastSnapshotHostTick;
         private double lastSnapshotReceivedAt = double.NaN;
+        private double hostClockOffset = double.NaN;
+        // Each arrival is quantized by up to a frame, so one sample may
+        // move the offset only 1%: at 0.1 the render clock itself jittered
+        // by several ms every snapshot.
+        private const double HostClockGain = 0.01;
+        // Diagnostics: accepted snapshots and the widest host-tick gap
+        // between consecutive ones (reset by the reader).
+        public long SnapshotsAccepted;
+        public long MaxSnapshotTickGap;
         // Render-time clock, injectable so tests can drive deterministic
         // host-time estimates; defaults to unscaled real time.
+        // Frame time, not wall time: remote poses are sampled once per
+        // rendered frame, and a wall-clock read moves with however long
+        // that frame's own work took before the read (tablet guests
+        // measured ~40% frame-to-frame speed variation on remote cars).
         internal Func<double> NowSeconds =
-            () => Time.realtimeSinceStartupAsDouble;
+            () => Time.unscaledTimeAsDouble;
 
         public NetworkRaceBridge(LanTransport transport, LanSessionService session)
         {
@@ -298,9 +311,12 @@ namespace FamilyRacing.Networking
         public double EstimatedHostSeconds(double nowSeconds)
         {
             if (double.IsNaN(lastSnapshotReceivedAt)) return 0;
-            return lastSnapshotHostTick
-                / (double)NetworkSettings.SimulationTicksPerSecond
-                + (nowSeconds - lastSnapshotReceivedAt);
+            // Snapshots are only seen at rendered-frame boundaries, so each
+            // arrival time is quantized by up to a frame (33 ms on a
+            // tablet). Anchoring to the latest arrival made remote cars
+            // speed up and slow down with that jitter; the low-passed
+            // host-clock offset gives a steady render clock instead.
+            return nowSeconds + hostClockOffset;
         }
 
         /// <summary>The host-time coordinate remote racers render at:
@@ -319,6 +335,29 @@ namespace FamilyRacing.Networking
         {
             return interpolation.Sample(participantId,
                 RenderHostTime(nowSeconds));
+        }
+
+        /// <summary>True when the last sampled pose for this remote was
+        /// extrapolated past (or held at) its newest snapshot.</summary>
+        // Newest snapshot host tick minus the render coordinate, in ticks:
+        // positive = interpolating inside the buffer.
+        public double TicksBehindNewest(double nowSeconds)
+        {
+            return lastSnapshotHostTick - RenderHostTime(nowSeconds)
+                * NetworkSettings.SimulationTicksPerSecond;
+        }
+
+        /// <summary>The client's live predicted local motor; null on a
+        /// host or before prediction is seeded.</summary>
+        public MotorState LocalPredictedMotor
+        {
+            get { return prediction != null ? prediction.Predicted : null; }
+        }
+
+        public bool RemoteExtrapolating(string participantId)
+        {
+            return interpolation.IsStale(participantId)
+                || interpolation.ExtrapolationSeconds(participantId) > 0;
         }
 
         /// <summary>Task 6 render seam: the local racer's pose to draw —
@@ -352,7 +391,9 @@ namespace FamilyRacing.Networking
                 smoothedLocal = null;
                 return;
             }
-            if (smoothedLocal != null)
+            // A confirmed snapshot changed nothing: any offset already
+            // decaying keeps decaying instead of restarting its blend.
+            if (smoothedLocal != null && !prediction.LastReconcileConfirmed)
                 smoother.Correct(smoothedLocal, corrected,
                     prediction.LastCorrectionSnap);
         }
@@ -934,6 +975,7 @@ namespace FamilyRacing.Networking
             }
             lastPublished = snapshot;
             SnapshotsPublished++;
+            hostLogPublished++; hostLogBytes = packet.Length;
             var sent = false;
             var allSent = true;
             foreach (var connectionId in session.HostConnections())
@@ -942,11 +984,23 @@ namespace FamilyRacing.Networking
                 if (!ok)
                     LastError = "snapshotSend:" + transport.LastError
                         + " len=" + packet.Length;
+                if (!ok) hostLogSendFailures++;
                 sent |= ok;
                 allSent &= ok;
             }
+            if (Time.realtimeSinceStartupAsDouble >= hostLogNext)
+            {
+                hostLogNext = Time.realtimeSinceStartupAsDouble + 2.0;
+                Debug.Log("LAN_HOST snapshots=" + hostLogPublished + " sendFailures=" + hostLogSendFailures
+                    + " bytes=" + hostLogBytes                    + " starvations=" + (inputs.Starvations - hostLogStarvations)                    + " skipped=" + (inputs.SkippedSamples - hostLogSkipped)                    + " lastError=" + LastError);                hostLogStarvations = inputs.Starvations; hostLogSkipped = inputs.SkippedSamples;
+                hostLogPublished = hostLogSendFailures = 0;
+            }
             return sent && allSent;
         }
+        // Field diagnostics for the host's snapshot stream.
+        private int hostLogPublished, hostLogSendFailures, hostLogBytes;
+        private double hostLogNext;
+        private long hostLogStarvations, hostLogSkipped;
 
         // Reliable ordered delivery of staged authoritative events. Each
         // batch carries identities so consumers apply every event once
@@ -1025,7 +1079,47 @@ namespace FamilyRacing.Networking
                 BindPredictionSimulation();
                 prediction.Reconcile(snapshot, LocalTuning(), clientWorld);
                 BlendCorrection();
+                LogPredictionHealth();
             }
+        }
+
+        // Field diagnostics for client rubber-banding: one logcat/Player.log
+        // line every two seconds of racing with the reconciliation counters
+        // and the worst error seen since the previous line.
+        private double nextPredictionLog;
+        private int correctionTraceCount;
+        private float worstErrorMeters;
+        private long loggedCorrections, loggedSnaps, loggedResyncs;
+        private int worstPending;
+        private void LogPredictionHealth()
+        {
+            if (prediction == null) return;
+            if (correctionTraceCount < 400 && prediction.LastErrorDetail.Length > 0)
+            {
+                correctionTraceCount++;
+                Debug.Log("CORRECTION_TRACE err=" + prediction.LastErrorDistance.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture) + " " + prediction.LastErrorDetail);
+            }
+            worstErrorMeters = Mathf.Max(worstErrorMeters, prediction.LastErrorDistance);
+            worstPending = Mathf.Max(worstPending, prediction.PendingCount);
+            var now = Time.realtimeSinceStartupAsDouble;
+            if (now < nextPredictionLog) return;
+            nextPredictionLog = now + 2.0;
+            Debug.Log("LAN_PREDICTION corrections=+" + (prediction.Corrections - loggedCorrections)
+                + " snaps=+" + (prediction.Snaps - loggedSnaps)
+                + " resyncs=+" + (prediction.ResyncCount - loggedResyncs)
+                + " lastResync=" + prediction.LastResyncReason
+                + " worstErrorM=" + worstErrorMeters.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)
+                + " worstPending=" + worstPending
+                + " decodeMs=" + (NetworkWireCodec.DecodeCount > 0
+                    ? (NetworkWireCodec.DecodeStopwatchTicks * 1000.0 / System.Diagnostics.Stopwatch.Frequency / NetworkWireCodec.DecodeCount) : 0).ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)
+                + " lastReplay=" + prediction.LastReplayCount
+                + " fps=" + (1f / Mathf.Max(0.0001f, Time.smoothDeltaTime)).ToString("0", System.Globalization.CultureInfo.InvariantCulture));
+            loggedCorrections = prediction.Corrections;
+            loggedSnaps = prediction.Snaps;
+            loggedResyncs = prediction.ResyncCount;
+            worstErrorMeters = 0f;
+            worstPending = 0;
+            NetworkWireCodec.DecodeStopwatchTicks = 0; NetworkWireCodec.DecodeCount = 0;
         }
 
         private void ResetPresentation()
@@ -1177,9 +1271,20 @@ namespace FamilyRacing.Networking
             // a burst coalesces to the newest authoritative boundary —
             // restore authoritative, replay unacknowledged — exactly
             // once per frame inside the shared replay budget.
+            var previousHostTick = lastSnapshotHostTick;
             lastSnapshotHostTick = snapshot.state != null
                 ? snapshot.state.hostTick : 0;
+            SnapshotsAccepted++;
+            if (previousHostTick > 0 && lastSnapshotHostTick - previousHostTick > MaxSnapshotTickGap)
+                MaxSnapshotTickGap = lastSnapshotHostTick - previousHostTick;
             lastSnapshotReceivedAt = NowSeconds();
+            var clockSample = lastSnapshotHostTick
+                / (double)NetworkSettings.SimulationTicksPerSecond
+                - lastSnapshotReceivedAt;
+            hostClockOffset = double.IsNaN(hostClockOffset)
+                    || Math.Abs(clockSample - hostClockOffset) > 0.25
+                ? clockSample
+                : hostClockOffset + (clockSample - hostClockOffset) * HostClockGain;
             interpolation.Push(snapshot);
             pendingReconcile = snapshot;
         }
@@ -1416,6 +1521,7 @@ namespace FamilyRacing.Networking
             lastSentEpoch = -1;
             lastSnapshotHostTick = 0;
             lastSnapshotReceivedAt = double.NaN;
+            hostClockOffset = double.NaN;
             inputSequence = 0;
         }
 

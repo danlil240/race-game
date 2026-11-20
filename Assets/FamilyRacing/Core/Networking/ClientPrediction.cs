@@ -100,6 +100,13 @@ namespace FamilyRacing.Core.Networking
         public bool LastCorrectionSnap { get; private set; }
         public long Corrections { get; private set; }
         public long Snaps { get; private set; }
+        // Snapshots whose horizon matched the prediction (no rewind).
+        public long ConfirmedSnapshots { get; private set; }
+        // True when the latest Reconcile left the predicted body untouched.
+        public bool LastReconcileConfirmed { get; private set; }
+        // Human-readable breakdown of the last measured correction; "" when none.
+        public string LastErrorDetail { get; private set; } = "";
+        private MotorModifiers currentModifiers;
         public bool ResyncRequested { get; private set; }
         public string LastResyncReason { get; private set; } = "";
         public long ResyncCount { get; private set; }
@@ -201,6 +208,8 @@ namespace FamilyRacing.Core.Networking
                         participantId = participantId,
                         input = input,
                         rulesBefore = NormalizedRules(state, true),
+                        modifiers = currentModifiers != null
+                            ? currentModifiers.Copy() : null,
                         simulateMotion = true
                     }
                 });
@@ -321,6 +330,7 @@ namespace FamilyRacing.Core.Networking
         public MotorState Reconcile(NetworkSnapshot snapshot,
             VehicleTuning tuning, IMotorWorld world)
         {
+            LastReconcileConfirmed = false;
             if (snapshot == null || snapshot.state == null)
                 return Predicted;
             var raceChanged = !string.Equals(raceId, snapshot.raceId ?? "",
@@ -361,6 +371,25 @@ namespace FamilyRacing.Core.Networking
             appliedRecoveryEpoch = authoritativeEpoch;
             lastAuthoritative = authoritative.Copy();
 
+            // The host layers per-tick modifiers on every racer before it
+            // steps: gadget effects and the slipstream draft. Predicting
+            // without them left the client a little slow whenever it was
+            // drafting (measured: along-track error with dSpeed ~0.4-2 m/s on
+            // nearly every snapshot). The snapshot carries both facts, so
+            // prediction and replay apply the same modifiers the host is
+            // applying now.
+            var mods = FamilyRacing.Core.Racing.GadgetRules.ModifierFor(
+                snapshot.state.gadgets, participantId)
+                ?? MotorModifiers.Neutral();
+            if (racer.slipstream)
+            {
+                mods.accelerationMultiplier *=
+                    FamilyRacing.Core.Racing.NetworkRace.SlipstreamAcceleration;
+                mods.speedCapMultiplier *=
+                    FamilyRacing.Core.Racing.NetworkRace.SlipstreamSpeedCap;
+            }
+            currentModifiers = mods.IsNeutral() ? null : mods;
+
             var ack = FindAck(snapshot);
             if (ack != null && ack.inputSequence > lastAckedSequence)
                 lastAckedSequence = ack.inputSequence;
@@ -376,17 +405,6 @@ namespace FamilyRacing.Core.Networking
                     return ResyncHold(authoritative, "missingHistory",
                         snap, tuning);
 
-            // One rendered frame shares a single replay budget across
-            // every correction it processes — a packet burst can never
-            // multiply a PhysX replay burst. A correction that would
-            // exceed the remaining budget holds the fresh authoritative
-            // pose rather than spreading a partially replayed world
-            // across later frames.
-            if (frameReplayTicks + pending.Count
-                    > NetworkSettings.PredictionReplayTicksPerFrame)
-                return ResyncHold(authoritative, "replayBudget",
-                    snap, tuning);
-
             // Error is measured at the ack horizon: the predicted pose
             // after the last consumed sample versus the authoritative
             // pose the snapshot carries — distance AND full-attitude
@@ -398,7 +416,32 @@ namespace FamilyRacing.Core.Networking
                 ? Distance(horizon, authoritative) : 0f;
             LastErrorDegrees = LastErrorMeasured
                 ? OrientationDegrees(horizon, authoritative) : 0f;
-            if (snap)
+            // Field diagnostic: what exactly differed at the ack horizon.
+            LastErrorDetail = "";
+            if (LastErrorMeasured
+                && (LastErrorDistance > NetworkSettings.CorrectionEpsilonMeters
+                    || LastErrorDegrees > NetworkSettings.CorrectionEpsilonDegrees))
+            {
+                var fx = (float)Math.Sin(authoritative.heading);
+                var fz = (float)Math.Cos(authoritative.heading);
+                var ex = authoritative.x - horizon.x;
+                var ez = authoritative.z - horizon.z;
+                var inv = System.Globalization.CultureInfo.InvariantCulture;
+                LastErrorDetail = "along=" + (ex * fx + ez * fz).ToString("0.00", inv)
+                    + " lat=" + (ex * fz - ez * fx).ToString("0.00", inv)
+                    + " dy=" + (authoritative.y - horizon.y).ToString("0.00", inv)
+                    + " dSpeed=" + (authoritative.speed - horizon.speed).ToString("0.00", inv)
+                    + " speed=" + authoritative.speed.ToString("0.0", inv)
+                    + " dHeadDeg=" + LastErrorDegrees.ToString("0.0", inv)
+                    + " heldTicks=" + (ack != null ? snapshot.state.hostTick - ack.hostTick : -1)
+                    + " slip=" + racer.slipstream
+                    + " drift=" + authoritative.drifting + "/" + horizon.drifting
+                    + " boost=" + authoritative.boostActive + "/" + horizon.boostActive
+                    + " turbo=" + authoritative.miniTurboSeconds.ToString("0.00", inv) + "/" + horizon.miniTurboSeconds.ToString("0.00", inv)
+                    + " contact=" + authoritative.lastContact + "/" + horizon.lastContact
+                    + " grounded=" + authoritative.grounded + "/" + horizon.grounded
+                    + " pending=" + pending.Count;
+            }            if (snap)
                 history.Clear();
             else
                 PruneHistory();
@@ -427,6 +470,40 @@ namespace FamilyRacing.Core.Networking
                 || LastErrorDegrees
                     > NetworkSettings.CorrectionEpsilonDegrees)
                 Corrections++;
+
+            // A confirmed prediction needs no rewind: when the measured
+            // horizon error sits inside the correction epsilon the live
+            // predicted body already IS the authoritative future, so the
+            // restore + PhysX replay (3-4 extra physics steps on every
+            // 15 Hz snapshot — the dominant main-thread cost on a tablet
+            // client) is skipped. Drift cannot hide: the error is an
+            // absolute pose comparison, so the first snapshot past the
+            // epsilon rewinds and replays as before.
+            if (!snap && LastErrorMeasured && predicted != null
+                && LastErrorDistance <= NetworkSettings.CorrectionEpsilonMeters
+                && LastErrorDegrees <= NetworkSettings.CorrectionEpsilonDegrees)
+            {
+                LastReplayCount = 0;
+                LastReplaySeconds = 0;
+                ConfirmedSnapshots++;
+                LastReconcileConfirmed = true;
+                return predicted.Copy();
+            }
+
+            // The budget only matters when a rewind is actually needed: a
+            // confirmed snapshot (above) replays nothing, so a long but
+            // correct unacknowledged tail - two tablets at ~25 fps sit
+            // around 300-400 ms - must never trigger a resync by itself.
+            // One rendered frame shares a single replay budget across
+            // every correction it processes — a packet burst can never
+            // multiply a PhysX replay burst. A correction that would
+            // exceed the remaining budget holds the fresh authoritative
+            // pose rather than spreading a partially replayed world
+            // across later frames.
+            if (frameReplayTicks + pending.Count
+                    > NetworkSettings.PredictionReplayTicksPerFrame)
+                return ResyncHold(authoritative, "replayBudget",
+                    snap, tuning);
 
             // Restore the full authoritative state on the injected body —
             // pose, velocities, attitude, angular velocity, controller
@@ -490,6 +567,7 @@ namespace FamilyRacing.Core.Networking
             LastCorrectionSnap = false;
             Corrections = 0;
             Snaps = 0;
+            ConfirmedSnapshots = 0;
             ResyncRequested = false;
             LastResyncReason = "";
             ResyncCount = 0;
@@ -499,6 +577,7 @@ namespace FamilyRacing.Core.Networking
             // The injected simulation survives a Reset (its owner manages
             // the roster); only the seed flag resets so the next race
             // re-initializes it with fresh facts.
+            currentModifiers = null;
             simulationSeeded = false;
         }
 
@@ -564,14 +643,16 @@ namespace FamilyRacing.Core.Networking
             return null;
         }
 
-        // Acknowledged history entries are dead weight: only the entry at
-        // the ack horizon (already consumed for the error measure) and
-        // older go; unacknowledged entries survive for the next measure.
+        // Acknowledged history entries older than the ack horizon are dead
+        // weight. The horizon entry itself survives: a host tick that
+        // consumed no new sample repeats the same ack, and that repeat must
+        // still measure (a missing horizon forces a snap every snapshot).
+        // Unacknowledged entries survive for the next measure.
         private void PruneHistory()
         {
             var dead = new List<long>();
             foreach (var seq in history.Keys)
-                if (seq <= lastAckedSequence) dead.Add(seq);
+                if (seq < lastAckedSequence) dead.Add(seq);
             foreach (var seq in dead) history.Remove(seq);
         }
 

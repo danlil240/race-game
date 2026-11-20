@@ -114,8 +114,17 @@ namespace FamilyRacing
                 Quaternion.Slerp(mirrorCamera.transform.rotation,
                     Quaternion.LookRotation(lookAt - desired, Vector3.up), blend));
             previousLocalPosition = localPosition; hasPose = true;
-            mirrorCamera.enabled = true;
+            // Tablet budget: the mirror is a second full scene render.
+            // Drawing it every third frame made every third frame slow
+            // (measured 16/49/33 ms repeating - a visible periodic stall),
+            // so a real tablet shows the mirror only while it has something
+            // to show (a deployed trap or a hit replay) and otherwise
+            // spends every frame on the road ahead.
+            var showMirror = !RenderProfileController.LowEndDevice
+                || !string.IsNullOrEmpty(focusedId) || shotRemaining > 0f;
+            mirrorCamera.enabled = showMirror;
             UpdateHud(state.language == "he");
+            frame.style.display = showMirror ? DisplayStyle.Flex : DisplayStyle.None;
         }
 
         private static NetworkRacerState Find(NetworkRaceState race, string id)
@@ -154,7 +163,7 @@ namespace FamilyRacing
             mirrorCamera.tag = "Untagged";
             mirrorCamera.fieldOfView = 65f;
             mirrorCamera.nearClipPlane = .2f;
-            mirrorCamera.farClipPlane = 180f;
+            mirrorCamera.farClipPlane = RenderProfileController.LowEndDevice ? 110f : 180f;
             mirrorCamera.allowHDR = false;
             mirrorCamera.allowMSAA = false;
             mirrorCamera.depth = source.depth - 1;
@@ -165,7 +174,10 @@ namespace FamilyRacing
             data.renderPostProcessing = false;
             data.requiresColorOption = CameraOverrideOption.Off;
             data.requiresDepthOption = CameraOverrideOption.Off;
-            texture = new RenderTexture(600, 200, 16, RenderTextureFormat.ARGB32) {
+            texture = RenderProfileController.LowEndDevice
+                ? new RenderTexture(360, 120, 16, RenderTextureFormat.ARGB32) {
+                    name = "Rear view mirror", antiAliasing = 1, filterMode = FilterMode.Bilinear }
+                : new RenderTexture(600, 200, 16, RenderTextureFormat.ARGB32) {
                 name = "Rear view mirror", antiAliasing = 1, filterMode = FilterMode.Bilinear };
             texture.Create();
             mirrorCamera.targetTexture = texture;

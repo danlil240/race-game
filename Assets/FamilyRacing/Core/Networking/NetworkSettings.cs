@@ -16,7 +16,7 @@ namespace FamilyRacing.Core.Networking
         // a seat is dealt rather than silently racing without items.
         // Protocol 4 adds moving missiles, armed mines, and EMP visuals;
         // protocol-3 clients cannot validate or render this weapon state.
-        public const int LanProtocolVersion = 4;
+        public const int LanProtocolVersion = 5; // 5: deflated snapshot envelope
 
         // Observation schema emitted by FoundationState once the network
         // slice exists. Profile schema (1 -> 2 in a later task) is a
@@ -194,6 +194,15 @@ namespace FamilyRacing.Core.Networking
         // commands/steering clear to neutral; the connection timeout then
         // hands control to AI.
         public const int InputStaleTicks = 15;
+        // Host jitter cushion per racer: queued input beyond this many
+        // samples (~230 ms: the 3-sample jitter cushion plus one 4-sample
+        // packet clump) is skipped oldest-first so
+        // latency cannot grow.
+        public const int InputCatchUpDepth = 7;
+        // Host jitter cushion: after a lane runs dry it resumes once this
+        // many samples are queued, or after waiting this many ticks.
+        public const int InputJitterTargetSamples = 3;
+        public const int InputJitterMaxWaitTicks = 3;
         // How far ahead of the newest seen sequence a frame may claim
         // before it is rejected as bogus future traffic.
         public const long InputSequenceWindow = 120;
@@ -246,7 +255,10 @@ namespace FamilyRacing.Core.Networking
         // per remote racer for interpolation.
         public const int InterpolationBufferCapacity = 64;
         // Remote racers render this far behind the newest host tick.
-        public const double InterpolationDelaySeconds = 0.1;
+        // Two 15 Hz snapshot intervals (133 ms) plus margin: at 100 ms a
+        // 30 fps client, which only sees snapshots at frame boundaries,
+        // regularly ran past its newest snapshot and extrapolated.
+        public const double InterpolationDelaySeconds = 0.15;
         // Past the newest buffered pose, extrapolation runs at most this
         // far, then the last pose holds and reports stale.
         public const double ExtrapolationLimitSeconds = 0.1;
@@ -256,8 +268,10 @@ namespace FamilyRacing.Core.Networking
         // error past CorrectionSnapMeters snaps instantly. Errors under
         // CorrectionEpsilonMeters are noise — reconciliation is not
         // assumed bit-identical across Android/Windows physics.
-        public const float CorrectionSnapMeters = 3f;
-        public const double CorrectionBlendSeconds = 0.1;
+        // 5 m / 0.2 s: with tablet-to-tablet latency a bump from another
+        // car measured 2.6-3.9 m; at 3 m those snapped visibly.
+        public const float CorrectionSnapMeters = 5f;
+        public const double CorrectionBlendSeconds = 0.2;
         public const float CorrectionEpsilonMeters = 0.01f;
         // Task 10: the orientation leg of the same policy — full-attitude
         // errors past CorrectionSnapDegrees snap, under
@@ -270,6 +284,9 @@ namespace FamilyRacing.Core.Networking
         // burst. A correction that would exceed the remaining budget
         // holds the fresh authoritative pose and resynchronizes instead
         // of spreading a partially replayed world across later frames.
+        // The budget binds only corrections that actually rewind: a
+        // snapshot that confirms the prediction replays nothing and is
+        // exempt (see ClientPrediction.Reconcile).
         public const int PredictionReplayTicksPerFrame = 12;
     }
 }

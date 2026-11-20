@@ -34,7 +34,10 @@ namespace FamilyRacing.Core.Networking
             internal long lastConsumedClientTick;
             internal long lastConsumedHostTick;
             internal DriverInput held;         // input held between samples
-            internal int staleTicks;           // consecutive ticks without a usable sample
+            internal int staleTicks;
+            internal bool streaming;           // consumed a sample on the previous tick
+            internal bool rebuffering;         // waiting for the jitter cushion
+            internal long lastStarvationTick = -1;           // consecutive ticks without a usable sample
             // One-shot action dedup is independent of held input and is
             // deliberately retained across reseat/replay boundaries (a
             // bounded LRU) so a retried id can never fire twice.
@@ -54,6 +57,10 @@ namespace FamilyRacing.Core.Networking
 
         // Number of times a lane overflowed the replay bound and resynced.
         public int OverflowCount { get { return overflowCount; } }
+        // Samples skipped by the latency catch-up (see Consume).
+        public long SkippedSamples { get; private set; }
+        // Ticks on which a live lane ran dry (see the jitter cushion).
+        public long Starvations { get; private set; }
         public bool RaceActive { get { return active; } }
         public string SessionId { get { return sessionId; } }
         public string RaceId { get { return raceId; } }
@@ -266,7 +273,31 @@ namespace FamilyRacing.Core.Networking
                 }
                 return lane.held;
             }
-            if (lane.queue.Count > 0)
+            // Latency catch-up: one sample per tick can never drain a
+            // backlog, so a burst (Wi-Fi batching, a client frame hitch, a
+            // slightly fast client clock) would otherwise become permanent
+            // input delay - the tablet's prediction then runs ever further
+            // ahead and snaps back. Beyond a small jitter cushion the
+            // oldest samples are skipped; the newest input still drives.
+            while (lane.queue.Count > NetworkSettings.InputCatchUpDepth)
+            {
+                lane.queue.Dequeue();
+                SkippedSamples++;
+            }
+            // Jitter cushion: a client and host that both run near 30 fps
+            // deliver samples in uneven clumps (two in one frame, none in
+            // the next). Consuming the moment anything arrives leaves the
+            // lane empty every other tick: the host then repeats the held
+            // input for a tick, its timeline slips against the client's
+            // prediction, and the client is corrected ~10 times a second
+            // (measured tablet-to-tablet with real steering). After a
+            // starvation the lane waits briefly for a second sample, so
+            // the next clump has a cushion instead of running dry again.
+            if (lane.rebuffering && lane.queue.Count > 0
+                && (lane.queue.Count >= NetworkSettings.InputJitterTargetSamples
+                    || lane.staleTicks >= NetworkSettings.InputJitterMaxWaitTicks))
+                lane.rebuffering = false;
+            if (lane.queue.Count > 0 && !lane.rebuffering)
             {
                 var frame = lane.queue.Dequeue();
                 lane.lastConsumed = frame.inputSequence;
@@ -274,9 +305,26 @@ namespace FamilyRacing.Core.Networking
                 lane.lastConsumedHostTick = hostTick;
                 lane.held = frame.input;
                 lane.staleTicks = 0;
+                lane.streaming = true;
             }
             else
             {
+                // The first dry tick of a live stream arms the cushion; a
+                // lane that was already silent consumes its next sample
+                // immediately.
+                // lane that was already silent, or that ran dry only once,
+                // consumes its next sample immediately - the cushion is
+                // for a stream that keeps starving (two dry ticks inside
+                // one second), not for a deliberate gap.
+                if (lane.queue.Count == 0 && lane.streaming)
+                {
+                    if (lane.lastStarvationTick >= 0 && hostTick - lane.lastStarvationTick
+                            <= NetworkSettings.SimulationTicksPerSecond)
+                        lane.rebuffering = true;
+                    lane.lastStarvationTick = hostTick;
+                    lane.streaming = false;
+                    Starvations++;
+                }
                 lane.staleTicks++;
                 if (lane.staleTicks >= NetworkSettings.InputStaleTicks)
                     lane.held = default(DriverInput);

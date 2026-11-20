@@ -717,6 +717,12 @@ namespace FamilyRacing.Core.Networking
             host.ready = false;
             host.controlSource = ControlLocal;
             host.ownershipEpoch = 1;
+            // Start configured: the lobby highlights the first LAN course
+            // and class as the pick, so the session commits that same
+            // default up front. Otherwise a family that never taps a
+            // picker sees everything selected yet Start refuses with
+            // notConfigured, and a later tap would clear everyone's ready.
+            ApplyDefaultConfiguration();
             // Advertise on discovery so nearby players see this host —
             // including the exact compatibility token a joiner must match
             // before it may dial; a responder failure never blocks manual
@@ -2098,6 +2104,34 @@ namespace FamilyRacing.Core.Networking
         private void ClearReady()
         {
             foreach (var slot in slots) if (slot.occupied) slot.ready = false;
+        }
+
+        // Same ordering the lobby pickers render: the ordinal-first
+        // "lan-" event, then its ordinal-first class.
+        private void ApplyDefaultConfiguration()
+        {
+            if (content == null || content.Events == null || descriptor == null)
+                return;
+            string eventId = null;
+            foreach (var id in content.Events.Keys)
+                if (id != null && id.StartsWith("lan-", StringComparison.Ordinal)
+                    && (eventId == null || string.CompareOrdinal(id, eventId) < 0))
+                    eventId = id;
+            if (eventId == null) return;
+            var evt = content.Events[eventId];
+            if (evt == null || evt.vehicleIds == null) return;
+            string classId = null;
+            foreach (var vehicleId in evt.vehicleIds)
+            {
+                var candidate = NetworkProtocol.VehicleClass(vehicleId);
+                if (!string.IsNullOrEmpty(candidate)
+                    && (classId == null || string.CompareOrdinal(candidate, classId) < 0))
+                    classId = candidate;
+            }
+            if (classId == null) return;
+            descriptor.eventId = eventId;
+            descriptor.classId = classId;
+            AssignDefaultVehicles();
         }
 
         private void AssignDefaultVehicles()

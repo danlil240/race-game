@@ -285,9 +285,17 @@ namespace FamilyRacing
             // Commands publish their action-boundary state+result before the
             // next observation tick is emitted.
             bridge?.Pump();
+            // A LAN peer must keep pumping while its window is unfocused:
+            // a PC host left in the background (the family is holding the
+            // tablets) otherwise freezes, and every tablet's Ready/Start
+            // request waits forever. Solo play still pauses on focus loss.
+            if (bridge == null)
+                Application.runInBackground = CurrentScreen != null
+                    && CurrentScreen.StartsWith("lan-", StringComparison.Ordinal);
             // Transport/discovery callbacks run on this thread and queue
             // session outcomes; monotonic wall time expires joins and
             // request round-trips whether or not the app is paused.
+            var costT0 = System.Diagnostics.Stopwatch.GetTimestamp();
             lanLink?.Pump(DateTime.UtcNow);
             service.AdvanceNetworkWallTime(Time.realtimeSinceStartupAsDouble);
             DrainNetworkBoundary();
@@ -301,6 +309,7 @@ namespace FamilyRacing
             // unseen. Re-arm comes from the pause-edge cleanup below.
             driverInput?.Pump(AgentControlsInput || lastNetworkPaused,
                 CurrentScreen);
+            var costT1 = System.Diagnostics.Stopwatch.GetTimestamp();
             accumulator += Time.unscaledDeltaTime;
             var step = 1f / TickRate;
             var steps = 0;
@@ -323,7 +332,7 @@ namespace FamilyRacing
                 // One local 30 Hz boundary on the replication path: host
                 // consumes validated inputs and steps the authoritative
                 // race (publishing at 15 Hz); a client emits one sample.
-                raceBridge?.StepTick(service.CurrentInput,
+                raceBridge?.StepTick(AutopilotOr(service.CurrentInput),
                     drivingWorld != null ? drivingWorld.MotorWorld : null);
                 var raceEvents = raceBridge != null ? raceBridge.DrainRaceEvents() : null;
                 if (raceEvents != null && raceEvents.Count > 0)
@@ -355,11 +364,13 @@ namespace FamilyRacing
                     bridge.EmitTick(tickState);
                 }
             }
+            var costT2 = System.Diagnostics.Stopwatch.GetTimestamp();
             presentation.backlogSteps = (int)(accumulator / step);
             if (steps == MaxStepsPerFrame && accumulator >= step)
                 presentation.stepOverloads++;
             FoundationState state;
             using (SnapshotMarker.Auto()) state = service.Snapshot();
+            var costT3 = System.Diagnostics.Stopwatch.GetTimestamp();
             // Fraction of the current sim tick already elapsed — the
             // vehicle and shield visuals interpolate between committed
             // poses by this alpha instead of stepping at the 30 Hz tick rate.
@@ -462,9 +473,11 @@ namespace FamilyRacing
             var networkPaused = state.network != null && state.network.paused;
             if (networkPaused && !lastNetworkPaused) ObserveInputCleanup();
             lastNetworkPaused = networkPaused;
+            var costT4 = System.Diagnostics.Stopwatch.GetTimestamp();
             RefreshPresentation(state);
             state.presentation = presentation.Copy();
             using (HudMarker.Auto()) shell?.Refresh(state);
+            LogFrameCost(costT0, costT1, costT2, costT3, costT4, steps);
             if (rearViewMirror != null)
                 rearViewMirror.ApplyFrame(state,
                     GetComponent<UnityEngine.UIElements.UIDocument>()?.rootVisualElement,
@@ -560,15 +573,125 @@ namespace FamilyRacing
         // remote racers render interpolated poses where a client-side lane
         // exists. Returns the locally owned racer's rendered pose for the
         // camera to follow; null when the local participant is not seated.
+        // Field diagnostic (real tablets, or --motion-probe): where the main
+        // thread's game-side frame time goes, averaged over two seconds.
+        // net = transport pump + snapshot decode + reconcile; sim = the
+        // 30 Hz steps (physics, prediction); copy = the state snapshot;
+        // world = vehicle/camera/effects presentation; hud = UI refresh.
+        private static readonly bool FrameCostForced = Array.IndexOf(
+            Environment.GetCommandLineArgs(), "--motion-probe") >= 0;
+        private double costNet, costSim, costCopy, costWorld, costHud;
+        private int costFrames, costSteps;
+        private float costNextLog;
+        private void LogFrameCost(long t0, long t1, long t2, long t3, long t4, int steps)
+        {
+            if (!RenderProfileController.LowEndDevice && !FrameCostForced) return;
+            var t5 = System.Diagnostics.Stopwatch.GetTimestamp();
+            var ms = 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+            costNet += (t1 - t0) * ms; costSim += (t2 - t1) * ms;
+            costCopy += (t3 - t2) * ms; costWorld += (t4 - t3) * ms;
+            costHud += (t5 - t4) * ms; costFrames++; costSteps += steps;
+            if (Time.unscaledTime < costNextLog) return;
+            costNextLog = Time.unscaledTime + 2f;
+            var inv = System.Globalization.CultureInfo.InvariantCulture;
+            Debug.Log("FRAME_COST net=" + (costNet / costFrames).ToString("0.0", inv)
+                + " sim=" + (costSim / costFrames).ToString("0.0", inv)
+                + " copy=" + (costCopy / costFrames).ToString("0.0", inv)
+                + " world=" + (costWorld / costFrames).ToString("0.0", inv)
+                + " hud=" + (costHud / costFrames).ToString("0.0", inv)
+                + " stepsPerFrame=" + ((float)costSteps / costFrames).ToString("0.00", inv)
+                + " frames=" + costFrames + " screen=" + CurrentScreen);
+            costNet = costSim = costCopy = costWorld = costHud = 0; costFrames = costSteps = 0;
+        }
+        // Test-only LAN autopilot: launched with --autopilot (PC command
+        // line, or `am start ... -e unity --autopilot` on Android) the
+        // local racer in a LAN race is steered by the same AiDriver the
+        // computer-controlled cars use, through the normal input path
+        // (prediction, input packets, host validation). It exists so a LAN
+        // session can be driven and measured on real devices without a
+        // person holding each one. No menu or setting reaches it.
+        private bool? autopilotEnabled;
+        private Core.Racing.AiDriver autopilot;
+        private string autopilotRaceId = "";
+        private string lastLocalLanId = "";
+
+        // Two switches, neither reachable from the game: the --autopilot
+        // command-line argument (PC, or Android's `-e unity --autopilot`
+        // launch extra, which Unity appends to the arguments), or an
+        // `autopilot.flag` file in the app's own files directory that a
+        // developer creates over adb. No JNI: an earlier version read the
+        // launch intent through AndroidJavaObject and aborted the whole app
+        // (JNI "jlr_method == null") on a normal launch without extras.
+        private bool AutopilotEnabled
+        {
+            get
+            {
+                if (!autopilotEnabled.HasValue)
+                {
+                    var enabled = Array.IndexOf(
+                        Environment.GetCommandLineArgs(), "--autopilot") >= 0;
+                    if (!enabled)
+                    {
+                        try
+                        {
+                            enabled = File.Exists(Path.Combine(
+                                Application.persistentDataPath, "autopilot.flag"));
+                        }
+                        catch (Exception) { enabled = false; }
+                    }
+                    autopilotEnabled = enabled;
+                }
+                return autopilotEnabled.Value;
+            }
+        }
+        private DriverInput AutopilotOr(DriverInput manual)
+        {
+            if (!AutopilotEnabled || raceBridge == null || drivingWorld == null)
+                return manual;
+            var race = raceBridge.LatestState;
+            if (race == null || race.racers == null || race.phase != "running"
+                || string.IsNullOrEmpty(lastLocalLanId))
+                return manual;
+            foreach (var racer in race.racers)
+            {
+                if (racer == null || racer.participantId != lastLocalLanId
+                    || racer.session == null) continue;
+                var catalog = drivingWorld.Catalog;
+                Core.Racing.CourseDefinition course;
+                if (catalog == null || catalog.Courses == null
+                    || !catalog.Courses.TryGetValue(racer.session.courseId ?? "", out course))
+                    return manual;
+                if (autopilot == null || autopilotRaceId != (race.raceId ?? ""))
+                {
+                    autopilot = new Core.Racing.AiDriver();
+                    autopilotRaceId = race.raceId ?? "";
+                    Debug.Log("AUTOPILOT engaged for " + lastLocalLanId);
+                }
+                // Steer from where this device believes the car is: the
+                // predicted pose on a client, the authoritative one on a host.
+                var session = racer.session.Copy();
+                var predicted = raceBridge.LocalPredictedMotor;
+                if (predicted != null) session.motor = predicted;
+                return autopilot.Sample(session, course);
+            }
+            return manual;
+        }
+        // Diagnostic: how many drawn remote poses were extrapolated or held
+        // (the snapshot buffer ran dry) since the last report.
+        private int remoteSamples, remoteExtrapolated;
+        private float nextRemoteLog;
         private MotorState ApplyNetworkFrame(NetworkRaceState race,
             FoundationState state, float alpha)
         {
             var localId = state.network != null
                 ? state.network.localParticipantId : "";
-            var now = Time.realtimeSinceStartupAsDouble;
+            lastLocalLanId = localId ?? "";
+            // Frame time: matches the bridge's snapshot arrival clock.
+            var now = Time.unscaledTimeAsDouble;
             var overrides = new Dictionary<string, MotorState>(
                 StringComparer.Ordinal);
             lastPoseSources.Clear();
+            drivingWorld.ContinuousPoseIds.Clear();
             MotorState localPose = null;
             foreach (var racer in race.racers)
             {
@@ -585,6 +708,9 @@ namespace FamilyRacing
                         localPose = racer.session.motor;
                     if (localPose != null)
                         overrides[racer.participantId] = localPose;
+                    // The predicted pose is a committed 30 Hz tick pose, so
+                    // it takes the same tick-interpolated draw path as a
+                    // solo racer (not the continuous path remotes use).
                     if (predicted != null)
                         lastPoseSources[racer.participantId] = "predicted";
                 }
@@ -595,7 +721,10 @@ namespace FamilyRacing
                         : null;
                     if (remote != null)
                     {
+                        remoteSamples++;
+                        if (raceBridge.RemoteExtrapolating(racer.participantId)) remoteExtrapolated++;
                         overrides[racer.participantId] = remote;
+                        drivingWorld.ContinuousPoseIds.Add(racer.participantId);
                         lastPoseSources[racer.participantId] =
                             "interpolated";
                     }
@@ -603,6 +732,16 @@ namespace FamilyRacing
             }
             // The roster resolves human cosmetics (avatar + color slot);
             // racers without a roster entry are AI and map by slot.
+            if (remoteSamples > 0 && Time.unscaledTime >= nextRemoteLog)
+            {
+                nextRemoteLog = Time.unscaledTime + 2f;
+                Debug.Log("LAN_REMOTE samples=" + remoteSamples + " extrapolated=" + remoteExtrapolated
+                    + " snapshots=" + raceBridge.SnapshotsAccepted + " maxTickGap=" + raceBridge.MaxSnapshotTickGap
+                    + " renderLagTicks=" + ((raceBridge.EstimatedHostSeconds(now) * 30.0) - raceBridge.RenderHostTime(now) * 30.0).ToString("0.0")
+                    + " behindNewestTicks=" + raceBridge.TicksBehindNewest(now).ToString("0.0"));
+                raceBridge.SnapshotsAccepted = 0; raceBridge.MaxSnapshotTickGap = 0;
+                remoteSamples = remoteExtrapolated = 0;
+            }
             drivingWorld.ApplyRaceFrame(race, alpha, overrides,
                 state.network != null ? state.network.participants : null);
             return localPose;

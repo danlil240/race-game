@@ -522,9 +522,11 @@ namespace FamilyRacing.Tests
             string error;
             Assert.That(NetworkWireCodec.TryEncodeSnapshot(snapshot,
                 out packet, out error), Is.True, error);
-            var body = Encoding.UTF8.GetString(packet,
-                NetworkWireCodec.HeaderBytes,
-                packet.Length - NetworkWireCodec.HeaderBytes);
+            // The snapshot body travels deflated; inspect the JSON it
+            // carries.
+            string body;
+            Assert.That(NetworkWireCodec.TryReadSnapshotJson(packet, out body),
+                Is.True);
             // The compact DTO rides `racer.physics`; diagnostic-only
             // contact data must never reach the wire.
             Assert.That(body, Does.Contain("\"physics\""));
