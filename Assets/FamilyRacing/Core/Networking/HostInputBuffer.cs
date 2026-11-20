@@ -279,7 +279,12 @@ namespace FamilyRacing.Core.Networking
             // input delay - the tablet's prediction then runs ever further
             // ahead and snaps back. Beyond a small jitter cushion the
             // oldest samples are skipped; the newest input still drives.
-            while (lane.queue.Count > NetworkSettings.InputCatchUpDepth)
+            // One skip per tick: dropping the whole excess at once moved
+            // the host timeline several ticks in a single boundary, which
+            // a tablet guest saw as a 2-4 m backward correction. Draining
+            // one extra sample per tick spreads the same catch-up into
+            // one-tick steps the correction blend absorbs.
+            if (lane.queue.Count > NetworkSettings.InputCatchUpDepth)
             {
                 lane.queue.Dequeue();
                 SkippedSamples++;

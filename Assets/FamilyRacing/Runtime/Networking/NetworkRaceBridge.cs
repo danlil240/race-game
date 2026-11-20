@@ -393,9 +393,16 @@ namespace FamilyRacing.Networking
             }
             // A confirmed snapshot changed nothing: any offset already
             // decaying keeps decaying instead of restarting its blend.
+            // Finish line: the host freezes a finished racer at the line,
+            // but this client keeps predicting until it hears (300-400 ms
+            // between tablets), so its car is already 4-13 m further on.
+            // Snapping it back was a visible jump at the moment of
+            // finishing; the race is over for this racer, so the drawn car
+            // keeps the position the player saw instead.
             if (smoothedLocal != null && !prediction.LastReconcileConfirmed)
                 smoother.Correct(smoothedLocal, corrected,
-                    prediction.LastCorrectionSnap);
+                    prediction.LastCorrectionSnap
+                        && !prediction.LastAuthoritativeFinished);
         }
 
         /// <summary>Queue a one-shot action (e.g. recover) for the local
@@ -1087,14 +1094,18 @@ namespace FamilyRacing.Networking
         // line every two seconds of racing with the reconciliation counters
         // and the worst error seen since the previous line.
         private double nextPredictionLog;
-        private int correctionTraceCount;
+        private int correctionTraceCount, bigCorrectionTraceCount;
         private float worstErrorMeters;
         private long loggedCorrections, loggedSnaps, loggedResyncs;
         private int worstPending;
         private void LogPredictionHealth()
         {
             if (prediction == null) return;
-            if (correctionTraceCount < 400 && prediction.LastErrorDetail.Length > 0)
+            // Every large correction is traced (bounded); small ones only
+            // for the first hundred.
+            if (prediction.LastErrorDetail.Length > 0
+                && ((prediction.LastErrorDistance > 0.4f && bigCorrectionTraceCount++ < 400)
+                    || correctionTraceCount < 100))
             {
                 correctionTraceCount++;
                 Debug.Log("CORRECTION_TRACE err=" + prediction.LastErrorDistance.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture) + " " + prediction.LastErrorDetail);
