@@ -256,6 +256,7 @@ namespace FamilyRacing
                 phys.attitudeZ, phys.attitudeW);
             if (motor.tick != physTick)
             {
+                var physTickGap = physTick >= 0 ? motor.tick - physTick : 1;
                 physPrevPos = physCurPos;
                 physPrevAtt = physCurAtt;
                 physPrevWheels = physCurWheels;
@@ -265,7 +266,8 @@ namespace FamilyRacing
                 physTick = motor.tick;
                 if (!physHasPose || phys.recoveryEpoch != physEpoch
                     || (physCurPos - physPrevPos).sqrMagnitude
-                        > TeleportSnapDistance * TeleportSnapDistance)
+                        > TeleportSnapDistance * TeleportSnapDistance
+                            * Mathf.Clamp(physTickGap, 1, 8) * Mathf.Clamp(physTickGap, 1, 8))
                 {
                     // First sample, respawn teleport, or a recovery
                     // epoch change: land exactly on the new commit —
@@ -273,6 +275,23 @@ namespace FamilyRacing
                     physPrevPos = physCurPos;
                     physPrevAtt = physCurAtt;
                     physPrevWheels = physCurWheels;
+                }
+                else if (physTickGap > 1 && physTickGap <= 8)
+                {
+                    // A rendered frame that spanned several sim ticks (any
+                    // device under 30 fps does this constantly): the two
+                    // commits held here are gap ticks apart, but alpha
+                    // only covers the final tick. Blending across the whole
+                    // span would pull the car back by up to a tick every
+                    // time alpha wraps, so rebuild the final one-tick window
+                    // from the observed span - same rule as the arcade path.
+                    var fraction = 1f - 1f / physTickGap;
+                    physPrevPos = Vector3.LerpUnclamped(physPrevPos, physCurPos, fraction);
+                    var spanTarget = physCurAtt;
+                    if (Quaternion.Dot(physPrevAtt, spanTarget) < 0f)
+                        spanTarget = new Quaternion(-spanTarget.x, -spanTarget.y,
+                            -spanTarget.z, -spanTarget.w);
+                    physPrevAtt = Quaternion.Slerp(physPrevAtt, spanTarget, fraction);
                 }
                 physEpoch = phys.recoveryEpoch;
                 physHasPose = true;
