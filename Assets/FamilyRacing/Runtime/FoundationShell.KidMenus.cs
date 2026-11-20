@@ -633,6 +633,22 @@ namespace FamilyRacing
                 case "lan-results":
                 case "lan-recovery": StyleKidLan(state); break;
             }
+            foreach (var scroller in root.Query<ScrollView>().ToList())
+            {
+                scroller.verticalScrollerVisibility = ScrollerVisibility.Hidden;
+                scroller.horizontalScrollerVisibility = ScrollerVisibility.Hidden;
+            }
+            if (Rtl(state))
+                foreach (var row in root.Query<VisualElement>().ToList())
+                {
+                    var n = row.name ?? "";
+                    if (n.StartsWith("quick.courses.") || n.StartsWith("trial.courses.")
+                        || n.EndsWith(".pickRow") || n.EndsWith(".optionRow")
+                        || n == "quick.classes" || n == "trial.classes" || n == "quick.vehicles"
+                        || n == "quick.difficulties" || n == "quick.modes" || n == "campaign.grid"
+                        || n == "campaign.setup" || n == "campaign.vehicles" || n == "campaign.difficulties")
+                        row.style.flexDirection = FlexDirection.RowReverse;
+                }
             if (state.screen == "sandbox" || state.screen == "profiles") return;
             var back = root.Q<Button>("loop.back") ?? root.Q<Button>("action.back");
             if (back != null)
@@ -1120,11 +1136,7 @@ namespace FamilyRacing
                 row.style.marginTop = row.style.marginBottom = 6;
                 foreach (var child in row.Children())
                     if (child is Label caption && caption.name != "status.persistence")
-                    {
-                        caption.style.fontSize = 22;
-                        caption.style.color = KidMuted;
-                        caption.style.minWidth = 120;
-                    }
+                        caption.style.display = DisplayStyle.None;
                 var mark = new MenuIcon(icon, 48, KidText);
                 mark.style.marginRight = 16;
                 row.Insert(0, mark);
@@ -1144,20 +1156,29 @@ namespace FamilyRacing
             {
                 if (slider == null) continue;
                 slider.style.minWidth = 420;
-                foreach (var dragger in slider.Query(className: "unity-dragger").ToList())
-                {
-                    dragger.style.width = 40; dragger.style.height = 40;
-                    dragger.style.marginTop = -18;
-                    dragger.style.backgroundColor = KidOrange;
-                    NoBorder(dragger);
-                    Round(dragger, 20);
-                }
+                slider.style.height = 48;
+                foreach (var container in slider.Query(className: "unity-base-slider__drag-container").ToList())
+                    container.style.height = 48;
                 foreach (var tracker in slider.Query(className: "unity-base-slider__tracker").ToList())
                 {
+                    tracker.style.position = Position.Absolute;
+                    tracker.style.top = 19;
                     tracker.style.height = 10;
+                    tracker.style.marginTop = 0;
                     tracker.style.backgroundColor = KidSurface;
                     NoBorder(tracker);
                     Round(tracker, 5);
+                }
+                foreach (var dragger in slider.Query(className: "unity-base-slider__dragger").ToList())
+                {
+                    dragger.style.width = 40;
+                    dragger.style.height = 40;
+                    dragger.style.top = 4;
+                    dragger.style.marginTop = 0;
+                    dragger.style.marginLeft = -20;
+                    dragger.style.backgroundColor = KidOrange;
+                    NoBorder(dragger);
+                    Round(dragger, 20);
                 }
             }
             if (saveButton != null)
@@ -1335,16 +1356,29 @@ namespace FamilyRacing
                     row.style.justifyContent = Justify.SpaceBetween;
                     if (row.Q<MenuIcon>("icon." + icon) == null)
                         row.Insert(0, new MenuIcon(icon, 44, KidText) { style = { marginRight = 10 } });
+                    string price = null;
                     foreach (var label in row.Query<Label>().ToList())
                     {
-                        label.style.fontSize = 20;
-                        label.style.color = label.name != null && label.name.EndsWith(".effect") ? KidTeal : KidMuted;
+                        var ln = label.name ?? "";
+                        label.style.fontSize = 22;
+                        label.style.unityFontStyleAndWeight = FontStyle.Bold;
+                        label.style.color = ln.EndsWith(".effect") ? KidTeal : KidMuted;
+                        if (ln.EndsWith(".cost"))
+                        {
+                            var digits = System.Text.RegularExpressions.Regex.Match(label.text ?? "", "[0-9]+");
+                            price = digits.Success ? digits.Value : null;
+                            // A maxed upgrade keeps its "max" word; a price
+                            // moves onto the buy button.
+                            if (price != null) label.style.display = DisplayStyle.None;
+                        }
+                        if (ln.EndsWith(".level")) label.style.display = DisplayStyle.None;
                     }
                     var installed = row.Q(n + ".installed");
                     if (installed != null)
                     {
                         installed.style.backgroundColor = installed.style.width.value.value > 10 ? KidTeal : KidBg;
-                        Round(installed, 7);
+                        installed.style.height = 18;
+                        Round(installed, 9);
                     }
                     var buy = row.Q<Button>(n + ".buy");
                     if (buy != null)
@@ -1354,6 +1388,8 @@ namespace FamilyRacing
                         buy.style.backgroundColor = KidGreen;
                         buy.style.minWidth = 130;
                         buy.style.height = buy.style.minHeight = 56;
+                        buy.style.fontSize = 26;
+                        if (price != null) buy.text = Ltr(price);
                         IconBeforeText(buy, "coin", 30, state, KidText);
                     }
                 }
@@ -1422,6 +1458,12 @@ namespace FamilyRacing
                 // its own race-control styling.
                 if (button.GetFirstAncestorOfType<ScrollView>() == null
                     && button.parent != null && button.parent.name == "hud.controls") continue;
+                if (Rtl(state) && button.parent != null)
+                {
+                    var row = button.parent.name == "kid.wrap" ? button.parent.parent : button.parent;
+                    if (row != null && row.style.flexDirection.value == FlexDirection.Row)
+                        row.style.flexDirection = FlexDirection.RowReverse;
+                }
                 NoBorder(button);
                 Round(button, 30);
                 button.style.backgroundColor = pair.Value.fill;
