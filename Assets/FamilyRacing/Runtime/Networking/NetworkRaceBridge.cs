@@ -145,14 +145,22 @@ namespace FamilyRacing.Networking
         private long lastSnapshotHostTick;
         private double lastSnapshotReceivedAt = double.NaN;
         private double hostClockOffset = double.NaN;
+        // Each arrival is quantized by up to a frame, so one sample may
+        // move the offset only 1%: at 0.1 the render clock itself jittered
+        // by several ms every snapshot.
+        private const double HostClockGain = 0.01;
         // Diagnostics: accepted snapshots and the widest host-tick gap
         // between consecutive ones (reset by the reader).
         public long SnapshotsAccepted;
         public long MaxSnapshotTickGap;
         // Render-time clock, injectable so tests can drive deterministic
         // host-time estimates; defaults to unscaled real time.
+        // Frame time, not wall time: remote poses are sampled once per
+        // rendered frame, and a wall-clock read moves with however long
+        // that frame's own work took before the read (tablet guests
+        // measured ~40% frame-to-frame speed variation on remote cars).
         internal Func<double> NowSeconds =
-            () => Time.realtimeSinceStartupAsDouble;
+            () => Time.unscaledTimeAsDouble;
 
         public NetworkRaceBridge(LanTransport transport, LanSessionService session)
         {
@@ -1257,7 +1265,7 @@ namespace FamilyRacing.Networking
             hostClockOffset = double.IsNaN(hostClockOffset)
                     || Math.Abs(clockSample - hostClockOffset) > 0.25
                 ? clockSample
-                : hostClockOffset + (clockSample - hostClockOffset) * 0.1;
+                : hostClockOffset + (clockSample - hostClockOffset) * HostClockGain;
             interpolation.Push(snapshot);
             pendingReconcile = snapshot;
         }

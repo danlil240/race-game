@@ -263,8 +263,10 @@ namespace FamilyRacing.Core.Networking
         // error past CorrectionSnapMeters snaps instantly. Errors under
         // CorrectionEpsilonMeters are noise — reconciliation is not
         // assumed bit-identical across Android/Windows physics.
-        public const float CorrectionSnapMeters = 3f;
-        public const double CorrectionBlendSeconds = 0.1;
+        // 5 m / 0.2 s: with tablet-to-tablet latency a bump from another
+        // car measured 2.6-3.9 m; at 3 m those snapped visibly.
+        public const float CorrectionSnapMeters = 5f;
+        public const double CorrectionBlendSeconds = 0.2;
         public const float CorrectionEpsilonMeters = 0.01f;
         // Task 10: the orientation leg of the same policy — full-attitude
         // errors past CorrectionSnapDegrees snap, under

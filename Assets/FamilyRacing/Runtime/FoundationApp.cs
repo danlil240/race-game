@@ -576,7 +576,8 @@ namespace FamilyRacing
         {
             var localId = state.network != null
                 ? state.network.localParticipantId : "";
-            var now = Time.realtimeSinceStartupAsDouble;
+            // Frame time: matches the bridge's snapshot arrival clock.
+            var now = Time.unscaledTimeAsDouble;
             var overrides = new Dictionary<string, MotorState>(
                 StringComparer.Ordinal);
             lastPoseSources.Clear();
